@@ -24,7 +24,7 @@ PY        := python3
 NAMES     := $(BUILD)/names.tsv
 SYMSRC    := $(wildcard config/symbols/*) config/names-manual.tsv tools/merge_symbols.py
 WIIBOOT   := $(OUT)/wiiboot
-BOOT_ARGS  = $(GAME) --nand $(BUILD)/nand --symbols $(RECOMP)/symbols.tsv $(if $(FONTS),--fonts $(FONTS))
+BOOT_ARGS  = $(GAME) --nand $(BUILD)/nand --keys $(BUILD)/keys.txt --symbols $(RECOMP)/symbols.tsv $(if $(FONTS),--fonts $(FONTS))
 
 .PHONY: all names recomp build run smoke deps clean check-game
 all: build

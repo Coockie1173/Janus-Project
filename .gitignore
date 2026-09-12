@@ -35,3 +35,7 @@ compile_commands.json
 .idea/
 *.swp
 .DS_Store
+
+# written by the runtime next to the disc directory
+/shadercache/
+/keys.txt
