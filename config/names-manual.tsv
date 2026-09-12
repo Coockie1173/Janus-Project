@@ -1,0 +1,35 @@
+addr	name	evidence
+804B3F30	OSSaveContext	signature in Dolphin's totaldb.dsy; stmw of the GPRs, the GQRs, CR, MSR
+804B3FB0	OSLoadContext	follows OSSaveContext; lmw of the GPRs, mtspr gqr1..7, SRR0/SRR1 from 0x198/0x19C and rfi (symbols.txt calls it "interrupt_ISR?")
+804BB0F0	OSCreateThread	follows OSYieldThread (Dolphin's signature, 804BB0B0) as in OSThread.c; 0x26C bytes, the size it has in this SDK build (symbols.txt calls it "bdPlatformThread_SetOptions")
+804B8D40	RealMode	clrlwi r3,r3,2 to SRR0, MSR without IR/DR to SRR1, rfi
+804A6E68	__write_console	MSL console output after fwide: OSGetConsoleType, InitializeUART(57600), WriteUARTN
+804C1E80	__VIRetraceHandler	reads VI's interrupt register (CC002030); 0x80C bytes, the size it has in this SDK build
+804EF910	WPADInit	0xC0 before WPADGetRadioSensitivity (Dolphin's signature), as in the same SDK build elsewhere
+804F0BE0	WPADDisconnect	0xC0 before WPADProbe (Dolphin's signature)
+804F0E50	WPADSetExtensionCallback	WPAD.c layout from WPADProbe on is identical to the reference build (sizes of WPADControlSpeaker 0x15FC and WPADSendStreamData 0x210 match)
+804F1020	WPADGetInfoAsync	same layout, 0x380 after WPADProbe
+804F1630	WPADRead	same layout, follows WPADSaveConfig (Dolphin's signature)
+804F16D0	WPADSetAutoSamplingBuf	same layout, follows WPADRead
+804F1AA0	WPADControlSpeaker	same layout; 0x15FC bytes
+804F30E0	WPADSetSpeakerVolume	same layout; 0x50 bytes after a 0x34-byte getter (WPADGetSpeakerVolume)
+804F3300	WPADSendStreamData	same layout; 0x210 bytes, follows WPADCanSendStreamData (Dolphin's signature)
+804F0D30	WPADSetSamplingCallback	(chan, cb): swaps the channel's callback at +0x8EC under OSDisableInterrupts; first of the three setters before WPADGetDataFormat, as in WPAD.c
+804F0DC0	WPADSetConnectCallback	(chan, cb): swaps the callback at +0x8E8; between the sampling and extension setters
+804EFA20	WPADGetSensorBarPosition	returns one small-data byte; follows WPADGetRadioSensitivity as in WPAD.c
+804F0EB0	WPADGetDataFormat	returns the channel's word at +0x8FC; follows WPADSetExtensionCallback
+804F0F00	WPADSetDataFormat	follows WPADGetDataFormat; 0xC0 bytes
+804F1310	WPADEnableMotor	stores r3 in one small-data word; between WPADControlMotor and WPADIsMotorEnabled (Dolphin's signatures)
+804F1A50	WPADIsSpeakerEnabled	returns the channel's word at +0x83C; just before WPADControlSpeaker
+804F30A0	WPADGetSpeakerVolume	returns the small-data byte WPADSetSpeakerVolume stores
+804F3510	WPADGetDpdSensitivity	returns one small-data byte; after WPADSendStreamData
+804F3550	WPADIsDpdEnabled	returns the channel's word at +0x838, the one the DPD code sets
+804F35E0	WPADControlDpd	0x1080 bytes, follows the DPD getters
+80507E10	KPADInitEx	calls WPADInit, WPADGetDpdSensitivity, WPADSetConnectCallback, WPADSetSamplingCallback, then fills the channels' 0x688-byte KPAD work (806B2928)
+80507E00	KPADInit	li r3,0; li r4,0; b KPADInitEx
+805075E0	KPADRead	li r6,0; li r7,0; b KPADiRead (805075F0, 0x808 bytes): the read without an error out
+80508480	KPADSetConnectCallback	(chan, cb): swaps the callback at +0x63C of the channel's KPAD work under OSDisableInterrupts
+80504440	KPADIsEnableAimingMode	returns byte +0x649 of the channel's KPAD work
+80504460	KPADGetSensorHeight	returns float +0x128 of the channel's KPAD work
+80508530	KPADDisableDPD	stores 0 in byte +0x642 of the channel's KPAD work
+80508550	KPADEnableDPD	stores 1 in byte +0x642 of the channel's KPAD work

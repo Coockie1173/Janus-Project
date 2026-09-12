@@ -1,0 +1,37 @@
+# BYOA: nothing from the original disc enters the repo.
+/game/
+/build/
+/nand/
+*.dol
+*.elf
+*.iso
+*.wbfs
+*.rvz
+*.wia
+*.gcz
+*.img
+*.arc
+*.tpl
+*.bnr
+*.thp
+*.bik
+*.brstm
+*.brsar
+# symbol dumps are text and are kept: config/symbols/
+!/config/symbols/*
+
+# generated
+__pycache__/
+*.pyc
+gxtrace_*.txt
+drawlog.txt
+efb_*.png
+*.log
+*.err
+compile_commands.json
+
+# editors, OS
+.vscode/
+.idea/
+*.swp
+.DS_Store

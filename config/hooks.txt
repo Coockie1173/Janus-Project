@@ -1,0 +1,7 @@
+# GoldenEye 007 (SJBE52): functions port/goldeneye.cpp may replace or trace,
+# on top of wiikit/runtime/hooks.txt. One name per line (as in build/names.tsv);
+# `@name` asks for a data symbol; `#` starts a comment.
+
+_OSReport              # the SDK's report: the game's own log lines
+debugPrint             # the game's debug print (symbols.txt)
+main
