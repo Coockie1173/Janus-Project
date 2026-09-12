@@ -30,7 +30,7 @@ development files). Linux is the platform this port is developed on.
 ```sh
 git clone --recursive <this repo>     # or: git submodule update --init
 make            # mix the symbols, recompile main.dol, build build/out/wiiboot
-make run        # boot the game
+./launch.sh     # build if needed and boot the game (log in build/run.log)
 make smoke      # 30 s headless boot, log in build/run.log
 ```
 
