@@ -5,6 +5,7 @@
 // be listed in config/hooks.txt so the recompiler gives them a slot.
 //
 //     GE_TRACE=1   log the game's own report lines and main()'s entry
+//     GE_FPS=N     the frame rate the engine may reach (default: its own 30)
 #include "rt.h"
 #include "video.h"
 #include <cstdlib>
@@ -17,6 +18,36 @@
 namespace {
 
 PPCFunc orig_main = nullptr;
+
+// The frame rate. The engine is variable-rate: each pass of its main loop
+// (ge_frame_tick) runs a frame when OSGetTime has passed the next frame's
+// time, and moves its current rate (a float, frames a second, from which
+// every time step is derived) one up when the frame was on time and one down
+// when it was late, between a lowest and a highest rate. The game sets both
+// to 30 in play. Raising the highest is all an unlock takes below VI's
+// 59.94 Hz; above it the frame also has to be shown, and the game waits for
+// a retrace per frame, so VI itself is run faster (g_vi_speed).
+const uint32_t kFpsMax = 0x806E9E44;                 // -0x713C(r13); the lowest is the word before
+uint32_t g_fps = 0;
+PPCFunc orig_tick = nullptr;
+
+void frame_tick(PPCContext& c) {
+    uint32_t max = ld32(kFpsMax);
+    if (max && max < g_fps) st32(kFpsMax, g_fps);
+    orig_tick(c);
+}
+
+void install_fps() {
+    const char* e = std::getenv("GE_FPS");
+    if (!e) return;
+    int fps = std::atoi(e);
+    if (fps <= 30 || fps > 1000) { rt_log("goldeneye: GE_FPS is 31..1000; the game's own 30 kept"); return; }
+    orig_tick = ppc_hook("ge_frame_tick", frame_tick);
+    if (!orig_tick) { rt_log("goldeneye: ge_frame_tick is not hooked in this build"); return; }
+    g_fps = (uint32_t)fps;
+    if (fps > 60) g_vi_speed = fps / 59.94;
+    rt_log("goldeneye: frame rate up to %d%s", fps, fps > 60 ? " (VI retraces at that rate too)" : "");
+}
 
 #ifndef _WIN32
 // A host fault in recompiled code (a guest null pointer, a jump the
@@ -49,6 +80,7 @@ void install_crash_handler() {}
 
 void install() {
     install_crash_handler();
+    install_fps();
     if (std::getenv("GE_TRACE")) {
         orig_main = ppc_hook("main", [](PPCContext& c) {
             rt_log("goldeneye: main() reached");

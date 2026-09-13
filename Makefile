@@ -39,6 +39,15 @@ $(BUILD)/sig_guess.tsv: tools/sigmatch.py | check-game
 	@if [ -n "$(DSY)" ]; then $(PY) tools/sigmatch.py $(GAME)/sys/main.dol --dsy $(DSY) --out $@ | tail -1; \
 	 else echo "no Dolphin totaldb.dsy (set DSY=...): signatures skipped"; echo "addr	size	name	source	alternatives" > $@; fi
 
+# Changes to the wiikit submodule live in patches/wiikit.patch (applied when
+# the submodule is pristine). After editing wiikit: make wiikit-save
+.PHONY: wiikit-patch wiikit-save
+wiikit-patch: | check-game
+	@if [ -s patches/wiikit.patch ] && git -C wiikit diff --quiet; then \
+	    git -C wiikit apply ../patches/wiikit.patch && echo "applied patches/wiikit.patch"; fi
+wiikit-save:
+	@mkdir -p patches && git -C wiikit diff > patches/wiikit.patch && echo "patches/wiikit.patch: $$(grep -c '^diff' patches/wiikit.patch) file(s)"
+
 names: $(NAMES)
 $(NAMES): $(SYMSRC) $(BUILD)/sig_guess.tsv | check-game
 	$(PY) tools/merge_symbols.py --dol $(GAME)/sys/main.dol --out $@
@@ -53,7 +62,7 @@ $(RECOMP)/report.txt: $(NAMES) config/hooks.txt $(wildcard wiikit/recomp/*.py wi
 deps:
 	@if ! pkg-config --exists sdl3 && [ ! -d $(SDL3_DIR)/lib*/cmake/SDL3 ]; then sh tools/build_sdl3.sh $(BUILD)/deps; fi
 
-build: recomp deps
+build: wiikit-patch recomp deps
 	cmake -S $(RECOMP) -B $(OUT) -G Ninja -DCMAKE_CXX_COMPILER=$(RECOMP_CXX) \
 	    -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS_RELEASE=-O1 \
 	    -DCMAKE_PREFIX_PATH=$(SDL3_DIR) -DCMAKE_BUILD_RPATH=$(SDL3_DIR)/lib \

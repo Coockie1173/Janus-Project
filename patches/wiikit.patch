@@ -1,0 +1,32 @@
+diff --git a/runtime/hw.cpp b/runtime/hw.cpp
+index c53d227..9605cae 100644
+--- a/runtime/hw.cpp
++++ b/runtime/hw.cpp
+@@ -989,10 +989,11 @@ void hw_run_locked(const std::function<void()>& fn) {
+     fn();
+ }
+ 
++double g_vi_speed = 1.0;
+ std::chrono::nanoseconds hw_vi_field_period() {
+     std::lock_guard<std::recursive_mutex> lk(g_hw);
+     ViTiming t = vi_timing();
+-    return std::chrono::nanoseconds((int64_t)(t.halflines * (double)t.hlw / t.sample_hz * 1e9));
++    return std::chrono::nanoseconds((int64_t)(t.halflines * (double)t.hlw / t.sample_hz * 1e9 / g_vi_speed));
+ }
+ 
+ uint8_t aram_read(uint32_t addr) {
+diff --git a/runtime/rt.h b/runtime/rt.h
+index 75fec5e..4530c97 100644
+--- a/runtime/rt.h
++++ b/runtime/rt.h
+@@ -84,6 +84,10 @@ bool hw_load_fonts(const char* dir);               // font_japanese.bin, font_we
+ bool hw_external_pending();                        // PI cause & mask
+ void hw_vi_retrace();                              // called at each vertical retrace
+ std::chrono::nanoseconds hw_vi_field_period();     // from the timing VI is programmed with
++// A port that unlocks a game's frame rate: retraces (and so presents) come
++// this many times faster than the timing VI is programmed with. Time itself
++// (the time base, the decrementer, audio) is unchanged.
++extern double g_vi_speed;
+ std::chrono::steady_clock::time_point hw_tick();   // timed device events; returns the next one
+ extern bool g_mmio_log;                            // log every first access to a register
+ 

@@ -5,3 +5,4 @@
 _OSReport              # the SDK's report: the game's own log lines
 debugPrint             # the game's debug print (symbols.txt)
 main
+ge_frame_tick          # one pass of the main loop: the frame limiter (GE_FPS)
