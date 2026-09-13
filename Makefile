@@ -17,6 +17,10 @@ SDL3_DIR  := $(abspath $(BUILD)/deps/sdl3)
 FONTS     ?= $(firstword $(wildcard /usr/share/dolphin-emu/Sys/GC $(BUILD)/fonts))
 DSY       ?= $(firstword $(wildcard /usr/share/dolphin-emu/Sys/totaldb.dsy /usr/share/dolphin-emu/sys/totaldb.dsy))
 RECOMP_CXX ?= clang++
+# optimisation of the recompiled code and the runtime: -O1 builds in a minute,
+# -O2 runs faster. Plain -O2 miscompiles something (the game panics in
+# DVDReadAsync at boot): the two flags are needed with it
+OPT       ?= -O2 -fno-strict-aliasing -fwrapv
 SMOKE_SECS ?= 30
 RUN_ARGS  ?=
 PY        := python3
@@ -64,7 +68,7 @@ deps:
 
 build: wiikit-patch recomp deps
 	cmake -S $(RECOMP) -B $(OUT) -G Ninja -DCMAKE_CXX_COMPILER=$(RECOMP_CXX) \
-	    -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS_RELEASE=-O1 \
+	    -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS_RELEASE="$(OPT)" \
 	    -DCMAKE_PREFIX_PATH=$(SDL3_DIR) -DCMAKE_BUILD_RPATH=$(SDL3_DIR)/lib \
 	    -DWIIKIT_EXTRA=$(abspath port/goldeneye.cmake) > $(BUILD)/cmake.log 2>&1 || { tail -20 $(BUILD)/cmake.log; exit 1; }
 	ninja -C $(OUT) wiiboot

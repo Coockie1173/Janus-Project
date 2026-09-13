@@ -1,32 +1,80 @@
-diff --git a/runtime/hw.cpp b/runtime/hw.cpp
-index c53d227..9605cae 100644
---- a/runtime/hw.cpp
-+++ b/runtime/hw.cpp
-@@ -989,10 +989,11 @@ void hw_run_locked(const std::function<void()>& fn) {
-     fn();
+diff --git a/runtime/gx.cpp b/runtime/gx.cpp
+index a6b37f2..12d5d10 100644
+--- a/runtime/gx.cpp
++++ b/runtime/gx.cpp
+@@ -460,7 +460,8 @@ void bp_write(uint32_t v) {
+         // when the renderer gets there, as the GP would: the game waits
+         // for it asleep (GXWaitDrawDone), and its other threads (the
+         // disc, the sound stream) run meanwhile
+-        if (video) { put<uint8_t>(VC_DRAWDONE); flush(true); return; }
++        if (video && !g_gx_early_done) { put<uint8_t>(VC_DRAWDONE); flush(true); return; }
++        if (video) flush(true);                                       // the renderer follows, frames_ahead behind at most
+         pe_ctrl |= 8; ++st.done; os_raise();
+         return;
+     case 0x47: pe_token = (uint16_t)val; return;                      // token
+@@ -729,6 +730,7 @@ void gx_init() {
+ // AI's, which start each audio frame's mix, above all. So does this wait.
+ // A handler may switch guest threads, and another thread may hand the
+ // record over in the meantime.
++bool g_gx_early_done = false;
+ void gx_draw_done_reached() {
+     hw_run_locked([] { pe_ctrl |= 8; ++st.done; os_raise(); });
  }
- 
-+double g_vi_speed = 1.0;
- std::chrono::nanoseconds hw_vi_field_period() {
-     std::lock_guard<std::recursive_mutex> lk(g_hw);
-     ViTiming t = vi_timing();
--    return std::chrono::nanoseconds((int64_t)(t.halflines * (double)t.hlw / t.sample_hz * 1e9));
-+    return std::chrono::nanoseconds((int64_t)(t.halflines * (double)t.hlw / t.sample_hz * 1e9 / g_vi_speed));
- }
- 
- uint8_t aram_read(uint32_t addr) {
 diff --git a/runtime/rt.h b/runtime/rt.h
-index 75fec5e..4530c97 100644
+index 75fec5e..60ea6dd 100644
 --- a/runtime/rt.h
 +++ b/runtime/rt.h
-@@ -84,6 +84,10 @@ bool hw_load_fonts(const char* dir);               // font_japanese.bin, font_we
- bool hw_external_pending();                        // PI cause & mask
- void hw_vi_retrace();                              // called at each vertical retrace
- std::chrono::nanoseconds hw_vi_field_period();     // from the timing VI is programmed with
-+// A port that unlocks a game's frame rate: retraces (and so presents) come
-+// this many times faster than the timing VI is programmed with. Time itself
-+// (the time base, the decrementer, audio) is unchanged.
-+extern double g_vi_speed;
- std::chrono::steady_clock::time_point hw_tick();   // timed device events; returns the next one
- extern bool g_mmio_log;                            // log every first access to a register
+@@ -74,6 +74,14 @@ void gx_submit_pending();                         // after a burst, outside g_hw
+ // game that reads the copy on the CPU (the renderer otherwise keeps copies
+ // on the host GPU only). False if no copy was made to addr (physical).
+ bool gx_copy_to_ram(uint32_t addr);
++// A port that unlocks a game's frame rate: draw-done is signalled when the
++// game asks, not when the renderer gets there, so the game's thread works on
++// the next frame while the renderer draws this one.
++extern bool g_gx_early_done;
++// With it: a frame is presented when the renderer has drawn it (the last
++// copy to an XFB), not at VI's retrace, which stays at the console's rate
++// with everything the SDK times by it.
++extern bool g_present_on_frame;
+ void gx_draw_done_reached();                      // the renderer: the game's draw-done point is drawn
+ void hw_run_locked(const std::function<void()>& fn);   // run fn holding the hardware lock
  
+diff --git a/runtime/video.cpp b/runtime/video.cpp
+index 5726093..3f5b7cd 100644
+--- a/runtime/video.cpp
++++ b/runtime/video.cpp
+@@ -1275,7 +1275,7 @@ void present() {
+     glColorMask(1, 1, 1, 1);
+     glClearColor(0, 0, 0, 1);
+     glClear(GL_COLOR_BUFFER_BIT);
+-    auto it = xfbs.find(xfb_addr.load());
++    auto it = xfbs.find(g_present_on_frame ? last_xfb : xfb_addr.load());
+     if (it == xfbs.end()) it = xfbs.find(last_xfb);
+     if (it != xfbs.end() && ww > 0 && wh > 0) {
+         const Tex& t = it->second;
+@@ -1479,6 +1479,7 @@ ClassicState video_classic(int chan) {
+ void video_set_rumble(int chan, bool on) {
+     if (chan >= 0 && chan < 4) rumble_want[chan] = on;
+ }
++bool g_present_on_frame = false;
+ void video_retrace() {
+     retraces.fetch_add(1);
+     if (wake) SDL_SignalSemaphore(wake);
+@@ -1621,6 +1622,17 @@ void video_run(const char* title) {
+             if (retraces.load() != seen) break;
+         }
+         uint32_t r = retraces.load();
++        if (g_present_on_frame) {
++            // each frame as it is drawn; without new frames (a load), ten times a second
++            static uint64_t shown_frames = 0;
++            static auto shown_at = Clock::now();
++            auto t = Clock::now();
++            if (cnt.frames != shown_frames || t - shown_at >= std::chrono::milliseconds(100)) {
++                shown_frames = cnt.frames;
++                shown_at = t;
++                seen = r - 1;
++            } else seen = r;
++        }
+         if (r != seen) {
+             seen = r;
+             auto tp = Clock::now();

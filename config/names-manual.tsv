@@ -34,3 +34,4 @@ addr	name	evidence
 80508530	KPADDisableDPD	stores 0 in byte +0x642 of the channel's KPAD work
 80508550	KPADEnableDPD	stores 1 in byte +0x642 of the channel's KPAD work
 802929A0	ge_frame_tick	called in a loop by main; OSGetTime against the next frame's time (-0x5098(r13)), the period (-0x50a8) recomputed from the current rate (float -0x7134) kept between the words at -0x7140 and -0x713C (both 30, set at 80010A8C)
+804BBE30	OSSleepTicks	(OSTime): OSCreateAlarm on the stack, OSSetAlarmTag with the current thread (800000E4), OSSetAlarm with a handler, OSSuspendThread, OSCancelAlarm, between OSDisableInterrupts and OSRestoreInterrupts; in OSThread.c's range
