@@ -9,10 +9,13 @@
 //                  the file F every 10 s: tools/profile_report.py names the samples
 //     GE_MOUSE=G   mouse look: stick deflection per pixel a second of motion (default 0.004;
 //                  0 leaves the mouse free and the right stick to the pad)
-//     GE_FPS=N     the frame rate the engine may reach (default: its own 30)
+//     GE_FPS=N     the frame rate the engine may reach (default: its own 30); auto: the
+//                  screen's refresh rate
 #include "rt.h"
 #include "video.h"
+#include <SDL3/SDL.h>
 #include <algorithm>
+#include <cmath>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
@@ -91,6 +94,13 @@ void install_fps() {
     const char* e = std::getenv("GE_FPS");
     if (!e) return;
     int fps = std::atoi(e);
+    if (!std::strcmp(e, "auto")) {                   // the screen's refresh rate
+        fps = 60;
+        if (SDL_InitSubSystem(SDL_INIT_VIDEO)) {
+            if (const SDL_DisplayMode* m = SDL_GetCurrentDisplayMode(SDL_GetPrimaryDisplay()))
+                if (m->refresh_rate >= 30) fps = (int)std::lround(m->refresh_rate);
+        }
+    }
     if (fps <= 30 || fps > 1000) { rt_log("goldeneye: GE_FPS is 31..1000; the game's own 30 kept"); return; }
     orig_tick = ppc_hook("ge_frame_tick", frame_tick);
     if (!orig_tick) { rt_log("goldeneye: ge_frame_tick is not hooked in this build"); return; }
@@ -184,6 +194,28 @@ void install_profiler() {}
 // caps a fast flick; looking through the view itself is the step after this.
 float g_mouse_gain = 0.004f;
 
+// The wheel changes weapon: a notch up is a press of the Classic's D-pad
+// right (the next weapon), a notch down of D-pad left (the previous one),
+// held 80 ms with 60 ms between presses, so that every notch of a fast spin
+// is a press of its own.
+const uint32_t kClLeft = 0x0002, kClRight = 0x8000;  // KPAD's Classic bits
+void wheel_buttons(ClassicState& s) {
+    static int queued = 0;                           // notches still to press: + next, - previous
+    static uint32_t held = 0;
+    static auto until = std::chrono::steady_clock::now();
+    auto now = std::chrono::steady_clock::now();
+    queued = std::clamp(queued + video_take_wheel(), -4, 4);
+    if (now >= until) {
+        if (held) { held = 0; until = now + std::chrono::milliseconds(60); }
+        else if (queued) {
+            held = queued > 0 ? kClRight : kClLeft;
+            queued += queued > 0 ? -1 : 1;
+            until = now + std::chrono::milliseconds(80);
+        }
+    }
+    s.buttons |= held;
+}
+
 void mouse_on_right_stick(int chan, ClassicState& s) {
     if (chan != 0) return;
     // The game may read the controller more than once a frame (KPAD's
@@ -203,6 +235,7 @@ void mouse_on_right_stick(int chan, ClassicState& s) {
         ax = ay = 0;
         last = now;
     }
+    wheel_buttons(s);
     s.rx = std::clamp(s.rx + defl_x, -1.0f, 1.0f);
     s.ry = std::clamp(s.ry - defl_y, -1.0f, 1.0f);
 }
