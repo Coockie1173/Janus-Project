@@ -7,10 +7,10 @@
 //     GE_TRACE=1   log the game's own report lines and main()'s entry
 //     GE_PROFILE=F a sampling profile of the whole process (CPU time, 1 kHz), written to
 //                  the file F every 10 s: tools/profile_report.py names the samples
-//     GE_MOUSE=G   mouse look: stick deflection per pixel a second of motion (default 0.004;
-//                  0 leaves the mouse free and the right stick to the pad)
+//     GE_MOUSE=S   mouse look sensitivity (default 1; 0 leaves the mouse free)
 //     GE_FPS=N     the frame rate the engine may reach (default: its own 30); auto: the
 //                  screen's refresh rate
+#include "debug.h"
 #include "rt.h"
 #include "video.h"
 #include <SDL3/SDL.h>
@@ -63,6 +63,8 @@ void guest_sleep(PPCContext& c, uint64_t ticks) {
     c.r[4] = r4;
 }
 
+void mouse_look();
+extern float g_mouse_sens;
 void frame_tick(PPCContext& c) {
     uint32_t max = ld32(kFpsMax);
     if (max && max < g_fps) st32(kFpsMax, g_fps);
@@ -72,6 +74,9 @@ void frame_tick(PPCContext& c) {
         uint64_t margin = tb_hz() / 5000;            // 0.2 ms
         if (next > now + margin && next - now < tb_hz()) guest_sleep(c, next - now - margin);
     }
+    static uint32_t frame = 0;                       // the tick spins between frames: look once a frame
+    uint32_t f = ld32(kFrameCount);
+    if (f != frame && g_mouse_sens > 0) { frame = f; mouse_look(); }
     orig_tick(c);
     if (g_fps_log) {                                 // GE_TRACE: frames run and the engine's rate, every 5 s
         static auto t0 = std::chrono::steady_clock::now();
@@ -91,6 +96,8 @@ void frame_tick(PPCContext& c) {
 }
 
 void install_fps() {
+    orig_tick = ppc_hook("ge_frame_tick", frame_tick);
+    if (!orig_tick) rt_die("goldeneye: ge_frame_tick is not hooked in this build");
     const char* e = std::getenv("GE_FPS");
     if (!e) return;
     int fps = std::atoi(e);
@@ -102,8 +109,6 @@ void install_fps() {
         }
     }
     if (fps <= 30 || fps > 1000) { rt_log("goldeneye: GE_FPS is 31..1000; the game's own 30 kept"); return; }
-    orig_tick = ppc_hook("ge_frame_tick", frame_tick);
-    if (!orig_tick) { rt_log("goldeneye: ge_frame_tick is not hooked in this build"); return; }
     g_fps = (uint32_t)fps;
     g_fps_log = std::getenv("GE_TRACE") != nullptr;
     g_gx_early_done = true;                          // the game's thread does not wait for the renderer
@@ -126,7 +131,8 @@ void install_fps() {
 // came from under it, the alarm ends the process anyway.
 void on_crash(int sig, siginfo_t* si, void*) {
     static volatile sig_atomic_t once = 0;
-    if (once++) _exit(128 + sig);
+    if (once) _exit(128 + sig);
+    once = 1;
     alarm(3);
     uintptr_t a = (uintptr_t)si->si_addr, base = (uintptr_t)g_mem;
     if (a >= base && a - base <= 0xFFFFFFFFull)
@@ -186,13 +192,55 @@ void install_profiler() {}
 #endif
 
 // Keyboard and mouse. The game plays with the Classic Controller: the left
-// stick moves (W A S D in the key file), the right stick looks. The mouse's
-// motion goes on channel 1's right stick, added to the pad's. A stick sets a
-// turning speed, not an angle, so the deflection is the mouse's speed
-// (pixels a second, measured between two reads of the controller): the same
-// motion then turns the view as far at any frame rate. The stick's travel
-// caps a fast flick; looking through the view itself is the step after this.
-float g_mouse_gain = 0.004f;
+// stick moves (W A S D in the key file), the right stick looks, and still
+// does for a pad. The mouse does not go through the stick: its motion is
+// added to the view's angles themselves, once a frame, before the game's own
+// frame runs. One pixel is one step of the angle at any frame rate, and
+// there is no turning-speed cap.
+//
+// The angles (found with port/debug.cpp's scans, from the player pointer of
+// the community's memory watch list): the word at 806EB698 (-0x58E8(r13))
+// points to the player; its yaw is the float at +0xDC, radians, growing to
+// the right (+0x250 and the matrix at +0x98 are computed from it). The pitch
+// is in the object the player's +0x16C points to, at +0x768, radians,
+// negative up (+0x760 follows it).
+const uint32_t kPlayerPtr = 0x806EB698;
+const float kPi = 3.14159265f;
+float g_mouse_sens = 1.0f;                           // GE_MOUSE: 1 is 0.0022 radians a pixel
+const float kRadPerPixel = 0.0022f, kPitchLimit = 1.35f;
+
+bool guest_ptr(uint32_t p) { return (p >= 0x80003000u && p < 0x81800000u) || (p >= 0x90000000u && p < 0x94000000u); }
+float ldf(uint32_t a) { uint32_t b = ld32(a); float v; std::memcpy(&v, &b, 4); return v; }
+void stf_(uint32_t a, float v) { uint32_t b; std::memcpy(&b, &v, 4); st32(a, b); }
+
+void mouse_look() {                                  // on the game's thread, before each frame
+    float dx = 0, dy = 0;
+    video_take_mouse_motion(dx, dy);
+    debug_mouse(dx, dy);
+    if (dx == 0 && dy == 0) return;
+    uint32_t player = ld32(kPlayerPtr);
+    if (!guest_ptr(player)) return;                  // no player: a menu, a movie
+    static uint32_t seen = 0;
+    if (player != seen && std::getenv("GE_TRACE")) {
+        uint32_t v = ld32(player + 0x16C);
+        rt_log("goldeneye: player %08X, yaw %f; view %08X, pitch %f", player, ldf(player + 0xDC), v,
+               guest_ptr(v) ? ldf(v + 0x768) : 0.0f);
+    }
+    seen = player;
+    float yaw = ldf(player + 0xDC);
+    if (std::isfinite(yaw) && std::fabs(yaw) < 100.0f) {
+        yaw += dx * kRadPerPixel * g_mouse_sens;
+        while (yaw > kPi) yaw -= 2 * kPi;
+        while (yaw < -kPi) yaw += 2 * kPi;
+        stf_(player + 0xDC, yaw);
+    }
+    uint32_t view = ld32(player + 0x16C);
+    if (guest_ptr(view)) {
+        float pitch = ldf(view + 0x768);
+        if (std::isfinite(pitch) && std::fabs(pitch) < 2.0f)
+            stf_(view + 0x768, std::clamp(pitch + dy * kRadPerPixel * g_mouse_sens, -kPitchLimit, kPitchLimit));
+    }
+}
 
 // The wheel changes weapon: a notch up is a press of the Classic's D-pad
 // right (the next weapon), a notch down of D-pad left (the previous one),
@@ -216,40 +264,22 @@ void wheel_buttons(ClassicState& s) {
     s.buttons |= held;
 }
 
-void mouse_on_right_stick(int chan, ClassicState& s) {
+void classic_filter(int chan, ClassicState& s) {
     if (chan != 0) return;
-    // The game may read the controller more than once a frame (KPAD's
-    // samples, WPAD's own): the speed is measured over at least 4 ms and
-    // every read in between gets the same deflection.
-    static auto last = std::chrono::steady_clock::now();
-    static float ax = 0, ay = 0, defl_x = 0, defl_y = 0;
-    auto now = std::chrono::steady_clock::now();
-    float dt = std::chrono::duration<float>(now - last).count();
-    float dx = 0, dy = 0;
-    video_take_mouse_motion(dx, dy);
-    ax += dx;
-    ay += dy;
-    if (dt >= 0.004f) {
-        if (dt > 0.25f) defl_x = defl_y = 0;         // after a pause: no speed to speak of
-        else { defl_x = ax / dt * g_mouse_gain; defl_y = ay / dt * g_mouse_gain; }
-        ax = ay = 0;
-        last = now;
-    }
     wheel_buttons(s);
-    s.rx = std::clamp(s.rx + defl_x, -1.0f, 1.0f);
-    s.ry = std::clamp(s.ry - defl_y, -1.0f, 1.0f);
+    debug_classic(s);
 }
 
 void install_mouse() {
-    if (const char* m = std::getenv("GE_MOUSE")) g_mouse_gain = (float)std::atof(m);
-    if (g_mouse_gain <= 0) return;
-    video_set_relative_mouse(true);
-    wpad_set_classic_filter(mouse_on_right_stick);
+    if (const char* m = std::getenv("GE_MOUSE")) g_mouse_sens = (float)std::atof(m);
+    wpad_set_classic_filter(classic_filter);
+    if (g_mouse_sens > 0) video_set_relative_mouse(true);
 }
 
 void install() {
     install_crash_handler();
     install_profiler();
+    debug_install();
     install_fps();
     if (std::getenv("GE_TRACE")) {
         orig_main = ppc_hook("main", [](PPCContext& c) {

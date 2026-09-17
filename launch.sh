@@ -4,7 +4,7 @@
 #     ./launch.sh --fullscreen
 #     ./launch.sh --window 1920x1080 --input keyboard
 #     ./launch.sh --fps 60             the frame rate (default: the screen's refresh rate; 30: the console's)
-#     ./launch.sh --mouse 0.006        mouse look sensitivity (default 0.004; 0: mouse look off)
+#     ./launch.sh --mouse 1.5          mouse look sensitivity (default 1; 0: mouse look off)
 # Keyboard and mouse: W A S D move, the mouse looks, left button fires, right button aims,
 # the wheel changes weapon;
 # the rest is in build/keys.txt ([Classic Controller]). Esc frees the mouse.
