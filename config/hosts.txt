@@ -1,0 +1,8 @@
+# Names the game resolves, given addresses before the system's resolver is
+# asked: the game's own /etc/hosts. The servers it was made for are gone;
+# these point it at the community server that replaces them.
+# GE_HOSTS=file uses another list; GE_HOSTS= (empty) uses none.
+50.104.71.220 naswii.nintendowifi.net
+50.104.71.220 dls1.nintendowifi.net
+50.104.71.220 jb2010-wii-live.auth.mmp3.demonware.net
+50.104.71.220 jb2010-wii-live.lsg.mmp3.demonware.net

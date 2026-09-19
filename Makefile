@@ -47,10 +47,11 @@ $(BUILD)/sig_guess.tsv: tools/sigmatch.py | check-game
 # the submodule is pristine). After editing wiikit: make wiikit-save
 .PHONY: wiikit-patch wiikit-save
 wiikit-patch: | check-game
-	@if [ -s patches/wiikit.patch ] && git -C wiikit diff --quiet; then \
+	@if [ -s patches/wiikit.patch ] && git -C wiikit apply --check ../patches/wiikit.patch 2>/dev/null; then \
 	    git -C wiikit apply ../patches/wiikit.patch && echo "applied patches/wiikit.patch"; fi
 wiikit-save:
-	@mkdir -p patches && git -C wiikit diff > patches/wiikit.patch && echo "patches/wiikit.patch: $$(grep -c '^diff' patches/wiikit.patch) file(s)"
+	@mkdir -p patches && git -C wiikit add -N . && git -C wiikit diff > patches/wiikit.patch && \
+	    echo "patches/wiikit.patch: $$(grep -c '^diff' patches/wiikit.patch) file(s)"
 
 names: $(NAMES)
 $(NAMES): $(SYMSRC) $(BUILD)/sig_guess.tsv | check-game

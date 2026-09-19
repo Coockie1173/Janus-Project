@@ -8,6 +8,8 @@
 //     GE_PROFILE=F a sampling profile of the whole process (CPU time, 1 kHz), written to
 //                  the file F every 10 s: tools/profile_report.py names the samples
 //     GE_MOUSE=S   mouse look sensitivity (default 1; 0 leaves the mouse free)
+//     GE_HOSTS=F   the hosts file for the game's name lookups (default config/hosts.txt)
+//     GE_NETLOG=1  log sockets, lookups and TLS sessions
 //     GE_FPS=N     the frame rate the engine may reach (default: its own 30); auto: the
 //                  screen's refresh rate
 #include "debug.h"
@@ -276,7 +278,31 @@ void install_mouse() {
     if (g_mouse_sens > 0) video_set_relative_mouse(true);
 }
 
+// Online. The game's servers (Nintendo WFC's authentication, DemonWare's
+// lobby) are gone; a community server answers for them at another address.
+// The names are given that address here, as lines of /etc/hosts would.
+#ifndef GE_HOSTS_DEFAULT
+#define GE_HOSTS_DEFAULT "config/hosts.txt"
+#endif
+void install_hosts() {
+    const char* path = std::getenv("GE_HOSTS");
+    if (!path) path = GE_HOSTS_DEFAULT;
+    ios_net_log(std::getenv("GE_NETLOG") != nullptr);
+    if (!*path) return;
+    FILE* f = std::fopen(path, "r");
+    if (!f) { rt_log("goldeneye: no hosts file %s: the game's servers as the system resolves them", path); return; }
+    char line[512], ip[64], name[256];
+    int n = 0;
+    while (std::fgets(line, sizeof line, f)) {
+        if (char* h = std::strchr(line, '#')) *h = 0;
+        if (std::sscanf(line, "%63s %255s", ip, name) == 2) { ios_net_add_host(name, ip); ++n; }
+    }
+    std::fclose(f);
+    rt_log("goldeneye: %d host name(s) from %s", n, path);
+}
+
 void install() {
+    install_hosts();
     install_crash_handler();
     install_profiler();
     debug_install();

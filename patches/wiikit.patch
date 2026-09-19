@@ -20,8 +20,860 @@ index a6b37f2..12d5d10 100644
  void gx_draw_done_reached() {
      hw_run_locked([] { pe_ctrl |= 8; ++st.done; os_raise(); });
  }
+diff --git a/runtime/ios.cpp b/runtime/ios.cpp
+index 23d837a..eab8109 100644
+--- a/runtime/ios.cpp
++++ b/runtime/ios.cpp
+@@ -25,18 +25,35 @@
+ // Devices so far: /dev/di (the disc, from the extracted tree), /dev/fs and
+ // file paths (NAND, on a host folder), /dev/es (title identity, ticket and
+ // TMD views), /dev/stm/immediate and /dev/stm/eventhook, /dev/usb/hid (no
+-// keyboard ever attached). Anything else fails
++// keyboard ever attached), and the network's (ios_net.h). Anything else fails
+ // to open, and every call a device does not know is logged.
+ #include "disc.h"
+ #include "rt.h"
+ #include <algorithm>
+ #include <chrono>
++#include <ctime>
+ #include <deque>
+ #include <filesystem>
+ #include <map>
+ #include <memory>
+ #include <vector>
+ 
++#ifndef _WIN32
++#include <arpa/inet.h>
++#include <cerrno>
++#include <fcntl.h>
++#include <functional>
++#include <netdb.h>
++#include <netinet/in.h>
++#include <netinet/tcp.h>
++#include <openssl/err.h>
++#include <openssl/ssl.h>
++#include <poll.h>
++#include <sys/socket.h>
++#include <thread>
++#include <unistd.h>
++#endif
++
+ namespace fs = std::filesystem;
+ 
+ namespace {
+@@ -374,8 +391,20 @@ struct USBHID : Device {
+     }
+ };
+ 
++#ifndef _WIN32
++#include "ios_net.h"
++#endif
++
+ std::unique_ptr<Device> make_device(const std::string& path) {
+     std::unique_ptr<Device> d;
++#ifndef _WIN32
++    if (path == "/dev/net/ip/top") d = std::make_unique<IPTop>();
++    else if (path == "/dev/net/ncd/manage") d = std::make_unique<NCD>();
++    else if (path == "/dev/net/kd/request") d = std::make_unique<KDRequest>();
++    else if (path == "/dev/net/kd/time") d = std::make_unique<KDTime>();
++    else if (path == "/dev/net/ssl") d = std::make_unique<NetSSL>();
++    if (d) { d->name = path; return d; }
++#endif
+     if (path == "/dev/di") d = std::make_unique<DI>();
+     else if (path == "/dev/fs") d = std::make_unique<FS>();
+     else if (path == "/dev/es") d = std::make_unique<ES>();
+@@ -522,8 +551,29 @@ void ios_idle() {
+ }
+ 
+ Clock::time_point ios_tick() {
++#ifndef _WIN32
++    bool waiting = net_update();                      // network calls that would have blocked
++#else
++    bool waiting = false;
++#endif
+     update();
+-    return replies.empty() ? Clock::time_point::max() : replies.front().due;
++    auto next = replies.empty() ? Clock::time_point::max() : replies.front().due;
++    return waiting ? std::min(next, Clock::now() + std::chrono::milliseconds(1)) : next;
++}
++
++void ios_net_add_host(const char* name, const char* address) {
++#ifndef _WIN32
++    g_hosts[lower(name)] = address;
++#else
++    (void)name; (void)address;
++#endif
++}
++void ios_net_log(bool on) {
++#ifndef _WIN32
++    g_net_log = on;
++#else
++    (void)on;
++#endif
+ }
+ 
+ void ios_irq_flag_clear(uint32_t v) {
+diff --git a/runtime/ios_net.h b/runtime/ios_net.h
+new file mode 100644
+index 0000000..3948327
+--- /dev/null
++++ b/runtime/ios_net.h
+@@ -0,0 +1,753 @@
++// wiikit runtime — IOS's network devices, in high-level emulation. Included by
++// ios.cpp, inside its namespace.
++//
++//   /dev/net/kd/request, /dev/net/kd/time   WiiConnect24: every request succeeds, the time is the host's
++//   /dev/net/ncd/manage                     the console's network configuration: one wired connection, up
++//   /dev/net/ip/top                         sockets, on the host's (BSD sockets), never blocking the
++//                                           console: a call that would wait stays pending and is tried
++//                                           again by the clock thread; names are resolved on a thread
++//   /dev/net/ssl                            TLS on those sockets (OpenSSL); certificates are not verified
++//
++// Request layouts and error numbers follow Dolphin's implementation
++// (Core/IOS/Network), which follows the console's.
++//
++// Names can be given addresses before the host's resolver is asked
++// (ios_net_add_host: a port's own hosts file), which is how a game is pointed
++// at a replacement for servers that no longer exist.
++// (its system headers are included by ios.cpp, outside the namespace)
++
++// ---- names ------------------------------------------------------------------------------------
++std::map<std::string, std::string> g_hosts;           // lower-case name -> address
++bool g_net_log = false;
++
++std::string lower(std::string s) {
++    for (char& c : s) c = (char)std::tolower((unsigned char)c);
++    return s;
++}
++std::string mapped_host(const std::string& name) {
++    auto it = g_hosts.find(lower(name));
++    if (it == g_hosts.end()) return name;
++    if (g_net_log) rt_log("net: %s is %s (hosts)", name.c_str(), it->second.c_str());
++    return it->second;
++}
++
++// ---- errors -----------------------------------------------------------------------------------
++enum : int32_t { SO_EAGAIN = 6, SO_EALREADY = 7, SO_EBADF = 8, SO_ECONNABORTED = 13, SO_ECONNREFUSED = 14,
++                 SO_ECONNRESET = 15, SO_EHOSTUNREACH = 23, SO_EINPROGRESS = 26, SO_EINVAL = 28, SO_EISCONN = 30,
++                 SO_EMSGSIZE = 35, SO_ENETDOWN = 38, SO_ENETRESET = 39, SO_ENETUNREACH = 40, SO_ENOMEM = 49,
++                 SO_ENOTCONN = 56, SO_EPIPE = 66, SO_EPROTONOSUPPORT = 68, SO_EPROTOTYPE = 69, SO_ETIMEDOUT = 76,
++                 SO_EAFNOSUPPORT = 5, SO_EADDRINUSE = 3, SO_EADDRNOTAVAIL = 4, SO_EACCES = 2 };
++int32_t g_so_last = 0;
++
++int32_t so_error(int e, bool rw) {
++    switch (e) {
++    case EAGAIN: return rw ? -SO_EAGAIN : -SO_EINPROGRESS;
++    case EINPROGRESS: return -SO_EINPROGRESS;
++    case EALREADY: return -SO_EALREADY;
++    case EISCONN: return -SO_EISCONN;
++    case ENOTCONN: return -SO_ENOTCONN;
++    case EBADF: case ENOTSOCK: return -SO_EBADF;
++    case ECONNREFUSED: return -SO_ECONNREFUSED;
++    case ECONNRESET: return -SO_ECONNRESET;
++    case ECONNABORTED: return -SO_ECONNABORTED;
++    case ENETUNREACH: return -SO_ENETUNREACH;
++    case EHOSTUNREACH: return -SO_EHOSTUNREACH;
++    case ENETDOWN: return -SO_ENETDOWN;
++    case ENETRESET: return -SO_ENETRESET;
++    case ETIMEDOUT: return -SO_ETIMEDOUT;
++    case EMSGSIZE: return -SO_EMSGSIZE;
++    case EPIPE: return -SO_EPIPE;
++    case EADDRINUSE: return -SO_EADDRINUSE;
++    case EADDRNOTAVAIL: return -SO_EADDRNOTAVAIL;
++    case EACCES: return -SO_EACCES;
++    case EINVAL: return -SO_EINVAL;
++    case ENOMEM: case ENOBUFS: return -SO_ENOMEM;
++    }
++    return -1;
++}
++int32_t so_result(long ret, bool rw) {
++    g_so_last = ret >= 0 ? (int32_t)ret : so_error(errno, rw);
++    return g_so_last;
++}
++
++// ---- sockets ----------------------------------------------------------------------------------
++struct Sock { int fd = -1; bool nonblock = false, tcp = false; int connecting = 0; };   // 0 no, 1 in progress, 2 done, 3 failed
++Sock g_socks[24];
++
++Sock* sock(uint32_t s) { return s < 24 && g_socks[s].fd >= 0 ? &g_socks[s] : nullptr; }
++int host_fd(uint32_t s) { Sock* k = sock(s); return k ? k->fd : -1; }
++
++sockaddr_in native_addr(uint32_t a) {                 // {u8 len, u8 family, u16 port, u32 address}, as on the wire
++    sockaddr_in n{};
++    n.sin_family = AF_INET;
++    std::memcpy(&n.sin_port, host(a + 2), 2);
++    std::memcpy(&n.sin_addr, host(a + 4), 4);
++    return n;
++}
++void guest_addr(uint32_t a, const sockaddr_in& n) {
++    st8(a, 8);
++    st8(a + 1, 2);
++    std::memcpy(host(a + 2), &n.sin_port, 2);
++    std::memcpy(host(a + 4), &n.sin_addr, 4);
++}
++
++// A call that would wait: tried again until it is done or its time is up.
++struct NetOp {
++    uint32_t req;
++    int sock;                                          // the socket it waits on (-1: several, or none)
++    std::function<bool(int32_t&)> step;                // true: done, with the result
++    Clock::time_point deadline = Clock::time_point::max();
++    int32_t late = 0;                                  // the result when the time is up
++};
++std::vector<NetOp> g_netops;
++
++int32_t net_start(uint32_t req, int s, std::function<bool(int32_t&)> step,
++                  Clock::time_point deadline = Clock::time_point::max(), int32_t late = 0) {
++    int32_t r = 0;
++    if (step(r)) return r;
++    g_netops.push_back({req, s, std::move(step), deadline, late});
++    return PENDING;
++}
++
++bool net_update() {                                   // by the clock thread; true while calls wait
++    auto now = Clock::now();
++    for (size_t i = 0; i < g_netops.size();) {
++        NetOp& op = g_netops[i];
++        int32_t r = 0;
++        bool done = op.step(r);
++        if (!done && now >= op.deadline) { done = true; r = op.late; }
++        if (done) {
++            uint32_t req = op.req;
++            g_netops.erase(g_netops.begin() + (long)i);
++            reply(req, r);
++        } else ++i;
++    }
++    return !g_netops.empty();
++}
++
++void net_abort(int s, int32_t result) {               // the socket is closed under its waiting calls
++    for (size_t i = 0; i < g_netops.size();) {
++        if (g_netops[i].sock == s) {
++            reply(g_netops[i].req, result);
++            g_netops.erase(g_netops.begin() + (long)i);
++        } else ++i;
++    }
++}
++
++// Work that takes the host's time (the resolver): on a thread of its own; it
++// returns what to do to the guest's memory, done under the hardware lock.
++void update();
++void net_async(uint32_t req, std::function<std::function<int32_t()>()> work) {
++    std::thread([req, work = std::move(work)] {
++        auto apply = work();
++        hw_run_locked([&] { reply(req, apply()); update(); });
++    }).detach();
++}
++
++uint32_t local_ip() {                                 // host order; the address the default route leaves from
++    static uint32_t ip = 0;
++    if (ip) return ip;
++    int s = ::socket(AF_INET, SOCK_DGRAM, 0);
++    sockaddr_in a{};
++    a.sin_family = AF_INET;
++    a.sin_port = htons(53);
++    inet_pton(AF_INET, "8.8.8.8", &a.sin_addr);
++    socklen_t n = sizeof a;
++    if (s >= 0 && ::connect(s, (sockaddr*)&a, sizeof a) == 0 && ::getsockname(s, (sockaddr*)&a, &n) == 0)
++        ip = ntohl(a.sin_addr.s_addr);
++    if (s >= 0) ::close(s);
++    if (!ip) ip = 0x0A00011E;                         // 10.0.1.30
++    return ip;
++}
++
++// The console's MAC address: made once, kept in the NAND folder.
++const uint8_t* mac_address() {
++    static uint8_t mac[6];
++    static bool have = false;
++    if (have) return mac;
++    std::string p = g_nand + "/mac.bin";
++    FILE* f = std::fopen(p.c_str(), "rb");
++    if (f && std::fread(mac, 1, 6, f) == 6) have = true;
++    if (f) std::fclose(f);
++    if (!have) {
++        uint64_t r = (uint64_t)std::chrono::system_clock::now().time_since_epoch().count() * 0x9E3779B97F4A7C15ull;
++        mac[0] = 0x00; mac[1] = 0x17; mac[2] = 0xAB;  // a Nintendo prefix
++        mac[3] = (uint8_t)(r >> 40); mac[4] = (uint8_t)(r >> 32); mac[5] = (uint8_t)(r >> 24);
++        if ((f = std::fopen(p.c_str(), "wb"))) { std::fwrite(mac, 1, 6, f); std::fclose(f); }
++        have = true;
++    }
++    return mac;
++}
++
++int wii_events(int native, bool to_wii) {
++    static const int map[][2] = {{POLLRDNORM, 0x01}, {POLLRDBAND, 0x02}, {POLLPRI, 0x04}, {POLLWRNORM, 0x08},
++                                 {POLLWRBAND, 0x10}, {POLLERR, 0x20}, {POLLHUP, 0x40}, {POLLNVAL, 0x80}};
++    int out = 0;
++    for (auto& m : map)
++        if (native & m[to_wii ? 0 : 1]) out |= m[to_wii ? 1 : 0];
++    return out;
++}
++
++int connect_state(Sock& k) {                          // a connection in progress: has it ended?
++    if (k.connecting != 1) return k.connecting;
++    pollfd p{k.fd, POLLOUT, 0};
++    if (::poll(&p, 1, 0) > 0) {
++        int err = 0;
++        socklen_t n = sizeof err;
++        ::getsockopt(k.fd, SOL_SOCKET, SO_ERROR, &err, &n);
++        k.connecting = (p.revents & (POLLERR | POLLHUP)) || err ? 3 : 2;
++    }
++    return k.connecting;
++}
++
++struct IPTop : Device {
++    int32_t ioctl(uint32_t req, uint32_t in, uint32_t in_len, uint32_t out, uint32_t out_len, uint32_t addr) override {
++        switch (req) {
++        case 15: {                                    // socket(af, type, protocol)
++            uint32_t af = rd32(in), type = rd32(in + 4), prot = rd32(in + 8);
++            if (af != 2) return -SO_EAFNOSUPPORT;
++            if (prot != 0) return -SO_EPROTONOSUPPORT;
++            if (type != 1 && type != 2) return -SO_EPROTOTYPE;
++            int fd = ::socket(AF_INET, type == 1 ? SOCK_STREAM : SOCK_DGRAM, 0);
++            if (fd < 0) return so_result(-1, false);
++            ::fcntl(fd, F_SETFL, ::fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
++            if (type == 2) { int on = 1; ::setsockopt(fd, SOL_SOCKET, SO_BROADCAST, &on, sizeof on); }
++            for (int i = 0; i < 24; ++i)
++                if (g_socks[i].fd < 0) {
++                    g_socks[i] = Sock{fd, false, type == 1, 0};
++                    if (g_net_log) rt_log("net: socket %d (%s)", i, type == 1 ? "TCP" : "UDP");
++                    return g_so_last = i;
++                }
++            ::close(fd);
++            return -33;                               // EMFILE
++        }
++        case 3: {                                     // close
++            uint32_t s = rd32(in);
++            Sock* k = sock(s);
++            if (!k) return -SO_EBADF;
++            ::close(k->fd);
++            *k = Sock{};
++            net_abort((int)s, -SO_ENOTCONN);
++            if (g_net_log) rt_log("net: socket %u closed", s);
++            return 0;
++        }
++        case 2: {                                     // bind(s, has address, address)
++            Sock* k = sock(rd32(in));
++            if (!k) return -SO_EBADF;
++            sockaddr_in a = native_addr(in + 8);
++            int32_t r = so_result(::bind(k->fd, (sockaddr*)&a, sizeof a), false);
++            if (g_net_log) rt_log("net: bind %u to %s:%u -> %d", rd32(in), inet_ntoa(a.sin_addr), ntohs(a.sin_port), r);
++            return r;
++        }
++        case 4: {                                     // connect
++            uint32_t s = rd32(in);
++            Sock* k = sock(s);
++            if (!k) return -SO_EBADF;
++            sockaddr_in a = native_addr(in + 8);
++            if (g_net_log) rt_log("net: connect %u to %s:%u", s, inet_ntoa(a.sin_addr), ntohs(a.sin_port));
++            auto step = [s, a](int32_t& r) {
++                Sock* k = sock(s);
++                if (!k) { r = -SO_EBADF; return true; }
++                r = so_result(::connect(k->fd, (const sockaddr*)&a, sizeof a), false);
++                if (r >= 0 || r == -SO_EISCONN) { k->connecting = 2; if (!k->nonblock) r = 0; return true; }
++                if (r == -SO_EINPROGRESS || r == -SO_EALREADY || r == -SO_EAGAIN) {
++                    k->connecting = 1;
++                    return k->nonblock;
++                }
++                k->connecting = 3;
++                return true;
++            };
++            return net_start(addr, (int)s, step, Clock::now() + std::chrono::seconds(30), -SO_ENETUNREACH);
++        }
++        case 1: {                                     // accept
++            uint32_t s = rd32(in);
++            if (!sock(s)) return -SO_EBADF;
++            auto step = [s, out, out_len](int32_t& r) {
++                Sock* k = sock(s);
++                if (!k) { r = -SO_EBADF; return true; }
++                sockaddr_in a{};
++                socklen_t n = sizeof a;
++                int fd = ::accept(k->fd, (sockaddr*)&a, &n);
++                if (fd < 0) {
++                    r = so_result(-1, true);
++                    return k->nonblock || r != -SO_EAGAIN;
++                }
++                ::fcntl(fd, F_SETFL, ::fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
++                for (int i = 0; i < 24; ++i)
++                    if (g_socks[i].fd < 0) {
++                        g_socks[i] = Sock{fd, false, true, 2};
++                        if (out && out_len >= 8) guest_addr(out, a);
++                        r = i;
++                        return true;
++                    }
++                ::close(fd);
++                r = -33;
++                return true;
++            };
++            return net_start(addr, (int)s, step);
++        }
++        case 5: {                                     // fcntl(s, cmd, arg): only the non-blocking flag (4)
++            Sock* k = sock(rd32(in));
++            if (!k) return -SO_EBADF;
++            uint32_t cmd = rd32(in + 4), arg = rd32(in + 8);
++            if (cmd == 3) return k->nonblock ? 4 : 0;
++            if (cmd == 4) k->nonblock = (arg & 4) != 0;
++            return 0;
++        }
++        case 14: {                                    // shutdown(s, how)
++            Sock* k = sock(rd32(in));
++            if (!k) return -SO_EBADF;
++            if (!k->tcp) return 0;
++            int32_t r = so_result(::shutdown(k->fd, (int)rd32(in + 4)), false);
++            net_abort((int)rd32(in), -SO_ENOTCONN);
++            return r;
++        }
++        case 10: {                                    // listen(s, backlog)
++            Sock* k = sock(rd32(in));
++            if (!k) return -SO_EBADF;
++            return so_result(::listen(k->fd, (int)rd32(in + 4)), false);
++        }
++        case 8: {                                     // getsockopt: (s, level, name) in the output, then length, value
++            Sock* k = sock(rd32(out));
++            if (!k) return -SO_EBADF;
++            uint32_t name = rd32(out + 8);
++            if (name == 0x1009) {                     // SO_ERROR
++                int err = 0;
++                socklen_t n = sizeof err;
++                ::getsockopt(k->fd, SOL_SOCKET, SO_ERROR, &err, &n);
++                wr32(out + 0xC, 4);
++                wr32(out + 0x10, err ? (uint32_t)so_error(err, false) : 0);
++                return 0;
++            }
++            int v = 0;
++            socklen_t n = sizeof v;
++            int nat = name == 0x4 ? SO_REUSEADDR : name == 0x1001 ? SO_SNDBUF : name == 0x1002 ? SO_RCVBUF :
++                      name == 0x1008 ? SO_TYPE : -1;
++            int32_t r = nat < 0 ? 0 : so_result(::getsockopt(k->fd, SOL_SOCKET, nat, &v, &n), false);
++            if (name == 0x1008) v = k->tcp ? 1 : 2;
++            wr32(out + 0xC, 4);
++            wr32(out + 0x10, (uint32_t)v);
++            return r;
++        }
++        case 9: {                                     // setsockopt(s, level, name, length, value)
++            Sock* k = sock(rd32(in));
++            if (!k) return -SO_EBADF;
++            uint32_t level = rd32(in + 4), name = rd32(in + 8);
++            int v = (int)rd32(in + 0x10);
++            if (level == 6) {                         // TCP: 0x2001 no delay; the rest accepted
++                if (name == 0x2001) ::setsockopt(k->fd, IPPROTO_TCP, TCP_NODELAY, &v, sizeof v);
++                return 0;
++            }
++            int nat = name == 0x4 ? SO_REUSEADDR : name == 0x1001 ? SO_SNDBUF : name == 0x1002 ? SO_RCVBUF : -1;
++            if (nat < 0) return 0;                    // linger, low-water marks: accepted
++            return so_result(::setsockopt(k->fd, SOL_SOCKET, nat, &v, sizeof v), false);
++        }
++        case 6: case 7: {                             // getpeername, getsockname
++            Sock* k = sock(rd32(in));
++            if (!k) return -SO_EBADF;
++            sockaddr_in a{};
++            socklen_t n = sizeof a;
++            int ret = req == 6 ? ::getpeername(k->fd, (sockaddr*)&a, &n) : ::getsockname(k->fd, (sockaddr*)&a, &n);
++            if (req == 7 && a.sin_addr.s_addr == 0) a.sin_addr.s_addr = htonl(local_ip());
++            if (out && out_len >= 8) guest_addr(out, a);
++            return so_result(ret, false);
++        }
++        case 16: return (int32_t)local_ip();          // gethostid
++        case 20: return g_so_last;                    // getlasterror
++        case 30: case 31: return 0;                   // setinterface, initinterface
++        case 11: {                                    // poll: timeout (s64 ms) in; {s, events, revents} * n out
++            if (!in || !out) return -SO_EINVAL;
++            int64_t timeout = (int64_t)((uint64_t)rd32(in) << 32 | rd32(in + 4));
++            uint32_t n = out_len / 0xC;
++            if (!n || n > 24) return -SO_EINVAL;
++            auto step = [out, n](int32_t& r) {
++                pollfd p[24];
++                for (uint32_t i = 0; i < n; ++i) {
++                    p[i].fd = host_fd(rd32(out + 0xC * i));
++                    p[i].events = (short)(wii_events((int)rd32(out + 0xC * i + 4), false) & ~(POLLERR | POLLHUP | POLLNVAL));
++                    p[i].revents = 0;
++                }
++                int ret = ::poll(p, n, 0);
++                if (ret <= 0) { r = ret < 0 ? so_result(-1, false) : 0; return ret < 0; }
++                for (uint32_t i = 0; i < n; ++i) wr32(out + 0xC * i + 8, (uint32_t)wii_events(p[i].revents, true));
++                r = ret;
++                return true;
++            };
++            for (uint32_t i = 0; i < n; ++i) wr32(out + 0xC * i + 8, 0);
++            if (timeout == 0) { int32_t r = 0; step(r); return r; }
++            auto deadline = timeout < 0 ? Clock::time_point::max() : Clock::now() + std::chrono::milliseconds(timeout);
++            return net_start(addr, -1, step, deadline, 0);
++        }
++        case 17: {                                    // gethostbyname: a hostent in 0x460 bytes
++            if (out_len != 0x460) return -1;
++            std::string name = guest_cstr(in, in_len ? in_len : 256);
++            net_async(addr, [name, out]() -> std::function<int32_t()> {
++                std::vector<uint32_t> ips;            // network order
++                addrinfo hints{}, *res = nullptr;
++                hints.ai_family = AF_INET;
++                if (::getaddrinfo(mapped_host(name).c_str(), nullptr, &hints, &res) == 0) {
++                    for (addrinfo* p = res; p && ips.size() < 16; p = p->ai_next) {
++                        uint32_t ip = ((sockaddr_in*)p->ai_addr)->sin_addr.s_addr;
++                        if (std::find(ips.begin(), ips.end(), ip) == ips.end()) ips.push_back(ip);
++                    }
++                    ::freeaddrinfo(res);
++                }
++                if (g_net_log) rt_log("net: gethostbyname %s: %zu address(es)", name.c_str(), ips.size());
++                return [name, out, ips]() -> int32_t {
++                    if (ips.empty() || name.size() + 1 > 0x100) return -1;
++                    zero(out, 0x460);
++                    uint32_t phys = out & 0x7FFFFFFFu;    // pointers in the reply as the request's: physical
++                    fill(out + 0x10, name.c_str(), name.size() + 1);
++                    wr32(out, phys + 0x10);               // h_name
++                    wr32(out + 4, phys + 0x340 + 4 * (uint32_t)ips.size());   // h_aliases: empty
++                    st16(out + 8, 2);                     // AF_INET
++                    st16(out + 10, 4);
++                    wr32(out + 12, phys + 0x340);         // h_addr_list
++                    for (size_t i = 0; i < ips.size(); ++i) {
++                        std::memcpy(host(out + 0x110 + 4 * (uint32_t)i), &ips[i], 4);
++                        wr32(out + 0x340 + 4 * (uint32_t)i, phys + 0x110 + 4 * (uint32_t)i);
++                    }
++                    return 0;
++                };
++            });
++            return PENDING;
++        }
++        case 21: {                                    // inet_aton, which also resolves names
++            std::string name = guest_cstr(in, in_len ? in_len : 256);
++            net_async(addr, [name, out]() -> std::function<int32_t()> {
++                uint32_t ip = 0;
++                bool ok = false;
++                addrinfo hints{}, *res = nullptr;
++                hints.ai_family = AF_INET;
++                if (::getaddrinfo(mapped_host(name).c_str(), nullptr, &hints, &res) == 0 && res) {
++                    ip = ((sockaddr_in*)res->ai_addr)->sin_addr.s_addr;
++                    ok = true;
++                    ::freeaddrinfo(res);
++                }
++                return [out, ip, ok]() -> int32_t {
++                    if (ok) std::memcpy(host(out), &ip, 4);
++                    return ok;
++                };
++            });
++            return PENDING;
++        }
++        case 22: {                                    // inet_pton
++            in_addr a{};
++            if (inet_pton(AF_INET, guest_cstr(in, 64).c_str(), &a) != 1) return 0;
++            std::memcpy(host(out + 4), &a, 4);
++            return 1;
++        }
++        case 23: {                                    // inet_ntop
++            char s[16];
++            std::snprintf(s, sizeof s, "%u.%u.%u.%u", ld8(in + 8), ld8(in + 9), ld8(in + 10), ld8(in + 11));
++            fill(out, s, std::strlen(s) + 1);
++            return 0;
++        }
++        }
++        rt_log("net: /dev/net/ip/top ioctl %u (in %u bytes, out %u) not known: 0", req, in_len, out_len);
++        return 0;
++    }
++
++    int32_t ioctlv(uint32_t req, std::vector<Vec>& in, std::vector<Vec>& io, uint32_t addr) override {
++        switch (req) {
++        case 26: case 27: case 29: return 0;          // startup, cleanup, setinterfaceopt
++        case 13: {                                    // sendto: data; (s, flags, has address, address)
++            if (in.size() < 2) return -SO_EINVAL;
++            uint32_t data = in[0].addr, len = in[0].size, p = in[1].addr;
++            uint32_t s = rd32(p), flags = rd32(p + 4);
++            bool has_dest = rd32(p + 8) != 0;
++            sockaddr_in to = has_dest ? native_addr(p + 0xC) : sockaddr_in{};
++            if (!sock(s)) return -SO_EBADF;
++            auto step = [s, data, len, flags, has_dest, to](int32_t& r) {
++                Sock* k = sock(s);
++                if (!k) { r = -SO_EBADF; return true; }
++                bool nb = k->nonblock || (flags & 4);
++                if (k->tcp && connect_state(*k) == 1) { r = -SO_EAGAIN; return nb; }
++                long n = ::sendto(k->fd, host(data), len, MSG_NOSIGNAL | (flags & 1 ? MSG_OOB : 0),
++                                  has_dest ? (const sockaddr*)&to : nullptr, has_dest ? sizeof to : 0);
++                r = so_result(n, true);
++                return nb || r != -SO_EAGAIN;
++            };
++            return net_start(addr, (int)s, step);
++        }
++        case 12: {                                    // recvfrom: (s, flags); data, address
++            if (in.empty() || io.empty()) return -SO_EINVAL;
++            uint32_t s = rd32(in[0].addr), flags = rd32(in[0].addr + 4);
++            uint32_t data = io[0].addr, len = io[0].size;
++            uint32_t from = io.size() > 1 && io[1].size >= 8 ? io[1].addr : 0;
++            if (!sock(s)) return -SO_EBADF;
++            auto step = [s, flags, data, len, from](int32_t& r) {
++                Sock* k = sock(s);
++                if (!k) { r = -SO_EBADF; return true; }
++                bool nb = k->nonblock || (flags & 4);
++                if (k->tcp && connect_state(*k) == 1) { r = -SO_EAGAIN; return nb; }
++                sockaddr_in a{};
++                socklen_t n = sizeof a;
++                long got = ::recvfrom(k->fd, host(data), len, (flags & 2 ? MSG_PEEK : 0) | (flags & 1 ? MSG_OOB : 0),
++                                      from ? (sockaddr*)&a : nullptr, from ? &n : nullptr);
++                r = so_result(got, true);
++                if (got >= 0 && from) guest_addr(from, a);
++                return nb || r != -SO_EAGAIN;
++            };
++            return net_start(addr, (int)s, step);
++        }
++        case 24: {                                    // getaddrinfo: node, service, hints; results in 0x460 + addresses
++            if (io.empty()) return -SO_EINVAL;
++            std::string node = !in.empty() && in[0].size ? guest_cstr(in[0].addr, in[0].size) : "";
++            std::string service = in.size() > 1 && in[1].size ? guest_cstr(in[1].addr, in[1].size) : "";
++            bool has_hints = in.size() > 2 && in[2].size >= 0x14;
++            addrinfo hints{};
++            if (has_hints) {
++                hints.ai_flags = (int)rd32(in[2].addr);
++                hints.ai_socktype = (int)rd32(in[2].addr + 8);
++                hints.ai_protocol = (int)rd32(in[2].addr + 0xC);
++            }
++            hints.ai_family = AF_INET;
++            uint32_t out = io[0].addr, out_len = io[0].size;
++            net_async(addr, [node, service, hints, out, out_len]() -> std::function<int32_t()> {
++                struct Res { int flags, socktype, protocol; sockaddr_in a; };
++                std::vector<Res> list;
++                addrinfo* res = nullptr;
++                std::string n = mapped_host(node);
++                int ret = ::getaddrinfo(node.empty() ? nullptr : n.c_str(), service.empty() ? nullptr : service.c_str(),
++                                        &hints, &res);
++                if (ret == 0) {
++                    for (addrinfo* p = res; p && list.size() < 8; p = p->ai_next)
++                        if (p->ai_addr && p->ai_family == AF_INET)
++                            list.push_back({p->ai_flags, p->ai_socktype, p->ai_protocol, *(sockaddr_in*)p->ai_addr});
++                    ::freeaddrinfo(res);
++                }
++                if (g_net_log) rt_log("net: getaddrinfo %s: %zu result(s)", node.c_str(), list.size());
++                return [list, out, out_len]() -> int32_t {
++                    if (list.empty()) return -305;        // host not found
++                    uint32_t phys = out & 0x7FFFFFFFu, a = out, sa = out + 0x460;
++                    for (size_t i = 0; i < list.size() && sa + 0x1C <= out + out_len; ++i, a += 0x20, sa += 0x1C) {
++                        wr32(a, (uint32_t)list[i].flags);
++                        wr32(a + 4, 2);
++                        wr32(a + 8, list[i].socktype == SOCK_STREAM ? 1 : list[i].socktype == SOCK_DGRAM ? 2 : 0);
++                        wr32(a + 0xC, (uint32_t)list[i].protocol);
++                        wr32(a + 0x10, 8);
++                        wr32(a + 0x14, 0);
++                        wr32(a + 0x18, sa - out + phys);
++                        guest_addr(sa, list[i].a);
++                        wr32(a + 0x1C, i + 1 < list.size() ? a + 0x20 - out + phys : 0);
++                    }
++                    return 0;
++                };
++            });
++            return PENDING;
++        }
++        case 28: {                                    // getinterfaceopt(0xFFFE, option)
++            if (in.empty() || io.empty()) return -SO_EINVAL;
++            if (rd32(in[0].addr) != 0xFFFE) return -51;
++            uint32_t opt = rd32(in[0].addr + 4), o = io[0].addr;
++            uint32_t len_out = io.size() > 1 ? io[1].addr : 0;
++            switch (opt) {
++            case 0xB003: wr32(o, 0x08080808); wr32(o + 4, 0x08080404); break;     // DNS servers
++            case 0x1003: wr32(o, 0); break;                                      // error
++            case 0x1004: fill(o, mac_address(), 6); break;
++            case 0x1005: wr32(o, 1); break;                                      // link up
++            case 0x3001: wr32(o, 0x10); break;
++            case 0x4002: wr32(o, 1); break;                                      // one address
++            case 0x4003: {                                                       // address, mask, broadcast
++                uint32_t ip = local_ip();
++                if (len_out) wr32(len_out, 0xC);
++                wr32(o, ip); wr32(o + 4, 0xFFFFFF00); wr32(o + 8, ip | 0xFF);
++                break;
++            }
++            case 0x4005: wr32(o, 0x20); break;
++            case 0x4006: {                                                       // routes: the default one
++                uint32_t ip = local_ip();
++                wr32(o, 0); wr32(o + 4, 0); wr32(o + 8, (ip & 0xFFFFFF00) | 1); wr32(o + 12, 1);
++                wr64(o + 16, 0);
++                if (len_out) wr32(len_out, 24);
++                break;
++            }
++            case 0x6003: case 0x600A: case 0x600C: wr32(o, 0x80); break;
++            case 0xB002: wr32(o, 2); break;
++            default: rt_log("net: getinterfaceopt %X not known", opt);
++            }
++            return 0;
++        }
++        }
++        rt_log("net: /dev/net/ip/top ioctlv %u (%zu in, %zu out) not known: 0", req, in.size(), io.size());
++        return 0;
++    }
++};
++
++// ---- /dev/net/ncd/manage ------------------------------------------------------------------------
++struct NCD : Device {
++    static uint32_t lock_fd;
++    int32_t ioctlv(uint32_t req, std::vector<Vec>& in, std::vector<Vec>& io, uint32_t) override {
++        uint32_t result = 0;
++        size_t rv = 0;                                // which output vector takes the result
++        switch (req) {
++        case 1:                                       // lock the wireless driver
++            if (io.empty() || io[0].size < 8) return IPC_EINVAL;
++            if (lock_fd) result = (uint32_t)IPC_EINVAL;
++            else { lock_fd = 1; wr32(io[0].addr + 4, 1); }
++            break;
++        case 2:                                       // unlock
++            if (in.empty() || io.empty()) return IPC_EINVAL;
++            if (rd32(in[0].addr) == lock_fd) lock_fd = 0;
++            else result = (uint32_t)-3;
++            break;
++        case 3: case 5: {                             // get, read the configuration: 0x1B5C bytes
++            if (io.empty()) return IPC_EINVAL;
++            zero(io[0].addr, std::min<uint32_t>(io[0].size, 0x1B5C));
++            st8(io[0].addr + 4, 2);                   // the wired interface
++            st8(io[0].addr + 8, 1 | 2 | 4 | 32 | 128);   // connection 1: wired, DHCP, tested, selected
++            if (req == 3) rv = 1;
++            break;
++        }
++        case 4: case 6: break;                        // set, write: not kept
++        case 7:                                       // link status
++            if (io.empty()) return IPC_EINVAL;
++            wr32(io[0].addr + 4, 3);                  // wired
++            break;
++        case 8:                                       // the wireless MAC address
++            if (io.size() < 2) return IPC_EINVAL;
++            fill(io[1].addr, mac_address(), 6);
++            break;
++        default: rt_log("net: /dev/net/ncd/manage ioctlv %u not known", req);
++        }
++        if (rv < io.size() && io[rv].size >= 4) {
++            wr32(io[rv].addr, result);
++            if (rv == 1 && io[rv].size >= 8) wr32(io[rv].addr + 4, result);
++        }
++        return 0;
++    }
++};
++uint32_t NCD::lock_fd = 0;
++
++// ---- /dev/net/kd ----------------------------------------------------------------------------------
++struct KDRequest : Device {
++    int32_t ioctl(uint32_t req, uint32_t, uint32_t, uint32_t out, uint32_t out_len, uint32_t) override {
++        if (g_net_log) rt_log("net: /dev/net/kd/request ioctl %X", req);
++        if (out && out_len >= 4) wr32(out, 0);        // WC24_OK
++        return 0;
++    }
++};
++
++struct KDTime : Device {
++    static int64_t utc_diff;
++    static uint32_t rtc;
++    static uint64_t utc() { return (uint64_t)((int64_t)std::time(nullptr) + utc_diff); }
++    int32_t ioctl(uint32_t req, uint32_t in, uint32_t, uint32_t out, uint32_t out_len, uint32_t) override {
++        int32_t result = 0;
++        switch (req) {
++        case 0x14: if (out_len >= 12) wr64(out + 4, utc()); break;                // get universal time
++        case 0x15: utc_diff = (int64_t)((uint64_t)rd32(in) << 32 | rd32(in + 4)) - (int64_t)std::time(nullptr); break;
++        case 0x17: rtc = rd32(in); break;                                         // set the RTC counter
++        case 0x18: if (out_len >= 12) wr64(out + 4, utc() - rtc); break;          // time difference
++        case 0x19: result = -9; break;
++        default: rt_log("net: /dev/net/kd/time ioctl %X not known", req);
++        }
++        if (out && out_len >= 4) wr32(out, 0);
++        return result;
++    }
++};
++int64_t KDTime::utc_diff = 0;
++uint32_t KDTime::rtc = 0;
++
++// ---- /dev/net/ssl ---------------------------------------------------------------------------------
++// The library's calls are "d:dd": the result is written to the first input
++// vector; the session's id (from 1) and the arguments are in the others.
++enum : int32_t { SSL_OK_ = 0, SSL_ERR_FAILED = -1, SSL_ERR_RAGAIN = -2, SSL_ERR_WAGAIN = -3, SSL_ERR_SYSCALL = -5,
++                 SSL_ERR_ZERO = -6, SSL_ERR_ID = -8 };
++struct TlsSession { SSL_CTX* ctx = nullptr; SSL* ssl = nullptr; std::string hostname; int sock = -1; };
++TlsSession g_tls[4];
++
++TlsSession* tls(uint32_t id) { return id >= 1 && id <= 4 && g_tls[id - 1].ctx ? &g_tls[id - 1] : nullptr; }
++
++struct NetSSL : Device {
++    int32_t ioctlv(uint32_t req, std::vector<Vec>& in, std::vector<Vec>& io, uint32_t addr) override {
++        if (in.empty() || io.empty()) return IPC_EINVAL;
++        uint32_t ret = in[0].addr;
++        auto result = [ret](int32_t v) { wr32(ret, (uint32_t)v); };
++        if (req == 1) {                               // new(verify options, host name)
++            std::string name = io.size() > 1 ? guest_cstr(io[1].addr, io[1].size) : "";
++            for (int i = 0; i < 4; ++i)
++                if (!g_tls[i].ctx) {
++                    SSL_CTX* ctx = SSL_CTX_new(TLS_client_method());
++                    if (!ctx) break;
++                    SSL_CTX_set_verify(ctx, SSL_VERIFY_NONE, nullptr);   // the servers of 2010 are gone: whoever answers
++                    SSL_CTX_set_security_level(ctx, 0);
++                    SSL_CTX_set_min_proto_version(ctx, 0);
++                    g_tls[i] = TlsSession{ctx, nullptr, name, -1};
++                    if (g_net_log) rt_log("net: ssl %d for %s", i + 1, name.c_str());
++                    result(i + 1);
++                    return 0;
++                }
++            result(SSL_ERR_FAILED);
++            return 0;
++        }
++        TlsSession* t = tls(rd32(io[0].addr));
++        if (!t) { result(SSL_ERR_ID); return 0; }
++        uint32_t id = rd32(io[0].addr);
++        switch (req) {
++        case 6:                                       // shutdown
++            if (t->ssl) { SSL_shutdown(t->ssl); SSL_free(t->ssl); }
++            SSL_CTX_free(t->ctx);
++            *t = TlsSession{};
++            result(SSL_OK_);
++            return 0;
++        case 2: {                                     // connect(socket): the session is on that socket
++            if (io.size() < 2) return IPC_EINVAL;
++            t->sock = (int)rd32(io[1].addr);
++            int fd = host_fd((uint32_t)t->sock);
++            if (fd < 0) { result(SSL_ERR_FAILED); return 0; }
++            if (t->ssl) SSL_free(t->ssl);
++            t->ssl = SSL_new(t->ctx);
++            SSL_set_fd(t->ssl, fd);
++            if (!t->hostname.empty()) SSL_set_tlsext_host_name(t->ssl, t->hostname.c_str());
++            result(SSL_OK_);
++            return 0;
++        }
++        case 3: case 4: case 5: {                     // handshake; read(buffer in in[1]); write(data in io[1])
++            if (!t->ssl) { result(SSL_ERR_FAILED); return 0; }
++            uint32_t buf = req == 4 ? (in.size() > 1 ? in[1].addr : 0) : (io.size() > 1 ? io[1].addr : 0);
++            uint32_t len = req == 4 ? (in.size() > 1 ? in[1].size : 0) : (io.size() > 1 ? io[1].size : 0);
++            auto step = [id, req, ret, buf, len](int32_t& r) {
++                r = 0;
++                TlsSession* t = tls(id);
++                Sock* k = t ? sock((uint32_t)t->sock) : nullptr;
++                if (!t || !t->ssl || !k) { wr32(ret, (uint32_t)SSL_ERR_ID); return true; }
++                if (req == 3) {
++                    int cs = connect_state(*k);
++                    if (cs == 1) { wr32(ret, (uint32_t)SSL_ERR_RAGAIN); return k->nonblock; }
++                    if (cs == 3) { wr32(ret, (uint32_t)SSL_ERR_SYSCALL); return true; }
++                }
++                ERR_clear_error();
++                int n = req == 3 ? SSL_connect(t->ssl) : req == 4 ? SSL_read(t->ssl, host(buf), (int)len)
++                                                                 : SSL_write(t->ssl, host(buf), (int)len);
++                if (n > 0) {
++                    wr32(ret, req == 3 ? (uint32_t)SSL_OK_ : (uint32_t)n);
++                    if (req == 3 && g_net_log) rt_log("net: ssl %u handshake done (%s)", id, SSL_get_version(t->ssl));
++                    return true;
++                }
++                int e = SSL_get_error(t->ssl, n);
++                if (e == SSL_ERROR_WANT_READ || e == SSL_ERROR_WANT_WRITE) {
++                    wr32(ret, (uint32_t)(e == SSL_ERROR_WANT_READ ? SSL_ERR_RAGAIN : SSL_ERR_WAGAIN));
++                    return k->nonblock;
++                }
++                if (e == SSL_ERROR_ZERO_RETURN) { wr32(ret, (uint32_t)SSL_ERR_ZERO); return true; }
++                if (g_net_log) {
++                    char msg[160] = "";
++                    ERR_error_string_n(ERR_get_error(), msg, sizeof msg);
++                    rt_log("net: ssl %u %s failed: %d %s", id, req == 3 ? "handshake" : req == 4 ? "read" : "write", e, msg);
++                }
++                wr32(ret, (uint32_t)(req != 3 && n == 0 ? SSL_ERR_ZERO : SSL_ERR_FAILED));
++                return true;
++            };
++            return net_start(addr, t->sock, step);
++        }
++        case 7: case 8: case 9: case 10: case 11: case 13: case 14: case 15:   // certificates: none is checked or sent
++            result(SSL_OK_);
++            return 0;
++        }
++        rt_log("net: /dev/net/ssl ioctlv %u not known", req);
++        result(SSL_OK_);
++        return 0;
++    }
++};
 diff --git a/runtime/rt.h b/runtime/rt.h
-index 75fec5e..60ea6dd 100644
+index 75fec5e..6925c10 100644
 --- a/runtime/rt.h
 +++ b/runtime/rt.h
 @@ -74,6 +74,14 @@ void gx_submit_pending();                         // after a burst, outside g_hw
@@ -39,6 +891,32 @@ index 75fec5e..60ea6dd 100644
  void gx_draw_done_reached();                      // the renderer: the game's draw-done point is drawn
  void hw_run_locked(const std::function<void()>& fn);   // run fn holding the hardware lock
  
+@@ -123,6 +131,10 @@ extern bool g_sysconf_eurgb60;                     // IPL.E60, after sysconf_pre
+ 
+ // ---- IOS (ios.cpp) ------------------------------------------------------------------
+ void ios_init(const char* disc_root, const char* nand_root);
++// The network (ios_net.h): a name given an address before the host's
++// resolver is asked, as a hosts file would; and a log of what the game does.
++void ios_net_add_host(const char* name, const char* address);
++void ios_net_log(bool on);
+ void ios_ipc_write(uint32_t reg, uint32_t v);      // 0xCD000000-0xCD00000C
+ uint32_t ios_ipc_read(uint32_t reg);
+ void ios_irq_flag_clear(uint32_t v);               // 0xCD000030
+diff --git a/runtime/runtime.cmake b/runtime/runtime.cmake
+index 1f97bc4..23429e9 100644
+--- a/runtime/runtime.cmake
++++ b/runtime/runtime.cmake
+@@ -14,6 +14,10 @@ add_library(wiikit_hw OBJECT ${_rt}/os.cpp ${_rt}/hw.cpp ${_rt}/gx.cpp ${_rt}/io
+             ${_rt}/video.cpp ${_rt}/gxshader.cpp ${_rt}/gxtex.cpp)
+ find_package(SDL3 REQUIRED CONFIG)
+ target_link_libraries(wiikit_hw PUBLIC SDL3::SDL3)
++if(NOT WIN32)
++  find_package(OpenSSL REQUIRED)                 # /dev/net/ssl (ios_net.h)
++  target_link_libraries(wiikit_hw PUBLIC OpenSSL::SSL OpenSSL::Crypto)
++endif()
+ foreach(t wiikit_core wiikit_stub wiikit_hw)
+   target_include_directories(${t} PUBLIC ${_rt})
+ endforeach()
 diff --git a/runtime/video.cpp b/runtime/video.cpp
 index 5726093..985e2d7 100644
 --- a/runtime/video.cpp
