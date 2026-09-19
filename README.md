@@ -40,6 +40,19 @@ replacements in `Sys/GC` when Dolphin is installed (`FONTS=dir` otherwise).
 Dolphin's `Sys/totaldb.dsy` (`DSY=file`), if present, names more SDK
 functions by signature.
 
+## Playing
+
+`./launch.sh` runs at the screen's refresh rate (`--fps N` for another,
+`--fps 30` for the console's). Keyboard and mouse: W A S D move, the mouse
+looks, the left button fires, the right aims, the wheel changes weapon, R
+reloads, C crouches, Shift sprints, E acts, G throws a grenade, V is the
+melee attack; `build/keys.txt` has the rest and can be edited. A gamepad is
+a Classic Controller.
+
+The game's online servers are gone. `config/hosts.txt` points their names at
+a community server, as lines of `/etc/hosts` would; `./launch.sh --offline`
+leaves it out. Needs OpenSSL's development files.
+
 ## Layout
 
     config/symbols/          three symbol sources for SJBE52, none fully accurate

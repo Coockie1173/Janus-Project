@@ -74,11 +74,15 @@ build: wiikit-patch recomp deps
 	    -DWIIKIT_EXTRA=$(abspath port/goldeneye.cmake) > $(BUILD)/cmake.log 2>&1 || { tail -20 $(BUILD)/cmake.log; exit 1; }
 	ninja -C $(OUT) wiiboot
 
-run: build
+# the key file: the port's defaults, copied once; build/keys.txt is the player's to edit
+$(BUILD)/keys.txt: | config/keys.txt
+	@mkdir -p $(BUILD) && cp config/keys.txt $@
+
+run: build $(BUILD)/keys.txt
 	$(WIIBOOT) $(BOOT_ARGS) $(RUN_ARGS)
 
 # Headless, time-boxed: the loop's progress check. Never fails the make; read the log.
-smoke: build
+smoke: build $(BUILD)/keys.txt
 	-timeout $$(( $(SMOKE_SECS) + 20 )) $(WIIBOOT) $(BOOT_ARGS) --no-video --no-audio --watch 5 \
 	    --quit-after $(SMOKE_SECS) $(RUN_ARGS) > $(BUILD)/run.log 2>&1; echo "exit $$?" >> $(BUILD)/run.log
 	@tail -40 $(BUILD)/run.log
