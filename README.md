@@ -45,8 +45,8 @@ functions by signature.
 `./launch.sh` runs at the screen's refresh rate (`--fps N` for another,
 `--fps 30` for the console's). Keyboard and mouse: W A S D move, the mouse
 looks, the left button fires, the right aims, the wheel changes weapon, R
-reloads, C crouches, Shift sprints, E acts, G throws a grenade, V is the
-melee attack; `build/keys.txt` has the rest and can be edited. A gamepad is
+reloads, Ctrl crouches, Shift sprints, E acts, G throws a grenade, V is the
+melee attack; in menus the left button selects and the right one goes back; `build/keys.txt` has the rest and can be edited. A gamepad is
 a Classic Controller.
 
 The game's online servers are gone. `config/hosts.txt` points their names at

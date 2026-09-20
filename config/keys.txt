@@ -28,18 +28,20 @@ Shake = Space, Mouse Middle
 Input        = Auto
 Face Buttons = Position
 Dead Zone    = 0.15
-# GoldenEye's default Classic layout ("Goldfinger Pro"): R fires, L aims down the sight, ZR throws a
-# grenade, ZL is the melee attack, a crouches, b is action and sprint, y reloads, x cycles grenades,
-# D-pad left and right cycle weapons (the mouse wheel does too), up is the firing mode, down the
-# smartphone, - night vision and the scoreboard, + pauses. In menus a selects and b goes back.
-A     = Return, C, Left Ctrl
-B     = Backspace, Left Shift, E, Space
+# GoldenEye's default Classic layout ("Goldfinger Pro"), as the game answers to it: ZR fires, ZL aims
+# down the sight, L is the melee attack, R throws a grenade, a crouches, b is action and sprint, y
+# reloads, x cycles grenades, D-pad left and right cycle weapons (the mouse wheel does too), up is the
+# firing mode, down the smartphone, - night vision and the scoreboard, + pauses.
+# In menus (and the pause menu) a selects and b goes back; there the port also takes ZR as a and ZL as
+# b, so the left mouse button selects and the right one goes back.
+A     = Left Ctrl, Return
+B     = Left Shift, E, Space, Backspace
 X     = T
 Y     = R
-L     = Mouse Right
-R     = Mouse Left
-ZL    = V, Mouse Middle
-ZR    = G
+L     = V, Mouse X1
+R     = G, Mouse X2
+ZL    = Mouse Right
+ZR    = Mouse Left
 Plus  = P
 Minus = Tab
 Home  = H

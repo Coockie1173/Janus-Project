@@ -7,7 +7,8 @@
 #     ./launch.sh --fps 60             the frame rate (default: the screen's refresh rate; 30: the console's)
 #     ./launch.sh --mouse 1.5          mouse look sensitivity (default 1; 0: mouse look off)
 # Keyboard and mouse: W A S D move, the mouse looks, left button fires, right button aims,
-# the wheel changes weapon, R reloads, C crouches, Shift sprints, E acts, G grenade, V melee;
+# the wheel changes weapon, R reloads, Ctrl crouches, Shift sprints, E acts, G grenade, V melee;
+# in menus the left button selects and the right one goes back;
 # the rest is in build/keys.txt ([Classic Controller]). Esc frees the mouse.
 # The log of the run is kept in build/run.log (send it along with a report).
 cd "$(dirname "$0")" || exit 1

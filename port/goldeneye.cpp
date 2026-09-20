@@ -207,6 +207,7 @@ void install_profiler() {}
 // is in the object the player's +0x16C points to, at +0x768, radians,
 // negative up (+0x760 follows it).
 const uint32_t kPlayerPtr = 0x806EB698;
+const uint32_t kPaused = 0x806EB69C;                 // a byte: 1 while the pause menu is up
 const float kPi = 3.14159265f;
 float g_mouse_sens = 1.0f;                           // GE_MOUSE: 1 is 0.0022 radians a pixel
 const float kRadPerPixel = 0.0022f, kPitchLimit = 1.35f;
@@ -221,7 +222,7 @@ void mouse_look() {                                  // on the game's thread, be
     debug_mouse(dx, dy);
     if (dx == 0 && dy == 0) return;
     uint32_t player = ld32(kPlayerPtr);
-    if (!guest_ptr(player)) return;                  // no player: a menu, a movie
+    if (!guest_ptr(player) || ld8(kPaused)) return;  // no player (a menu, a movie), or paused
     static uint32_t seen = 0;
     if (player != seen && std::getenv("GE_TRACE")) {
         uint32_t v = ld32(player + 0x16C);
@@ -266,10 +267,36 @@ void wheel_buttons(ClassicState& s) {
     s.buttons |= held;
 }
 
+// In play the triggers fire (ZR) and aim (ZL); in a menu they do nothing,
+// and there they are taken as a (select) and b (back), so that the mouse's
+// buttons work the menus. "In play" is a player and no pause: the byte at
+// 806EB69C, next to the player pointer, is 1 while the pause menu is up
+// (found by pausing and resuming under a word scan). A trigger held when a
+// menu closes stays out of play until it is let go: selecting "Continue"
+// does not fire a shot.
+const uint32_t kClA = 0x0010, kClB = 0x0040, kClZR = 0x0004, kClZL = 0x0080;
+
+bool in_play() { return guest_ptr(ld32(kPlayerPtr)) && ld8(kPaused) == 0; }
+
+void menu_buttons(ClassicState& s) {
+    static uint32_t held_from_menu = 0;
+    uint32_t triggers = s.buttons & (kClZR | kClZL);
+    if (!in_play()) {
+        if (triggers & kClZR) s.buttons |= kClA;
+        if (triggers & kClZL) s.buttons |= kClB;
+        s.buttons &= ~(kClZR | kClZL);
+        held_from_menu = triggers;
+    } else {
+        held_from_menu &= triggers;
+        s.buttons &= ~held_from_menu;
+    }
+}
+
 void classic_filter(int chan, ClassicState& s) {
     if (chan != 0) return;
     wheel_buttons(s);
     debug_classic(s);
+    menu_buttons(s);
 }
 
 void install_mouse() {

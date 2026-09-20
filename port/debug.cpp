@@ -2,6 +2,8 @@
 //
 //   GE_STICK="42-43:r1,0 45-46:l0,1"   between two times (seconds from start) hold a stick:
 //                                      r or l, then x,y in -1..1 (y up)
+//   GE_BUTTONS="66-66.3:0004 69-70:2000"  between two times hold Classic buttons (KPAD's bits, hex:
+//                                      ZR 0004, ZL 0080, R 0200, L 2000, a 0010, b 0040, x 0008, y 0020)
 //   GE_MOUSEMOVE="66-67:300,0"         between two times, mouse motion in pixels a second (x right,
 //                                      y down), as if the mouse moved: tests mouse look
 //   GE_SCAN="41,43.5,44.5,46.5,49"     snapshots of guest memory at those times; then floats
@@ -9,6 +11,7 @@
 //                                      interval (1st->2nd, 3rd->4th...) and stood still over
 //                                      each even one: with GE_STICK turning the view in the odd
 //                                      intervals, the view's angles are among them
+//                                      (GE_SCANINT=1: raw words instead of floats)
 //   GE_POKE="50:80ABCDEF=f1.5 52:80ABCDEF+=f0.2"   at a time, store or add a float (f) or a
 //                                      word (x, hex)
 //   GE_PROBE="64:816F0270:build/cands.txt"   from a time on, for each address in the file (hex,
@@ -45,6 +48,8 @@ void sleep_until_s(double t) {
 
 struct Hold { double a, b; char stick; float x, y; };
 std::vector<Hold> holds, moves;
+struct Press { double a, b; uint32_t bits; };
+std::vector<Press> presses;
 
 const uint32_t kRanges[][2] = {{0x80000000u, 0x81800000u}, {0x90000000u, 0x94000000u}};
 
@@ -69,6 +74,24 @@ void scan_main(std::vector<double> times) {
     FILE* out = std::fopen("build/scan.txt", "w");
     if (!out) return;
     size_t n = snaps[0].size(), found = 0;
+    if (std::getenv("GE_SCANINT")) {                 // words instead (flags, counters): same rule, raw values
+        for (size_t off = 0; off + 4 <= n; off += 4) {
+            bool ok = true;
+            for (size_t i = 0; ok && i + 1 < snaps.size(); ++i) {
+                bool same = !std::memcmp(&snaps[i][off], &snaps[i + 1][off], 4);
+                ok = i % 2 == 0 ? !same : same;
+            }
+            if (!ok) continue;
+            uint32_t addr = off < 0x01800000u ? 0x80000000u + (uint32_t)off : 0x90000000u + (uint32_t)(off - 0x01800000u);
+            std::fprintf(out, "%08X", addr);
+            for (auto& sn : snaps) std::fprintf(out, " %02X%02X%02X%02X", sn[off], sn[off + 1], sn[off + 2], sn[off + 3]);
+            std::fprintf(out, "\n");
+            ++found;
+        }
+        std::fclose(out);
+        rt_log("scan: %zu words in build/scan.txt", found);
+        return;
+    }
     for (size_t off = 0; off + 4 <= n; off += 4) {
         bool ok = true;
         for (size_t i = 0; ok && i + 1 < snaps.size(); ++i) {
@@ -193,6 +216,12 @@ void peek_main(std::vector<uint32_t> addrs) {
 
 void debug_classic(ClassicState& s) {
     double t = now_s();
+    for (auto& p : presses)
+        if (t >= p.a && t < p.b) {
+            s.buttons |= p.bits;
+            if (p.bits & 0x2000) s.lt = 1.0f;         // L and R are also analogue triggers
+            if (p.bits & 0x0200) s.rt = 1.0f;
+        }
     for (auto& h : holds)
         if (t >= h.a && t < h.b) {
             if (h.stick == 'r') { s.rx = h.x; s.ry = h.y; }
@@ -209,6 +238,18 @@ void debug_mouse(float& dx, float& dy) {
 }
 
 void debug_install() {
+    if (const char* e = std::getenv("GE_BUTTONS")) {
+        for (const char* q = e; *q;) {
+            Press p{};
+            char* end;
+            p.a = std::strtod(q, &end);
+            p.b = std::strtod(end + 1, &end);
+            p.bits = (uint32_t)std::strtoul(end + 1, &end, 16);
+            presses.push_back(p);
+            q = end;
+            while (*q == ' ') ++q;
+        }
+    }
     if (const char* e = std::getenv("GE_MOUSEMOVE")) {
         for (const char* q = e; *q;) {
             Hold h{};
