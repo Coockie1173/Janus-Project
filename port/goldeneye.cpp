@@ -10,6 +10,8 @@
 //     GE_MOUSE=S   mouse look sensitivity (default 1; 0 leaves the mouse free)
 //     GE_HOSTS=F   the hosts file for the game's name lookups (default config/hosts.txt)
 //     GE_NETLOG=1  log sockets, lookups and TLS sessions
+//     GE_GECKO=F   the Gecko codes' run-time writes (default build/patched/gecko.ram, from
+//                  tools/gecko.py; empty: none)
 //     GE_FPS=N     the frame rate the engine may reach (default: its own 30); auto: the
 //                  screen's refresh rate
 #include "debug.h"
@@ -21,6 +23,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
+#include <vector>
 #ifndef _WIN32
 #include <atomic>
 #include <csignal>
@@ -66,6 +69,7 @@ void guest_sleep(PPCContext& c, uint64_t ticks) {
 }
 
 void mouse_look();
+void gecko_apply();
 extern float g_mouse_sens;
 void frame_tick(PPCContext& c) {
     uint32_t max = ld32(kFpsMax);
@@ -78,7 +82,11 @@ void frame_tick(PPCContext& c) {
     }
     static uint32_t frame = 0;                       // the tick spins between frames: look once a frame
     uint32_t f = ld32(kFrameCount);
-    if (f != frame && g_mouse_sens > 0) { frame = f; mouse_look(); }
+    if (f != frame) {
+        frame = f;
+        gecko_apply();
+        if (g_mouse_sens > 0) mouse_look();
+    }
     orig_tick(c);
     if (g_fps_log) {                                 // GE_TRACE: frames run and the engine's rate, every 5 s
         static auto t0 = std::chrono::steady_clock::now();
@@ -328,8 +336,38 @@ void install_hosts() {
     rt_log("goldeneye: %d host name(s) from %s", n, path);
 }
 
+// Gecko codes (config/gecko.txt). Writes into the game's code are made in
+// the executable before it is recompiled (tools/gecko.py); the others, into
+// data or the heap, are stored here every frame, as a code handler would.
+#ifndef GE_GECKO_DEFAULT
+#define GE_GECKO_DEFAULT "build/patched/gecko.ram"
+#endif
+struct GeckoWrite { uint32_t addr, size, value; };
+std::vector<GeckoWrite> g_gecko;
+
+void gecko_apply() {
+    for (auto& w : g_gecko) {
+        if (w.size == 1) st8(w.addr, (uint8_t)w.value);
+        else if (w.size == 2) st16(w.addr, (uint16_t)w.value);
+        else st32(w.addr, w.value);
+    }
+}
+
+void install_gecko() {
+    const char* path = std::getenv("GE_GECKO");
+    if (!path) path = GE_GECKO_DEFAULT;
+    FILE* f = *path ? std::fopen(path, "r") : nullptr;
+    if (!f) return;
+    GeckoWrite w;
+    while (std::fscanf(f, "%x %u %x", &w.addr, &w.size, &w.value) == 3)
+        if (guest_ptr(w.addr) && w.addr + w.size <= 0x94000000u) g_gecko.push_back(w);
+    std::fclose(f);
+    if (!g_gecko.empty()) rt_log("goldeneye: %zu Gecko write(s) kept up from %s", g_gecko.size(), path);
+}
+
 void install() {
     install_hosts();
+    install_gecko();
     install_crash_handler();
     install_profiler();
     debug_install();

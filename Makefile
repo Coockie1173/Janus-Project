@@ -57,9 +57,14 @@ names: $(NAMES)
 $(NAMES): $(SYMSRC) $(BUILD)/sig_guess.tsv | check-game
 	$(PY) tools/merge_symbols.py --dol $(GAME)/sys/main.dol --out $@
 
+# Gecko codes: the executable the recompiler reads has them applied
+PATCHED   := $(BUILD)/patched
+$(PATCHED)/main.dol: config/gecko.txt tools/gecko.py | check-game
+	$(PY) tools/gecko.py $(GAME)/sys/main.dol config/gecko.txt --out $(PATCHED)
+
 recomp: $(RECOMP)/report.txt
-$(RECOMP)/report.txt: $(NAMES) config/hooks.txt $(wildcard wiikit/recomp/*.py wiikit/*.py wiikit/runtime/hooks.txt)
-	$(PY) -m wiikit.recomp $(GAME)/sys/main.dol --out $(RECOMP) --symbols $(NAMES) \
+$(RECOMP)/report.txt: $(NAMES) $(PATCHED)/main.dol config/hooks.txt $(wildcard wiikit/recomp/*.py wiikit/*.py wiikit/runtime/hooks.txt)
+	$(PY) -m wiikit.recomp $(PATCHED)/main.dol --out $(RECOMP) --symbols $(NAMES) \
 	    --hooks config/hooks.txt --no-comments > $(BUILD)/recomp.log 2>&1 || { tail -20 $(BUILD)/recomp.log; exit 1; }
 	@grep -v '^  hook: no symbol' $(BUILD)/recomp.log | tail -12
 	@echo "hooks the executable has no name for yet: $$(grep -c 'hook: no symbol' $(BUILD)/recomp.log) (see $(BUILD)/recomp.log)"

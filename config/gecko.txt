@@ -1,0 +1,13 @@
+# Gecko codes built into the port, in Dolphin's notation: a "$Name" line, then
+# the code's lines; "*" lines are notes, "#" comments a line out.
+#
+# The game's code is recompiled ahead of time, so a code that writes into it
+# cannot be applied while it runs: tools/gecko.py writes those into a copy of
+# main.dol (build/patched/main.dol) that is recompiled instead. Writes to data
+# are applied by the port every frame, as a code handler would.
+# Supported: RAM writes (00, 02, 04). Others are reported and skipped.
+# After editing: make  (only what changed is rebuilt).
+
+$Each counted player counts as four
+001E78EF 00000004
+*playerCount (801E7830): "addi r28, r28, 1" at 801E78EC becomes "addi r28, r28, 4"

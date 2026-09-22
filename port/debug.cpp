@@ -23,6 +23,9 @@
 //                                      build/obj.txt
 //   GE_FINDPTR="66:80848000:808491A4"   at a time, every word of guest memory that holds an
 //                                      address in that range (who points at an object)
+//   GE_SETALL="62:49=80:80000000:94000000"  at a time, every float equal to the first value in the
+//                                      address range becomes the second (each one logged):
+//                                      which copy of a constant matters, by halving the range
 //   GE_PEEK="80ABCDEF,80ABCDF0"        log those floats every half second
 #include "debug.h"
 #include "rt.h"
@@ -196,6 +199,18 @@ void findptr_main(double t, uint32_t lo, uint32_t hi) {
     rt_log("findptr: %d found", n);
 }
 
+void setall_main(double t, float from, float to, uint32_t lo, uint32_t hi) {
+    sleep_until_s(t);
+    int n = 0;
+    for (auto& r : kRanges)
+        for (uint32_t a = std::max(r[0], lo); a < std::min(r[1], hi); a += 4)
+            if (rdf(a) == from) {
+                wrf(a, to);
+                if (n++ < 300) rt_log("setall: %08X", a);
+            }
+    rt_log("setall: %d floats %g -> %g", n, from, to);
+}
+
 void peek_main(std::vector<uint32_t> addrs) {
     for (;;) {
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
@@ -326,6 +341,14 @@ void debug_install() {
         double t = std::strtod(e, &end);
         uint32_t lo = (uint32_t)std::strtoul(end + 1, &end, 16), hi = (uint32_t)std::strtoul(end + 1, &end, 16);
         std::thread(findptr_main, t, lo, hi).detach();
+    }
+    if (const char* e = std::getenv("GE_SETALL")) {
+        char* end;
+        double t = std::strtod(e, &end);
+        float from = std::strtof(end + 1, &end), to = std::strtof(end + 1, &end);
+        uint32_t lo = 0x80000000u, hi = 0x94000000u;
+        if (*end == ':') { lo = (uint32_t)std::strtoul(end + 1, &end, 16); hi = (uint32_t)std::strtoul(end + 1, &end, 16); }
+        std::thread(setall_main, t, from, to, lo, hi).detach();
     }
     if (const char* e = std::getenv("GE_PEEK")) {
         std::vector<uint32_t> addrs;
