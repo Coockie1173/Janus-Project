@@ -208,13 +208,17 @@ void install_profiler() {}
 // frame runs. One pixel is one step of the angle at any frame rate, and
 // there is no turning-speed cap.
 //
-// The angles (found with port/debug.cpp's scans, from the player pointer of
-// the community's memory watch list): the word at 806EB698 (-0x58E8(r13))
-// points to the player; its yaw is the float at +0xDC, radians, growing to
-// the right (+0x250 and the matrix at +0x98 are computed from it). The pitch
-// is in the object the player's +0x16C points to, at +0x768, radians,
-// negative up (+0x760 follows it).
-const uint32_t kPlayerPtr = 0x806EB698;
+// The angles (found with port/debug.cpp's scans and the community's memory
+// watch list). The word at 805D43EC points to the first viewport's camera,
+// and the camera's +4 to the player it shows: the player this console
+// plays. (The global at 806EB698 also points to a player, but online it is
+// whichever was made last: with a second player in the match the mouse
+// turned them instead.) The player's yaw is the float at +0xDC, radians,
+// growing to the right (+0x250 and the matrix at +0x98 are computed from
+// it). The pitch is in the object the player's +0x16C points to, at +0x768,
+// radians, negative up (+0x760 follows it).
+const uint32_t kCameraPtr = 0x805D43EC;
+const uint32_t kPlayerPtr = 0x806EB698;              // a player exists (any): used only to tell menus from play
 const uint32_t kPaused = 0x806EB69C;                 // a byte: 1 while the pause menu is up
 const float kPi = 3.14159265f;
 float g_mouse_sens = 1.0f;                           // GE_MOUSE: 1 is 0.0022 radians a pixel
@@ -229,7 +233,8 @@ void mouse_look() {                                  // on the game's thread, be
     video_take_mouse_motion(dx, dy);
     debug_mouse(dx, dy);
     if (dx == 0 && dy == 0) return;
-    uint32_t player = ld32(kPlayerPtr);
+    uint32_t camera = ld32(kCameraPtr);
+    uint32_t player = guest_ptr(camera) ? ld32(camera + 4) : 0;
     if (!guest_ptr(player) || ld8(kPaused)) return;  // no player (a menu, a movie), or paused
     static uint32_t seen = 0;
     if (player != seen && std::getenv("GE_TRACE")) {
