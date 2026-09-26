@@ -42,16 +42,22 @@ functions by signature.
 
 ## Playing
 
-`./launch.sh` runs at the screen's refresh rate (`--fps N` for another,
-`--fps 30` for the console's). Keyboard and mouse: W A S D move, the mouse
-looks, the left button fires, the right aims, the wheel changes weapon, R
-reloads, Ctrl crouches, Shift sprints, E acts, G throws a grenade, V is the
-melee attack; in menus the left button selects and the right one goes back; `build/keys.txt` has the rest and can be edited. A gamepad is
+`./launch.sh` opens a small window first: the frame rate (the screen's
+refresh rate by default), the field of view, the mouse's sensitivity, online
+on or off, and the key bindings (click Set, press a key or a mouse button).
+Then Play. `./launch.sh --no-gui` starts the game with what was saved, and
+any option does too (`--fps 60`, `--fov 70`, `--mouse 1.5`, `--offline`,
+`--fullscreen`).
+
+Keyboard and mouse by default: W A S D move, the mouse looks, the left
+button fires, the right aims, the wheel changes weapon, R reloads, Ctrl
+crouches, Shift sprints, E acts, G throws a grenade, V is the melee attack;
+in menus the left button selects and the right one goes back. A gamepad is
 a Classic Controller.
 
 The game's online servers are gone. `config/hosts.txt` points their names at
-a community server, as lines of `/etc/hosts` would; `./launch.sh --offline`
-leaves it out. Needs OpenSSL's development files.
+a community server, as lines of `/etc/hosts` would. Needs OpenSSL's
+development files. Gecko codes go in `config/gecko.txt` (RAM writes only).
 
 ## Layout
 
