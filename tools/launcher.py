@@ -28,7 +28,7 @@ ACTIONS = [
     ("Move forward", "Left Stick Up"), ("Move back", "Left Stick Down"),
     ("Move left", "Left Stick Left"), ("Move right", "Left Stick Right"),
 ]
-DEFAULTS = {"fps": "auto", "fov": "49", "mouse": "1.0", "online": "1", "fullscreen": "0"}
+DEFAULTS = {"fps": "auto", "fov": "49", "mouse": "1.0", "online": "1", "fullscreen": "0", "faststart": "0"}
 
 # Tk's key names -> SDL's (the key file's)
 TK_TO_SDL = {
@@ -197,6 +197,9 @@ def run_gui():
         row=3, column=0, columnspan=2, sticky="w", **pad)
     ttk.Checkbutton(st, text="Fullscreen  (F11 or Alt+Enter switches in the game)", variable=fullscreen).grid(
         row=4, column=0, columnspan=2, sticky="w", **pad)
+    faststart = tk.BooleanVar(value=settings["faststart"] == "1")
+    ttk.Checkbutton(st, text="Quicker start: hurry through the screens before the menu (a Gecko code)",
+                    variable=faststart).grid(row=5, column=0, columnspan=2, sticky="w", **pad)
 
     # -- controls
     ct = ttk.Frame(book)
@@ -293,6 +296,7 @@ def run_gui():
         settings["mouse"] = f"{mouse.get():.2f}"
         settings["online"] = "1" if online.get() else "0"
         settings["fullscreen"] = "1" if fullscreen.get() else "0"
+        settings["faststart"] = "1" if faststart.get() else "0"
         save_settings(settings)
         save_keys(lines, binds)
 

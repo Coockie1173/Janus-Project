@@ -1,0 +1,14 @@
+# Optional: a quicker start (the launcher's "Skip the intro" box, ./launch.sh --fast-start,
+# GE_GECKO_EXTRA). Run by the port's code handler while the game runs: no rebuild.
+
+$Quicker start
+08573504 806EE7A8
+2002000C 00000000
+20776B10 00000007
+046F1D08 3F800000
+CC000000 00000000
+046F1D08 44FA0000
+E0000000 80008000
+*three pointers at 80573504 (0xC apart) point at the float at 806EE7A8; while the word at
+*80776B10 is 7 the float at 806F1D08 is 1.0, and each time it becomes 7 a switch turns
+*2000.0 there on or off

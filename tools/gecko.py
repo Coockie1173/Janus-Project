@@ -6,11 +6,13 @@
 Writes, into --out:
     main.dol     the executable with every write that lands in its code or data applied
                  (what the recompiler reads: recompiled code cannot be patched at run time)
-    gecko.ram    "addr size value" lines for the port to store every frame: the writes
-                 outside the code (data, the heap), as a code handler would repeat them
+    gecko.txt    the codes, or parts of codes, for the port's handler to run every frame:
+                 writes outside the code (data, the heap), conditions and switches
     gecko.report what each code did
 
-Code types: 00 (bytes, with fill), 02 (halfwords, with fill), 04 (word), at ba = 80000000.
+Baked into main.dol: plain writes (00, 02, 04, 08) that land in the code. For the handler:
+those that land elsewhere, and codes with conditions (20-2E), switches (CC) and E0/E2.
+Not supported: anything that inserts or changes code while the game runs (C0, C2, F6...).
 """
 import argparse
 import os
@@ -41,24 +43,46 @@ def parse(path):
 
 
 def writes(lines):
-    """[(addr, size, value)] of a code, or None if it has a line that is not a RAM write."""
-    out = []
-    for a, b in lines:
+    """[(addr, size, value)] of a code made only of plain RAM writes (00, 02, 04, 08), else None:
+    a code with conditions or a switch is run by the port's handler while the game runs."""
+    out, i = [], 0
+    while i < len(lines):
+        a, b = lines[i]
+        i += 1
         typ = a >> 24 & 0xFE
         addr = 0x80000000 | (a & 0x01FFFFFF)
         if a & 0x10000000:
             return None                                   # relative to the pointer: not static
         if typ == 0x00:
-            for i in range((b >> 16) + 1):
-                out.append((addr + i, 1, b & 0xFF))
+            for k in range((b >> 16) + 1):
+                out.append((addr + k, 1, b & 0xFF))
         elif typ == 0x02:
-            for i in range((b >> 16) + 1):
-                out.append((addr + 2 * i, 2, b & 0xFFFF))
+            for k in range((b >> 16) + 1):
+                out.append((addr + 2 * k, 2, b & 0xFFFF))
         elif typ == 0x04:
             out.append((addr, 4, b))
+        elif typ == 0x08 and i < len(lines):              # serial: value, then T NNN ZZZZ / value step
+            c, step = lines[i]
+            i += 1
+            size = (1, 2, 4)[min(c >> 28, 2)]
+            for k in range((c >> 16 & 0xFFF) + 1):
+                out.append((addr + k * (c & 0xFFFF), size, (b + k * step) & (256 ** size - 1)))
+        elif (a, b) == (0xE0000000, 0x80008000):
+            pass
         else:
             return None
     return out
+
+
+def text_writes(lines, secs):
+    """Does a code the handler would run store into the executable's code? (It cannot.)"""
+    for a, b in lines:
+        typ = a >> 24 & 0xFE
+        if typ in (0x00, 0x02, 0x04, 0x08) and not a & 0x10000000:
+            addr = 0x80000000 | (a & 0x01FFFFFF)
+            if any(s[0] <= addr < s[1] and s[3] for s in secs):
+                return True
+    return False
 
 
 def main():
@@ -74,22 +98,28 @@ def main():
     siz = struct.unpack(">18I", dol[0x90:0xD8])
     secs = [(adr[i], adr[i] + siz[i], off[i], i < 7) for i in range(18) if siz[i]]
 
-    ram, report, in_code = [], [], 0
+    run, report, in_code = [], [], 0
     for name, lines in parse(a.codes) if os.path.exists(a.codes) else []:
         w = writes(lines)
         if w is None:
-            report.append(f"SKIPPED  {name}: has a code type other than 00/02/04")
-            print(f"gecko: skipped \"{name}\" (only RAM writes 00/02/04 are supported)", file=sys.stderr)
+            if any((x >> 24 & 0xFE) in (0xC0, 0xC2, 0xC6, 0xF2, 0xF6) for x, _ in lines) or text_writes(lines, secs):
+                report.append(f"SKIPPED  {name}: inserts code or stores into code under a condition")
+                print(f"gecko: skipped \"{name}\" (it changes the game's code while it runs)", file=sys.stderr)
+            else:
+                run.append((name, lines))
+                report.append(f"HANDLER  {name}: run by the port while the game runs")
             continue
-        n_code = 0
+        n_code, rest = 0, []
         for addr, size, value in w:
             sec = next((s for s in secs if s[0] <= addr and addr + size <= s[1]), None)
             if sec:
                 o = sec[2] + addr - sec[0]
                 dol[o:o + size] = value.to_bytes(size, "big")
                 n_code += sec[3]
-            if not (sec and sec[3]):
-                ram.append((addr, size, value))            # data and heap: kept up while the game runs
+            if not (sec and sec[3]):                       # data and heap: kept up while the game runs
+                rest.append((((size >> 1) * 2) << 24 | (addr & 0x01FFFFFF), value))
+        if rest:
+            run.append((name, rest))
         in_code += n_code
         report.append(f"APPLIED  {name}: {len(w)} write(s), {n_code} in code")
 
@@ -106,9 +136,9 @@ def main():
             f.write(data)
 
     put("main.dol", bytes(dol), "wb")
-    put("gecko.ram", "".join(f"{x:08X} {s} {v:X}\n" for x, s, v in ram), "w")
+    put("gecko.txt", "".join(f"${n}\n" + "".join(f"{x:08X} {y:08X}\n" for x, y in ls) for n, ls in run), "w")
     put("gecko.report", "\n".join(report) + "\n", "w")
-    print(f"gecko: {len(report)} code(s), {in_code} write(s) into code, {len(ram)} kept up at run time",
+    print(f"gecko: {len(report)} code(s), {in_code} write(s) into code, {len(run)} for the handler",
           file=sys.stderr)
 
 

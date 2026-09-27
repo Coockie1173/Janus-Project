@@ -12,7 +12,8 @@ import argparse, bisect, collections, os, struct, subprocess
 
 ROOT = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
 ap = argparse.ArgumentParser()
-ap.add_argument("samples")
+ap.add_argument("samples", nargs="?")
+ap.add_argument("--offsets", nargs="+", metavar="HEX", help="name these offsets instead of reading a sample file")
 ap.add_argument("--exe", default=os.path.join(ROOT, "build/out/wiiboot"))
 ap.add_argument("--last", type=int, default=0)
 ap.add_argument("--top", type=int, default=40)
@@ -35,6 +36,13 @@ if os.path.exists(tsv):
         p = l.split("\t")
         if len(p) > 5:
             guest[p[0].upper()] = p[5]
+if a.offsets:
+    for o in a.offsets:
+        i = bisect.bisect_right(addrs, base + int(o, 16)) - 1
+        n = syms[i][1]
+        g = guest.get(n.split("_", 1)[-1][:8].upper(), "") if n.startswith(("f_", "orig_")) else ""
+        print(o, n, g)
+    raise SystemExit
 data = open(a.samples, "rb").read()
 s = struct.unpack("<%dI" % (len(data) // 4), data)
 if a.last:

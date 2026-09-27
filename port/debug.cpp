@@ -26,10 +26,21 @@
 //   GE_SETALL="62:49=80:80000000:94000000"  at a time, every float equal to the first value in the
 //                                      address range becomes the second (each one logged):
 //                                      which copy of a constant matters, by halving the range
+//   GE_WATCH="64:807807AC"             from a time on, who writes that guest word: the page is made
+//                                      read-only; a write to the word logs the host code address (as
+//                                      an offset in the executable: tools/profile_report.py names
+//                                      offsets given with --offsets) and the guest call chain, and
+//                                      every write to the page is let through by single-stepping
 //   GE_PEEK="80ABCDEF,80ABCDF0"        log those floats every half second
 #include "debug.h"
 #include "rt.h"
 #include "video.h"
+#ifndef _WIN32
+#include <csignal>
+#include <sys/mman.h>
+#include <ucontext.h>
+#include <unistd.h>
+#endif
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -212,6 +223,52 @@ void setall_main(double t, float from, float to, uint32_t lo, uint32_t hi) {
     rt_log("setall: %d floats %g -> %g", n, from, to);
 }
 
+#ifndef _WIN32
+// ---- GE_WATCH ---------------------------------------------------------------------------------
+extern "C" char __executable_start;
+uint8_t* watch_page = nullptr;
+uint8_t* watch_addr = nullptr;
+int watch_hits = 0;
+struct sigaction watch_prev_segv;
+
+void watch_segv(int sig, siginfo_t* si, void* uc_) {
+    ucontext_t* uc = (ucontext_t*)uc_;
+    uint8_t* a = (uint8_t*)si->si_addr;
+    if (!watch_page || a < watch_page || a >= watch_page + 4096) {
+        if (watch_prev_segv.sa_flags & SA_SIGINFO) watch_prev_segv.sa_sigaction(sig, si, uc_);
+        else _exit(128 + sig);
+        return;
+    }
+    if (a >= watch_addr && a < watch_addr + 4 && watch_hits < 12) {
+        ++watch_hits;
+        uintptr_t pc = (uintptr_t)uc->uc_mcontext.gregs[REG_RIP];
+        std::fprintf(stderr, "watch: write from host offset %lX\n", (unsigned long)(pc - (uintptr_t)&__executable_start));
+        os_report_running(10);
+    }
+    mprotect(watch_page, 4096, PROT_READ | PROT_WRITE);
+    uc->uc_mcontext.gregs[REG_EFL] |= 0x100;          // one instruction, then protect again
+}
+void watch_trap(int, siginfo_t*, void* uc_) {
+    ucontext_t* uc = (ucontext_t*)uc_;
+    uc->uc_mcontext.gregs[REG_EFL] &= ~0x100;
+    if (watch_page) mprotect(watch_page, 4096, PROT_READ);
+}
+void watch_main(double t, uint32_t addr) {
+    sleep_until_s(t);
+    watch_addr = host(addr);
+    struct sigaction sa = {};
+    sa.sa_flags = SA_SIGINFO;
+    sa.sa_sigaction = watch_trap;
+    sigaction(SIGTRAP, &sa, nullptr);
+    sa.sa_sigaction = watch_segv;
+    sigaction(SIGSEGV, &sa, &watch_prev_segv);
+    uint8_t* page = (uint8_t*)((uintptr_t)watch_addr & ~(uintptr_t)4095);
+    watch_page = page;
+    mprotect(page, 4096, PROT_READ);
+    rt_log("watch: %08X", addr);
+}
+#endif
+
 void peek_main(std::vector<uint32_t> addrs) {
     for (;;) {
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
@@ -351,6 +408,13 @@ void debug_install() {
         if (*end == ':') { lo = (uint32_t)std::strtoul(end + 1, &end, 16); hi = (uint32_t)std::strtoul(end + 1, &end, 16); }
         std::thread(setall_main, t, from, to, lo, hi).detach();
     }
+#ifndef _WIN32
+    if (const char* e = std::getenv("GE_WATCH")) {
+        char* end;
+        double t = std::strtod(e, &end);
+        std::thread(watch_main, t, (uint32_t)std::strtoul(end + 1, &end, 16)).detach();
+    }
+#endif
     if (const char* e = std::getenv("GE_PEEK")) {
         std::vector<uint32_t> addrs;
         for (const char* q = e; *q;) {
