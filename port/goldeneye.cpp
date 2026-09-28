@@ -381,7 +381,10 @@ void install_hosts() {
 #ifndef GE_GECKO_DEFAULT
 #define GE_GECKO_DEFAULT "build/patched/gecko.txt"
 #endif
-struct GeckoLine { uint32_t a, b; bool was = false, on = false; };   // was/on: a CC line's switch
+// A CC line's switch starts on (the handler keeps it in the line's second word, where 0 is
+// "execute"): what follows it runs from the start, and stops the first time the condition
+// before it becomes true.
+struct GeckoLine { uint32_t a, b; bool was = false, on = true; };
 std::vector<std::vector<GeckoLine>> g_gecko;
 
 bool gecko_ok(uint32_t addr, uint32_t size) {

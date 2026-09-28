@@ -31,6 +31,7 @@
 //                                      an offset in the executable: tools/profile_report.py names
 //                                      offsets given with --offsets) and the guest call chain, and
 //                                      every write to the page is let through by single-stepping
+//   GE_TRACEW="80776B10"               log that word whenever it changes (looked at 200 times a second)
 //   GE_PEEK="80ABCDEF,80ABCDF0"        log those floats every half second
 #include "debug.h"
 #include "rt.h"
@@ -269,6 +270,15 @@ void watch_main(double t, uint32_t addr) {
 }
 #endif
 
+void tracew_main(uint32_t addr) {
+    uint32_t last = ~0u;
+    for (;;) {
+        uint32_t v = ld32(addr);
+        if (v != last) { rt_log("tracew %.2f: %08X = %08X (float %g)", now_s(), addr, v, rdf(addr)); last = v; }
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+}
+
 void peek_main(std::vector<uint32_t> addrs) {
     for (;;) {
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
@@ -415,6 +425,12 @@ void debug_install() {
         std::thread(watch_main, t, (uint32_t)std::strtoul(end + 1, &end, 16)).detach();
     }
 #endif
+    if (const char* e = std::getenv("GE_TRACEW"))
+        for (const char* q = e; *q;) {
+            char* end;
+            std::thread(tracew_main, (uint32_t)std::strtoul(q, &end, 16)).detach();
+            q = *end ? end + 1 : end;
+        }
     if (const char* e = std::getenv("GE_PEEK")) {
         std::vector<uint32_t> addrs;
         for (const char* q = e; *q;) {

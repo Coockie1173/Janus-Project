@@ -9,6 +9,6 @@ $Quicker start
 CC000000 00000000
 046F1D08 44FA0000
 E0000000 80008000
-*three pointers at 80573504 (0xC apart) point at the float at 806EE7A8; while the word at
-*80776B10 is 7 the float at 806F1D08 is 1.0, and each time it becomes 7 a switch turns
-*2000.0 there on or off
+*three pointers at 80573504 (0xC apart) point at the float at 806EE7A8; the float at 806F1D08
+*is 2000.0 from the start, until the word at 80776B10 (the boot's state) becomes 7, after the
+*logos: the switch turns that off, and 1.0 is written back
