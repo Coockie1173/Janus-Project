@@ -69,7 +69,7 @@ void guest_sleep(PPCContext& c, uint64_t ticks) {
     c.r[4] = r4;
 }
 
-void mouse_look();
+extern uint32_t g_look_frame;
 void gecko_apply();
 void fov_apply();
 extern float g_mouse_sens;
@@ -88,7 +88,10 @@ void frame_tick(PPCContext& c) {
         frame = f;
         gecko_apply();
         fov_apply();
-        if (g_mouse_sens > 0) mouse_look();
+        if (g_look_frame != f - 1 && g_look_frame != f) {   // nobody to turn (a menu, a pause): the motion is dropped
+            float dx, dy;
+            video_take_mouse_motion(dx, dy);
+        }
     }
     orig_tick(c);
     if (g_fps_log) {                                 // GE_TRACE: frames run and the engine's rate, every 5 s
@@ -211,16 +214,21 @@ void install_profiler() {}
 // frame runs. One pixel is one step of the angle at any frame rate, and
 // there is no turning-speed cap.
 //
+// Whose view: every player in a match has a controller object, updated once
+// a frame by ge_controller_update (80108A60; controller+4 is its player). The
+// game itself decides which controllers take this console's input: before
+// the look update fn_8012A1D0 calls fn_80108D70(controller), which in a
+// network game looks the controller up among the console's own players and
+// returns 0 for those. The mouse is applied in a hook on the update, to the
+// first controller of the frame for which that function returns 0. (Globals
+// that point at "the" player or camera, 806EB698 and 805D43EC, hold whichever
+// was made last: online that is another player.)
 // The angles (found with port/debug.cpp's scans and the community's memory
-// watch list). The word at 805D43EC points to the first viewport's camera,
-// and the camera's +4 to the player it shows: the player this console
-// plays. (The global at 806EB698 also points to a player, but online it is
-// whichever was made last: with a second player in the match the mouse
-// turned them instead.) The player's yaw is the float at +0xDC, radians,
-// growing to the right (+0x250 and the matrix at +0x98 are computed from
-// it). The pitch is in the object the player's +0x16C points to, at +0x768,
-// radians, negative up (+0x760 follows it).
-const uint32_t kCameraPtr = 0x805D43EC;
+// watch list): the player's yaw is the float at +0xDC, radians, growing to
+// the right (the rotation vector at +0xD8; +0x250 and the matrix at +0x98
+// are computed from it). The pitch is in the object the player's +0x16C
+// points to, at +0x768, radians, negative up (+0x760 follows it).
+const uint32_t kControllerNotLocal = 0x80108D70;     // (controller) -> 0 if this console plays it
 const uint32_t kPlayerPtr = 0x806EB698;              // a player exists (any): used only to tell menus from play
 const uint32_t kPaused = 0x806EB69C;                 // a byte: 1 while the pause menu is up
 const float kPi = 3.14159265f;
@@ -231,14 +239,14 @@ bool guest_ptr(uint32_t p) { return (p >= 0x80003000u && p < 0x81800000u) || (p 
 float ldf(uint32_t a) { uint32_t b = ld32(a); float v; std::memcpy(&v, &b, 4); return v; }
 void stf_(uint32_t a, float v) { uint32_t b; std::memcpy(&b, &v, 4); st32(a, b); }
 
-void mouse_look() {                                  // on the game's thread, before each frame
+PPCFunc orig_controller_update = nullptr, controller_not_local = nullptr;
+uint32_t g_look_frame = ~0u;                         // the frame the mouse was last applied in
+
+void mouse_look(uint32_t player) {
     float dx = 0, dy = 0;
     video_take_mouse_motion(dx, dy);
     debug_mouse(dx, dy);
     if (dx == 0 && dy == 0) return;
-    uint32_t camera = ld32(kCameraPtr);
-    uint32_t player = guest_ptr(camera) ? ld32(camera + 4) : 0;
-    if (!guest_ptr(player) || ld8(kPaused)) return;  // no player (a menu, a movie), or paused
     static uint32_t seen = 0;
     if (player != seen && std::getenv("GE_TRACE")) {
         uint32_t v = ld32(player + 0x16C);
@@ -259,6 +267,22 @@ void mouse_look() {                                  // on the game's thread, be
         if (std::isfinite(pitch) && std::fabs(pitch) < 2.0f)
             stf_(view + 0x768, std::clamp(pitch + dy * kRadPerPixel * g_mouse_sens, -kPitchLimit, kPitchLimit));
     }
+}
+
+void controller_update(PPCContext& c) {
+    uint32_t ctrl = c.r[3], frame = ld32(kFrameCount);
+    uint32_t player = guest_ptr(ctrl) ? ld32(ctrl + 4) : 0;
+    if (g_mouse_sens > 0 && frame != g_look_frame && guest_ptr(player) && !ld8(kPaused)) {
+        PPCContext saved = c;                        // the game's own test, its registers kept
+        controller_not_local(c);
+        bool local = (int8_t)c.r[3] == 0;
+        c = saved;
+        if (local) {
+            g_look_frame = frame;
+            mouse_look(player);
+        }
+    }
+    orig_controller_update(c);
 }
 
 // The wheel changes weapon: a notch up is a press of the Classic's D-pad
@@ -318,7 +342,11 @@ void classic_filter(int chan, ClassicState& s) {
 void install_mouse() {
     if (const char* m = std::getenv("GE_MOUSE")) g_mouse_sens = (float)std::atof(m);
     wpad_set_classic_filter(classic_filter);
-    if (g_mouse_sens > 0) video_set_relative_mouse(true);
+    if (g_mouse_sens <= 0) return;
+    controller_not_local = ppc_lookup(kControllerNotLocal);
+    orig_controller_update = ppc_hook("ge_controller_update", controller_update);
+    if (!orig_controller_update || !controller_not_local) rt_die("goldeneye: the controller update is not hooked in this build");
+    video_set_relative_mouse(true);
 }
 
 // Online. The game's servers (Nintendo WFC's authentication, DemonWare's
