@@ -8,6 +8,8 @@
 //     GE_PROFILE=F a sampling profile of the whole process (CPU time, 1 kHz), written to
 //                  the file F every 10 s: tools/profile_report.py names the samples
 //     GE_MOUSE=S   mouse look sensitivity (default 1; 0 leaves the mouse free)
+//     GE_MOUSE_MODE=auto|direct|stick   how the mouse turns the view (auto: direct, but through
+//                  the right stick in a network game someone else hosts)
 //     GE_HOSTS=F   the hosts file for the game's name lookups (default config/hosts.txt)
 //     GE_NETLOG=1  log sockets, lookups and TLS sessions
 //     GE_GECKO=F   the Gecko codes the port runs each frame (default build/patched/gecko.txt,
@@ -70,6 +72,7 @@ void guest_sleep(PPCContext& c, uint64_t ticks) {
 }
 
 extern uint32_t g_look_frame;
+extern bool g_stick_took;
 void gecko_apply();
 void fov_apply();
 extern float g_mouse_sens;
@@ -88,7 +91,7 @@ void frame_tick(PPCContext& c) {
         frame = f;
         gecko_apply();
         fov_apply();
-        if (g_look_frame != f - 1 && g_look_frame != f) {   // nobody to turn (a menu, a pause): the motion is dropped
+        if (!g_stick_took && g_look_frame != f - 1 && g_look_frame != f) {   // nobody to turn (a menu, a pause): the motion is dropped
             float dx, dy;
             video_take_mouse_motion(dx, dy);
         }
@@ -239,10 +242,44 @@ bool guest_ptr(uint32_t p) { return (p >= 0x80003000u && p < 0x81800000u) || (p 
 float ldf(uint32_t a) { uint32_t b = ld32(a); float v; std::memcpy(&v, &b, 4); return v; }
 void stf_(uint32_t a, float v) { uint32_t b; std::memcpy(&b, &v, 4); st32(a, b); }
 
-PPCFunc orig_controller_update = nullptr, controller_not_local = nullptr;
-uint32_t g_look_frame = ~0u;                         // the frame the mouse was last applied in
+// In a network game this console did not start, the host turns the players
+// from what each console sends, and a view turned here is not taken. There
+// the mouse goes on the right stick instead: real input, with the stick's
+// limits (its top turning speed). "A joined game" is what fn_80108D70 itself
+// tests: the word at 805D5490 is 1 or 2 in a network game, the one at
+// 805D5470 non-zero on the host. GE_MOUSE_MODE=direct or stick forces one.
+const uint32_t kNetState = 0x805D5460;
+int g_mouse_mode = 0;                                // 0 auto, 1 direct, 2 stick
+float g_stick_gain = 0.001f;                         // stick deflection per pixel a second: full stick turns
+                                                     // 2.3 radians a second, a pixel is to be 0.0022 radians
 
-void mouse_look(uint32_t player) {
+bool joined_game() {
+    uint32_t mode = ld32(kNetState + 0x30);
+    return (mode == 1 || mode == 2) && ld32(kNetState + 0x10) == 0;
+}
+bool mouse_on_stick() {
+    bool stick = g_mouse_mode == 2 || (g_mouse_mode == 0 && joined_game());
+    static int said = -1;
+    if (said != (int)stick) {
+        said = stick;
+        rt_log("goldeneye: the mouse %s", stick ? "is on the right stick (a joined network game)" : "turns the view itself");
+    }
+    return stick;
+}
+
+PPCFunc orig_controller_update = nullptr, controller_not_local = nullptr, orig_look_apply = nullptr;
+uint32_t g_look_frame = ~0u;                         // the frame the mouse was last applied in
+uint32_t g_look_ctrl = 0;                            // the controller it is for, and what is still to turn
+float g_look_yaw = 0;
+
+// The mouse's motion for this frame. The pitch is written (the view's own
+// angle); the yaw is handed to the game as input: ge_look_apply (80101EC0)
+// turns the controller's angular velocity, the float at +0x97C in radians a
+// second (what the stick's deflection becomes, smoothed), times the frame's
+// time step (+0x578) into rotation. For the one call the mouse's turn over
+// that time step is added to it, and taken out again: the game turns the
+// player by stick and mouse together, through its own code.
+void mouse_look(uint32_t ctrl, uint32_t player) {
     float dx = 0, dy = 0;
     video_take_mouse_motion(dx, dy);
     debug_mouse(dx, dy);
@@ -250,17 +287,12 @@ void mouse_look(uint32_t player) {
     static uint32_t seen = 0;
     if (player != seen && std::getenv("GE_TRACE")) {
         uint32_t v = ld32(player + 0x16C);
-        rt_log("goldeneye: player %08X, yaw %f; view %08X, pitch %f", player, ldf(player + 0xDC), v,
-               guest_ptr(v) ? ldf(v + 0x768) : 0.0f);
+        rt_log("goldeneye: controller %08X, player %08X, yaw %f; view %08X, pitch %f", ctrl, player,
+               ldf(player + 0xDC), v, guest_ptr(v) ? ldf(v + 0x768) : 0.0f);
     }
     seen = player;
-    float yaw = ldf(player + 0xDC);
-    if (std::isfinite(yaw) && std::fabs(yaw) < 100.0f) {
-        yaw += dx * kRadPerPixel * g_mouse_sens;
-        while (yaw > kPi) yaw -= 2 * kPi;
-        while (yaw < -kPi) yaw += 2 * kPi;
-        stf_(player + 0xDC, yaw);
-    }
+    g_look_ctrl = ctrl;
+    g_look_yaw += dx * kRadPerPixel * g_mouse_sens;
     uint32_t view = ld32(player + 0x16C);
     if (guest_ptr(view)) {
         float pitch = ldf(view + 0x768);
@@ -269,20 +301,55 @@ void mouse_look(uint32_t player) {
     }
 }
 
+void look_apply(PPCContext& c) {
+    uint32_t ctrl = c.r[3];
+    float dt = guest_ptr(ctrl) ? ldf(ctrl + 0x578) : 0;
+    if (ctrl != g_look_ctrl || g_look_yaw == 0 || !(dt > 0.0005f && dt < 0.2f)) { orig_look_apply(c); return; }
+    float rate = ldf(ctrl + 0x97C), add = g_look_yaw / dt;
+    g_look_yaw = 0;
+    stf_(ctrl + 0x97C, rate + add);
+    orig_look_apply(c);
+    stf_(ctrl + 0x97C, ldf(ctrl + 0x97C) - add);
+}
+
 void controller_update(PPCContext& c) {
     uint32_t ctrl = c.r[3], frame = ld32(kFrameCount);
     uint32_t player = guest_ptr(ctrl) ? ld32(ctrl + 4) : 0;
-    if (g_mouse_sens > 0 && frame != g_look_frame && guest_ptr(player) && !ld8(kPaused)) {
+    if (g_mouse_sens > 0 && frame != g_look_frame && guest_ptr(player) && !ld8(kPaused) && !mouse_on_stick()) {
         PPCContext saved = c;                        // the game's own test, its registers kept
         controller_not_local(c);
         bool local = (int8_t)c.r[3] == 0;
         c = saved;
         if (local) {
             g_look_frame = frame;
-            mouse_look(player);
+            mouse_look(ctrl, player);
         }
     }
     orig_controller_update(c);
+    static const bool angles = std::getenv("GE_TRACE") != nullptr;
+    if (angles && ctrl == g_look_ctrl && guest_ptr(player)) {     // the turned player's angles, twice a second
+        static auto last = std::chrono::steady_clock::now();
+        auto now = std::chrono::steady_clock::now();
+        if (now - last >= std::chrono::milliseconds(500)) {
+            last = now;
+            uint32_t v = ld32(player + 0x16C);
+            rt_log("goldeneye: yaw %.4f pitch %.4f", ldf(player + 0xDC), guest_ptr(v) ? ldf(v + 0x768) : 0.0f);
+        }
+    }
+    static const bool trace = std::getenv("GE_TRACELOOK") != nullptr;
+    if (trace && guest_ptr(ctrl)) {                  // the controller's look vectors, when they change
+        static uint32_t last[8];
+        static int n = 0;
+        uint32_t now[8];
+        for (int i = 0; i < 8; ++i) now[i] = ld32(ctrl + 0x968 + 4 * i);
+        if (std::memcmp(now, last, sizeof now) && n++ < 80) {
+            std::memcpy(last, now, sizeof now);
+            rt_log("look: ctrl %08X player %08X dt %g flags %02X %02X | %g %g %g %g | %g %g %g %g", ctrl, player,
+                   ldf(ctrl + 0x578), ld8(ctrl + 0x57C), ld8(ctrl + 0x57D), ldf(ctrl + 0x968), ldf(ctrl + 0x96C),
+                   ldf(ctrl + 0x970), ldf(ctrl + 0x974), ldf(ctrl + 0x978), ldf(ctrl + 0x97C), ldf(ctrl + 0x980),
+                   ldf(ctrl + 0x984));
+        }
+    }
 }
 
 // The wheel changes weapon: a notch up is a press of the Classic's D-pad
@@ -332,8 +399,36 @@ void menu_buttons(ClassicState& s) {
     }
 }
 
+// The mouse on the right stick (a joined network game): its speed, in pixels
+// a second measured over at least 4 ms, as deflection; every read of the
+// controller in between gets the same.
+bool g_stick_took = false;
+void mouse_stick(ClassicState& s) {
+    g_stick_took = g_mouse_sens > 0 && in_play() && mouse_on_stick();
+    if (!g_stick_took) return;
+    static auto last = std::chrono::steady_clock::now();
+    static float ax = 0, ay = 0, defl_x = 0, defl_y = 0;
+    auto now = std::chrono::steady_clock::now();
+    float dt = std::chrono::duration<float>(now - last).count();
+    float dx = 0, dy = 0;
+    video_take_mouse_motion(dx, dy);
+    debug_mouse(dx, dy);
+    ax += dx;
+    ay += dy;
+    if (dt >= 0.004f) {
+        float g = g_stick_gain * g_mouse_sens;
+        if (dt > 0.25f) defl_x = defl_y = 0;
+        else { defl_x = ax / dt * g; defl_y = ay / dt * g; }
+        ax = ay = 0;
+        last = now;
+    }
+    s.rx = std::clamp(s.rx + defl_x, -1.0f, 1.0f);
+    s.ry = std::clamp(s.ry - defl_y, -1.0f, 1.0f);
+}
+
 void classic_filter(int chan, ClassicState& s) {
     if (chan != 0) return;
+    mouse_stick(s);
     wheel_buttons(s);
     debug_classic(s);
     menu_buttons(s);
@@ -341,11 +436,13 @@ void classic_filter(int chan, ClassicState& s) {
 
 void install_mouse() {
     if (const char* m = std::getenv("GE_MOUSE")) g_mouse_sens = (float)std::atof(m);
+    if (const char* m = std::getenv("GE_MOUSE_MODE")) g_mouse_mode = !std::strcmp(m, "direct") ? 1 : !std::strcmp(m, "stick") ? 2 : 0;
     wpad_set_classic_filter(classic_filter);
     if (g_mouse_sens <= 0) return;
     controller_not_local = ppc_lookup(kControllerNotLocal);
     orig_controller_update = ppc_hook("ge_controller_update", controller_update);
-    if (!orig_controller_update || !controller_not_local) rt_die("goldeneye: the controller update is not hooked in this build");
+    orig_look_apply = ppc_hook("ge_look_apply", look_apply);
+    if (!orig_controller_update || !controller_not_local || !orig_look_apply) rt_die("goldeneye: the controller update is not hooked in this build");
     video_set_relative_mouse(true);
 }
 

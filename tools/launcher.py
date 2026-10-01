@@ -28,7 +28,7 @@ ACTIONS = [
     ("Move forward", "Left Stick Up"), ("Move back", "Left Stick Down"),
     ("Move left", "Left Stick Left"), ("Move right", "Left Stick Right"),
 ]
-DEFAULTS = {"fps": "auto", "fov": "49", "mouse": "1.0", "online": "1", "fullscreen": "0", "faststart": "0"}
+DEFAULTS = {"fps": "auto", "fov": "49", "mouse": "1.0", "online": "1", "fullscreen": "0", "faststart": "0", "mousemode": "auto"}
 
 # Tk's key names -> SDL's (the key file's)
 TK_TO_SDL = {
@@ -191,6 +191,14 @@ def run_gui():
     ttk.Label(fr, textvariable=mouse_text, width=18).pack(side="left", padx=6)
     mouse_changed()
 
+    modes = {"auto": "Automatic (direct; through the stick in a game someone else hosts)",
+             "direct": "Direct: the mouse turns the view itself",
+             "stick": "Right stick: as controller input (capped turning speed)"}
+    mousemode = tk.StringVar(value=modes.get(settings["mousemode"], modes["auto"]))
+    ttk.Label(st, text="Mouse look").grid(row=6, column=0, sticky="w", **pad)
+    ttk.Combobox(st, textvariable=mousemode, values=list(modes.values()), state="readonly", width=58).grid(
+        row=6, column=1, sticky="w", **pad)
+
     online = tk.BooleanVar(value=settings["online"] == "1")
     fullscreen = tk.BooleanVar(value=settings["fullscreen"] == "1")
     ttk.Checkbutton(st, text="Online: use the community server (config/hosts.txt)", variable=online).grid(
@@ -297,6 +305,7 @@ def run_gui():
         settings["online"] = "1" if online.get() else "0"
         settings["fullscreen"] = "1" if fullscreen.get() else "0"
         settings["faststart"] = "1" if faststart.get() else "0"
+        settings["mousemode"] = next((k for k, v in modes.items() if v == mousemode.get()), "auto")
         save_settings(settings)
         save_keys(lines, binds)
 

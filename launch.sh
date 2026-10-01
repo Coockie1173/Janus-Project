@@ -7,6 +7,9 @@
 #     ./launch.sh --fov 70             the field of view in degrees (the game's is 49)
 #     ./launch.sh --mouse 1.5          mouse look sensitivity (1 by default; 0: mouse look off)
 #     ./launch.sh --fast-start         hurry through the screens before the menu (config/gecko/faststart.txt)
+#     ./launch.sh --mouse-mode stick   the mouse as right-stick input (auto does this in a game someone
+#                                      else hosts; direct never does)
+#     ./launch.sh --trace              log the mouse's player, its angles and the look state (for a report)
 #     ./launch.sh --offline            no hosts file: the game does not find its servers
 #     ./launch.sh --fullscreen         (and any other option of wiiboot: --window 1920x1080, --input keyboard...)
 # Any option skips the window. Settings are kept in build/settings.env, the keys in build/keys.txt.
@@ -24,7 +27,7 @@ if [ $# -eq 0 ] && command -v python3 >/dev/null; then
 fi
 
 # the saved settings, then the command line over them
-LAUNCH_FPS=auto; LAUNCH_FOV=49; LAUNCH_MOUSE=1.0; LAUNCH_ONLINE=1; LAUNCH_FULLSCREEN=0; LAUNCH_FASTSTART=0
+LAUNCH_FPS=auto; LAUNCH_FOV=49; LAUNCH_MOUSE=1.0; LAUNCH_ONLINE=1; LAUNCH_FULLSCREEN=0; LAUNCH_FASTSTART=0; LAUNCH_MOUSEMODE=auto
 [ -f build/settings.env ] && . ./build/settings.env
 ARGS=
 while [ $# -gt 0 ]; do
@@ -33,14 +36,17 @@ while [ $# -gt 0 ]; do
         --fps) LAUNCH_FPS=$2; shift 2 ;;
         --fov) LAUNCH_FOV=$2; shift 2 ;;
         --mouse) LAUNCH_MOUSE=$2; shift 2 ;;
+        --mouse-mode) LAUNCH_MOUSEMODE=$2; shift 2 ;;
         --offline) LAUNCH_ONLINE=0; shift ;;
         --fullscreen) LAUNCH_FULLSCREEN=1; shift ;;
         --fast-start) LAUNCH_FASTSTART=1; shift ;;
+        --trace) GE_TRACE=1; GE_TRACELOOK=1; export GE_TRACE GE_TRACELOOK; shift ;;
         *) ARGS="$ARGS $1"; shift ;;
     esac
 done
 GE_FPS=${GE_FPS:-$LAUNCH_FPS}; GE_FOV=${GE_FOV:-$LAUNCH_FOV}; GE_MOUSE=${GE_MOUSE:-$LAUNCH_MOUSE}
-export GE_FPS GE_FOV GE_MOUSE
+GE_MOUSE_MODE=${GE_MOUSE_MODE:-$LAUNCH_MOUSEMODE}
+export GE_FPS GE_FOV GE_MOUSE GE_MOUSE_MODE
 if [ "$LAUNCH_ONLINE" = 0 ]; then GE_HOSTS=; export GE_HOSTS; fi
 [ "$LAUNCH_FULLSCREEN" = 1 ] && ARGS="$ARGS --fullscreen"
 if [ "$LAUNCH_FASTSTART" = 1 ]; then GE_GECKO_EXTRA="$PWD/config/gecko/faststart.txt${GE_GECKO_EXTRA:+:$GE_GECKO_EXTRA}"; export GE_GECKO_EXTRA; fi

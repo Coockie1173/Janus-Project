@@ -320,7 +320,27 @@ void debug_mouse(float& dx, float& dy) {
         if (t >= h.a && t < h.b) { dx += h.x * (float)dt; dy += h.y * (float)dt; }
 }
 
+// GE_TRACELOOK=1: the look input vectors (controller+0x968, +0x978) after ge_look_input, when they change.
+PPCFunc orig_look_trace = nullptr;
+void look_trace(PPCContext& c) {
+    uint32_t ctrl = c.r[3], pad = c.r[4];
+    orig_look_trace(c);
+    static uint32_t last[8];
+    uint32_t now[8];
+    for (int i = 0; i < 8; ++i) now[i] = ld32(ctrl + 0x968 + 4 * i);
+    static int n = 0, calls = 0;
+    if (calls++ < 3) rt_log("look: call %d, ctrl %08X pad %08X -> %d", calls, ctrl, pad, (int)c.r[3]);
+    if (std::memcmp(now, last, sizeof now) && n < 60) {
+        ++n;
+        std::memcpy(last, now, sizeof now);
+        rt_log("look %.2f: ctrl %08X pad %08X dt %g | %g %g %g %g | %g %g %g %g", now_s(), ctrl, pad, rdf(ctrl + 0x578),
+               rdf(ctrl + 0x968), rdf(ctrl + 0x96C), rdf(ctrl + 0x970), rdf(ctrl + 0x974),
+               rdf(ctrl + 0x978), rdf(ctrl + 0x97C), rdf(ctrl + 0x980), rdf(ctrl + 0x984));
+    }
+}
+
 void debug_install() {
+    if (std::getenv("GE_TRACELOOK")) orig_look_trace = ppc_hook("ge_look_input", look_trace);
     if (const char* e = std::getenv("GE_BUTTONS")) {
         for (const char* q = e; *q;) {
             Press p{};

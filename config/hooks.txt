@@ -8,3 +8,5 @@ main
 ge_frame_tick          # one pass of the main loop: the frame limiter (GE_FPS)
 VIWaitForRetrace       # above 60 frames a second (GE_FPS): a short sleep instead
 ge_controller_update   # mouse look is applied to the controller the game itself takes input for
+ge_look_input          # the look input: the mouse is added to what the stick gives
+ge_look_apply          # the mouse, as angular velocity for one frame
