@@ -11,3 +11,10 @@
 $Each counted player counts as four
 001E78EF 00000004
 *playerCount (801E7830): "addi r28, r28, 1" at 801E78EC becomes "addi r28, r28, 4"
+
+$Level timer [Mars]
+0418CE38 C0430194
+0418CE40 60000000
+0418CE48 60000000
+0418CE24 60000000
+*in fn_8018CD40: the timer shown in a level
