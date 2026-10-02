@@ -59,6 +59,11 @@ The game's online servers are gone. `config/hosts.txt` points their names at
 a community server, as lines of `/etc/hosts` would. Needs OpenSSL's
 development files. Gecko codes go in `config/gecko.txt` (RAM writes only).
 
+F3 opens a debug overlay: the memory watches of a Dolphin Memory Engine
+list (a `.dmw` file in the project's folder, or `GE_DMW=file`), read live
+from the running game, with a filter. It is drawn with Dear ImGui, fetched
+into `build/deps` by `make`.
+
 ## Layout
 
     config/symbols/          three symbol sources for SJBE52, none fully accurate
@@ -66,7 +71,7 @@ development files. Gecko codes go in `config/gecko.txt` (RAM writes only).
     config/hooks.txt         functions the port's layer may replace
     tools/merge_symbols.py   mixes the sources into build/names.tsv
     tools/sigmatch.py        names SDK functions by Dolphin's signatures
-    port/                    the game's own layer on the runtime
+    port/                    the game's own layer on the runtime (port/ge.h lists its files)
     wiikit/                  recompiler and runtime (submodule)
     docs/                    status and findings
     game/, build/            (not in git) your disc, everything derived from it

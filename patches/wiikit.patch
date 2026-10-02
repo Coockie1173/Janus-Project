@@ -1141,10 +1141,19 @@ index 1f97bc4..23429e9 100644
    target_include_directories(${t} PUBLIC ${_rt})
  endforeach()
 diff --git a/runtime/video.cpp b/runtime/video.cpp
-index 5726093..985e2d7 100644
+index 5726093..9ca3428 100644
 --- a/runtime/video.cpp
 +++ b/runtime/video.cpp
-@@ -1275,7 +1275,7 @@ void present() {
+@@ -1266,6 +1266,8 @@ void update_pad() {
+     for (int i = 0; i < 4; ++i) classic[i] = c[i];
+ }
+ 
++VideoOverlay overlay_cb;
++
+ void present() {
+     ++cnt.presents;
+     int ww = 0, wh = 0;
+@@ -1275,7 +1277,7 @@ void present() {
      glColorMask(1, 1, 1, 1);
      glClearColor(0, 0, 0, 1);
      glClear(GL_COLOR_BUFFER_BIT);
@@ -1153,16 +1162,25 @@ index 5726093..985e2d7 100644
      if (it == xfbs.end()) it = xfbs.find(last_xfb);
      if (it != xfbs.end() && ww > 0 && wh > 0) {
          const Tex& t = it->second;
-@@ -1462,6 +1462,8 @@ std::atomic<bool> want_relative{false};
+@@ -1286,6 +1288,7 @@ void present() {
+         glBlitNamedFramebuffer(copy_fbo, 0, 0, 0, t.w, t.h, dx, dy + dh, dx + dw, dy,   // top row first
+                                GL_COLOR_BUFFER_BIT, GL_LINEAR);
+     }
++    if (overlay_cb.draw) overlay_cb.draw();
+     if (opt.dump_dir && cnt.presents % (uint64_t)opt.dump_every == 0 && ww > 0 && wh > 0) {
+         std::vector<uint8_t> px((size_t)ww * wh * 4), flip(px.size());   // the window, as shown
+         glReadPixels(0, 0, ww, wh, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+@@ -1462,6 +1465,9 @@ std::atomic<bool> want_relative{false};
  std::mutex motion_mx;
  float motion_x = 0, motion_y = 0;
  void video_set_relative_mouse(bool on) { want_relative = on; }
++void video_set_overlay(const VideoOverlay& o) { overlay_cb = o; }
 +std::atomic<int> wheel_y{0};
 +int video_take_wheel() { return wheel_y.exchange(0); }
  void video_take_mouse_motion(float& dx, float& dy) {
      std::lock_guard<std::mutex> lk(motion_mx);
      dx = motion_x; dy = motion_y;
-@@ -1479,6 +1481,7 @@ ClassicState video_classic(int chan) {
+@@ -1479,6 +1485,7 @@ ClassicState video_classic(int chan) {
  void video_set_rumble(int chan, bool on) {
      if (chan >= 0 && chan < 4) rumble_want[chan] = on;
  }
@@ -1170,15 +1188,25 @@ index 5726093..985e2d7 100644
  void video_retrace() {
      retraces.fetch_add(1);
      if (wake) SDL_SignalSemaphore(wake);
-@@ -1534,6 +1537,7 @@ void video_run(const char* title) {
+@@ -1506,6 +1513,7 @@ void video_run(const char* title) {
+     SDL_GL_MakeCurrent(win, ctx);
+     SDL_GL_SetSwapInterval(0);                   // VI paces the presents
+     if (!gl_load()) rt_die("video: OpenGL functions missing");
++    if (overlay_cb.init) overlay_cb.init(win, ctx);
+     rt_log("video: %s, %s", (const char*)glGetString(GL_RENDERER), (const char*)glGetString(GL_VERSION));
+     if (debug) {
+         glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
+@@ -1533,7 +1541,9 @@ void video_run(const char* title) {
+         SDL_Event e;
          bool quit = false;
          while (SDL_PollEvent(&e)) {
++            if (overlay_cb.event) overlay_cb.event(&e);
              if (e.type == SDL_EVENT_QUIT) quit = true;
 +            if (e.type == SDL_EVENT_MOUSE_WHEEL) wheel_y.fetch_add(e.wheel.y > 0 ? 1 : e.wheel.y < 0 ? -1 : 0);
              if (e.type == SDL_EVENT_GAMEPAD_ADDED) pad_added(e.gdevice.which);
              if (e.type == SDL_EVENT_GAMEPAD_REMOVED) pad_removed(e.gdevice.which);
              // F11 or Alt+Enter: fullscreen and back
-@@ -1621,6 +1625,17 @@ void video_run(const char* title) {
+@@ -1621,6 +1631,17 @@ void video_run(const char* title) {
              if (retraces.load() != seen) break;
          }
          uint32_t r = retraces.load();
@@ -1197,15 +1225,27 @@ index 5726093..985e2d7 100644
              seen = r;
              auto tp = Clock::now();
 diff --git a/runtime/video.h b/runtime/video.h
-index ecfb499..f97b7c9 100644
+index ecfb499..46e9dee 100644
 --- a/runtime/video.h
 +++ b/runtime/video.h
-@@ -97,6 +97,8 @@ void video_set_rumble(int chan, bool on);
- // the pause box), and the motion is summed until taken.
+@@ -98,6 +98,20 @@ void video_set_rumble(int chan, bool on);
  void video_set_relative_mouse(bool on);
  void video_take_mouse_motion(float& dx, float& dy);
+ 
++// A port's overlay over the picture (a debug window): init once the window
++// and its OpenGL context exist, event for every SDL event, draw before each
++// swap, with the window's framebuffer bound. All on the renderer's thread.
++struct SDL_Window;
++union SDL_Event;
++struct VideoOverlay {
++    void (*init)(SDL_Window* window, void* gl_context) = nullptr;
++    void (*event)(const SDL_Event* e) = nullptr;
++    void (*draw)() = nullptr;
++};
++void video_set_overlay(const VideoOverlay& o);
 +// The mouse wheel's notches since the last call: up positive, down negative.
 +int video_take_wheel();
- 
++
  // WIIKIT_PERF=1: where a frame's time goes, reported every second by the
  // renderer. Nanoseconds, summed since the last report.
+ struct VideoPerf {

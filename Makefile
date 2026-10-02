@@ -71,6 +71,7 @@ $(RECOMP)/report.txt: $(NAMES) $(PATCHED)/main.dol config/hooks.txt $(wildcard w
 
 deps:
 	@if ! pkg-config --exists sdl3 && [ ! -d $(SDL3_DIR)/lib*/cmake/SDL3 ]; then sh tools/build_sdl3.sh $(BUILD)/deps; fi
+	@[ -d $(BUILD)/deps/imgui ] || sh tools/get_imgui.sh $(BUILD)/deps 2>/dev/null || echo "no Dear ImGui: the debug overlay is left out"
 
 build: wiikit-patch recomp deps
 	cmake -S $(RECOMP) -B $(OUT) -G Ninja -DCMAKE_CXX_COMPILER=$(RECOMP_CXX) \
