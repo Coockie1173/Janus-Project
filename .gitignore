@@ -39,3 +39,6 @@ compile_commands.json
 # written by the runtime next to the disc directory
 /shadercache/
 /keys.txt
+
+# Ghidra project exports hold the game's code
+*.gzf
