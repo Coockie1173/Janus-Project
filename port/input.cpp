@@ -72,6 +72,29 @@ float g_look_yaw = 0;
 // time step (+0x578) into rotation. For the one call the mouse's turn over
 // that time step is added to it, and taken out again: the game turns the
 // player by stick and mouse together, through its own code.
+// The mouse turns the view only while the player has it. The controller
+// (the game's ExPlayer) keeps the player's state in the word at +0x704: 0
+// standing, 2 moving, 3 sprinting are the ones the view is free in; in the
+// others (4 landing, 5 death, 8 a climb or vault, 9 melee, 0x22 a
+// first-person cutscene, 0x23-0x25 a slide...) the game has the view and the
+// mouse is locked out, its motion dropped.
+// This goes by the controller this console plays, found once a frame by the
+// game's own test (controller_update). That is so alone, and hosting. In a
+// game someone else hosts the mouse is on the stick (mouse_stick), which has
+// no controller at hand: it is locked by the same state when the test has
+// found this console's controller in the last frames, and left free when it
+// has not, so that joining a game never loses the mouse.
+const uint32_t kPlayerState = 0x704;
+uint32_t g_local_frame = ~0u, g_local_ctrl = 0;      // the controller this console plays, as of that frame
+
+bool look_allowed(uint32_t ctrl) {
+    uint32_t st = ld32(ctrl + kPlayerState);
+    return st == 0 || st == 2 || st == 3;
+}
+bool stick_look_allowed() {
+    return ld32(kFrameCount) - g_local_frame >= 4 || !guest_ptr(g_local_ctrl) || look_allowed(g_local_ctrl);
+}
+
 void mouse_look(uint32_t ctrl, uint32_t player) {
     float dx = 0, dy = 0;
     video_take_mouse_motion(dx, dy);
@@ -108,15 +131,24 @@ void look_apply(PPCContext& c) {
 void controller_update(PPCContext& c) {
     uint32_t ctrl = c.r[3], frame = ld32(kFrameCount);
     uint32_t player = guest_ptr(ctrl) ? ld32(ctrl + 4) : 0;
-    if (g_mouse_sens > 0 && frame != g_look_frame && guest_ptr(player) && !ld8(kPaused) && !overlay_open() &&
-        !mouse_on_stick()) {
+    if (g_mouse_sens > 0 && frame != g_local_frame && guest_ptr(player)) {
         PPCContext saved = c;                        // the game's own test, its registers kept
         controller_not_local(c);
         bool local = (int8_t)c.r[3] == 0;
         c = saved;
         if (local) {
-            g_look_frame = frame;
-            mouse_look(ctrl, player);
+            g_local_frame = frame;
+            g_local_ctrl = ctrl;
+            static uint32_t said = ~0u;
+            uint32_t st = ld32(ctrl + kPlayerState);
+            if (st != said && std::getenv("GE_TRACE")) {
+                said = st;
+                rt_log("goldeneye: player state %X: the mouse %s", st, look_allowed(ctrl) ? "turns the view" : "is locked");
+            }
+            if (!ld8(kPaused) && !overlay_open() && look_allowed(ctrl) && !mouse_on_stick()) {
+                g_look_frame = frame;
+                mouse_look(ctrl, player);
+            }
         }
     }
     orig_controller_update(c);
@@ -209,7 +241,7 @@ const uint32_t kSensAddr[4] = {0x805DE7A4, 0x805DE7A8, 0x805DE7CC, 0x805DE7D0};
 float g_pitch_rate_scale = 1.25f;                    // the pitch's rate against the yaw's at the same sensitivity
 bool g_stick_took = false;
 void mouse_stick(ClassicState& s) {
-    g_stick_took = g_mouse_sens > 0 && in_play() && !overlay_open() && mouse_on_stick();
+    g_stick_took = g_mouse_sens > 0 && in_play() && !overlay_open() && stick_look_allowed() && mouse_on_stick();
     if (!g_stick_took) return;
     // the mouse's speed, measured over at least 4 ms; every read in between gets the same
     static auto last = std::chrono::steady_clock::now();
