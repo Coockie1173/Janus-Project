@@ -20,7 +20,11 @@ RECOMP_CXX ?= clang++
 # optimisation of the recompiled code and the runtime: -O1 builds in a minute,
 # -O2 runs faster. Plain -O2 miscompiles something (the game panics in
 # DVDReadAsync at boot): the two flags are needed with it
-OPT       ?= -O2 -fno-strict-aliasing -fwrapv
+# -march=x86-64-v3: any x86-64 CPU since about 2015 (AVX2, BMI, MOVBE: the
+# guest's big-endian loads in one instruction), not this machine's alone;
+# ARCH= for an older one
+ARCH      ?= -march=x86-64-v3
+OPT       ?= -O2 -fno-strict-aliasing -fwrapv $(ARCH)
 SMOKE_SECS ?= 30
 RUN_ARGS  ?=
 PY        := python3

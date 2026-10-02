@@ -74,8 +74,9 @@ float g_look_yaw = 0;
 // player by stick and mouse together, through its own code.
 // The mouse turns the view only while the player has it. The controller
 // (the game's ExPlayer) keeps the player's state in the word at +0x704: 0
-// standing, 2 moving, 3 sprinting are the ones the view is free in; in the
-// others (4 landing, 5 death, 8 a climb or vault, 9 melee, 0x22 a
+// standing, 2 moving, 3 sprinting and 4 in the air (set as a fall begins, by
+// fn_801212A0; landing leaves it) are the ones the view is free in; in the
+// others (5 death, 8 a climb or vault, 9 melee, 0x22 a
 // first-person cutscene, 0x23-0x25 a slide...) the game has the view and the
 // mouse is locked out, its motion dropped.
 // This goes by the controller this console plays, found once a frame by the
@@ -89,7 +90,7 @@ uint32_t g_local_frame = ~0u, g_local_ctrl = 0;      // the controller this cons
 
 bool look_allowed(uint32_t ctrl) {
     uint32_t st = ld32(ctrl + kPlayerState);
-    return st == 0 || st == 2 || st == 3;
+    return st == 0 || st == 2 || st == 3 || st == 4;
 }
 bool stick_look_allowed() {
     return ld32(kFrameCount) - g_local_frame >= 4 || !guest_ptr(g_local_ctrl) || look_allowed(g_local_ctrl);
