@@ -38,3 +38,5 @@ addr	name	evidence
 80108A60	ge_controller_update	(this, f1 time step, r4): a player's controller, once a frame; this+4 is its player; calls the look and move updates through its vtable and fn_8012A1D0. Found with a write watch on the yaw while the stick turned (port/debug.cpp GE_WATCH)
 80101DC0	ge_look_input	(controller, pad component): reads the look stick through fn_80307AA0 into the vectors at controller+0x968 and +0x978, which fn_80101EC0 turns into rotation; called by fn_8012A1D0
 80101EC0	ge_look_apply	(controller): turns the controller's angular velocity (the vector at +0x978, radians a second; +0x97C the yaw's) times its time step (+0x578) into the player's rotation; called by fn_8012A1D0 after the optional ge_look_input
+801CDC30	ge_look_sens	reads the look sensitivities (805DE7A4 across, 805DE7A8 up and down; 0x104 and 0x108 of the settings at 805DE6A0) for the stick's turning rate
+801CDE70	ge_look_sens_ads	its twin for aiming down the sight (805DE7CC, 805DE7D0)

@@ -9,7 +9,7 @@
 //                  the file F every 10 s: tools/profile_report.py names the samples
 //     GE_MOUSE=S   mouse look sensitivity (default 1; 0 leaves the mouse free)
 //     GE_MOUSE_MODE=auto|direct|stick   how the mouse turns the view (auto: direct, but through
-//                  the right stick in a network game someone else hosts)
+//                  the right stick, at a very high sensitivity, in a network game someone else hosts)
 //     GE_HOSTS=F   the hosts file for the game's name lookups (default config/hosts.txt)
 //     GE_NETLOG=1  log sockets, lookups and TLS sessions
 //     GE_GECKO=F   the Gecko codes the port runs each frame (default build/patched/gecko.txt,
@@ -73,6 +73,7 @@ void guest_sleep(PPCContext& c, uint64_t ticks) {
 
 extern uint32_t g_look_frame;
 extern bool g_stick_took;
+extern const uint32_t kSensAddr[4];
 void gecko_apply();
 void fov_apply();
 extern float g_mouse_sens;
@@ -245,13 +246,11 @@ void stf_(uint32_t a, float v) { uint32_t b; std::memcpy(&b, &v, 4); st32(a, b);
 // In a network game this console did not start, the host turns the players
 // from what each console sends, and a view turned here is not taken. There
 // the mouse goes on the right stick instead: real input, with the stick's
-// limits (its top turning speed). "A joined game" is what fn_80108D70 itself
+// sensitivity raised out of the way (mouse_stick). "A joined game" is what fn_80108D70 itself
 // tests: the word at 805D5490 is 1 or 2 in a network game, the one at
 // 805D5470 non-zero on the host. GE_MOUSE_MODE=direct or stick forces one.
 const uint32_t kNetState = 0x805D5460;
 int g_mouse_mode = 0;                                // 0 auto, 1 direct, 2 stick
-float g_stick_gain = 0.001f;                         // stick deflection per pixel a second: full stick turns
-                                                     // 2.3 radians a second, a pixel is to be 0.0022 radians
 
 bool joined_game() {
     uint32_t mode = ld32(kNetState + 0x30);
@@ -326,6 +325,7 @@ void controller_update(PPCContext& c) {
         }
     }
     orig_controller_update(c);
+    if (g_stick_took) g_look_ctrl = ctrl;            // (for the angle trace)
     static const bool angles = std::getenv("GE_TRACE") != nullptr;
     if (angles && ctrl == g_look_ctrl && guest_ptr(player)) {     // the turned player's angles, twice a second
         static auto last = std::chrono::steady_clock::now();
@@ -399,13 +399,25 @@ void menu_buttons(ClassicState& s) {
     }
 }
 
-// The mouse on the right stick (a joined network game): its speed, in pixels
-// a second measured over at least 4 ms, as deflection; every read of the
-// controller in between gets the same.
+// The mouse on the right stick (a joined network game). The game turns a
+// stick's deflection d into a turning rate: nothing up to 0.12, then
+// 3.094 * sensitivity * (d - 0.12) / 0.88 radians a second (measured: the
+// sensitivity is the float the options menu sets, 805DE7A4 across and
+// 805DE7A8 up and down, with 805DE7CC and 805DE7D0 when aiming down the
+// sight). At the menu's sensitivities the stick tops out near 6 radians a
+// second. So while the game reads them (ge_look_sens, ge_look_sens_ads) the
+// four sensitivities are kStickSens, a hundred times that, and put back
+// right after (the options, and what the game saves, never see it); and the
+// deflection is the one that gives the mouse's speed at that sensitivity:
+// small, exact, and as good as never at the stick's end.
+const float kStickSens = 100.0f, kStickRate = 2.95f, kStickDead = 0.12f;   // the rate as the mouse test gives it
+extern const uint32_t kSensAddr[4] = {0x805DE7A4, 0x805DE7A8, 0x805DE7CC, 0x805DE7D0};
+float g_pitch_rate_scale = 1.25f;                    // the pitch's rate against the yaw's at the same sensitivity
 bool g_stick_took = false;
 void mouse_stick(ClassicState& s) {
     g_stick_took = g_mouse_sens > 0 && in_play() && mouse_on_stick();
     if (!g_stick_took) return;
+    // the mouse's speed, measured over at least 4 ms; every read in between gets the same
     static auto last = std::chrono::steady_clock::now();
     static float ax = 0, ay = 0, defl_x = 0, defl_y = 0;
     auto now = std::chrono::steady_clock::now();
@@ -416,14 +428,32 @@ void mouse_stick(ClassicState& s) {
     ax += dx;
     ay += dy;
     if (dt >= 0.004f) {
-        float g = g_stick_gain * g_mouse_sens;
-        if (dt > 0.25f) defl_x = defl_y = 0;
-        else { defl_x = ax / dt * g; defl_y = ay / dt * g; }
+        defl_x = defl_y = 0;
+        if (dt <= 0.25f) {
+            float k = kRadPerPixel * g_mouse_sens / dt / (kStickRate * kStickSens);
+            float vx = ax * k, vy = ay * k / g_pitch_rate_scale, m = std::sqrt(vx * vx + vy * vy);
+            if (m > 1e-7f) {
+                float d = std::min(1.0f, kStickDead + (1 - kStickDead) * m) / m;
+                defl_x = vx * d;
+                defl_y = vy * d;
+            }
+        }
         ax = ay = 0;
         last = now;
     }
     s.rx = std::clamp(s.rx + defl_x, -1.0f, 1.0f);
     s.ry = std::clamp(s.ry - defl_y, -1.0f, 1.0f);
+}
+
+// The game's two readers of the sensitivities (ge_look_sens, ge_look_sens_ads):
+// with the mouse on the stick they see kStickSens, and only they do.
+PPCFunc orig_look_sens[2];
+template <int I> void look_sens(PPCContext& c) {
+    if (!g_stick_took) { orig_look_sens[I](c); return; }
+    uint32_t saved[4];
+    for (int i = 0; i < 4; ++i) { saved[i] = ld32(kSensAddr[i]); stf_(kSensAddr[i], kStickSens); }
+    orig_look_sens[I](c);
+    for (int i = 0; i < 4; ++i) st32(kSensAddr[i], saved[i]);
 }
 
 void classic_filter(int chan, ClassicState& s) {
@@ -443,6 +473,9 @@ void install_mouse() {
     orig_controller_update = ppc_hook("ge_controller_update", controller_update);
     orig_look_apply = ppc_hook("ge_look_apply", look_apply);
     if (!orig_controller_update || !controller_not_local || !orig_look_apply) rt_die("goldeneye: the controller update is not hooked in this build");
+    orig_look_sens[0] = ppc_hook("ge_look_sens", look_sens<0>);
+    orig_look_sens[1] = ppc_hook("ge_look_sens_ads", look_sens<1>);
+    if (!orig_look_sens[0] || !orig_look_sens[1]) rt_die("goldeneye: the sensitivity readers are not hooked in this build");
     video_set_relative_mouse(true);
 }
 
