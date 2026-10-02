@@ -60,7 +60,23 @@ void on_prof(int, siginfo_t*, void* uc) {
     }
 }
 
+// A build instrumented for profile-guided optimisation (make pgo) writes its
+// counts when the process exits normally, which this one never does: they
+// are written every 15 seconds instead.
+extern "C" int __llvm_profile_write_file(void) __attribute__((weak));
+void install_pgo_writer() {
+    if (!__llvm_profile_write_file) return;
+    std::thread([] {
+        for (;;) {
+            std::this_thread::sleep_for(std::chrono::seconds(15));
+            __llvm_profile_write_file();
+        }
+    }).detach();
+    rt_log("goldeneye: an instrumented build: profile counts written every 15 s");
+}
+
 void install_profiler() {
+    install_pgo_writer();
     const char* path = std::getenv("GE_PROFILE");
     if (!path) return;
     g_samples = new uint32_t[kMaxSamples];

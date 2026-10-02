@@ -24,7 +24,11 @@ RECOMP_CXX ?= clang++
 # guest's big-endian loads in one instruction), not this machine's alone;
 # ARCH= for an older one
 ARCH      ?= -march=x86-64-v3
-OPT       ?= -O2 -fno-strict-aliasing -fwrapv $(ARCH)
+# profile-guided optimisation, when a profile has been made (make pgo): about a tenth faster
+PGO       := $(wildcard $(BUILD)/pgo/ge.profdata)
+PGO_USE   := $(if $(PGO),-fprofile-instr-use=$(abspath $(PGO)) -Wno-profile-instr-unprofiled -Wno-profile-instr-out-of-date)
+OPT_BASE  ?= -O2 -fno-strict-aliasing -fwrapv $(ARCH)
+OPT       ?= $(OPT_BASE) $(PGO_USE)
 SMOKE_SECS ?= 30
 RUN_ARGS  ?=
 PY        := python3
@@ -89,13 +93,29 @@ $(BUILD)/keys.txt: | config/keys.txt
 	@mkdir -p $(BUILD) && cp config/keys.txt $@
 
 run: build $(BUILD)/keys.txt
-	$(WIIBOOT) $(BOOT_ARGS) $(RUN_ARGS)
+	$(or $(GE_BIN),$(WIIBOOT)) $(BOOT_ARGS) $(RUN_ARGS)
 
 # Headless, time-boxed: the loop's progress check. Never fails the make; read the log.
 smoke: build $(BUILD)/keys.txt
 	-timeout $$(( $(SMOKE_SECS) + 20 )) $(WIIBOOT) $(BOOT_ARGS) --no-video --no-audio --watch 5 \
 	    --quit-after $(SMOKE_SECS) $(RUN_ARGS) > $(BUILD)/run.log 2>&1; echo "exit $$?" >> $(BUILD)/run.log
 	@tail -40 $(BUILD)/run.log
+
+# Profile-guided optimisation: an instrumented build is played for a while,
+# and what it counted steers the real build.
+#   make pgo-build     the instrumented game, in build/out-gen (slow: about half speed)
+#   GE_BIN=build/out-gen/wiiboot ./launch.sh     play a few minutes of a mission, then quit
+#   make pgo-merge     the counts become build/pgo/ge.profdata; make then uses it
+#   make pgo-clean     back to a build without it
+.PHONY: pgo-build pgo-merge pgo-clean
+pgo-build:
+	@mkdir -p $(BUILD)/pgo
+	$(MAKE) build OUT=$(BUILD)/out-gen OPT="$(OPT_BASE) -fprofile-instr-generate=$(abspath $(BUILD)/pgo/ge.profraw)"
+pgo-merge:
+	llvm-profdata merge -o $(BUILD)/pgo/ge.profdata $(BUILD)/pgo/ge.profraw
+	@echo "profile ready: run make"
+pgo-clean:
+	rm -rf $(BUILD)/pgo $(BUILD)/out-gen
 
 clean:
 	rm -rf $(RECOMP) $(OUT) $(NAMES) $(BUILD)/names.*
