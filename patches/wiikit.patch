@@ -1,5 +1,5 @@
 diff --git a/runtime/gx.cpp b/runtime/gx.cpp
-index a6b37f2..aeb7933 100644
+index a6b37f2..e7686fe 100644
 --- a/runtime/gx.cpp
 +++ b/runtime/gx.cpp
 @@ -152,6 +152,21 @@ uint64_t hash_mem(const uint8_t* p, size_t n) {
@@ -41,21 +41,52 @@ index a6b37f2..aeb7933 100644
  std::unordered_map<uint32_t, CopyRec> copies;      // EFB copies to texture, by address
  
  // texture format an EFB copy format produces in RAM (for its size)
-@@ -204,8 +220,11 @@ void bind_map(int m) {
+@@ -204,8 +220,42 @@ void bind_map(int m) {
      if (img1 >> 21 & 1) warn_once("texture preloaded in TMEM (not modelled), map", m);
  
      auto c = copies.find(addr);
 -    if (c != copies.end() && mem_ok(addr, c->second.size) &&
 -        hash_mem(host(virt(addr)), c->second.size) == c->second.hash) {
-+    if (c != copies.end() && mem_ok(addr, c->second.size) && c->second.gen != tex_gen) {
-+        c->second.same = hash_mem(host(virt(addr)), c->second.size) == c->second.hash;
-+        c->second.gen = tex_gen;
++    auto still = [](uint32_t a) -> CopyRec* {       // the copy made to a, if memory still holds it
++        auto it = copies.find(a);
++        if (it == copies.end() || !mem_ok(a, it->second.size)) return nullptr;
++        if (it->second.gen != tex_gen) {
++            it->second.same = hash_mem(host(virt(a)), it->second.size) == it->second.hash;
++            it->second.gen = tex_gen;
++        }
++        return it->second.same ? &it->second : nullptr;
++    };
++    // A texture taller than the copy at its address may be several copies,
++    // each made right after the last in memory: a game whose scratch area of
++    // the EFB is lower than the picture it builds there copies it out in
++    // strips (a 160 x 112 bloom from 80 rows: 80, then 32). The renderer
++    // puts the strips together.
++    if (CopyRec* first = still(addr); first && first->w == w && first->h < h) {
++        struct Piece { uint32_t addr; int row; } pieces[8];
++        int n = 0, rows = 0;
++        for (uint32_t a = addr; rows < h && n < 8;) {
++            CopyRec* r = still(a);
++            if (!r || r->w != w || r->fmt != first->fmt) break;
++            pieces[n++] = {a, rows};
++            rows += r->h;
++            a += (uint32_t)r->size;
++        }
++        if (rows == h && n > 1) {
++            put<uint8_t>(VC_TEXEFBN);
++            put<uint8_t>((uint8_t)m);
++            put<uint16_t>((uint16_t)w);
++            put<uint16_t>((uint16_t)h);
++            put<uint8_t>((uint8_t)n);
++            for (int i = 0; i < n; ++i) { put<uint32_t>(pieces[i].addr); put<uint16_t>((uint16_t)pieces[i].row); }
++            map_bound[m] = ~0ull;                    // put together again whenever it is bound: its strips change
++            return;
++        }
 +    }
-+    if (c != copies.end() && mem_ok(addr, c->second.size) && c->second.same) {
++    if (c != copies.end() && still(addr)) {
          uint64_t tag = 1ull << 32 | addr;
          if (map_bound[m] != tag) {
              put<uint8_t>(VC_TEXEFB);
-@@ -246,9 +265,17 @@ void bind_map(int m) {
+@@ -246,9 +296,17 @@ void bind_map(int m) {
      TexEntry& e = it->second;
      bool upload = false;
      if (fresh || e.gen != tex_gen) {
@@ -76,7 +107,7 @@ index a6b37f2..aeb7933 100644
          e.gen = tex_gen;
      }
      if (upload) {
-@@ -387,43 +414,80 @@ const uint8_t* fetch(uint32_t mode, int arr, int size, const uint8_t*& p, uint32
+@@ -387,43 +445,80 @@ const uint8_t* fetch(uint32_t mode, int arr, int size, const uint8_t*& p, uint32
      return host(virt(cp[0xA0 + arr] + idx * cp[0xB0 + arr] + sub));
  }
  
@@ -180,7 +211,7 @@ index a6b37f2..aeb7933 100644
          }
      }
      return flags;
-@@ -460,7 +524,8 @@ void bp_write(uint32_t v) {
+@@ -460,7 +555,8 @@ void bp_write(uint32_t v) {
          // when the renderer gets there, as the GP would: the game waits
          // for it asleep (GXWaitDrawDone), and its other threads (the
          // disc, the sound stream) run meanwhile
@@ -190,7 +221,7 @@ index a6b37f2..aeb7933 100644
          pe_ctrl |= 8; ++st.done; os_raise();
          return;
      case 0x47: pe_token = (uint16_t)val; return;                      // token
-@@ -729,6 +794,7 @@ void gx_init() {
+@@ -729,6 +825,7 @@ void gx_init() {
  // AI's, which start each audio frame's mix, above all. So does this wait.
  // A handler may switch guest threads, and another thread may hand the
  // record over in the meantime.
@@ -1141,10 +1172,84 @@ index 1f97bc4..23429e9 100644
    target_include_directories(${t} PUBLIC ${_rt})
  endforeach()
 diff --git a/runtime/video.cpp b/runtime/video.cpp
-index 5726093..9ca3428 100644
+index 5726093..204e6e5 100644
 --- a/runtime/video.cpp
 +++ b/runtime/video.cpp
-@@ -1266,6 +1266,8 @@ void update_pad() {
+@@ -100,6 +100,8 @@ bool sampler_set[8];
+ struct Tex { GLuint name = 0; int w = 0, h = 0, levels = 0; };
+ std::unordered_map<uint32_t, Tex> texs;            // decoded textures, by id
+ std::unordered_map<uint32_t, Tex> efb_copies;      // EFB copies to texture, by address
++std::unordered_map<uint32_t, Tex> efb_joined;      // textures put together from several copies, by the first's address
++GLuint join_fbo = 0;
+ std::unordered_map<uint32_t, Tex> xfbs;            // EFB copies to the XFB, by address
+ uint64_t map_src[8];                               // per map: texture id, or 1 << 32 | EFB copy address
+ uint32_t last_xfb = 0;
+@@ -325,7 +327,9 @@ void efb_dump(const char* tag) {
+     write_png(name, EFB_W * S, EFB_H * S, px.data());
+ }
+ 
++long efb_copies_this_frame = 0;                      // (for the per-draw dumps)
+ void efb_copy(uint32_t v) {
++    if (v >> 14 & 1) efb_copies_this_frame = 0; else ++efb_copies_this_frame;
+     int x = (int)(bp[0x49] & 0x3FF), y = (int)(bp[0x49] >> 10 & 0x3FF);
+     int w = (int)(bp[0x4A] & 0x3FF) + 1, h = (int)(bp[0x4A] >> 10 & 0x3FF) + 1;
+     uint32_t dest = (bp[0x4B] & 0xFFFFFF) << 5;
+@@ -475,7 +479,10 @@ void bind_textures() {
+     for (int m = 0; m < 8; ++m) {
+         if (!(used >> m & 1)) continue;
+         GLuint name = 0;
+-        if (map_src[m] >> 32) {
++        if (map_src[m] >> 32 == 2) {
++            auto it = efb_joined.find((uint32_t)map_src[m]);
++            if (it != efb_joined.end()) name = it->second.name;
++        } else if (map_src[m] >> 32) {
+             auto it = efb_copies.find((uint32_t)map_src[m]);
+             if (it != efb_copies.end()) name = it->second.name;
+         } else {
+@@ -646,7 +653,8 @@ void draw(uint8_t prim, uint8_t vflags, const uint8_t* pieces, uint32_t npieces)
+     }
+     if (mode && npieces == 1) glDrawArrays(mode, base, counts[0]);
+     else if (mode) glMultiDrawArrays(mode, firsts.data(), counts.data(), (GLsizei)npieces);
+-    if (efb_dump_every && efb_dumping()) {
++    static const long dump_after = std::getenv("WIIKIT_EFBDUMP_AFTERCOPY") ? std::atol(std::getenv("WIIKIT_EFBDUMP_AFTERCOPY")) : -1;
++    if (efb_dump_every && efb_dumping() && efb_copies_this_frame > dump_after) {   // (AFTERCOPY=n: only past the frame's nth copy)
+         static long k = 0;
+         if (++k % efb_dump_every == 0) {
+             char tag[32];
+@@ -742,6 +750,32 @@ void exec(const std::vector<uint8_t>& data) {
+         }
+         case VC_TEXBIND: { uint8_t m = rd<uint8_t>(p); map_src[m] = rd<uint32_t>(p); break; }
+         case VC_TEXEFB: { uint8_t m = rd<uint8_t>(p); map_src[m] = 1ull << 32 | rd<uint32_t>(p); break; }
++        case VC_TEXEFBN: {                           // several copies, one above the other, as one texture
++            uint8_t m = rd<uint8_t>(p);
++            int w = rd<uint16_t>(p), h = rd<uint16_t>(p), n = rd<uint8_t>(p);
++            uint32_t first = 0;
++            Tex* joined = nullptr;
++            for (int i = 0; i < n; ++i) {
++                uint32_t addr = rd<uint32_t>(p);
++                int row = rd<uint16_t>(p);
++                if (i == 0) {
++                    first = addr;
++                    joined = &efb_joined[addr];
++                    ensure_tex(*joined, w * S, h * S, 1);
++                    if (!join_fbo) glCreateFramebuffers(1, &join_fbo);
++                    glNamedFramebufferTexture(join_fbo, GL_COLOR_ATTACHMENT0, joined->name, 0);
++                }
++                auto it = efb_copies.find(addr);
++                if (it == efb_copies.end()) continue;
++                const Tex& src = it->second;
++                glNamedFramebufferTexture(copy_fbo, GL_COLOR_ATTACHMENT0, src.name, 0);
++                glDisable(GL_SCISSOR_TEST);
++                glBlitNamedFramebuffer(copy_fbo, join_fbo, 0, 0, src.w, src.h, 0, row * S, src.w, row * S + src.h,
++                                       GL_COLOR_BUFFER_BIT, GL_NEAREST);
++            }
++            map_src[m] = 2ull << 32 | first;
++            break;
++        }
+         case VC_FRAME: break;
+         case VC_DRAWDONE: gx_draw_done_reached(); break;
+         default: rt_die("video: bad record byte %02X", p[-1]);
+@@ -1266,6 +1300,8 @@ void update_pad() {
      for (int i = 0; i < 4; ++i) classic[i] = c[i];
  }
  
@@ -1153,7 +1258,7 @@ index 5726093..9ca3428 100644
  void present() {
      ++cnt.presents;
      int ww = 0, wh = 0;
-@@ -1275,7 +1277,7 @@ void present() {
+@@ -1275,7 +1311,7 @@ void present() {
      glColorMask(1, 1, 1, 1);
      glClearColor(0, 0, 0, 1);
      glClear(GL_COLOR_BUFFER_BIT);
@@ -1162,7 +1267,7 @@ index 5726093..9ca3428 100644
      if (it == xfbs.end()) it = xfbs.find(last_xfb);
      if (it != xfbs.end() && ww > 0 && wh > 0) {
          const Tex& t = it->second;
-@@ -1286,6 +1288,7 @@ void present() {
+@@ -1286,6 +1322,7 @@ void present() {
          glBlitNamedFramebuffer(copy_fbo, 0, 0, 0, t.w, t.h, dx, dy + dh, dx + dw, dy,   // top row first
                                 GL_COLOR_BUFFER_BIT, GL_LINEAR);
      }
@@ -1170,7 +1275,7 @@ index 5726093..9ca3428 100644
      if (opt.dump_dir && cnt.presents % (uint64_t)opt.dump_every == 0 && ww > 0 && wh > 0) {
          std::vector<uint8_t> px((size_t)ww * wh * 4), flip(px.size());   // the window, as shown
          glReadPixels(0, 0, ww, wh, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
-@@ -1462,6 +1465,9 @@ std::atomic<bool> want_relative{false};
+@@ -1462,6 +1499,9 @@ std::atomic<bool> want_relative{false};
  std::mutex motion_mx;
  float motion_x = 0, motion_y = 0;
  void video_set_relative_mouse(bool on) { want_relative = on; }
@@ -1180,7 +1285,7 @@ index 5726093..9ca3428 100644
  void video_take_mouse_motion(float& dx, float& dy) {
      std::lock_guard<std::mutex> lk(motion_mx);
      dx = motion_x; dy = motion_y;
-@@ -1479,6 +1485,7 @@ ClassicState video_classic(int chan) {
+@@ -1479,6 +1519,7 @@ ClassicState video_classic(int chan) {
  void video_set_rumble(int chan, bool on) {
      if (chan >= 0 && chan < 4) rumble_want[chan] = on;
  }
@@ -1188,7 +1293,7 @@ index 5726093..9ca3428 100644
  void video_retrace() {
      retraces.fetch_add(1);
      if (wake) SDL_SignalSemaphore(wake);
-@@ -1506,6 +1513,7 @@ void video_run(const char* title) {
+@@ -1506,6 +1547,7 @@ void video_run(const char* title) {
      SDL_GL_MakeCurrent(win, ctx);
      SDL_GL_SetSwapInterval(0);                   // VI paces the presents
      if (!gl_load()) rt_die("video: OpenGL functions missing");
@@ -1196,7 +1301,7 @@ index 5726093..9ca3428 100644
      rt_log("video: %s, %s", (const char*)glGetString(GL_RENDERER), (const char*)glGetString(GL_VERSION));
      if (debug) {
          glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
-@@ -1533,7 +1541,9 @@ void video_run(const char* title) {
+@@ -1533,7 +1575,9 @@ void video_run(const char* title) {
          SDL_Event e;
          bool quit = false;
          while (SDL_PollEvent(&e)) {
@@ -1206,7 +1311,7 @@ index 5726093..9ca3428 100644
              if (e.type == SDL_EVENT_GAMEPAD_ADDED) pad_added(e.gdevice.which);
              if (e.type == SDL_EVENT_GAMEPAD_REMOVED) pad_removed(e.gdevice.which);
              // F11 or Alt+Enter: fullscreen and back
-@@ -1621,6 +1631,17 @@ void video_run(const char* title) {
+@@ -1621,6 +1665,17 @@ void video_run(const char* title) {
              if (retraces.load() != seen) break;
          }
          uint32_t r = retraces.load();
@@ -1225,10 +1330,22 @@ index 5726093..9ca3428 100644
              seen = r;
              auto tp = Clock::now();
 diff --git a/runtime/video.h b/runtime/video.h
-index ecfb499..46e9dee 100644
+index ecfb499..f03e4d3 100644
 --- a/runtime/video.h
 +++ b/runtime/video.h
-@@ -98,6 +98,20 @@ void video_set_rumble(int chan, bool on);
+@@ -34,7 +34,10 @@ struct GVtx {
+ };
+ static_assert(sizeof(GVtx) == 132, "GVtx layout");
+ 
+-enum : uint8_t { VC_BP = 1, VC_XF, VC_DRAW, VC_TEXUP, VC_TEXBIND, VC_TEXEFB, VC_FRAME, VC_DRAWDONE };
++enum : uint8_t { VC_BP = 1, VC_XF, VC_DRAW, VC_TEXUP, VC_TEXBIND, VC_TEXEFB, VC_FRAME, VC_DRAWDONE,
++                 // a texture made of several EFB copies, one after the other in memory: map (u8),
++                 // width, height (u16), pieces (u8), then each piece's address (u32) and first row (u16)
++                 VC_TEXEFBN };
+ enum : uint8_t { VTX_COL0 = 1, VTX_COL1 = 2, VTX_NRM = 4, VTX_NBT = 8 };
+ 
+ // video.cpp
+@@ -98,6 +101,20 @@ void video_set_rumble(int chan, bool on);
  void video_set_relative_mouse(bool on);
  void video_take_mouse_motion(float& dx, float& dy);
  
