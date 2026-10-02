@@ -4,6 +4,7 @@
 // Drawn with Dear ImGui over the picture, by the renderer's thread (wiikit's
 // overlay hooks: after the context is made, on each event, before each
 // swap). While it is up the mouse is free and does not turn the view.
+// Without a watch list there is no overlay: F3 does nothing.
 //
 //     GE_DMW=F       the watch list (default: the first .dmw in the project's folder)
 //     GE_OVERLAY=1   start with the overlay up
@@ -33,6 +34,7 @@ std::atomic<bool> g_open{false};
 WatchGroup g_watches;
 std::string g_source, g_error;
 char g_filter[64] = "";
+bool g_have = false;                                 // a watch list was read: without one there is no overlay
 
 std::string find_dmw() {
     if (const char* e = std::getenv("GE_DMW")) return e;
@@ -107,12 +109,13 @@ void init(SDL_Window* win, void* gl) {
     if (g_source.empty()) g_error = "no .dmw file (put one in the project's folder, or set GE_DMW)";
     else if (dmw_load(g_source, g_watches, g_error))
         rt_log("goldeneye: overlay (F3): %zu watches from %s", g_watches.count(), g_source.c_str());
-    if (!g_error.empty()) rt_log("goldeneye: overlay: %s", g_error.c_str());
-    if (std::getenv("GE_OVERLAY")) { g_open = true; mouse_capture(false); }
+    g_have = g_error.empty() && g_watches.count() > 0;
+    if (!g_have) rt_log("goldeneye: no overlay (F3 does nothing): %s", g_error.empty() ? "the list is empty" : g_error.c_str());
+    if (g_have && std::getenv("GE_OVERLAY")) { g_open = true; mouse_capture(false); }
 }
 
 void event(const SDL_Event* e) {
-    if (e->type == SDL_EVENT_KEY_DOWN && e->key.scancode == SDL_SCANCODE_F3 && !e->key.repeat) {
+    if (g_have && e->type == SDL_EVENT_KEY_DOWN && e->key.scancode == SDL_SCANCODE_F3 && !e->key.repeat) {
         g_open = !g_open;
         mouse_capture(!g_open);
     }
