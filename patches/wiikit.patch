@@ -1,18 +1,18 @@
 diff --git a/runtime/gx.cpp b/runtime/gx.cpp
-index a6b37f2..e7686fe 100644
+index a6b37f2..4626acb 100644
 --- a/runtime/gx.cpp
 +++ b/runtime/gx.cpp
 @@ -152,6 +152,21 @@ uint64_t hash_mem(const uint8_t* p, size_t n) {
      return h;
  }
  
-+// 64 words spread over the data: enough to see a texture rewritten, at a
-+// fraction of hashing all of it.
++// 512 words spread over the data: enough to see a texture rewritten, at a
++// fraction of hashing all of it (a 256 x 256 CMPR texture is 4 000 words).
 +uint64_t hash_quick(const uint8_t* p, size_t n) {
-+    if (n <= 1024) return hash_mem(p, n);
++    if (n <= 8192) return hash_mem(p, n);
 +    uint64_t h = 0x9E3779B97F4A7C15ull ^ n;
-+    size_t step = (n - 8) / 63;
-+    for (size_t i = 0; i < 64; ++i) {
++    size_t step = (n - 8) / 511;
++    for (size_t i = 0; i < 512; ++i) {
 +        uint64_t w;
 +        std::memcpy(&w, p + i * step, 8);
 +        h = (h ^ w) * 0xFF51AFD7ED558CCDull;
@@ -29,7 +29,7 @@ index a6b37f2..e7686fe 100644
      }
  };
 -struct TexEntry { uint32_t id; uint64_t hash; uint32_t gen; };
-+struct TexEntry { uint32_t id; uint64_t hash; uint32_t gen; uint64_t frame = ~0ull, quick = 0; };
++struct TexEntry { uint32_t id; uint64_t hash; uint32_t gen; uint64_t quick = 0; };
  std::unordered_map<TexKey, TexEntry, TexKeyHash> tcache;
  uint32_t tex_next_id = 1, tex_gen = 1;
  uint8_t tex_dirty = 0xFF;                          // maps whose binding must be looked at again
@@ -93,15 +93,15 @@ index a6b37f2..e7686fe 100644
 -        uint64_t hh = hash_mem(src, total);
 -        upload = fresh || hh != e.hash;
 -        e.hash = hh;
-+        // A game may invalidate its textures many times a frame (each one
-+        // starts a generation): the whole texture is hashed once a frame,
-+        // and within the frame only if a sample of it has changed.
++        // A game may invalidate its textures every frame, and many times in
++        // one (each starts a generation), without having changed any: a
++        // sample of the texture is looked at each time, and all of it hashed
++        // only when the sample has changed (or the texture is new).
 +        uint64_t q = hash_quick(src, total);
-+        if (fresh || e.frame != st.frames || q != e.quick) {
++        if (fresh || q != e.quick) {
 +            uint64_t hh = hash_mem(src, total);
 +            upload = fresh || hh != e.hash;
 +            e.hash = hh;
-+            e.frame = st.frames;
 +            e.quick = q;
 +        }
          e.gen = tex_gen;
