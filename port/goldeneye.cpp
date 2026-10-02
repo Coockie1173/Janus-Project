@@ -77,6 +77,9 @@ extern const uint32_t kSensAddr[4];
 void gecko_apply();
 void fov_apply();
 extern float g_mouse_sens;
+static float ldf_(uint32_t a) { uint32_t b = ld32(a); float v; std::memcpy(&v, &b, 4); return v; }
+static void stf__(uint32_t a, float v) { uint32_t b; std::memcpy(&b, &v, 4); st32(a, b); }
+
 void frame_tick(PPCContext& c) {
     uint32_t max = ld32(kFpsMax);
     if (max && max < g_fps) st32(kFpsMax, g_fps);
@@ -97,13 +100,48 @@ void frame_tick(PPCContext& c) {
             video_take_mouse_motion(dx, dy);
         }
     }
+    static const char* hitch = std::getenv("GE_HITCH");      // "t,t,...": a 60 ms stall at those times (a test)
+    if (hitch && f != 0) {
+        static auto t0 = std::chrono::steady_clock::now();
+        static const char* q = hitch;
+        double t = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+        if (*q && t >= std::atof(q)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(60));
+            q = std::strchr(q, ',') ? std::strchr(q, ',') + 1 : q + std::strlen(q);
+        }
+    }
     orig_tick(c);
+    // One long frame must not cost seconds. When a frame comes more than three
+    // frame times late (21 ms at 144: a shader compiled, a file read, the
+    // system busy) the limiter starts over from its lowest rate, and then
+    // climbs back by 1 a frame: 144 becomes 17, and is 144 again a hundred
+    // frames later. Here the rate is put back to where it was, less 1, as a
+    // late frame costs; and a rate that is climbing climbs 4 a frame. A
+    // machine that really cannot hold the rate still comes down, by 1 for
+    // every late frame, as the game means it to.
+    if (g_fps) {
+        static float before = 0;
+        static const bool keep = !std::getenv("GE_NO_RATE_FIX");
+        float rate = ldf_(kFpsNow), top = (float)ld32(kFpsMax);
+        if (keep && before > 0 && rate >= 1 && rate <= 1000) {
+            if (rate < before - 1.5f && before <= top) {
+                static int said = 0;
+                if (g_fps_log && said++ < 10) rt_log("goldeneye: a long frame: the rate fell from %.0f to %.0f, put back", before, rate);
+                rate = before - 1;
+                stf__(kFpsNow, rate);
+            } else if (rate > before && rate < top) {
+                rate = std::min(top, rate + 3);
+                stf__(kFpsNow, rate);
+            }
+        }
+        before = rate;
+    }
     if (g_fps_log) {                                 // GE_TRACE: frames run and the engine's rate, every 5 s
         static auto t0 = std::chrono::steady_clock::now();
         static uint32_t n0 = ld32(kFrameCount);
         auto now = std::chrono::steady_clock::now();
         double dt = std::chrono::duration<double>(now - t0).count();
-        if (dt >= 5) {
+        if (dt >= (hitch ? 0.5 : 5)) {
             uint32_t n = ld32(kFrameCount), bits = ld32(kFpsNow);
             float rate;
             std::memcpy(&rate, &bits, 4);
