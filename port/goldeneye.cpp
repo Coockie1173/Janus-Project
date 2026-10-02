@@ -15,8 +15,7 @@
 //     GE_GECKO=F   the Gecko codes the port runs each frame (default build/patched/gecko.txt,
 //                  from tools/gecko.py; empty: none); GE_GECKO_EXTRA=F[:F...] adds files
 //     GE_FOV=D     the field of view in play, degrees (the game's is 49)
-//     GE_FPS=N     the frame rate the engine may reach (default: its own 30); auto: the
-//                  screen's refresh rate
+//     GE_FPS=N     the frame rate the engine may reach (default: its own 30); auto: 60
 #include "debug.h"
 #include "rt.h"
 #include "video.h"
@@ -157,14 +156,17 @@ void frame_tick(PPCContext& c) {
 void install_fps() {
     orig_tick = ppc_hook("ge_frame_tick", frame_tick);
     if (!orig_tick) rt_die("goldeneye: ge_frame_tick is not hooked in this build");
+    // GE_FPS: the rate the game runs at. "auto" (what launch.sh gives) is 60,
+    // or the screen's rate where that is lower: the game holds 60 everywhere,
+    // and not much more in its heavy levels.
     const char* e = std::getenv("GE_FPS");
     if (!e) return;
     int fps = std::atoi(e);
-    if (!std::strcmp(e, "auto")) {                   // the screen's refresh rate
+    if (!std::strcmp(e, "auto")) {
         fps = 60;
         if (SDL_InitSubSystem(SDL_INIT_VIDEO)) {
             if (const SDL_DisplayMode* m = SDL_GetCurrentDisplayMode(SDL_GetPrimaryDisplay()))
-                if (m->refresh_rate >= 30) fps = (int)std::lround(m->refresh_rate);
+                if (m->refresh_rate >= 30) fps = std::min(60, (int)std::lround(m->refresh_rate));
         }
     }
     if (fps <= 30 || fps > 1000) { rt_log("goldeneye: GE_FPS is 31..1000; the game's own 30 kept"); return; }

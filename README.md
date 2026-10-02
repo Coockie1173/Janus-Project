@@ -42,8 +42,8 @@ functions by signature.
 
 ## Playing
 
-`./launch.sh` opens a small window first: the frame rate (the screen's
-refresh rate by default), the field of view, the mouse's sensitivity, online
+`./launch.sh` opens a small window first: the frame rate (60 by default
+and at most; 30 is the console's), the field of view, the mouse's sensitivity, online
 on or off, and the key bindings (click Set, press a key or a mouse button).
 Then Play. `./launch.sh --no-gui` starts the game with what was saved, and
 any option does too (`--fps 60`, `--fov 70`, `--mouse 1.5`, `--offline`,

@@ -155,15 +155,19 @@ def run_gui():
 
     hz = refresh_rate()
     fps_mode = tk.StringVar(value="auto" if settings["fps"] == "auto" else "custom")
+    if settings["fps"] != "auto" and not settings["fps"].isdigit():
+        settings["fps"] = "auto"
+    if settings["fps"] != "auto" and int(settings["fps"]) >= 60:
+        settings["fps"] = "auto"                 # 60 is the most, and the default
     fps_val = tk.StringVar(value="60" if settings["fps"] == "auto" else settings["fps"])
     ttk.Label(st, text="Frame rate").grid(row=0, column=0, sticky="w", **pad)
     fr = ttk.Frame(st)
     fr.grid(row=0, column=1, sticky="w", **pad)
-    ttk.Radiobutton(fr, text=f"Screen's refresh rate ({hz} Hz)", variable=fps_mode, value="auto").pack(anchor="w")
+    ttk.Radiobutton(fr, text="60 (the default)", variable=fps_mode, value="auto").pack(anchor="w")
     row = ttk.Frame(fr)
     row.pack(anchor="w")
     ttk.Radiobutton(row, text="Limit to", variable=fps_mode, value="custom").pack(side="left")
-    ttk.Spinbox(row, from_=30, to=360, width=5, textvariable=fps_val).pack(side="left", padx=4)
+    ttk.Spinbox(row, from_=30, to=60, width=5, textvariable=fps_val).pack(side="left", padx=4)
     ttk.Label(row, text="(30 is the console's)").pack(side="left")
 
     fov = tk.DoubleVar(value=float(settings["fov"]))
@@ -299,7 +303,7 @@ def run_gui():
     result = {"play": False}
 
     def collect():
-        settings["fps"] = "auto" if fps_mode.get() == "auto" else str(max(30, min(1000, int(float(fps_val.get() or 60)))))
+        settings["fps"] = "auto" if fps_mode.get() == "auto" else str(max(30, min(60, int(float(fps_val.get() or 60)))))
         settings["fov"] = str(round(fov.get()))
         settings["mouse"] = f"{mouse.get():.2f}"
         settings["online"] = "1" if online.get() else "0"
