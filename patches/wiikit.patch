@@ -1,8 +1,186 @@
 diff --git a/runtime/gx.cpp b/runtime/gx.cpp
-index a6b37f2..12d5d10 100644
+index a6b37f2..aeb7933 100644
 --- a/runtime/gx.cpp
 +++ b/runtime/gx.cpp
-@@ -460,7 +460,8 @@ void bp_write(uint32_t v) {
+@@ -152,6 +152,21 @@ uint64_t hash_mem(const uint8_t* p, size_t n) {
+     return h;
+ }
+ 
++// 64 words spread over the data: enough to see a texture rewritten, at a
++// fraction of hashing all of it.
++uint64_t hash_quick(const uint8_t* p, size_t n) {
++    if (n <= 1024) return hash_mem(p, n);
++    uint64_t h = 0x9E3779B97F4A7C15ull ^ n;
++    size_t step = (n - 8) / 63;
++    for (size_t i = 0; i < 64; ++i) {
++        uint64_t w;
++        std::memcpy(&w, p + i * step, 8);
++        h = (h ^ w) * 0xFF51AFD7ED558CCDull;
++        h ^= h >> 29;
++    }
++    return h;
++}
++
+ // ---- textures --------------------------------------------------------------------------------
+ // Decoded textures are cached by what names them (address, format, size,
+ // levels, palette) and re-uploaded when their bytes change. Bytes are hashed
+@@ -169,13 +184,14 @@ struct TexKeyHash {
+         return (size_t)(k.addr * 0x9E3779B1u ^ k.shape * 0x85EBCA77u ^ k.levels ^ k.tlut);
+     }
+ };
+-struct TexEntry { uint32_t id; uint64_t hash; uint32_t gen; };
++struct TexEntry { uint32_t id; uint64_t hash; uint32_t gen; uint64_t frame = ~0ull, quick = 0; };
+ std::unordered_map<TexKey, TexEntry, TexKeyHash> tcache;
+ uint32_t tex_next_id = 1, tex_gen = 1;
+ uint8_t tex_dirty = 0xFF;                          // maps whose binding must be looked at again
+ uint64_t map_bound[8];                             // what the renderer has on each map
+ 
+-struct CopyRec { size_t size; uint64_t hash; uint32_t fmt; int w, h; };
++struct CopyRec { size_t size; uint64_t hash; uint32_t fmt; int w, h;
++                 uint32_t gen = 0; bool same = false; };   // whether RAM still holds the copy, looked at once a generation
+ std::unordered_map<uint32_t, CopyRec> copies;      // EFB copies to texture, by address
+ 
+ // texture format an EFB copy format produces in RAM (for its size)
+@@ -204,8 +220,11 @@ void bind_map(int m) {
+     if (img1 >> 21 & 1) warn_once("texture preloaded in TMEM (not modelled), map", m);
+ 
+     auto c = copies.find(addr);
+-    if (c != copies.end() && mem_ok(addr, c->second.size) &&
+-        hash_mem(host(virt(addr)), c->second.size) == c->second.hash) {
++    if (c != copies.end() && mem_ok(addr, c->second.size) && c->second.gen != tex_gen) {
++        c->second.same = hash_mem(host(virt(addr)), c->second.size) == c->second.hash;
++        c->second.gen = tex_gen;
++    }
++    if (c != copies.end() && mem_ok(addr, c->second.size) && c->second.same) {
+         uint64_t tag = 1ull << 32 | addr;
+         if (map_bound[m] != tag) {
+             put<uint8_t>(VC_TEXEFB);
+@@ -246,9 +265,17 @@ void bind_map(int m) {
+     TexEntry& e = it->second;
+     bool upload = false;
+     if (fresh || e.gen != tex_gen) {
+-        uint64_t hh = hash_mem(src, total);
+-        upload = fresh || hh != e.hash;
+-        e.hash = hh;
++        // A game may invalidate its textures many times a frame (each one
++        // starts a generation): the whole texture is hashed once a frame,
++        // and within the frame only if a sample of it has changed.
++        uint64_t q = hash_quick(src, total);
++        if (fresh || e.frame != st.frames || q != e.quick) {
++            uint64_t hh = hash_mem(src, total);
++            upload = fresh || hh != e.hash;
++            e.hash = hh;
++            e.frame = st.frames;
++            e.quick = q;
++        }
+         e.gen = tex_gen;
+     }
+     if (upload) {
+@@ -387,43 +414,80 @@ const uint8_t* fetch(uint32_t mode, int arr, int size, const uint8_t*& p, uint32
+     return host(virt(cp[0xA0 + arr] + idx * cp[0xB0 + arr] + sub));
+ }
+ 
++// Tens of thousands of vertices a frame come through here on the game's
++// thread: what does not change from one vertex to the next (which attributes
++// there are, where their arrays are, the vertex's defaults) is worked out once
++// for the draw.
++static inline float compf(const uint8_t* q, uint32_t fmt, float sc) {
++    switch (fmt) {
++    case 0: return q[0] * sc;
++    case 1: return (int8_t)q[0] * sc;
++    case 2: return be16(q) * sc;
++    case 3: return (int16_t)be16(q) * sc;
++    default: { uint32_t u = be32(q); float v; std::memcpy(&v, &u, 4); return v; }
++    }
++}
++struct VtxSrc { uint32_t mode; const uint8_t* base; uint32_t stride; };   // mode 1: in the stream; 2, 3: an index into an array
++static inline const uint8_t* vtx_at(const VtxSrc& s, int size, const uint8_t*& p, uint32_t sub = 0) {
++    if (s.mode == 1) { const uint8_t* q = p; p += size; return q; }
++    uint32_t idx;
++    if (s.mode == 2) idx = *p++;
++    else { idx = be16(p); p += 2; }
++    return s.base + idx * s.stride + sub;
++}
++
+ uint8_t decode_vertices(const VtxFmt& f, const uint8_t* p, uint32_t count, GVtx* out) {
+-    uint32_t pos = f.lo >> 9 & 3, nrm = f.lo >> 11 & 3, col[2] = {f.lo >> 13 & 3, f.lo >> 15 & 3};
++    const uint32_t pos = f.lo >> 9 & 3, nrm = f.lo >> 11 & 3, col[2] = {f.lo >> 13 & 3, f.lo >> 15 & 3};
+     uint8_t flags = (col[0] ? VTX_COL0 : 0) | (col[1] ? VTX_COL1 : 0) | (nrm ? VTX_NRM : 0) |
+                     (nrm && f.nbt ? VTX_NBT : 0);
+-    int nsz = fmt_size(f.nrm_fmt);
++    auto src = [](uint32_t mode, int arr) {
++        return VtxSrc{mode, mode >= 2 ? host(virt(cp[0xA0 + arr])) : nullptr, mode >= 2 ? cp[0xB0 + arr] : 0};
++    };
++    const VtxSrc spos = src(pos, 0), snrm = src(nrm, 1), scol[2] = {src(col[0], 2), src(col[1], 3)};
++    const int psz = fmt_size(f.pos_fmt), nsz = fmt_size(f.nrm_fmt), pos_n = f.pos_n;
++    const int csz[2] = {col_size(f.col_fmt[0]), col_size(f.col_fmt[1])};
++    const bool nbt3 = f.nbt && f.nidx3 && nrm != 1;
++    const int nn = f.nbt ? 3 : 1;
++    struct Tc { int t, n, cs; uint32_t fmt; float sc; VtxSrc s; } tcs[8];
++    int ntc = 0;
++    for (int t = 0; t < 8; ++t) {
++        uint32_t m = f.hi >> (2 * t) & 3;
++        if (m) tcs[ntc++] = Tc{t, f.tc_n[t], fmt_size(f.tc_fmt[t]), f.tc_fmt[t], f.tc_sc[t], src(m, 4 + t)};
++    }
++    const uint32_t mtx_bits = f.lo & 0x1FF;          // matrix indices in the stream, in this order
++    GVtx proto;                                      // a vertex with nothing read yet
++    std::memset(&proto, 0, sizeof proto);
++    for (int i = 0; i < 9; ++i) proto.mtx[i] = f.mtx_default[i];
++    for (int c = 0; c < 2; ++c)
++        if (!col[c]) std::memset(proto.col[c], 255, 4);   // a missing colour reads as white
++
+     for (uint32_t k = 0; k < count; ++k) {
+         GVtx& v = out[k];
+-        std::memset(&v, 0, sizeof v);
+-        for (int i = 0; i < 9; ++i) v.mtx[i] = (f.lo >> i & 1) ? *p++ : f.mtx_default[i];
++        std::memcpy(&v, &proto, sizeof v);
++        for (uint32_t m = mtx_bits; m; m &= m - 1) v.mtx[__builtin_ctz(m)] = *p++;
+         if (pos) {
+-            const uint8_t* q = fetch(pos, 0, f.pos_n * fmt_size(f.pos_fmt), p);
+-            for (int i = 0; i < f.pos_n; ++i) v.pos[i] = comp(q + i * fmt_size(f.pos_fmt), f.pos_fmt, f.pos_sc);
++            const uint8_t* q = vtx_at(spos, pos_n * psz, p);
++            for (int i = 0; i < pos_n; ++i) v.pos[i] = compf(q + i * psz, f.pos_fmt, f.pos_sc);
+         }
+         if (nrm) {
+             float* dst[3] = {v.nrm, v.bin, v.tan};
+-            if (f.nbt && f.nidx3 && nrm != 1) {
++            if (nbt3) {
+                 for (int j = 0; j < 3; ++j) {
+-                    const uint8_t* q = fetch(nrm, 1, 0, p, (uint32_t)(j * 3 * nsz));
+-                    for (int i = 0; i < 3; ++i) dst[j][i] = comp(q + i * nsz, f.nrm_fmt, f.nrm_sc);
++                    const uint8_t* q = vtx_at(snrm, 0, p, (uint32_t)(j * 3 * nsz));
++                    for (int i = 0; i < 3; ++i) dst[j][i] = compf(q + i * nsz, f.nrm_fmt, f.nrm_sc);
+                 }
+             } else {
+-                int n = f.nbt ? 3 : 1;
+-                const uint8_t* q = fetch(nrm, 1, 3 * n * nsz, p);
+-                for (int j = 0; j < n; ++j)
+-                    for (int i = 0; i < 3; ++i) dst[j][i] = comp(q + (j * 3 + i) * nsz, f.nrm_fmt, f.nrm_sc);
++                const uint8_t* q = vtx_at(snrm, 3 * nn * nsz, p);
++                for (int j = 0; j < nn; ++j)
++                    for (int i = 0; i < 3; ++i) dst[j][i] = compf(q + (j * 3 + i) * nsz, f.nrm_fmt, f.nrm_sc);
+             }
+         }
+-        for (int c = 0; c < 2; ++c) {
+-            if (col[c]) read_col(fetch(col[c], 2 + c, col_size(f.col_fmt[c]), p), f.col_fmt[c], v.col[c]);
+-            else std::memset(v.col[c], 255, 4);    // a missing colour reads as white
+-        }
+-        for (int t = 0; t < 8; ++t) {
+-            uint32_t m = f.hi >> (2 * t) & 3;
+-            if (!m) continue;
+-            int cs = fmt_size(f.tc_fmt[t]);
+-            const uint8_t* q = fetch(m, 4 + t, f.tc_n[t] * cs, p);
+-            for (int i = 0; i < f.tc_n[t]; ++i) v.tc[t][i] = comp(q + i * cs, f.tc_fmt[t], f.tc_sc[t]);
++        for (int c = 0; c < 2; ++c)
++            if (col[c]) read_col(vtx_at(scol[c], csz[c], p), f.col_fmt[c], v.col[c]);
++        for (int i = 0; i < ntc; ++i) {
++            const Tc& t = tcs[i];
++            const uint8_t* q = vtx_at(t.s, t.n * t.cs, p);
++            for (int j = 0; j < t.n; ++j) v.tc[t.t][j] = compf(q + j * t.cs, t.fmt, t.sc);
+         }
+     }
+     return flags;
+@@ -460,7 +524,8 @@ void bp_write(uint32_t v) {
          // when the renderer gets there, as the GP would: the game waits
          // for it asleep (GXWaitDrawDone), and its other threads (the
          // disc, the sound stream) run meanwhile
@@ -12,7 +190,7 @@ index a6b37f2..12d5d10 100644
          pe_ctrl |= 8; ++st.done; os_raise();
          return;
      case 0x47: pe_token = (uint16_t)val; return;                      // token
-@@ -729,6 +730,7 @@ void gx_init() {
+@@ -729,6 +794,7 @@ void gx_init() {
  // AI's, which start each audio frame's mix, above all. So does this wait.
  // A handler may switch guest threads, and another thread may hand the
  // record over in the meantime.
@@ -872,6 +1050,51 @@ index 0000000..3948327
 +        return 0;
 +    }
 +};
+diff --git a/runtime/ppc.h b/runtime/ppc.h
+index 99351d5..c3a817e 100644
+--- a/runtime/ppc.h
++++ b/runtime/ppc.h
+@@ -23,11 +23,13 @@
+ #define PPC_BSWAP16 _byteswap_ushort
+ #define PPC_BSWAP32 _byteswap_ulong
+ #define PPC_UNLIKELY(x) (x)
++#define PPC_LIKELY(x) (x)
+ #define PPC_NOINLINE __declspec(noinline)
+ #else
+ #define PPC_BSWAP16 __builtin_bswap16
+ #define PPC_BSWAP32 __builtin_bswap32
+ #define PPC_UNLIKELY(x) __builtin_expect(!!(x), 0)
++#define PPC_LIKELY(x) __builtin_expect(!!(x), 1)
+ #define PPC_NOINLINE __attribute__((noinline))
+ #endif
+ 
+@@ -278,12 +280,24 @@ static inline void ps_quant(uint32_t type, int scale, uint32_t ea, double v, int
+ }
+ static inline int gqr_scale(uint32_t s6) { return (int)(s6 & 0x20 ? s6 | ~0x3Fu : s6); }
+ static inline void psq_load(PPCContext& c, int d, uint32_t ea, int w, int i) {
+-    uint32_t g = c.gqr[i], type = g >> 16 & 7; int scale = gqr_scale(g >> 24 & 0x3F), sz;
++    uint32_t g = c.gqr[i], type = g >> 16 & 7;
++    if (PPC_LIKELY(type < 4)) {                    // floats, as nearly always: no call
++        c.f[d] = (double)as_f32(ld32(ea));
++        c.ps1[d] = w ? 1.0 : (double)as_f32(ld32(ea + 4));
++        return;
++    }
++    int scale = gqr_scale(g >> 24 & 0x3F), sz;
+     c.f[d] = ps_dequant(type, scale, ea, &sz);
+     c.ps1[d] = w ? 1.0 : ps_dequant(type, scale, ea + sz, &sz);
+ }
+ static inline void psq_store(PPCContext& c, int s, uint32_t ea, int w, int i) {
+-    uint32_t g = c.gqr[i], type = g & 7; int scale = gqr_scale(g >> 8 & 0x3F), sz;
++    uint32_t g = c.gqr[i], type = g & 7;
++    if (PPC_LIKELY(type < 4)) {
++        st32(ea, as_u32((float)c.f[s]));
++        if (!w) st32(ea + 4, as_u32((float)c.ps1[s]));
++        return;
++    }
++    int scale = gqr_scale(g >> 8 & 0x3F), sz;
+     ps_quant(type, scale, ea, c.f[s], &sz);
+     if (!w) ps_quant(type, scale, ea + sz, c.ps1[s], &sz);
+ }
 diff --git a/runtime/rt.h b/runtime/rt.h
 index 75fec5e..6925c10 100644
 --- a/runtime/rt.h

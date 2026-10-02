@@ -31,6 +31,7 @@
 #include <atomic>
 #include <csignal>
 #include <string>
+#include <sys/syscall.h>
 #include <sys/time.h>
 #include <thread>
 #include <ucontext.h>
@@ -218,8 +219,11 @@ const uint32_t kMaxSamples = 4u << 20;
 
 void on_prof(int, siginfo_t*, void* uc) {
     uintptr_t pc = (uintptr_t)((ucontext_t*)uc)->uc_mcontext.gregs[REG_RIP];
-    uint32_t i = g_nsamples.fetch_add(1, std::memory_order_relaxed);
-    if (i < kMaxSamples) g_samples[i] = (uint32_t)(pc - (uintptr_t)&__executable_start);   // outside it: a huge offset
+    uint32_t i = g_nsamples.fetch_add(2, std::memory_order_relaxed);
+    if (i + 1 < kMaxSamples) {                       // pairs: the thread, the offset (outside the executable: a huge one)
+        g_samples[i] = (uint32_t)syscall(SYS_gettid);
+        g_samples[i + 1] = (uint32_t)(pc - (uintptr_t)&__executable_start);
+    }
 }
 
 void install_profiler() {

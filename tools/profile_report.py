@@ -45,16 +45,25 @@ if a.offsets:
     raise SystemExit
 data = open(a.samples, "rb").read()
 s = struct.unpack("<%dI" % (len(data) // 4), data)
+pairs = list(zip(s[0::2], s[1::2]))                  # (thread, offset)
 if a.last:
-    s = s[-a.last:]
-hist = collections.Counter()
-for off in s:
+    pairs = pairs[-a.last:]
+
+
+def name_of(off):
     i = bisect.bisect_right(addrs, base + off) - 1
     name = syms[i][1] if 0 <= i and off < 0x10000000 else "(outside the executable: libraries, the GL driver)"
     for pre in ("f_", "orig_"):
         if name.startswith(pre) and name[len(pre):len(pre) + 8].upper() in guest:
             name = f"{name[:len(pre) + 8]} {guest[name[len(pre):len(pre) + 8].upper()]}"
-    hist[name] += 1
-print(f"{len(s)} samples")
-for name, n in hist.most_common(a.top):
-    print(f"{100 * n / len(s):6.2f}%  {name}")
+    return name
+
+
+threads = collections.Counter(t for t, _ in pairs)
+print(f"{len(pairs)} samples (1 ms of CPU time each), {len(threads)} threads")
+for tid, n in threads.most_common(4):
+    hist = collections.Counter(name_of(o) for t, o in pairs if t == tid)
+    recomp = sum(v for k, v in hist.items() if k.startswith(("f_", "orig_")))
+    print(f"\nthread {tid}: {100 * n / len(pairs):.1f}% of all samples; recompiled game code {100 * recomp / n:.1f}% of it")
+    for name, k in hist.most_common(a.top):
+        print(f"{100 * k / n:6.2f}%  {name}")

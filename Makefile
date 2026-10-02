@@ -19,8 +19,10 @@ DSY       ?= $(firstword $(wildcard /usr/share/dolphin-emu/Sys/totaldb.dsy /usr/
 RECOMP_CXX ?= clang++
 # optimisation of the recompiled code and the runtime: -O1 builds in a minute,
 # -O2 runs faster. Plain -O2 miscompiles something (the game panics in
-# DVDReadAsync at boot): the two flags are needed with it
-OPT       ?= -O2 -fno-strict-aliasing -fwrapv
+# DVDReadAsync at boot): the two flags are needed with it. -march=native: the
+# build is for this machine (big-endian loads in one instruction where the CPU
+# has movbe); take it out for a binary that is to run elsewhere
+OPT       ?= -O2 -fno-strict-aliasing -fwrapv -march=native
 SMOKE_SECS ?= 30
 RUN_ARGS  ?=
 PY        := python3
