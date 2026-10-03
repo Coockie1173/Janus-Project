@@ -1,19 +1,16 @@
-// GoldenEye 007 — the debug overlay (F3): the memory watches of a Dolphin
-// Memory Engine list (.dmw), read live from the running game.
+//the debug overlay (F3): memory watches from a Dolphin Memory Engine list (.dmw), read live
 //
-// Drawn with Dear ImGui over the picture, by the renderer's thread (wiikit's
-// overlay hooks: after the context is made, on each event, before each
-// swap). While it is up the mouse is free and does not turn the view.
-// Without a watch list there is no overlay: F3 does nothing.
-// The settings menu (F1, settings.cpp) is drawn in the same frame, over it.
+//drawn with Dear ImGui by the renderer's thread through wiikit's overlay hooks
+//while it's up the mouse is free and doesn't turn the view
+//no watch list means no overlay, F3 does nothing then
+//the settings menu (F1, settings.cpp) gets drawn in the same frame on top of it
 //
-//     GE_DMW=F       the watch list (default: the first .dmw in the project's folder)
-//     GE_OVERLAY=1   start with the overlay up
-//     GE_STATE=1     start with the player state shown
+//GE_DMW=F the watch list (the first .dmw in the project folder by default)
+//GE_OVERLAY=1 start with the overlay up
+//GE_STATE=1 start with the player state shown
 //
-// "Player state on screen" in the window puts the state of the player this
-// console plays (the controller's +0x704, by the Ghidra project's names) in
-// the picture's top right corner, and it stays there with the window closed.
+//"Player state on screen" puts the local player's state (the controller's +0x704, named
+//after the Ghidra project) in the top right corner, it stays there with the window closed
 #include "dmw.h"
 #include "ge.h"
 #include <atomic>
@@ -36,7 +33,7 @@
 namespace ge {
 
 #ifdef GE_IMGUI
-void settings_init();                                // settings.cpp
+void settings_init(); //settings.cpp
 bool settings_event(const SDL_Event* e);
 void settings_draw();
 #endif
@@ -49,10 +46,10 @@ std::atomic<bool> g_open{false};
 WatchGroup g_watches;
 std::string g_source, g_error;
 char g_filter[64] = "";
-bool g_have = false;                                 // a watch list was read: without one there is no overlay
-bool g_show_state = false;                           // the player state in the top right corner
+bool g_have = false; //a watch list was read
+bool g_show_state = false; //the player state in the top right corner
 
-const char* state_name(uint32_t st) {                // the Ghidra project's PlayerStates
+const char* state_name(uint32_t st) { //the Ghidra project's PlayerStates
     switch (st) {
         case 0x00: return "Standing";
         case 0x02: return "Moving";
@@ -123,7 +120,7 @@ bool begin_table(const char* id) {
     return true;
 }
 
-void group(const WatchGroup& g) {                   // the list as the file groups it
+void group(const WatchGroup& g) { //the list as the file groups it
     if (!g.watches.empty() && begin_table("w")) {
         for (auto& w : g.watches) row(w);
         ImGui::EndTable();
@@ -139,7 +136,7 @@ void group(const WatchGroup& g) {                   // the list as the file grou
     }
 }
 
-void filtered(const WatchGroup& g, const std::string& path) {   // with a filter: every match, flat
+void filtered(const WatchGroup& g, const std::string& path) { //with a filter it's every match, flat
     for (auto& w : g.watches)
         if (matches(path + "/" + w.label)) row(w);
     for (auto& sub : g.groups) filtered(sub, path + "/" + sub.name);
@@ -148,9 +145,9 @@ void filtered(const WatchGroup& g, const std::string& path) {   // with a filter
 void init(SDL_Window* win, void* gl) {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
-    ImGui::GetIO().IniFilename = nullptr;            // no imgui.ini left in the folder
+    ImGui::GetIO().IniFilename = nullptr; //no imgui.ini left in the folder
     ImGui::StyleColorsDark();
-    ImGui::GetIO().Fonts->AddFontDefault();          // the window's; the settings menu adds its own after it
+    ImGui::GetIO().Fonts->AddFontDefault(); //the window's font, the settings menu adds its own after it
     g_show_state = std::getenv("GE_STATE") != nullptr;
     ImGui_ImplSDL3_InitForOpenGL(win, gl);
     ImGui_ImplOpenGL3_Init("#version 450");
@@ -202,7 +199,7 @@ void watches() {
 
 void draw() {
     if (!overlay_open() && !g_show_state) return;
-    // with only the state shown the cursor stays the window's (hidden over the picture)
+    //with only the state shown the cursor stays hidden over the picture
     ImGuiIO& io = ImGui::GetIO();
     if (overlay_open()) io.ConfigFlags &= ~ImGuiConfigFlags_NoMouseCursorChange;
     else io.ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
@@ -217,7 +214,7 @@ void draw() {
 }
 #endif
 
-}  // namespace
+} //namespace
 
 bool overlay_open() { return g_open || settings_open(); }
 
@@ -231,4 +228,4 @@ void install_overlay() {
 #endif
 }
 
-}  // namespace ge
+} //namespace ge

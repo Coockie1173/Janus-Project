@@ -1,4 +1,4 @@
-// GoldenEye 007 — the frame rate: the engine's limiter, raised and kept steady.
+//the frame rate: the engine's limiter, raised and kept steady
 #include "ge.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
@@ -10,29 +10,25 @@
 
 namespace ge {
 
-// The frame rate. The engine is variable-rate: each pass of its main loop
-// (ge_frame_tick) runs a frame when OSGetTime has passed the next frame's
-// time, and moves its current rate (a float, frames a second, from which
-// every time step is derived) one up when the frame was on time and one down
-// when it was late, between a lowest and a highest rate. The game sets both
-// to 30 in play. Raising the highest is all an unlock takes below VI's
-// 59.94 Hz; above it the frame also has to be shown, and the game waits for
-// a retrace per frame, so VI itself is run faster (g_vi_speed).
-const uint32_t kFpsMax = 0x806E9E44;                 // -0x713C(r13); the lowest is the word before
-const uint32_t kFpsNow = 0x806E9E4C;                 // -0x7134(r13): the current rate, a float
-std::atomic<uint32_t> g_fps{0};                      // 0: the game's own 30
-uint32_t g_fps_applied = 0;                          // what the game's thread has set itself up for
-uint32_t g_max_written = 0;                          // the highest rate last given to the game: ours to replace again
+//the engine is variable-rate: ge_frame_tick runs a frame once OSGetTime passes the next
+//frame's time, then moves its current rate (a float every time step comes from) one up if
+//the frame was on time and one down if it was late, between a lowest and a highest rate
+//the game sets both to 30 in play, so raising the highest is the whole unlock
+const uint32_t kFpsMax = 0x806E9E44; //-0x713C(r13), the lowest is the word before
+const uint32_t kFpsNow = 0x806E9E4C; //-0x7134(r13), the current rate as a float
+std::atomic<uint32_t> g_fps{0}; //0 is the game's own 30
+uint32_t g_fps_applied = 0; //what the game's thread has set itself up for
+uint32_t g_max_written = 0; //the highest rate we last wrote, so we know it's ours to replace
 bool g_fps_log = false;
 PPCFunc orig_tick = nullptr, orig_vi_wait = nullptr;
 
-// OSSleepTicks(OSTime): the thread asleep on an alarm, the others running.
+//OSSleepTicks(OSTime), sleeps this thread on an alarm so the others can run
 const uint32_t kOSSleepTicks = 0x804BBE30;
-const uint32_t kNextFrame = 0x806EBEE8;              // -0x5098(r13): the next frame's time, 64-bit ticks
+const uint32_t kNextFrame = 0x806EBEE8; //-0x5098(r13), the next frame's time in 64-bit ticks
 PPCFunc sleep_ticks = nullptr;
 
 void guest_sleep(PPCContext& c, uint64_t ticks) {
-    if (!sleep_ticks || !(c.msr & 0x8000)) return;   // only with interrupts on: the alarm ends it
+    if (!sleep_ticks || !(c.msr & 0x8000)) return; //only with interrupts on, the alarm is what ends it
     uint32_t r3 = c.r[3], r4 = c.r[4];
     c.r[3] = (uint32_t)(ticks >> 32);
     c.r[4] = (uint32_t)ticks;
@@ -41,15 +37,13 @@ void guest_sleep(PPCContext& c, uint64_t ticks) {
     c.r[4] = r4;
 }
 
-// The rate as it is now (the settings menu changes it in play), taken up by
-// the game's thread between two frames. Up to 60 frames are shown at VI's
-// retrace. Above VI's rate VI stays as it is (the SDK and the game time
-// things by retraces); frames are shown as they are drawn, and the game's
-// wait for a retrace once a frame, which is also where its other threads get
-// to run, becomes a sleep until the next frame is due (vi_wait).
+//picks up the current rate (the settings menu can change it in play) between two frames
+//up to 60 we show frames at VI's retrace, above that VI stays as it is since the SDK
+//and the game time things by retraces: frames get shown as they're drawn, and the game's
+//wait for a retrace becomes a sleep until the next frame is due (vi_wait)
 void apply_rate(uint32_t fps) {
     g_fps_applied = fps;
-    g_gx_early_done = fps > kGameFps;                // the game's thread does not wait for the renderer
+    g_gx_early_done = fps > kGameFps; //the game's thread doesn't wait for the renderer
     g_present_on_frame = fps > 60;
     rt_log("goldeneye: frame rate up to %u%s", fps ? fps : kGameFps, fps > 60 ? " (frames shown as drawn, not at VI's retrace)" : "");
 }
@@ -62,7 +56,7 @@ void vi_wait(PPCContext& c) {
 void frame_tick(PPCContext& c) {
     uint32_t fps = g_fps;
     if (fps != g_fps_applied) apply_rate(fps);
-    // the game's highest rate raised to ours; and what was ours brought to the new one
+    //raise the game's highest rate to ours, or update it if it was already ours
     uint32_t want = fps ? fps : kGameFps, max = ld32(kFpsMax);
     if (max && max != want && (max < want || max == g_max_written)) {
         st32(kFpsMax, want);
@@ -70,18 +64,18 @@ void frame_tick(PPCContext& c) {
         g_max_written = want;
     }
     if (sleep_ticks && fps > 60) {
-        // the limiter spins until the next frame's time: sleep up to just before it
+        //the limiter spins until the next frame's time, so sleep up to just before it
         uint64_t next = (uint64_t)ld32(kNextFrame) << 32 | ld32(kNextFrame + 4), now = os_tb_now();
-        uint64_t margin = tb_hz() / 5000;            // 0.2 ms
+        uint64_t margin = tb_hz() / 5000; //0.2 ms
         if (next > now + margin && next - now < tb_hz()) guest_sleep(c, next - now - margin);
     }
-    static uint32_t frame = 0;                       // the tick spins between frames: look once a frame
+    static uint32_t frame = 0; //the tick spins between frames, only look once a frame
     uint32_t f = ld32(kFrameCount);
     if (f != frame) {
         frame = f;
         each_frame(f);
     }
-    static const char* hitch = std::getenv("GE_HITCH");      // "t,t,...": a 60 ms stall at those times (a test)
+    static const char* hitch = std::getenv("GE_HITCH"); //"t,t,...", a 60 ms stall at those times to test with
     if (hitch && f != 0) {
         static auto t0 = std::chrono::steady_clock::now();
         static const char* q = hitch;
@@ -92,14 +86,11 @@ void frame_tick(PPCContext& c) {
         }
     }
     orig_tick(c);
-    // One long frame must not cost seconds. When a frame comes more than three
-    // frame times late (21 ms at 144: a shader compiled, a file read, the
-    // system busy) the limiter starts over from its lowest rate, and then
-    // climbs back by 1 a frame: 144 becomes 17, and is 144 again a hundred
-    // frames later. Here the rate is put back to where it was, less 1, as a
-    // late frame costs; and a rate that is climbing climbs 4 a frame. A
-    // machine that really cannot hold the rate still comes down, by 1 for
-    // every late frame, as the game means it to.
+    //one long frame shouldn't cost seconds: when a frame is more than three frame times late
+    //(a shader compile, a file read) the limiter restarts from its lowest rate and climbs back
+    //by 1 a frame, so 144 turns into 17 for a hundred frames
+    //so put the rate back to where it was minus 1, and let a climbing rate climb 4 a frame
+    //a machine that really can't hold the rate still comes down 1 per late frame
     if (fps) {
         static float before = 0;
         static const bool keep = !std::getenv("GE_NO_RATE_FIX");
@@ -117,7 +108,7 @@ void frame_tick(PPCContext& c) {
         }
         before = rate;
     }
-    if (g_fps_log) {                                 // GE_TRACE: frames run and the engine's rate, every 5 s
+    if (g_fps_log) { //GE_TRACE, frames run and the engine's rate every 5 s
         static auto t0 = std::chrono::steady_clock::now();
         static uint32_t n0 = ld32(kFrameCount);
         auto now = std::chrono::steady_clock::now();
@@ -137,9 +128,8 @@ void frame_tick(PPCContext& c) {
 void install_fps() {
     orig_tick = ppc_hook("ge_frame_tick", frame_tick);
     if (!orig_tick) rt_die("goldeneye: ge_frame_tick is not hooked in this build");
-    // GE_FPS: the rate the game runs at. "auto" (what launch.sh gives) is 60,
-    // or the screen's rate where that is lower: the game holds 60 everywhere,
-    // and not much more in its heavy levels.
+    //"auto" (what launch.sh passes) is 60, or the screen's rate if that's lower
+    //the game holds 60 everywhere and not much more in its heavy levels
     g_fps_log = std::getenv("GE_TRACE") != nullptr;
     sleep_ticks = ppc_lookup(kOSSleepTicks);
     orig_vi_wait = ppc_hook("VIWaitForRetrace", vi_wait);
@@ -162,4 +152,4 @@ void install_fps() {
 uint32_t fps_limit() { return g_fps ? g_fps.load() : kGameFps; }
 void set_fps_limit(uint32_t fps) { g_fps = fps <= kGameFps ? 0 : std::min(fps, 1000u); }
 
-}  // namespace ge
+} //namespace ge

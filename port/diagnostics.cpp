@@ -1,4 +1,4 @@
-// GoldenEye 007 — the sampling profiler (POSIX). crashes are in crashdump.cpp
+//the sampling profiler (POSIX only), crashes are in crashdump.cpp
 #include "ge.h"
 #include <algorithm>
 #include <chrono>
@@ -19,12 +19,9 @@
 namespace ge {
 
 #ifndef _WIN32
-// GE_PROFILE: SIGPROF every millisecond of CPU time, on whichever thread is
-// running; the handler keeps the program counter as an offset in the
-// executable, and in FILE.stacks the host's call stack (kDepth return
-// addresses a sample, innermost first: recompiled functions are frames like
-// any other), for the time a function takes with what it calls. FILE.maps
-// says where the libraries are.
+//GE_PROFILE: SIGPROF every millisecond of CPU time on whichever thread is running
+//a sample is the pc as an offset in the executable, FILE.stacks gets the host call stack
+//(kDepth return addresses, innermost first) and FILE.maps says where the libraries are
 extern "C" char __executable_start;
 extern "C" char _end;
 std::atomic<uint32_t> g_nsamples{0};
@@ -36,14 +33,14 @@ uint64_t* g_stacks = nullptr;
 void on_prof(int, siginfo_t*, void* uc) {
     uintptr_t pc = (uintptr_t)((ucontext_t*)uc)->uc_mcontext.gregs[REG_RIP];
     uint32_t i = g_nsamples.fetch_add(2, std::memory_order_relaxed);
-    if (i + 1 < kMaxSamples) {                       // pairs: the thread, the offset (outside the executable: a huge one)
+    if (i + 1 < kMaxSamples) { //pairs of thread and offset
         g_samples[i] = (uint32_t)syscall(SYS_gettid);
 		//anything outside our own image gets one marker value, a library's address cut to
 		//32 bits can land right inside the executable's range and get a function's name
 		const bool Ours{ pc >= (uintptr_t)&__executable_start && pc < (uintptr_t)&_end };
 		g_samples[i + 1] = Ours ? (uint32_t)(pc - (uintptr_t)&__executable_start) : 0xFFFFFFFFu;
         void* frames[kDepth + 3];
-        int n = backtrace(frames, kDepth + 3);       // the first ones are this handler and the signal's frame
+        int n = backtrace(frames, kDepth + 3); //the first frames are this handler and the signal's
         uint64_t* st = g_stacks + (size_t)(i / 2) * kDepth;
         int from = 0;
         while (from < n && (uintptr_t)frames[from] != pc) ++from;
@@ -52,9 +49,8 @@ void on_prof(int, siginfo_t*, void* uc) {
     }
 }
 
-// A build instrumented for profile-guided optimisation (make pgo) writes its
-// counts when the process exits normally, which this one never does: they
-// are written every 15 seconds instead.
+//a pgo build (make pgo) only writes its counts on a normal exit, which never happens here
+//so write them every 15 seconds instead
 extern "C" int __llvm_profile_write_file(void) __attribute__((weak));
 void install_pgo_writer() {
     if (!__llvm_profile_write_file) return;
@@ -74,7 +70,7 @@ void install_profiler() {
     g_samples = new uint32_t[kMaxSamples];
     g_stacks = new uint64_t[(size_t)(kMaxSamples / 2) * kDepth]();
     void* warm[4];
-    backtrace(warm, 4);                              // the unwinder loaded now, not in the handler
+    backtrace(warm, 4); //loads the unwinder now so it doesn't happen in the handler
     struct sigaction sa = {};
     sa.sa_sigaction = on_prof;
     sa.sa_flags = SA_SIGINFO | SA_RESTART;
@@ -107,4 +103,4 @@ void install_profiler() {
 void install_profiler() {}
 #endif
 
-}  // namespace ge
+} //namespace ge

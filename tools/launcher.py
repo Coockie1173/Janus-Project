@@ -25,12 +25,12 @@ import extract_disc
 
 ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 GAME_EXE = os.path.join(ROOT, "GoldenEye.exe")
-PORTABLE = os.path.exists(GAME_EXE)              # the Windows package: no build folder, no launch.sh
+PORTABLE = os.path.exists(GAME_EXE) #the Windows package: no build folder, no launch.sh
 STATE = ROOT if PORTABLE else os.path.join(ROOT, "build")
 KEYS = os.path.join(STATE, "keys.txt")
 KEYS_DEFAULT = os.path.join(ROOT, "config", "keys.txt")
 SETTINGS = os.path.join(STATE, "settings.env")
-# the frame rates the slider stops at (the game's own settings menu, port/settings.cpp, has the same)
+#the frame rates the slider stops at (the game's own settings menu, port/settings.cpp, has the same)
 FPS_STOPS = [30, 40, 50, 60, 75, 90, 100, 120, 144, 165, 180, 200, 240, 275]
 FPS_MAX = FPS_STOPS[-1]
 CHEATS = os.path.join(ROOT, "config", "gecko", "cheats.txt")
@@ -39,7 +39,7 @@ GAME = os.path.join(ROOT, "game")
 RUN_LOG = os.path.join(STATE, "run.log")
 IMAGE_TYPES = [("Wii disc images", "*.rvz *.iso *.wbfs *.wia"), ("All files", "*")]
 
-# what the game does with each Classic Controller button (its default layout), and the key file's name for it
+#what the game does with each Classic Controller button (its default layout), and the key file's name for it
 ACTIONS = [
     ("Fire", "ZR"), ("Aim down the sight", "ZL"), ("Melee attack", "L"), ("Throw grenade  (doubles as R button)", "R"),
     ("Reload", "Y"), ("Crouch  (menus: select)", "A"), ("Action / sprint  (menus: back)", "B"),
@@ -53,7 +53,7 @@ DEFAULTS = {"fps": "auto", "fov": "49", "mouse": "1.0", "online": "1", "fullscre
             "mouseinvert": "0", "mouseeverywhere": "0", "skipcutscenes": "0", "leveltimer": "1", "extrasmenu": "0",
             "crashdump": "1", "crashmem": "0"}
 
-# Tk's key names -> SDL's (the key file's)
+#Tk's key names -> SDL's (the key file's)
 TK_TO_SDL = {
     "Return": "Return", "space": "Space", "Tab": "Tab", "BackSpace": "Backspace", "Delete": "Delete",
     "Shift_L": "Left Shift", "Shift_R": "Right Shift", "Control_L": "Left Ctrl", "Control_R": "Right Ctrl",
@@ -79,7 +79,7 @@ def sdl_name(keysym):
     return None
 
 
-# ---- the files ------------------------------------------------------------------------------------
+#---- the files ------------------------------------------------------------------------------------
 def load_settings():
     s = dict(DEFAULTS)
     try:
@@ -133,7 +133,7 @@ def save_keys(lines, binds):
     where = classic_lines(lines)
     for _, name in ACTIONS:
         if name in where:
-            head = lines[where[name]].split("=", 1)[0]       # the file's own spacing
+            head = lines[where[name]].split("=", 1)[0] #the file's own spacing
             lines[where[name]] = (head + "= " + ", ".join(binds[name])).rstrip()
         else:
             lines.append(f"{name} = " + ", ".join(binds[name]))
@@ -158,7 +158,7 @@ def load_cheats(path):
 
 
 def save_cheats(cheats, ticked):
-    # only the ticked ones end up in the file the game reads, an empty file means no cheats
+    #only the ticked ones end up in the file the game reads, an empty file means no cheats
     os.makedirs(os.path.dirname(CHEATS_ON), exist_ok=True)
     with open(CHEATS_ON, "w") as f:
         for name, code, _ in cheats:
@@ -179,7 +179,7 @@ def refresh_rate():
     return "?"
 
 
-# ---- the window -----------------------------------------------------------------------------------
+#---- the window -----------------------------------------------------------------------------------
 def run_gui():
     import queue
     import threading
@@ -199,12 +199,12 @@ def run_gui():
     book = ttk.Notebook(root)
     book.pack(fill="both", expand=True, padx=10, pady=10)
 
-    # -- settings
+    #settings
     st = ttk.Frame(book)
     book.add(st, text="Settings")
 
     hz = refresh_rate()
-    # the slider goes over the stops, 60 is the default and is saved as "auto"
+    #the slider goes over the stops, 60 is the default and is saved as "auto"
     now = int(settings["fps"]) if settings["fps"].isdigit() else 60
     fps = tk.DoubleVar(value=min(range(len(FPS_STOPS)), key=lambda i: abs(FPS_STOPS[i] - now)))
     fps_text = tk.StringVar()
@@ -258,7 +258,7 @@ def run_gui():
 
     online = tk.BooleanVar(value=settings["online"] == "1")
     fullscreen = tk.BooleanVar(value=settings["fullscreen"] == "1")
-    if not PORTABLE:                              # the Windows build has no network and no crash dumps yet
+    if not PORTABLE: #the Windows build has no network and no crash dumps yet
         ttk.Checkbutton(st, text="Online: use the community server (config/hosts.txt)", variable=online).grid(
             row=3, column=0, columnspan=2, sticky="w", **pad)
     ttk.Checkbutton(st, text="Fullscreen  (F11 or Alt+Enter switches in the game)", variable=fullscreen).grid(
@@ -275,7 +275,7 @@ def run_gui():
         ttk.Checkbutton(st, text="...with the game's memory in each dump (88 MB)",
                         variable=crashmem).grid(row=8, column=0, columnspan=2, sticky="w", padx=(30, 8))
 
-    # -- controls
+    #controls
     ct = ttk.Frame(book)
     book.add(ct, text="Controls")
     ttk.Label(ct, text="The mouse looks; the wheel changes weapon. In menus the Fire button selects and the Aim "
@@ -301,7 +301,7 @@ def run_gui():
         if key is None:
             status.set("Cancelled.")
             return
-        for other in binds:                       # a key does one thing
+        for other in binds: #a key does one thing
             if other != name and key in binds[other]:
                 binds[other].remove(key)
                 show(other)
@@ -361,7 +361,7 @@ def run_gui():
     ttk.Button(bottom, text="Defaults", command=reset_keys).pack(side="left")
     ttk.Label(bottom, textvariable=status).pack(side="left", padx=10)
 
-    # -- enhancements
+    #enhancements
     #the F1 menu's Enhancements page has the same ones
     en = ttk.Frame(book)
     book.add(en, text="Enhancements")
@@ -374,14 +374,14 @@ def run_gui():
     ttk.Label(en, text="The hud shows the time played in the level.",
               foreground="gray", wraplength=520, justify="left").grid(row=3, column=0, sticky="w", padx=(30, 8))
 
-    # -- cheats
+    #cheats
     #the tab just lists whatever is in config/gecko/cheats.txt, so adding a cheat is adding it to that file
     ch = ttk.Frame(book)
     book.add(ch, text="Cheats")
     cheats = load_cheats(CHEATS)
     already_on = {name for name, _, _ in load_cheats(CHEATS_ON)}
     cheat_vars = {}
-    # the port's own cheats (the F1 menu's Cheats page has them too), then the Gecko codes
+    #the port's own cheats (the F1 menu's Cheats page has them too), then the Gecko codes
     always_mouse = tk.BooleanVar(value=settings["mouseeverywhere"] == "1")
     ttk.Checkbutton(ch, text="Always Enable Mouse", variable=always_mouse).grid(row=0, column=0, sticky="w", **pad)
     ttk.Label(ch, text="The mouse turns the view where the game locks it: cutscenes, melee, climbing, death.",
@@ -400,7 +400,7 @@ def run_gui():
     if not cheats:
         ttk.Label(ch, text="No codes in there yet.", foreground="gray").grid(row=5, column=0, sticky="w", **pad)
 
-    # -- play
+    #play
     result = {"play": False}
 
     def collect():
@@ -421,7 +421,7 @@ def run_gui():
         save_keys(lines, binds)
         save_cheats(cheats, {name for name, var in cheat_vars.items() if var.get()})
 
-    # -- the game's files
+    #the game's files
     game_text = tk.StringVar()
 
     def game_changed():
@@ -459,7 +459,7 @@ def run_gui():
                 raise Stopped()
             news.put(("at", done, total, rel))
 
-        def work():                               # the disc is read off the window's thread
+        def work(): #the disc is read off the window's thread
             try:
                 extract_disc.extract(image, GAME, force, progress, lambda text: news.put(("say", text)))
                 news.put(("done", None))
@@ -517,7 +517,7 @@ def run_gui():
     return result["play"]
 
 
-# ---- the Windows package: what launch.sh does ------------------------------------------------------
+#---- the Windows package: what launch.sh does ------------------------------------------------------
 def run_game(args):
     """Start GoldenEye.exe with the saved settings and the command line over them; its exit code."""
     s = load_settings()
@@ -567,7 +567,7 @@ def run_game(args):
     if env.get("GE_GECKO_EXTRA"):
         extra.append(env["GE_GECKO_EXTRA"])
     if extra:
-        env["GE_GECKO_EXTRA"] = ":".join(extra)       # paths from the package's folder: no drive letters
+        env["GE_GECKO_EXTRA"] = ":".join(extra) #paths from the package's folder: no drive letters
     if not os.path.exists(KEYS):
         shutil.copy(KEYS_DEFAULT, KEYS)
     cmd = [GAME_EXE, "game", "--symbols", os.path.join("config", "symbols.tsv"), "--watch", "10"]
@@ -600,7 +600,7 @@ def main():
         if not args:
             try:
                 if not run_gui():
-                    return 0                         # closed without Play
+                    return 0 #closed without Play
             except Exception as e:
                 print(f"launcher: no window ({e}); starting with the saved settings", file=sys.stderr)
         return run_game(args)
@@ -615,10 +615,10 @@ def main():
         return 0 if same else 1
     try:
         play = run_gui()
-    except Exception as e:                       # no display, no Tk: the game starts with what is saved
+    except Exception as e: #no display, no Tk: the game starts with what is saved
         print(f"launcher: no window ({e}); starting with the saved settings", file=sys.stderr)
         return 0
-    return 0 if play else 3                      # 3: closed without Play
+    return 0 if play else 3 #3: closed without Play
 
 
 if __name__ == "__main__":

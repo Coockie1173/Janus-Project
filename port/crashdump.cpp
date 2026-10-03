@@ -1,4 +1,4 @@
-// GoldenEye 007 - crash dumps
+//crash dumps
 //
 //when the game dies (a host fault in recompiled code, the runtime giving up on something, an
 //abort) everything worth knowing gets written to build/crashes/<date>-<time>-<kind>/report.txt
@@ -6,11 +6,11 @@
 //chain, the crashing thread's registers and stack, the settings and the last log lines.
 //a stall (no new frame for 20 s) gets one too, without killing anything.
 //
-//    GE_CRASH_MEM=1   also write the guest's memory (mem1.bin, mem2.bin: 88 MB a dump)
-//    GE_CRASH_DIR=D   somewhere else than build/crashes
-//    GE_NO_CRASHDUMP=1  just the few lines on stderr, like before
-//    GE_CRASH_TEST=crash|die|stall[,seconds]  make one happen on the game's thread (10 s in by default)
-//                  also badstack (a crash with r1 pointing nowhere) and overflow (the host stack runs out)
+//GE_CRASH_MEM=1   also write the guest's memory (mem1.bin, mem2.bin: 88 MB a dump)
+//GE_CRASH_DIR=D   somewhere else than build/crashes
+//GE_NO_CRASHDUMP=1  just the few lines on stderr, like before
+//GE_CRASH_TEST=crash|die|stall[,seconds]  make one happen on the game's thread (10 s in by default)
+//also badstack (a crash with r1 pointing nowhere) and overflow (the host stack runs out)
 //
 //the dump is written from inside the signal handler, by a process that is already broken, so
 //it has to survive that: every part is written under a guard (a fault in one part skips that
@@ -56,8 +56,8 @@ namespace
 	bool g_WriteDumps{ true };
 	std::string g_DumpRoot{};
 	const size_t g_SignalStackSize{ 256u << 10 };
-	thread_local bool t_Dumping{ false };            //this thread is the one writing the dump
-	thread_local sigjmp_buf* t_Recover{ nullptr };   //where a fault inside a guarded part goes back to
+	thread_local bool t_Dumping{ false }; //this thread is the one writing the dump
+	thread_local sigjmp_buf* t_Recover{ nullptr }; //where a fault inside a guarded part goes back to
 
 	//one part of a dump. what it reads may be the very thing that's broken (a stack pointer
 	//into nowhere, a thread table half written): a fault in it comes back here through OnCrash
@@ -224,7 +224,7 @@ namespace
 			return {};
 		}
 		std::fprintf(Out, "GoldenEye 007 (SJBE52) %s dump, %s\n\n%s\n\n", Kind, Stamp, What);
-		std::fflush(Out);                                //whatever happens next, this much is on disk
+		std::fflush(Out); //whatever happens next, this much is on disk
 		Guarded(Out, "the game's state", [Out] { WriteGameState(Out); });
 
 		std::fprintf(Out, "\n== host ==\n");
@@ -300,7 +300,7 @@ namespace
 		{
 			if (t_Dumping)
 			{
-				_exit(128 + Sig);                            //the dump's own code faulted outside a guard
+				_exit(128 + Sig); //the dump's own code faulted outside a guard
 			}
 			WaitForTheDump();
 		}
@@ -344,7 +344,7 @@ namespace
 			{
 				return;
 			}
-			WaitForTheDump();                            //rt_die would end the process under the other thread's dump
+			WaitForTheDump(); //rt_die would end the process under the other thread's dump
 		}
 		t_Dumping = true;
 		alarm(10);
@@ -409,9 +409,9 @@ void crash_test()
 	}
 	if (std::strncmp(Test, "badstack", 8) == 0 && t_ppc != nullptr)
 	{
-		t_ppc->r[1] = 0x85000000u;                   //between MEM1 and MEM2: nothing is mapped there
+		t_ppc->r[1] = 0x85000000u; //between MEM1 and MEM2: nothing is mapped there
 	}
-	*(volatile uint32_t*)PPC_MEM(4) = 0;             //what a guest null pointer write looks like
+	*(volatile uint32_t*)PPC_MEM(4) = 0; //what a guest null pointer write looks like
 }
 
 //every thread that may crash wants its own stack for the handler: without one a stack that
@@ -420,7 +420,7 @@ void crash_thread_stack()
 {
 	stack_t Stack{};
 	Stack.ss_size = g_SignalStackSize;
-	Stack.ss_sp = std::malloc(Stack.ss_size);        //kept for as long as the thread lives
+	Stack.ss_sp = std::malloc(Stack.ss_size); //kept for as long as the thread lives
 	if (Stack.ss_sp != nullptr)
 	{
 		sigaltstack(&Stack, nullptr);
@@ -437,7 +437,7 @@ void install_crash_handler()
 	g_DumpRoot = Dir != nullptr ? Dir : "crashes";
 #endif
 	void* Warm[4];
-	backtrace(Warm, 4);                              //the unwinder loaded now, not while crashing
+	backtrace(Warm, 4); //the unwinder loaded now, not while crashing
 	crash_thread_stack();
 	g_rt_on_thread = crash_thread_stack;
 	struct sigaction Action = {};

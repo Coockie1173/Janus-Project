@@ -22,7 +22,7 @@ def newest_dump():
 
 
 def load_symbols():
-    # same idea as profile_report.py: offsets in the report are from __executable_start
+    #same idea as profile_report.py: offsets in the report are from __executable_start
     syms, base = [], 0
     out = subprocess.run(["nm", "-C", "-n", "--defined-only", EXE], capture_output=True, text=True).stdout
     for line in out.splitlines():
@@ -56,7 +56,7 @@ def main():
         name = syms[i][1] if i >= 0 else "?"
         out.append(f"  wiiboot+0x{off:x}  {name}+0x{base + off - syms[i][0]:x}" if i >= 0 else f"  wiiboot+0x{off:x}  ?")
 
-    # the crashing thread's chain is the first block of the guest threads section
+    #the crashing thread's chain is the first block of the guest threads section
     guest = []
     section = report.split("== guest threads ==", 1)[-1].split("thread ", 2)
     block = section[1] if len(section) > 1 else ""

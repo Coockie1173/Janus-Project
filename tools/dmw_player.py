@@ -13,10 +13,10 @@ import struct
 import sys
 
 GROUP = "Player struct (806EB698 ->)"
-SIZE = 0x720                      # where the dump stops looking like one object
+SIZE = 0x720 #where the dump stops looking like one object
 PTR = "806EB698"
 
-KNOWN = {                         # offset: (name, type) with f float, x hex word, d word, p pointer
+KNOWN = { #offset: (name, type) with f float, x hex word, d word, p pointer
     0x004: ("unk_004", "x"),
     0x00C: ("flags (halfword at +0xC)", "x"),
     0x060: ("-> into the controller object", "p"),

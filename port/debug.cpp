@@ -1,38 +1,27 @@
-// GoldenEye 007 — debugging aids for finding things in the running game.
+//debugging aids for finding things in the running game
+//times are seconds from start
 //
-//   GE_STICK="42-43:r1,0 45-46:l0,1"   between two times (seconds from start) hold a stick:
-//                                      r or l, then x,y in -1..1 (y up)
-//   GE_BUTTONS="66-66.3:0004 69-70:2000"  between two times hold Classic buttons (KPAD's bits, hex:
-//                                      ZR 0004, ZL 0080, R 0200, L 2000, a 0010, b 0040, x 0008, y 0020)
-//   GE_MOUSEMOVE="66-67:300,0"         between two times, mouse motion in pixels a second (x right,
-//                                      y down), as if the mouse moved: tests mouse look
-//   GE_SCAN="41,43.5,44.5,46.5,49"     snapshots of guest memory at those times; then floats
-//                                      are listed (build/scan.txt) that changed over each odd
-//                                      interval (1st->2nd, 3rd->4th...) and stood still over
-//                                      each even one: with GE_STICK turning the view in the odd
-//                                      intervals, the view's angles are among them
-//                                      (GE_SCANINT=1: raw words instead of floats)
-//   GE_POKE="50:80ABCDEF=f1.5 52:80ABCDEF+=f0.2"   at a time, store or add a float (f) or a
-//                                      word (x, hex)
-//   GE_PROBE="64:816F0270:build/cands.txt"   from a time on, for each address in the file (hex,
-//                                      one a line): add 0.35 to its float, wait 80 ms, and
-//                                      say whether the watched float followed; then put it
-//                                      back. Finds the value a derived one is computed from.
-//   GE_OBJ="806EB698:400:79,81.5,84.5"  the object a pointer points to: its first bytes (hex
-//                                      count) as words and floats at each time, to
-//                                      build/obj.txt
-//   GE_FINDPTR="66:80848000:808491A4"   at a time, every word of guest memory that holds an
-//                                      address in that range (who points at an object)
-//   GE_SETALL="62:49=80:80000000:94000000"  at a time, every float equal to the first value in the
-//                                      address range becomes the second (each one logged):
-//                                      which copy of a constant matters, by halving the range
-//   GE_WATCH="64:807807AC"             from a time on, who writes that guest word: the page is made
-//                                      read-only; a write to the word logs the host code address (as
-//                                      an offset in the executable: tools/profile_report.py names
-//                                      offsets given with --offsets) and the guest call chain, and
-//                                      every write to the page is let through by single-stepping
-//   GE_TRACEW="80776B10"               log that word whenever it changes (looked at 200 times a second)
-//   GE_PEEK="80ABCDEF,80ABCDF0"        log those floats every half second
+//GE_STICK="42-43:r1,0 45-46:l0,1" hold a stick (r or l, then x,y in -1..1 with y up)
+//GE_BUTTONS="66-66.3:0004 69-70:2000" hold classic buttons, KPAD's bits in hex
+//(ZR 0004, ZL 0080, R 0200, L 2000, a 0010, b 0040, x 0008, y 0020)
+//GE_MOUSEMOVE="66-67:300,0" fake mouse motion in pixels a second (x right, y down)
+//GE_SCAN="41,43.5,44.5,46.5,49" snapshots guest memory at those times, then lists the floats
+//(build/scan.txt) that changed over every odd interval and stood still over every even one
+//turn the view with GE_STICK in the odd ones and the view's angles are in there
+//GE_SCANINT=1 does it with raw words instead
+//GE_POKE="50:80ABCDEF=f1.5 52:80ABCDEF+=f0.2" store or add a float (f) or a hex word (x)
+//GE_PROBE="64:816F0270:build/cands.txt" for each address in the file add 0.35 to its float,
+//wait 80 ms, say if the watched float followed, then put it back
+//finds the value a derived one gets computed from
+//GE_OBJ="806EB698:400:79,81.5,84.5" dumps the object a pointer points to (hex byte count)
+//as words and floats at each time, into build/obj.txt
+//GE_FINDPTR="66:80848000:808491A4" every guest word holding an address in that range
+//GE_SETALL="62:49=80:80000000:94000000" every float equal to the first value in the range
+//becomes the second, to find which copy of a constant matters by halving the range
+//GE_WATCH="64:807807AC" who writes that guest word: the page goes read-only and a write logs
+//the host code offset (tools/profile_report.py --offsets names it) and the guest call chain
+//GE_TRACEW="80776B10" log that word whenever it changes (checked 200 times a second)
+//GE_PEEK="80ABCDEF,80ABCDF0" log those floats every half second
 #include "debug.h"
 #include "mem.h"
 #include "rt.h"
@@ -91,7 +80,7 @@ void scan_main(std::vector<double> times) {
     FILE* out = std::fopen("build/scan.txt", "w");
     if (!out) return;
     size_t n = snaps[0].size(), found = 0;
-    if (std::getenv("GE_SCANINT")) {                 // words instead (flags, counters): same rule, raw values
+    if (std::getenv("GE_SCANINT")) { //words instead (flags, counters), same rule on raw values
         for (size_t off = 0; off + 4 <= n; off += 4) {
             bool ok = true;
             for (size_t i = 0; ok && i + 1 < snaps.size(); ++i) {
@@ -114,8 +103,8 @@ void scan_main(std::vector<double> times) {
         for (size_t i = 0; ok && i + 1 < snaps.size(); ++i) {
             float a = fl(snaps[i], off), b = fl(snaps[i + 1], off);
             if (!std::isfinite(a) || !std::isfinite(b) || std::fabs(a) > 1e5f || std::fabs(b) > 1e5f) ok = false;
-            else if (i % 2 == 0) ok = std::fabs(a - b) > 1e-4f;       // turning: it moved
-            else ok = a == b;                                         // still: it did not
+            else if (i % 2 == 0) ok = std::fabs(a - b) > 1e-4f; //turning, so it moved
+            else ok = a == b; //still, so it didn't
         }
         if (!ok) continue;
         uint32_t addr = off < 0x01800000u ? 0x80000000u + (uint32_t)off : 0x90000000u + (uint32_t)(off - 0x01800000u);
@@ -226,7 +215,7 @@ void setall_main(double t, float from, float to, uint32_t lo, uint32_t hi) {
 }
 
 #ifndef _WIN32
-// ---- GE_WATCH ---------------------------------------------------------------------------------
+//GE_WATCH
 extern "C" char __executable_start;
 uint8_t* watch_page = nullptr;
 uint8_t* watch_addr = nullptr;
@@ -242,7 +231,7 @@ void watch_segv(int sig, siginfo_t* si, void* uc_) {
         else _exit(128 + sig);
         return;
     }
-    mem_watch_fault(a);                               // (the runtime may watch the page too)
+    mem_watch_fault(a); //the runtime may be watching the page too
     if (a >= watch_addr && a < watch_addr + 4 && watch_hits < 12) {
         ++watch_hits;
         uintptr_t pc = (uintptr_t)uc->uc_mcontext.gregs[REG_RIP];
@@ -250,7 +239,7 @@ void watch_segv(int sig, siginfo_t* si, void* uc_) {
         os_report_running(10);
     }
     mprotect(watch_page, 4096, PROT_READ | PROT_WRITE);
-    uc->uc_mcontext.gregs[REG_EFL] |= 0x100;          // one instruction, then protect again
+    uc->uc_mcontext.gregs[REG_EFL] |= 0x100; //one instruction, then protect again
 }
 void watch_trap(int, siginfo_t*, void* uc_) {
     ucontext_t* uc = (ucontext_t*)uc_;
@@ -298,14 +287,14 @@ void peek_main(std::vector<uint32_t> addrs) {
     }
 }
 
-}  // namespace
+} //namespace
 
 void debug_classic(ClassicState& s) {
     double t = now_s();
     for (auto& p : presses)
         if (t >= p.a && t < p.b) {
             s.buttons |= p.bits;
-            if (p.bits & 0x2000) s.lt = 1.0f;         // L and R are also analogue triggers
+            if (p.bits & 0x2000) s.lt = 1.0f; //L and R are also analogue triggers
             if (p.bits & 0x0200) s.rt = 1.0f;
         }
     for (auto& h : holds)
@@ -323,7 +312,7 @@ void debug_mouse(float& dx, float& dy) {
         if (t >= h.a && t < h.b) { dx += h.x * (float)dt; dy += h.y * (float)dt; }
 }
 
-// GE_TRACELOOK=1: the look input vectors (controller+0x968, +0x978) after ge_look_input, when they change.
+//GE_TRACELOOK=1 logs the look input vectors (controller+0x968, +0x978) after ge_look_input when they change
 PPCFunc orig_look_trace = nullptr;
 void look_trace(PPCContext& c) {
     uint32_t ctrl = c.r[3], pad = c.r[4];
@@ -403,7 +392,7 @@ void debug_install() {
             p.t = std::strtod(q, &end);
             p.addr = (uint32_t)std::strtoul(end + 1, &end, 16);
             if (*end == '+') { p.add = true; ++end; }
-            ++end;                                    // '='
+            ++end; //'='
             p.is_float = *end == 'f';
             if (p.is_float) p.f = std::strtof(end + 1, &end);
             else p.x = (uint32_t)std::strtoul(end + 1, &end, 16);

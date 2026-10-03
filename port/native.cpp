@@ -1,41 +1,39 @@
-// GoldenEye 007 — the engine's small math routines, written for the host.
+//the engine's small math routines, written for the host
 //
-// The game's thread spends its time thinly over thousands of functions; the
-// few leaves that stand out are Eurocom's hand-written paired-single routines
-// (skinning, clip codes, collision tests, vector helpers). Recompiled, each
-// paired-single instruction is two doubles rounded to single and the saved
-// registers go through guest memory; here they are plain float code doing
-// what the instructions do, in the same order (a multiply-add is fused, as on
-// the console, where the host has it).
+//the game's time is spread thin over thousands of functions, the few leaves that stand out
+//are Eurocom's hand-written paired-single routines (skinning, clip codes, collision tests)
+//recompiled, every paired-single instruction is two doubles rounded to single
+//here they're plain float code doing the same thing in the same order (multiply-adds fused
+//like on the console)
 //
-//     GE_NATIVE=0      the recompiled routines instead
-//     GE_NATIVE=check  run both on every call and count the differences (slow)
+//GE_NATIVE=0 use the recompiled routines instead
+//GE_NATIVE=check run both on every call and count the differences (slow)
 //
-// A routine's volatile registers (r0, r3-r12, f0-f13, ctr) are left as they
-// were apart from its result: its callers are compiled C.
+//volatile registers (r0, r3-r12, f0-f13, ctr) are left alone apart from the result,
+//the callers are compiled C so that's fine
 #include "ge.h"
 #include <cmath>
 #include <cstdlib>
 #include <utility>
 #include <vector>
 
-#pragma STDC FP_CONTRACT OFF                         // only the multiply-adds written as such are fused
+#pragma STDC FP_CONTRACT OFF //only the multiply-adds written as such are fused
 
 namespace ge {
 namespace {
 
 inline float F(uint32_t a) { return as_f32(ld32r(a)); }
 inline void S(uint32_t a, float v) { st32r(a, as_u32(v)); }
-inline float madd(float a, float c, float b) {       // a * c + b
+inline float madd(float a, float c, float b) { //a * c + b
 #ifdef __FMA__
     return __builtin_fmaf(a, c, b);
 #else
     return (float)((double)a * (double)c + (double)b);
 #endif
 }
-inline bool ram(uint32_t a) { return !PPC_IS_IO(a); }   // memory or the locked cache: not a register
+inline bool ram(uint32_t a) { return !PPC_IS_IO(a); } //memory or the locked cache, not a register
 
-// a quantised element as psq_l reads it and psq_st writes it (a GQR's type and scale)
+//a quantised element as psq_l reads it and psq_st writes it (a GQR's type and scale)
 struct Quant {
     uint32_t type; float k; int size;
     Quant(uint32_t t, uint32_t scale6, bool load) : type(t) {
@@ -70,18 +68,18 @@ inline Quant gqr_store(const PPCContext& c, int i) { return Quant(c.gqr[i] & 7, 
 struct Routine {
     const char* name;
     PPCFunc native;
-    uint32_t (*out)(const PPCContext&, uint32_t* len);   // where it writes (for the check)
-    int kind;                                            // 0 floats, 1 skinned vertices, 2 words; +8: no result in r3
-    uint32_t state = 0, state_len = 0;                   // bytes it reads and changes: put back between the two runs
+    uint32_t (*out)(const PPCContext&, uint32_t* len); //where it writes (for the check)
+    int kind; //0 floats, 1 skinned vertices, 2 words. +8 means no result in r3
+    uint32_t state = 0, state_len = 0; //bytes it reads and changes, put back between the two runs
     PPCFunc orig = nullptr;
     uint64_t calls = 0, differ = 0;
 };
 extern Routine g_routines[];
 
-// ---- ge_box_clip_codes (803AB100): (4x4 matrix, box {min xyz, -, max xyz}, out[2]) -------------
-// The box's eight corners through the matrix; a corner's six bits say which of
-// x, y, z is beyond +w or -w. out[0]: the four corners at min z, a byte each
-// (bit 0 the max x one, bit 1 the max y one); out[1]: those at max z.
+//ge_box_clip_codes (803AB100): (4x4 matrix, box {min xyz, -, max xyz}, out[2])
+//the box's eight corners through the matrix, a corner's six bits say which of x, y, z is
+//beyond +w or -w. out[0] is the four corners at min z, a byte each (bit 0 the max x one,
+//bit 1 the max y one), out[1] the ones at max z
 void box_clip_codes(PPCContext& c) {
     uint32_t m = c.r[3], b = c.r[4], o = c.r[5];
     float M[16];
@@ -102,12 +100,12 @@ void box_clip_codes(PPCContext& c) {
     }
 }
 
-// ---- ge_skin1 (803A9FA0), ge_skin2 (803AA2E4) --------------------------------------------------
-// (n, 3x4 matrix, in, out[, -, second matrix, weights]) -> the end of out. A
-// vertex is 16 bytes: a position (floats), a normal (three elements quantised
-// by GQR7) and a fourth element, written as the sum the paired halves leave
-// there. Two bones: the position is blended by the pair of weights (GQR6, 4
-// bytes a vertex); the normal takes the first matrix and the first weight only.
+//ge_skin1 (803A9FA0), ge_skin2 (803AA2E4)
+//(n, 3x4 matrix, in, out[, -, second matrix, weights]) -> the end of out
+//a vertex is 16 bytes: a position (floats), a normal (three elements quantised by GQR7)
+//and a fourth element that ends up as the sum the paired halves leave there
+//with two bones the position is blended by the pair of weights (GQR6, 4 bytes a vertex),
+//the normal only takes the first matrix and the first weight
 struct Mtx34 {
     float a[12];
     explicit Mtx34(uint32_t p) { for (int i = 0; i < 12; ++i) a[i] = F(p + 4 * i); }
@@ -154,7 +152,7 @@ void skin(PPCContext& c, bool two) {
 void skin1(PPCContext& c) { skin(c, false); }
 void skin2(PPCContext& c) { skin(c, true); }
 
-// ---- ge_plane_ray (803AB2B4): (plane {n, d}, f1 epsilon, out t, origin, direction) -> hit? -----
+//ge_plane_ray (803AB2B4): (plane {n, d}, f1 epsilon, out t, origin, direction) -> hit?
 void plane_ray(PPCContext& c) {
     uint32_t pl = c.r[3], o = c.r[5], d = c.r[6];
     float nx = F(pl), ny = F(pl + 4), nz = F(pl + 8);
@@ -162,13 +160,13 @@ void plane_ray(PPCContext& c) {
     c.r[3] = 0;
     if (std::fabs((double)den) < c.f[1]) return;
     float num = -madd(nz, F(o + 8), madd(ny, F(o + 4), madd(nx, F(o), F(pl + 12))));
-    float r = (float)(1.0 / (double)den);            // fres, then one Newton step
+    float r = (float)(1.0 / (double)den); //fres, then one Newton step
     float inv = madd(r, madd(-r, den, F(c.r[2] - 0x2538)), r);
     S(c.r[4], num * inv);
     c.r[3] = 1;
 }
 
-// ---- ge_tri_contains (803AB324): (-, a, b, c, point, normal) -> inside all three edges? --------
+//ge_tri_contains (803AB324): (-, a, b, c, point, normal) -> inside all three edges?
 void tri_contains(PPCContext& c) {
     float v[3][3], p[3], n[3];
     const uint32_t src[3] = {c.r[4], c.r[5], c.r[6]};
@@ -177,7 +175,7 @@ void tri_contains(PPCContext& c) {
         p[i] = F(c.r[7] + 4 * i);
         n[i] = F(c.r[8] + 4 * i);
     }
-    static const int from[3] = {2, 0, 1}, to[3] = {0, 1, 2};   // the edges c>a, a>b, b>c; the point from a, b, c
+    static const int from[3] = {2, 0, 1}, to[3] = {0, 1, 2}; //the edges c>a, a>b, b>c and the point from a, b, c
     c.r[3] = 0;
     for (int e = 0; e < 3; ++e) {
         const float* a = v[from[e]];
@@ -190,7 +188,7 @@ void tri_contains(PPCContext& c) {
     c.r[3] = 1;
 }
 
-// ---- ge_vec4_transform (800164B0): v = M v; ge_vec4_sub (80014CE0): out = a - b ----------------
+//ge_vec4_transform (800164B0): v = M v; ge_vec4_sub (80014CE0): out = a - b
 void vec4_transform(PPCContext& c) {
     uint32_t v = c.r[3], m = c.r[4];
     float x = F(v), y = F(v + 4), z = F(v + 8), w = F(v + 12), o[4];
@@ -205,8 +203,8 @@ void vec4_sub(PPCContext& c) {
     for (int k = 0; k < 4; ++k) S(o + 4 * k, t[k]);
 }
 
-// ---- ge_segment_closest (8033C7B0): (segment {origin, direction}, point, out) ------------------
-// -> 1 the origin, 2 a point between, 3 the end (vectors of four floats; the dot products take three)
+//ge_segment_closest (8033C7B0): (segment {origin, direction}, point, out)
+//-> 1 the origin, 2 a point between, 3 the end (vectors of four floats; the dot products take three)
 void segment_closest(PPCContext& c) {
     uint32_t sg = c.r[3], pt = c.r[4], out = c.r[5];
     float o[4], d[4], p[4], zero = F(c.r[2] - 0x2E04);
@@ -230,13 +228,13 @@ void segment_closest(PPCContext& c) {
     c.r[3] = 2;
 }
 
-// ---- ge_matrix_flush (80297E80) ----------------------------------------------------------------
+//ge_matrix_flush (80297E80)
 //the renderer keeps its matrices in one block at 80641F60, 0x40 apart: three "outer" ones
 //(A0..A2), the model matrix M and another one N, then the products P = A * M and Q = P * N.
 //dirty bytes at 806EC2BC.. say which products to redo. called for pretty much every object
 //drawn, and recompiled it is six 4x4 multiplies in emulated paired singles.
 const uint32_t kMtxBlock = 0x80641F60;
-const uint32_t kMtxDirty = 0x806EC2BC;               //+0 the Qs, +1 everything, +2 P0, +3 P1, +5 P2
+const uint32_t kMtxDirty = 0x806EC2BC; //+0 the Qs, +1 everything, +2 P0, +3 P1, +5 P2
 
 void MatrixMultiply(uint32_t out, uint32_t a, uint32_t m)
 {
@@ -288,7 +286,7 @@ void MatrixFlush(PPCContext&)
 	st8r(kMtxDirty, 0);
 }
 
-// ---- ge_box_in_rect (802F2340): (rect {min x, min y, max x, max y, near}, box, 4x4 matrix) ------
+//ge_box_in_rect (802F2340): (rect {min x, min y, max x, max y, near}, box, 4x4 matrix)
 //the box's eight corners through the matrix and the perspective divide, against a rectangle on
 //screen. 0 when all of them are behind the near plane or off the same side, -1 otherwise.
 void BoxInRect(PPCContext& c)
@@ -352,7 +350,7 @@ void BoxInRect(PPCContext& c)
 	c.r[3] = Out ? 0 : 0xFFFFFFFFu;
 }
 
-// ---- the table, and the check ------------------------------------------------------------------
+//the table and the check
 uint32_t out_r5_8(const PPCContext& c, uint32_t* len) { *len = 8; return c.r[5]; }
 uint32_t out_r6_n16(const PPCContext& c, uint32_t* len) { *len = c.r[3] * 16; return c.r[6]; }
 uint32_t out_r4_4(const PPCContext& c, uint32_t* len) { *len = 4; return c.r[4]; }
@@ -382,9 +380,9 @@ bool close_f(uint32_t a, uint32_t b) {
     return a == b || std::fabs(x - y) <= 1e-5f * std::fmax(1.0f, std::fmax(std::fabs(x), std::fabs(y))) || (x != x && y != y);
 }
 
-// The recompiled routine first, on the same input; then the native one, and
-// what the two wrote and returned compared (floats to a part in 10^5: the two
-// round differently; quantised normals to one step).
+//runs the recompiled routine first, then the native one on the same input, and compares
+//what they wrote and returned (floats to a part in 10^5 since the two round differently,
+//quantised normals to one step)
 template <int I> void checked(PPCContext& c) {
     Routine& r = g_routines[I];
     uint32_t len = 0, at = r.out(c, &len);
@@ -424,7 +422,7 @@ template <int... I> void install_checked(std::integer_sequence<int, I...>) {
     ((g_routines[I].orig = ppc_hook(g_routines[I].name, checked<I>)), ...);
 }
 
-}  // namespace
+} //namespace
 
 void install_native() {
     const char* e = std::getenv("GE_NATIVE");
@@ -439,4 +437,4 @@ void install_native() {
         if (!r.orig) rt_log("goldeneye: no hook for %s", r.name);
 }
 
-}  // namespace ge
+} //namespace ge

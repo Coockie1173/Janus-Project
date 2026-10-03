@@ -1,4 +1,4 @@
-// GoldenEye 007 — the field of view.
+//the field of view
 #include "ge.h"
 #include <algorithm>
 #include <atomic>
@@ -6,16 +6,14 @@
 
 namespace ge {
 
-// The field of view. The word at 806EB694 (the global before the player
-// pointer) points to an object whose float at +0x328 is the view's angle in
-// degrees: 49 in play. (Found by setting every 49.0 in memory and halving the
-// range: this one alone widens the world, and leaves the HUD as it is; the
-// executable's own 49.0 constants are not read once a level is up.) Only the
-// game's 49 (or what the port put there last: the settings menu changes it in play) is replaced, each frame, so whatever else sets an angle of its own
-// (a cutscene) keeps it.
+//806EB694 (the global before the player pointer) points to an object with the view's
+//angle in degrees as a float at +0x328, 49 in play
+//found it by setting every 49.0 in memory and halving the range, this is the only one
+//that widens the world and leaves the HUD alone
+//we only replace the game's 49 (or what we wrote last), so a cutscene keeps its own angle
 const uint32_t kViewSettingsPtr = 0x806EB694;
-std::atomic<float> g_fov{0};                         // 0: the game's own
-float g_fov_written = 0;                             // what the view was last given: ours to replace again
+std::atomic<float> g_fov{0}; //0 is the game's own
+float g_fov_written = 0; //what we last wrote, so we know it's ours to replace
 
 void fov_apply() {
     uint32_t o = ld32(kViewSettingsPtr);
@@ -37,4 +35,4 @@ void install_fov() {
     if (f != kGameFov) { g_fov = f; rt_log("goldeneye: field of view %.0f degrees", f); }
 }
 
-}  // namespace ge
+} //namespace ge

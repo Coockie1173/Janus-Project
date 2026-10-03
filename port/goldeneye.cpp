@@ -1,31 +1,26 @@
-// GoldenEye 007 (Wii, SJBE52) — the port's own layer on the wiikit runtime.
+//the game layer on top of wiikit, anything only GoldenEye needs goes in port/
+//hooks used here have to be in config/hooks.txt or the recompiler won't give them a slot
 //
-// Everything every Wii game needs lives in wiikit; what only this game needs
-// (its hooks, its fixes, its input mapping) lives here. Hooks named here must
-// be listed in config/hooks.txt so the recompiler gives them a slot.
-//
-//     GE_TRACE=1   log the game's own report lines and main()'s entry
-//     GE_PROFILE=F a sampling profile of the whole process (CPU time, 1 kHz), written to
-//                  the file F every 10 s: tools/profile_report.py names the samples
-//     GE_MOUSE=S   mouse look sensitivity (default 1; 0 leaves the mouse free)
-//     GE_MOUSE_MODE=auto|direct|stick   how the mouse turns the view (auto: direct, but through
-//                  the right stick, at a very high sensitivity, in a network game someone else hosts)
-//     GE_HOSTS=F   the hosts file for the game's name lookups (default config/hosts.txt)
-//     GE_NETLOG=1  log sockets, lookups and TLS sessions
-//     GE_GECKO=F   the Gecko codes the port runs each frame (default build/patched/gecko.txt,
-//                  from tools/gecko.py; empty: none); GE_GECKO_EXTRA=F[:F...] adds files
-//     GE_FOV=D     the field of view in play, degrees (the game's is 49)
-//     GE_MOUSE_INVERT=1  the mouse pushed forward looks down
-//     GE_MOUSE_EVERYWHERE=1  the cheat: mouse look in every player state
-//     GE_SKIP_CUTSCENES=1  a mission starts at the checkpoint after its opening cutscene
-//     GE_LEVEL_TIMER=0  no level timer in the hud (it is on by default)
-//     GE_EXTRAS_MENU=1  the cheat: the menu's unused extras page
-//     GE_SETTINGS=N  start with the settings menu (F1, settings.cpp) up, on its page N
-//     GE_FPS=N     the frame rate the engine may reach (default: its own 30); auto: 60
-//     GE_NATIVE=0  the engine's math routines as recompiled, not the host versions (check: compare them)
-//     GE_CRASH_MEM=1  crash dumps (build/crashes, see crashdump.cpp) with the guest's memory in them
-//     GE_DMW=F     the memory watch list the debug overlay shows (F3); default: the .dmw in the
-//                  project's folder
+//the environment variables:
+//GE_TRACE=1 log the game's own report lines and main()'s entry
+//GE_PROFILE=F sampling profile written to F every 10 s, tools/profile_report.py reads it
+//GE_MOUSE=S mouse look sensitivity (1 by default, 0 leaves the mouse free)
+//GE_MOUSE_MODE=auto|direct|stick how the mouse turns the view
+//GE_MOUSE_INVERT=1 pushing the mouse forward looks down
+//GE_MOUSE_EVERYWHERE=1 cheat, mouse look in every player state
+//GE_HOSTS=F hosts file for the game's servers (config/hosts.txt by default)
+//GE_NETLOG=1 log sockets, lookups and TLS sessions
+//GE_GECKO=F gecko codes to run each frame (build/patched/gecko.txt by default, empty for none)
+//GE_GECKO_EXTRA=F[:F...] more gecko files
+//GE_FOV=D field of view in degrees (the game's is 49)
+//GE_SKIP_CUTSCENES=1 missions start at the checkpoint after the opening cutscene
+//GE_LEVEL_TIMER=0 no level timer in the hud
+//GE_EXTRAS_MENU=1 cheat, the menu's unused extras page
+//GE_SETTINGS=N start with the settings menu (F1) open on page N
+//GE_FPS=N frame rate the engine may reach (30 by default, auto is 60)
+//GE_NATIVE=0 run the recompiled math routines instead of the host ones
+//GE_CRASH_MEM=1 put the guest's memory in crash dumps (build/crashes)
+//GE_DMW=F watch list for the debug overlay (F3), the .dmw in the project folder by default
 #include "debug.h"
 #include "ge.h"
 #include <cstdlib>
@@ -61,8 +56,7 @@ void install() {
             orig_main(c);
         });
     }
-    // The game is played with the Remote and Nunchuk or the Classic
-    // Controller; start with the Classic (keys, mouse, gamepads).
+    //start on the classic controller, that's what keys, mouse and gamepads map to
     wpad_set_classic(true);
     install_mouse();
     install_overlay();
@@ -70,5 +64,5 @@ void install() {
 
 RtGameLayer layer("GoldenEye 007", install);
 
-}  // namespace
-}  // namespace ge
+} //namespace
+} //namespace ge

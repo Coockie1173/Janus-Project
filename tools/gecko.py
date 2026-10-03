@@ -52,7 +52,7 @@ def writes(lines):
         typ = a >> 24 & 0xFE
         addr = 0x80000000 | (a & 0x01FFFFFF)
         if a & 0x10000000:
-            return None                                   # relative to the pointer: not static
+            return None #relative to the pointer: not static
         if typ == 0x00:
             for k in range((b >> 16) + 1):
                 out.append((addr + k, 1, b & 0xFF))
@@ -61,7 +61,7 @@ def writes(lines):
                 out.append((addr + 2 * k, 2, b & 0xFFFF))
         elif typ == 0x04:
             out.append((addr, 4, b))
-        elif typ == 0x08 and i < len(lines):              # serial: value, then T NNN ZZZZ / value step
+        elif typ == 0x08 and i < len(lines): #serial: value, then T NNN ZZZZ / value step
             c, step = lines[i]
             i += 1
             size = (1, 2, 4)[min(c >> 28, 2)]
@@ -116,7 +116,7 @@ def main():
                 o = sec[2] + addr - sec[0]
                 dol[o:o + size] = value.to_bytes(size, "big")
                 n_code += sec[3]
-            if not (sec and sec[3]):                       # data and heap: kept up while the game runs
+            if not (sec and sec[3]): #data and heap: kept up while the game runs
                 rest.append((((size >> 1) * 2) << 24 | (addr & 0x01FFFFFF), value))
         if rest:
             run.append((name, rest))
@@ -129,7 +129,7 @@ def main():
         path = os.path.join(a.out, name)
         try:
             if open(path, "rb").read() == (data if mode == "wb" else data.encode()):
-                return                                     # unchanged: nothing downstream rebuilds
+                return #unchanged: nothing downstream rebuilds
         except OSError:
             pass
         with open(path, mode) as f:

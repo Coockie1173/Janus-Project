@@ -48,7 +48,7 @@ if a.offsets:
     raise SystemExit
 data = open(a.samples, "rb").read()
 s = struct.unpack("<%dI" % (len(data) // 4), data)
-pairs = list(zip(s[0::2], s[1::2]))                  # (thread, offset)
+pairs = list(zip(s[0::2], s[1::2])) #(thread, offset)
 if a.last:
     pairs = pairs[-a.last:]
 
@@ -84,7 +84,7 @@ if a.inclusive:
         if len(p) > 5 and os.path.realpath(p[5]) == os.path.realpath(a.exe):
             lo, hi = (int(x, 16) for x in p[0].split("-"))
             exe_lo, exe_hi = (min(exe_lo, lo) if exe_lo else lo), max(exe_hi, hi)
-    # the game's thread is the one running recompiled code, not always the busiest one
+    #the game's thread is the one running recompiled code, not always the busiest one
     game = collections.Counter(t for t, o in pairs if name_of(o).startswith(("f_", "orig_")))
     tid = (game or threads).most_common(1)[0][0]
     inc, n = collections.Counter(), 0
@@ -95,7 +95,7 @@ if a.inclusive:
         names = set()
         for k, pc in enumerate(chain):
             if exe_lo <= pc < exe_hi:
-                names.add(name_of(pc - exe_lo - (1 if k else 0)))   # a return address: the call before it
+                names.add(name_of(pc - exe_lo - (1 if k else 0))) #a return address: the call before it
         for x in names:
             inc[x] += 1
     print(f"\nthread {tid}, inclusive: a function and what it calls ({DEPTH} frames deep at most)")

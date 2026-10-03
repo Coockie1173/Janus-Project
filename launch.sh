@@ -42,7 +42,7 @@ fi
 
 if [ $# -eq 0 ] && command -v python3 >/dev/null; then
     python3 tools/launcher.py
-    [ $? -eq 3 ] && exit 0                           # the window was closed without Play
+    [ $? -eq 3 ] && exit 0 #the window was closed without Play
 fi
 
 # the saved settings, then the command line over them

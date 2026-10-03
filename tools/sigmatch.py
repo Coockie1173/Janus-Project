@@ -38,7 +38,7 @@ import os
 import struct
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))  # wiikit/
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")) #wiikit/
 
 from wiikit.dol import Image
 from wiikit.ppc import branch_target, decode

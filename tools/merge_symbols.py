@@ -113,7 +113,7 @@ def main():
     mp = read_map(os.path.join(a.sym_dir, "main.dol.map"))
     manual = read_manual(a.manual)
 
-    # function candidates per address: {addr: {source: (name, size)}}
+    #function candidates per address: {addr: {source: (name, size)}}
     funcs, data, dropped = {}, {}, []
     for src, syms in (("symbols.txt", s1), ("symbols-2.txt", s2)):
         for addr, name, section, is_fn, size in syms:
@@ -126,8 +126,8 @@ def main():
                 data.setdefault(addr, {}).setdefault(src, (name, size, section))
     for addr, name, size in mp:
         if in_text(addr):
-            # the map has no types: in text, only an address a dtk source also
-            # calls a function, or a real name, is taken as a function
+            #the map has no types: in text, only an address a dtk source also
+            #calls a function, or a real name, is taken as a function
             if addr % 4 == 0 and (addr in funcs or not is_auto(name)):
                 funcs.setdefault(addr, {}).setdefault("main.dol.map", (name, size))
         elif not is_auto(name):
@@ -145,7 +145,7 @@ def main():
                 sig.append((addr, size, name))
                 count[name] = count.get(name, 0) + 1
         for addr, size, name in sig:
-            # C++ signatures (templates, methods) are other games' code: only plain C names
+            #C++ signatures (templates, methods) are other games' code: only plain C names
             if count[name] == 1 and size >= 0x30 and addr in funcs and re.fullmatch(r"\w+", name):
                 funcs[addr].setdefault("signatures", (name, size))
 
@@ -154,7 +154,7 @@ def main():
     def best(addr):
         c = funcs[addr]
         return next((i for i, s in enumerate(rank) if s in c and not is_auto(c[s][0])), len(rank))
-    # the better source claims a name first, should two addresses want it
+    #the better source claims a name first, should two addresses want it
     for addr in sorted(funcs, key=lambda x: (best(x), x)):
         c = funcs[addr]
         real = [(s, c[s][0]) for s in rank if s in c and not is_auto(c[s][0])]
@@ -167,7 +167,7 @@ def main():
         else:
             src, name = "auto", f"fn_{addr:08X}"
         name = re.sub(r"\s", "_", name)
-        if name in taken:                      # two addresses, one name: hooks look names up
+        if name in taken: #two addresses, one name: hooks look names up
             name = f"{name}_{addr:08X}"
         taken[name] = addr
         chosen[addr] = (name, size, src)

@@ -1,4 +1,4 @@
-// GoldenEye 007 — Gecko codes run while the game does.
+//gecko codes that run while the game does
 #include "ge.h"
 #include <algorithm>
 #include <cstdio>
@@ -8,18 +8,14 @@
 
 namespace ge {
 
-// Gecko codes. Writes into the game's code are made in the executable before
-// it is recompiled (tools/gecko.py, config/gecko.txt); everything else is run
-// here once a frame, as a code handler would: RAM writes (00, 02, 04, 08
-// serial), conditions (20-2E), the on/off switch (CC), E0 and E2. The files
-// are in Dolphin's notation; GE_GECKO_EXTRA adds optional ones
-// (config/gecko/*.txt, chosen in the launcher).
+//codes that patch the game's code are applied to the dol before recompiling (tools/gecko.py)
+//the rest runs here once a frame like a code handler would: RAM writes (00, 02, 04, 08),
+//conditions (20-2E), the on/off switch (CC), E0 and E2
+//files are in Dolphin's notation, the launcher picks extra ones from config/gecko/*.txt
 #ifndef GE_GECKO_DEFAULT
 #define GE_GECKO_DEFAULT "build/patched/gecko.txt"
 #endif
-// A CC line's switch starts on (the handler keeps it in the line's second word, where 0 is
-// "execute"): what follows it runs from the start, and stops the first time the condition
-// before it becomes true.
+//a CC switch starts on, so what follows it runs until the condition before it first turns true
 struct GeckoLine { uint32_t a, b; bool was = false, on = true; };
 std::vector<std::vector<GeckoLine>> g_gecko;
 
@@ -35,12 +31,12 @@ void gecko_store(uint32_t addr, uint32_t size, uint32_t v) {
 
 void gecko_apply() {
     for (auto& code : g_gecko) {
-        int skip = 0;                                // > 0: inside that many conditions that failed
+        int skip = 0; //how many failed conditions we're inside of
         for (size_t i = 0; i < code.size(); ++i) {
             GeckoLine& l = code[i];
             uint32_t type = l.a >> 24 & 0xFE, addr = 0x80000000u | (l.a & 0x01FFFFFFu);
-            if (type >= 0x20 && type <= 0x2E) {      // if: 32-bit (20-26) or 16-bit with a mask (28-2E)
-                if (l.a & 1) { skip = std::max(0, skip - 1); addr &= ~1u; }   // an endif first
+            if (type >= 0x20 && type <= 0x2E) { //if, 32-bit (20-26) or 16-bit with a mask (28-2E)
+                if (l.a & 1) { skip = std::max(0, skip - 1); addr &= ~1u; } //an endif first
                 if (skip) { ++skip; continue; }
                 bool wide = type < 0x28, ok = gecko_ok(addr, wide ? 4 : 2);
                 uint32_t have = !ok ? 0 : wide ? ld32(addr) : (uint32_t)ld16(addr) & ~(l.b >> 16);
@@ -52,14 +48,14 @@ void gecko_apply() {
                 case 6: ok = ok && have < want; break;
                 }
                 if (!ok) skip = 1;
-            } else if (type == 0xCC) {               // switch: flips when what precedes it becomes true
+            } else if (type == 0xCC) { //switch, flips when what's before it turns true
                 bool now = skip == 0;
                 if (now && !l.was) l.on = !l.on;
                 l.was = now;
                 skip = l.on ? 0 : 1;
             } else if (type == 0xE0) skip = 0;
             else if (type == 0xE2) skip = std::max(0, skip - (int)(l.b & 0xFF));
-            else if (type == 0x08) {                 // serial write: this line and the next
+            else if (type == 0x08) { //serial write, takes this line and the next
                 if (i + 1 >= code.size()) break;
                 GeckoLine& n = code[++i];
                 if (skip) continue;
@@ -99,7 +95,7 @@ void install_gecko() {
     if (*path) {
         if (FILE* f = std::fopen(path, "r")) { std::fclose(f); gecko_load(path); }
     }
-    if (const char* extra = std::getenv("GE_GECKO_EXTRA")) {   // more files, ':' between them
+    if (const char* extra = std::getenv("GE_GECKO_EXTRA")) { //more files, ':' between them
         std::string s = extra;
         for (size_t p = 0; p < s.size();) {
             size_t e = s.find(':', p);
@@ -110,4 +106,4 @@ void install_gecko() {
     }
 }
 
-}  // namespace ge
+} //namespace ge

@@ -1,19 +1,18 @@
-// GoldenEye 007 (Wii, SJBE52) — what the port's files share.
-//
-//   goldeneye.cpp    the layer: what is installed, what runs each frame
-//   framerate.cpp    the engine's frame limiter (GE_FPS)
-//   input.cpp        mouse look, the wheel, mouse buttons in menus (GE_MOUSE, GE_MOUSE_MODE)
-//   fov.cpp          the field of view (GE_FOV)
-//   gecko.cpp        Gecko codes run each frame (GE_GECKO, GE_GECKO_EXTRA)
-//   cutscenes.cpp    skip cutscenes: a mission starts past its opening (GE_SKIP_CUTSCENES)
-//   tweaks.cpp      the level timer, the unused extras menu (GE_LEVEL_TIMER, GE_EXTRAS_MENU)
-//   native.cpp       the engine's hot math routines written for the host (GE_NATIVE)
-//   net.cpp          the hosts file for the game's servers (GE_HOSTS, GE_NETLOG)
-//   overlay.cpp      the debug overlay (F3): memory watches from a .dmw file (dmw.cpp)
-//   settings.cpp     the settings menu (F1): field of view, mouse, gamepad, key bindings, cheats
-//   crashdump.cpp    crash, die and stall dumps into build/crashes (GE_CRASH_MEM, GE_NO_CRASHDUMP)
-//   diagnostics.cpp  the sampling profiler (GE_PROFILE)
-//   debug.cpp        aids for finding things in the running game (scans, probes, scripted input)
+//what the port's files share, one file per concern:
+//goldeneye.cpp installs everything and runs the per-frame stuff
+//framerate.cpp the engine's frame limiter
+//input.cpp mouse look, the wheel, mouse buttons in menus
+//fov.cpp the field of view
+//gecko.cpp gecko codes run each frame
+//cutscenes.cpp skip cutscenes
+//tweaks.cpp the level timer and the unused extras menu
+//native.cpp the engine's hot math routines written for the host
+//net.cpp the hosts file for the game's servers
+//overlay.cpp the debug overlay (F3), memory watches from a .dmw file (dmw.cpp)
+//settings.cpp the settings menu (F1)
+//crashdump.cpp crash, die and stall dumps into build/crashes
+//diagnostics.cpp the sampling profiler
+//debug.cpp aids for finding things in the running game
 #pragma once
 #include "rt.h"
 #include "video.h"
@@ -22,10 +21,10 @@
 
 namespace ge {
 
-// ---- the game's memory -------------------------------------------------------------------------
-const uint32_t kFrameCount = 0x806EBED0;             // -0x50B0(r13): frames run
-const uint32_t kPlayerPtr = 0x806EB698;              // a player exists (any one): tells play from menus
-const uint32_t kPaused = 0x806EB69C;                 // a byte: 1 while the pause menu is up
+//the game's memory
+const uint32_t kFrameCount = 0x806EBED0; //-0x50B0(r13), frames run
+const uint32_t kPlayerPtr = 0x806EB698; //set when any player exists, tells play from menus
+const uint32_t kPaused = 0x806EB69C; //a byte, 1 while the pause menu is up
 
 inline bool guest_ptr(uint32_t p) {
     return (p >= 0x80003000u && p < 0x81800000u) || (p >= 0x90000000u && p < 0x94000000u);
@@ -34,52 +33,52 @@ inline float ldf(uint32_t a) { uint32_t b = ld32(a); float v; std::memcpy(&v, &b
 inline void stf(uint32_t a, float v) { uint32_t b; std::memcpy(&b, &v, 4); st32(a, b); }
 inline bool in_play() { return guest_ptr(ld32(kPlayerPtr)) && ld8(kPaused) == 0; }
 
-// ---- the parts ---------------------------------------------------------------------------------
-void each_frame(uint32_t frame);                     // goldeneye.cpp: called by the limiter's hook, once a game frame
+//the parts
+void each_frame(uint32_t frame); //goldeneye.cpp, called by the limiter's hook once a game frame
 
-void install_fps();                                  // framerate.cpp
+void install_fps(); //framerate.cpp
 const uint32_t kGameFps = 30;
-uint32_t fps_limit();                                // the most frames a second the engine may run
+uint32_t fps_limit(); //the most frames a second the engine may run
 void set_fps_limit(uint32_t fps);
-void install_crash_handler();                        // crashdump.cpp
+void install_crash_handler(); //crashdump.cpp
 void crash_test();
-void crash_thread_stack();                           // the calling thread's stack for the crash handler
-void install_profiler();                             // diagnostics.cpp
-void install_mouse();                                // input.cpp
+void crash_thread_stack(); //the calling thread's stack for the crash handler
+void install_profiler(); //diagnostics.cpp
+void install_mouse(); //input.cpp
 void mouse_frame(uint32_t frame);
 void mouse_capture(bool on);
 const float kMouseSensMax = 5.0f;
-float mouse_sens();                                  // 1 is the default, 0 no mouse look
+float mouse_sens(); //1 is the default, 0 no mouse look
 void set_mouse_sens(float s);
-int mouse_mode();                                    // 0 auto, 1 direct, 2 stick
+int mouse_mode(); //0 auto, 1 direct, 2 stick
 void set_mouse_mode(int m);
-bool local_player_state(uint32_t& state);           // the controller's +0x704, of the player this console plays
+bool local_player_state(uint32_t& state); //the controller's +0x704 for the local player
 bool mouse_invert();
 void set_mouse_invert(bool on);
-const char* local_look_name();                       // what the mouse does in that state: "view", "aim", "locked", "cheat"
-bool mouse_everywhere();                             // the cheat: mouse look in every player state
+const char* local_look_name(); //what the mouse does in that state, "view", "aim", "locked" or "cheat"
+bool mouse_everywhere(); //cheat, mouse look in every player state
 void set_mouse_everywhere(bool on);
-void install_hosts();                                // net.cpp
-void install_gecko();                                // gecko.cpp
+void install_hosts(); //net.cpp
+void install_gecko(); //gecko.cpp
 void gecko_apply();
-void install_fov();                                  // fov.cpp
+void install_fov(); //fov.cpp
 void fov_apply();
 const float kGameFov = 49.0f, kFovMin = 20.0f, kFovMax = 120.0f;
-float fov();                                         // degrees
+float fov(); //degrees
 void set_fov(float degrees);
-void install_native();                               // native.cpp
-void install_cutscenes();                            // cutscenes.cpp
-bool skip_cutscenes();                               // a mission starts at the checkpoint after its opening
+void install_native(); //native.cpp
+void install_cutscenes(); //cutscenes.cpp
+bool skip_cutscenes(); //missions start at the checkpoint after their opening
 void set_skip_cutscenes(bool on);
-void install_tweaks();                               // tweaks.cpp
+void install_tweaks(); //tweaks.cpp
 void tweaks_apply();
-bool level_timer();                                  // the hud shows the level's time
+bool level_timer(); //the hud shows the level's time
 void set_level_timer(bool on);
-bool extras_menu();                                  // the cheat: the menu's unused extras page
+bool extras_menu(); //cheat, the menu's unused extras page
 void set_extras_menu(bool on);
-void install_overlay();                              // overlay.cpp
-bool overlay_open();                                 // the watches or the settings menu: the mouse is free
-bool settings_open();                                // settings.cpp
-uint32_t settings_buttons();                         // Classic buttons the menu presses itself (+ to pause as it opens)
+void install_overlay(); //overlay.cpp
+bool overlay_open(); //the watches or the settings menu are up, so the mouse is free
+bool settings_open(); //settings.cpp
+uint32_t settings_buttons(); //classic buttons the menu presses itself (+ to pause as it opens)
 
-}  // namespace ge
+} //namespace ge

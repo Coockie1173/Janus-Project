@@ -1,8 +1,7 @@
-// GoldenEye 007 — reading a Dolphin Memory Engine watch list (.dmw: JSON).
-//
-//   {"watchList": [ entry... ]}      an entry is a watch
-//   {"label", "address" (hex text), "typeIndex", "unsigned", "baseIndex", "length"?, "pointerOffsets"? (hex texts)}
-//   or a group {"groupName", "groupEntries": [ entry... ]}
+//reads a Dolphin Memory Engine watch list (.dmw, which is JSON)
+//{"watchList": [ entry... ]} where an entry is a watch
+//{"label", "address" (hex text), "typeIndex", "unsigned", "baseIndex", "length"?, "pointerOffsets"? (hex texts)}
+//or a group {"groupName", "groupEntries": [ entry... ]}
 #include "dmw.h"
 #include "ge.h"
 #include <cstdio>
@@ -13,14 +12,14 @@
 namespace ge {
 namespace {
 
-// Just enough JSON: objects, arrays, strings, numbers, true, false, null.
+//just enough JSON to read one
 struct Json {
     enum Kind { Null, Bool, Num, Str, Arr, Obj } kind = Null;
     bool b = false;
     double n = 0;
     std::string s;
     std::vector<Json> a;
-    std::vector<std::string> keys;                   // an object's, with its values in a
+    std::vector<std::string> keys; //an object's keys, the values are in a
     const Json* get(const char* key) const {
         for (size_t i = 0; i < keys.size(); ++i)
             if (keys[i] == key) return &a[i];
@@ -43,7 +42,7 @@ struct Parser {
                 switch (*p) {
                 case 'n': out += '\n'; break;
                 case 't': out += '\t'; break;
-                case 'u': {                                  // \uXXXX: ASCII as it is, anything else '?'
+                case 'u': { //\uXXXX, ASCII stays and anything else becomes '?'
                     unsigned v = p + 4 < end ? (unsigned)std::strtoul(std::string(p + 1, 4).c_str(), nullptr, 16) : '?';
                     out += v < 128 ? (char)v : '?';
                     p += 4;
@@ -124,7 +123,7 @@ bool readable(uint32_t a, uint32_t n) {
     return (a >= 0x80000000u && a + n <= 0x81800000u) || (a >= 0x90000000u && a + n <= 0x94000000u);
 }
 
-}  // namespace
+} //namespace
 
 size_t WatchGroup::count() const {
     size_t n = watches.size();
@@ -206,4 +205,4 @@ std::string watch_value(const Watch& w, uint32_t a) {
     return s;
 }
 
-}  // namespace ge
+} //namespace ge

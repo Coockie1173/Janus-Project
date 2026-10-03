@@ -19,7 +19,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, ".."))
-sys.path[:0] = [HERE, ROOT]                      # the package keeps wiikit beside this file
+sys.path[:0] = [HERE, ROOT] #the package keeps wiikit beside this file
 
 GAME_ID = "SJBE52"
 IMAGES = (".rvz", ".iso", ".wbfs", ".wia")
@@ -136,19 +136,19 @@ def extract(image, out, force=False, progress=None, log=print):
 
     tmp = out.rstrip("/\\") + ".extracting"
     shutil.rmtree(tmp, ignore_errors=True)
-    done = [0, 0, ""]                            # bytes read, bytes at the last report, the file just finished
+    done = [0, 0, ""] #bytes read, bytes at the last report, the file just finished
     kind_of = type(part)
     plain_read = kind_of.read
 
-    def counted_read(self, off, size):           # wiikit reads a file in 4 MB pieces: progress inside the big packs
+    def counted_read(self, off, size): #wiikit reads a file in 4 MB pieces: progress inside the big packs
         data = plain_read(self, off, size)
-        done[0] = min(done[0] + len(data), total)    # the few MB of sys/ are counted too: close enough
+        done[0] = min(done[0] + len(data), total) #the few MB of sys/ are counted too: close enough
         if progress and done[0] - done[1] >= (16 << 20):
             done[1] = done[0]
             progress(done[0], total, done[2])
         return data
 
-    def each(line):                              # wiikit says "  path" after each file
+    def each(line): #wiikit says "  path" after each file
         done[2] = line.strip()
 
     try:
@@ -179,7 +179,7 @@ def extract(image, out, force=False, progress=None, log=print):
                 old = out.rstrip("/\\") + f".old{n}"
             os.rename(out, old)
             log(f"the folder that was there is now {old}")
-        else:                                    # only the package's note in it
+        else: #only the package's note in it
             shutil.rmtree(out)
     os.rename(tmp, out)
     log(f"the game's files are in {out}")

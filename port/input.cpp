@@ -1,4 +1,4 @@
-// GoldenEye 007 — keyboard and mouse: mouse look, the wheel, the buttons in menus.
+//keyboard and mouse: mouse look, the wheel, the mouse buttons in menus
 #include "ge.h"
 #include "debug.h"
 #include <algorithm>
@@ -9,44 +9,37 @@
 
 namespace ge {
 
-extern bool g_stick_took;                            // the mouse is on the stick this frame (mouse_stick)
+extern bool g_stick_took; //the mouse is on the stick this frame
 
-// Keyboard and mouse. The game plays with the Classic Controller: the left
-// stick moves (W A S D in the key file), the right stick looks, and still
-// does for a pad. The mouse does not go through the stick: its motion is
-// added to the view's angles themselves, once a frame, before the game's own
-// frame runs. One pixel is one step of the angle at any frame rate, and
-// there is no turning-speed cap.
+//the game plays with the classic controller: left stick moves (WASD in the key file),
+//right stick looks. the mouse doesn't go through the stick, its motion gets added to the
+//view's angles once a frame before the game's own frame runs
+//so one pixel is one step of the angle at any frame rate, and there's no turning-speed cap
 //
-// Whose view: every player in a match has a controller object, updated once
-// a frame by ge_controller_update (80108A60; controller+4 is its player). The
-// game itself decides which controllers take this console's input: before
-// the look update fn_8012A1D0 calls fn_80108D70(controller), which in a
-// network game looks the controller up among the console's own players and
-// returns 0 for those. The mouse is applied in a hook on the update, to the
-// first controller of the frame for which that function returns 0. (Globals
-// that point at "the" player or camera, 806EB698 and 805D43EC, hold whichever
-// was made last: online that is another player.)
-// The angles (found with port/debug.cpp's scans and the community's memory
-// watch list): the player's yaw is the float at +0xDC, radians, growing to
-// the right (the rotation vector at +0xD8; +0x250 and the matrix at +0x98
-// are computed from it). The pitch is in the object the player's +0x16C
-// points to, at +0x768, radians, negative up (+0x760 follows it).
-const uint32_t kControllerNotLocal = 0x80108D70;     // (controller) -> 0 if this console plays it
+//whose view: every player in a match has a controller object, updated once a frame by
+//ge_controller_update (80108A60, controller+4 is its player). the game decides itself which
+//controllers take this console's input: fn_8012A1D0 calls fn_80108D70(controller) before the
+//look update, which returns 0 for the console's own players
+//the mouse goes to the first controller of the frame that returns 0 for
+//(the globals 806EB698 and 805D43EC hold whichever player was made last, online that's someone else)
+//
+//the angles: the player's yaw is the float at +0xDC, radians, growing to the right
+//(+0x250 and the matrix at +0x98 are computed from it)
+//the pitch is in the object at the player's +0x16C, at +0x768, radians, negative up
+const uint32_t kControllerNotLocal = 0x80108D70; //(controller) -> 0 if this console plays it
 const float kPi = 3.14159265f;
-std::atomic<float> g_mouse_sens{1.0f};               // GE_MOUSE: 1 is 0.0022 radians a pixel
-std::atomic<bool> g_mouse_invert{false};             // GE_MOUSE_INVERT: the mouse pushed forward looks down
+std::atomic<float> g_mouse_sens{1.0f}; //1 is 0.0022 radians a pixel
+std::atomic<bool> g_mouse_invert{false}; //pushing the mouse forward looks down
 const float kRadPerPixel = 0.0022f, kPitchLimit = 1.35f;
 
 
-// In a network game this console did not start, the host turns the players
-// from what each console sends, and a view turned here is not taken. There
-// the mouse goes on the right stick instead: real input, with the stick's
-// sensitivity raised out of the way (mouse_stick). "A joined game" is what fn_80108D70 itself
-// tests: the word at 805D5490 is 1 or 2 in a network game, the one at
-// 805D5470 non-zero on the host. GE_MOUSE_MODE=direct or stick forces one.
+//in a network game someone else hosts, the host turns the players from what each console
+//sends, so a view turned here gets ignored. there the mouse goes on the right stick instead,
+//with the stick's sensitivity raised out of the way (mouse_stick)
+//"a joined game" is what fn_80108D70 tests: the word at 805D5490 is 1 or 2 in a network game
+//and the one at 805D5470 is non-zero on the host. GE_MOUSE_MODE=direct or stick forces one
 const uint32_t kNetState = 0x805D5460;
-std::atomic<int> g_mouse_mode{0};                    // 0 auto, 1 direct, 2 stick
+std::atomic<int> g_mouse_mode{0}; //0 auto, 1 direct, 2 stick
 
 bool joined_game() {
     uint32_t mode = ld32(kNetState + 0x30);
@@ -63,55 +56,45 @@ bool mouse_on_stick() {
 }
 
 PPCFunc orig_controller_update = nullptr, controller_not_local = nullptr, orig_look_apply = nullptr;
-uint32_t g_look_frame = ~0u;                         // the frame the mouse was last applied in
-uint32_t g_look_ctrl = 0;                            // the controller it is for, and what is still to turn
+uint32_t g_look_frame = ~0u; //the frame the mouse was last applied in
+uint32_t g_look_ctrl = 0; //the controller it's for, and what's still left to turn
 float g_look_yaw = 0;
 
-// The mouse's motion for this frame. The pitch is written (the view's own
-// angle); the yaw is handed to the game as input: ge_look_apply (80101EC0)
-// turns the controller's angular velocity, the float at +0x97C in radians a
-// second (what the stick's deflection becomes, smoothed), times the frame's
-// time step (+0x578) into rotation. For the one call the mouse's turn over
-// that time step is added to it, and taken out again: the game turns the
-// player by stick and mouse together, through its own code.
-// The mouse turns the view only while the player has it. The controller
-// (the game's ExPlayer) keeps the player's state in the word at +0x704: 0
-// standing, 2 moving, 3 sprinting and 4 in the air (set as a fall begins, by
-// fn_801212A0; landing leaves it) are the ones the view is free in; in the
-// others (5 death, 8 a climb or vault, 9 melee, 0x23-0x25 a slide...) the
-// game has the view and the mouse is locked out, its motion dropped.
+//the mouse's motion for this frame. the pitch gets written directly, the yaw is handed to
+//the game as input: ge_look_apply (80101EC0) turns the controller's angular velocity
+//(+0x97C, radians a second) times the frame's time step (+0x578) into rotation
+//for that one call the mouse's turn is added to it and taken out again after, so the game
+//turns the player by stick and mouse together through its own code
 //
-// State 0x22 is the player as an actor of a cutscene (set by fn_801222A0 when
-// the cutscene's script takes the player, left through fn_80122460), and its
-// update, fn_801227A0, has three ways to go:
-//   - the word at +0x1024 is not 0 (a script command, 8001B268, sets it): the
-//     game reads the look stick itself (fn_8010C880, ge_look_apply) and keeps
-//     the yaw within the script's limits around +0x1124. The view is the
-//     player's: the mouse turns it as in play.
-//   - +0x1024 is 0 and the byte at +0xBD9 is set (the blend at +0x674 has run
-//     out): the view stays the cutscene's and the stick moves the aim inside
-//     it (fn_80124130), two angles at +0xEDC (up and down) and +0xEE0
-//     (across), radians, kept within limits in degrees. The mouse moves those.
-//   - neither: nothing is the player's, and the mouse is locked.
-// fn_8014BCD0, the game's "may aim" in a cutscene, is that same test.
+//the mouse only turns the view while the player has it. the controller (the game's ExPlayer)
+//keeps the player's state at +0x704: 0 standing, 2 moving, 3 sprinting and 4 in the air are
+//the free ones. in the others (5 death, 8 a climb or vault, 9 melee, 0x23-0x25 a slide...)
+//the game has the view and the mouse is locked out
 //
-// This goes by the controller this console plays, found once a frame by the
-// game's own test (controller_update). That is so alone, and hosting. In a
-// game someone else hosts the mouse is on the stick (mouse_stick), which has
-// no controller at hand: it is locked by the same state when the test has
-// found this console's controller in the last frames, and left free when it
-// has not, so that joining a game never loses the mouse.
+//state 0x22 is the player as an actor in a cutscene (set by fn_801222A0, left through
+//fn_80122460) and its update fn_801227A0 goes one of three ways:
+//- +0x1024 isn't 0 (a script command sets it): the game reads the look stick itself and
+//  keeps the yaw within the script's limits around +0x1124. the mouse turns it like in play
+//- +0x1024 is 0 and the byte at +0xBD9 is set: the view stays the cutscene's and the stick
+//  moves the aim inside it (fn_80124130), two angles at +0xEDC and +0xEE0. the mouse moves those
+//- neither: nothing is the player's and the mouse is locked
+//fn_8014BCD0, the game's "may aim" in a cutscene, is the same test
+//
+//all of this goes by the local controller, found once a frame by the game's own test
+//in a game someone else hosts the mouse is on the stick, which has no controller at hand:
+//it's locked by the same state if the test found our controller in the last frames and
+//left free if it didn't, so joining a game never loses the mouse
 const uint32_t kPlayerState = 0x704, kStateFlags = 0x708, kStateCutscene = 0x22;
-const uint32_t kInCutscene = 0x5E4;                  // a byte: set with state 0x22, cleared as the cutscene lets go
+const uint32_t kInCutscene = 0x5E4; //a byte, set with state 0x22 and cleared when the cutscene lets go
 const uint32_t kCutsceneLook = 0x1024, kCutsceneAim = 0xBD9;
 const uint32_t kAimOn = 0xED4, kAimPitch = 0xEDC, kAimYaw = 0xEE0;
-const uint32_t kAimLimits = 0x1014;                  // four floats, degrees: pitch from and to, yaw from and to
-const uint32_t kAimLimitsPlay = 0x806E95F8, kAimLimitsNarrow = 0x806E9608;   // the same four, out of a cutscene; with flag 0x80
+const uint32_t kAimLimits = 0x1014; //four floats in degrees, pitch from and to then yaw from and to
+const uint32_t kAimLimitsPlay = 0x806E95F8, kAimLimitsNarrow = 0x806E9608; //the same four outside a cutscene, and with flag 0x80
 const float kRadPerDegree = 0.01745329f;
-uint32_t g_local_frame = ~0u, g_local_ctrl = 0;      // the controller this console plays, as of that frame
-std::atomic<bool> g_mouse_everywhere{false};         // the cheat: the mouse turns the view in every state
+uint32_t g_local_frame = ~0u, g_local_ctrl = 0; //the local controller as of that frame
+std::atomic<bool> g_mouse_everywhere{false}; //cheat, the mouse turns the view in every state
 
-// For the overlay: the state of the player this console plays, false with none (menus, loading).
+//for the overlay: the local player's state, false if there's none (menus, loading)
 bool local_player_state(uint32_t& state) {
     uint32_t ctrl = g_local_ctrl;
     if (!guest_ptr(ctrl) || !guest_ptr(ld32(kPlayerPtr)) || ld32(kFrameCount) - g_local_frame >= 4) return false;
@@ -141,8 +124,7 @@ bool stick_look_allowed() {
     return ld32(kFrameCount) - g_local_frame >= 4 || !guest_ptr(g_local_ctrl) || look_mode(g_local_ctrl) != kLookLocked;
 }
 
-// The aim inside a cutscene's view: the mouse's motion on the two angles,
-// within the limits fn_80124130 itself picks.
+//the aim inside a cutscene's view, within the limits fn_80124130 itself picks
 void mouse_aim(uint32_t ctrl) {
     float dx = 0, dy = 0;
     video_take_mouse_motion(dx, dy);
@@ -199,7 +181,7 @@ void controller_update(PPCContext& c) {
     uint32_t player = guest_ptr(ctrl) ? ld32(ctrl + 4) : 0;
     bool forced = false;
     if (g_mouse_sens > 0 && frame != g_local_frame && guest_ptr(player)) {
-        PPCContext saved = c;                        // the game's own test, its registers kept
+        PPCContext saved = c; //the game's own test, registers put back after
         controller_not_local(c);
         bool local = (int8_t)c.r[3] == 0;
         c = saved;
@@ -222,15 +204,15 @@ void controller_update(PPCContext& c) {
         }
     }
     orig_controller_update(c);
-    // the cheat, in a state whose update never came to ge_look_apply: the turn goes on the player's yaw itself
+    //the cheat, in a state whose update never got to ge_look_apply: turn the player's yaw directly
     if (forced && ctrl == g_look_ctrl && g_look_yaw != 0) {
         float yaw = ldf(player + 0xDC);
         if (std::isfinite(yaw)) stf(player + 0xDC, yaw + g_look_yaw);
         g_look_yaw = 0;
     }
-    if (g_stick_took) g_look_ctrl = ctrl;            // (for the angle trace)
+    if (g_stick_took) g_look_ctrl = ctrl; //for the angle trace
     static const bool angles = std::getenv("GE_TRACE") != nullptr;
-    if (angles && ctrl == g_look_ctrl && guest_ptr(player)) {     // the turned player's angles, twice a second
+    if (angles && ctrl == g_look_ctrl && guest_ptr(player)) { //the turned player's angles, twice a second
         static auto last = std::chrono::steady_clock::now();
         auto now = std::chrono::steady_clock::now();
         if (now - last >= std::chrono::milliseconds(500)) {
@@ -241,7 +223,7 @@ void controller_update(PPCContext& c) {
         }
     }
     static const bool trace = std::getenv("GE_TRACELOOK") != nullptr;
-    if (trace && guest_ptr(ctrl)) {                  // the controller's look vectors, when they change
+    if (trace && guest_ptr(ctrl)) { //the controller's look vectors, when they change
         static uint32_t last[8];
         static int n = 0;
         uint32_t now[8];
@@ -256,13 +238,11 @@ void controller_update(PPCContext& c) {
     }
 }
 
-// The wheel changes weapon: a notch up is a press of the Classic's D-pad
-// right (the next weapon), a notch down of D-pad left (the previous one),
-// held 80 ms with 60 ms between presses, so that every notch of a fast spin
-// is a press of its own.
-const uint32_t kClLeft = 0x0002, kClRight = 0x8000;  // KPAD's Classic bits
+//the wheel changes weapon: a notch up presses D-pad right (next), a notch down D-pad left
+//held 80 ms with 60 ms in between, so every notch of a fast spin is its own press
+const uint32_t kClLeft = 0x0002, kClRight = 0x8000; //KPAD's classic bits
 void wheel_buttons(ClassicState& s) {
-    static int queued = 0;                           // notches still to press: + next, - previous
+    static int queued = 0; //notches still to press, + is next and - is previous
     static uint32_t held = 0;
     static auto until = std::chrono::steady_clock::now();
     auto now = std::chrono::steady_clock::now();
@@ -278,13 +258,11 @@ void wheel_buttons(ClassicState& s) {
     s.buttons |= held;
 }
 
-// In play the triggers fire (ZR) and aim (ZL); in a menu they do nothing,
-// and there they are taken as a (select) and b (back), so that the mouse's
-// buttons work the menus. "In play" is a player and no pause: the byte at
-// 806EB69C, next to the player pointer, is 1 while the pause menu is up
-// (found by pausing and resuming under a word scan). A trigger held when a
-// menu closes stays out of play until it is let go: selecting "Continue"
-// does not fire a shot.
+//in play the triggers fire (ZR) and aim (ZL), in a menu they do nothing
+//so there they count as a (select) and b (back) and the mouse buttons work the menus
+//"in play" is a player and no pause (the byte at 806EB69C, found by pausing under a word scan)
+//a trigger held when a menu closes stays out of play until it's let go, so selecting
+//"Continue" doesn't fire a shot
 const uint32_t kClA = 0x0010, kClB = 0x0040, kClZR = 0x0004, kClZL = 0x0080;
 
 
@@ -302,25 +280,23 @@ void menu_buttons(ClassicState& s) {
     }
 }
 
-// The mouse on the right stick (a joined network game). The game turns a
-// stick's deflection d into a turning rate: nothing up to 0.12, then
-// 3.094 * sensitivity * (d - 0.12) / 0.88 radians a second (measured: the
-// sensitivity is the float the options menu sets, 805DE7A4 across and
-// 805DE7A8 up and down, with 805DE7CC and 805DE7D0 when aiming down the
-// sight). At the menu's sensitivities the stick tops out near 6 radians a
-// second. So while the game reads them (ge_look_sens, ge_look_sens_ads) the
-// four sensitivities are kStickSens, a hundred times that, and put back
-// right after (the options, and what the game saves, never see it); and the
-// deflection is the one that gives the mouse's speed at that sensitivity:
-// small, exact, and as good as never at the stick's end.
-const float kStickSens = 100.0f, kStickRate = 2.95f, kStickDead = 0.12f;   // the rate as the mouse test gives it
+//the mouse on the right stick (a joined network game)
+//the game turns a deflection d into a turning rate: nothing up to 0.12, then
+//3.094 * sensitivity * (d - 0.12) / 0.88 radians a second
+//the sensitivity is the float the options menu sets: 805DE7A4 across and 805DE7A8 up and
+//down, 805DE7CC and 805DE7D0 when aiming down the sight
+//at the menu's sensitivities the stick tops out near 6 radians a second, so while the game
+//reads them (ge_look_sens, ge_look_sens_ads) they're kStickSens, a hundred times that, and
+//put back right after so the options and the save never see it
+//the deflection is then whatever gives the mouse's speed at that sensitivity
+const float kStickSens = 100.0f, kStickRate = 2.95f, kStickDead = 0.12f; //the rate as measured with the mouse test
 const uint32_t kSensAddr[4] = {0x805DE7A4, 0x805DE7A8, 0x805DE7CC, 0x805DE7D0};
-float g_pitch_rate_scale = 1.25f;                    // the pitch's rate against the yaw's at the same sensitivity
+float g_pitch_rate_scale = 1.25f; //the pitch's rate compared to the yaw's at the same sensitivity
 bool g_stick_took = false;
 void mouse_stick(ClassicState& s) {
     g_stick_took = g_mouse_sens > 0 && in_play() && !overlay_open() && stick_look_allowed() && mouse_on_stick();
     if (!g_stick_took) return;
-    // the mouse's speed, measured over at least 4 ms; every read in between gets the same
+    //the mouse's speed measured over at least 4 ms, every read in between gets the same
     static auto last = std::chrono::steady_clock::now();
     static float ax = 0, ay = 0, defl_x = 0, defl_y = 0;
     auto now = std::chrono::steady_clock::now();
@@ -348,8 +324,7 @@ void mouse_stick(ClassicState& s) {
     s.ry = std::clamp(s.ry - defl_y, -1.0f, 1.0f);
 }
 
-// The game's two readers of the sensitivities (ge_look_sens, ge_look_sens_ads):
-// with the mouse on the stick they see kStickSens, and only they do.
+//the game's two readers of the sensitivities, with the mouse on the stick they see kStickSens
 PPCFunc orig_look_sens[2];
 template <int I> void look_sens(PPCContext& c) {
     if (!g_stick_took) { orig_look_sens[I](c); return; }
@@ -374,7 +349,7 @@ void install_mouse() {
     if (const char* m = std::getenv("GE_MOUSE_EVERYWHERE")) g_mouse_everywhere = std::atoi(m) != 0;
     if (const char* m = std::getenv("GE_MOUSE_MODE")) g_mouse_mode = !std::strcmp(m, "direct") ? 1 : !std::strcmp(m, "stick") ? 2 : 0;
     wpad_set_classic_filter(classic_filter);
-    // hooked whatever the sensitivity: the settings menu turns mouse look on and off in play
+    //hooked whatever the sensitivity is, the settings menu can turn mouse look on and off in play
     controller_not_local = ppc_lookup(kControllerNotLocal);
     orig_controller_update = ppc_hook("ge_controller_update", controller_update);
     orig_look_apply = ppc_hook("ge_look_apply", look_apply);
@@ -394,7 +369,7 @@ void set_mouse_invert(bool on) { g_mouse_invert = on; }
 bool mouse_everywhere() { return g_mouse_everywhere; }
 void set_mouse_everywhere(bool on) { g_mouse_everywhere = on; }
 
-// Once a game frame: with nobody to turn (a menu, a pause) the mouse's motion is dropped.
+//once a game frame, with nobody to turn (a menu, a pause) the mouse's motion is dropped
 void mouse_frame(uint32_t f) {
     if (!g_stick_took && g_look_frame != f - 1 && g_look_frame != f) {
         float dx, dy;
@@ -402,7 +377,7 @@ void mouse_frame(uint32_t f) {
     }
 }
 
-// The cursor is the game's while it plays, and free while an overlay (F1, F3) is up.
+//the cursor is the game's while it plays and free while an overlay (F1, F3) is up
 void mouse_capture(bool on) { video_set_relative_mouse(on && g_mouse_sens > 0); }
 
-}  // namespace ge
+} //namespace ge

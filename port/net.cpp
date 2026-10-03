@@ -1,13 +1,12 @@
-// GoldenEye 007 — online: the hosts file for the game's servers.
+//online: the hosts file for the game's servers
 #include "ge.h"
 #include <cstdio>
 #include <cstdlib>
 
 namespace ge {
 
-// Online. The game's servers (Nintendo WFC's authentication, DemonWare's
-// lobby) are gone; a community server answers for them at another address.
-// The names are given that address here, as lines of /etc/hosts would.
+//the real servers (Nintendo WFC, DemonWare) are gone, a community server answers instead
+//so the names get pointed at it here, same format as /etc/hosts
 #ifndef GE_HOSTS_DEFAULT
 #define GE_HOSTS_DEFAULT "config/hosts.txt"
 #endif
@@ -28,4 +27,4 @@ void install_hosts() {
     rt_log("goldeneye: %d host name(s) from %s", n, path);
 }
 
-}  // namespace ge
+} //namespace ge

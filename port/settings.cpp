@@ -1,19 +1,19 @@
-// GoldenEye 007 — the settings menu (F1), drawn the way the game draws its own
-// menus: the cream lines, the blue bars, the white bar under the cursor.
+//the settings menu (F1), drawn like the game's own menus: cream lines, blue bars and the
+//white bar under the cursor
 //
-// Five pages: the screen (the field of view and the frame rate, sliders), the controls (the mouse, the
-// gamepad), the key bindings, the enhancements and the cheats. What is changed counts at once. The field
-// of view and the mouse are kept in the launcher's settings file, the rest in
-// the runtime's key file ([Classic Controller]: only the lines changed here
-// are rewritten), so the launcher's window and this menu show the same.
+//five pages: screen (fov and frame rate), controls (mouse, gamepad), key bindings,
+//enhancements and cheats. changes count right away
+//fov and mouse go in the launcher's settings file, the rest in the runtime's key file
+//(only the [Classic Controller] lines changed here get rewritten) so the launcher and this
+//menu show the same thing
 //
-// While it is up the game gets no input, and a game in play is paused first
-// (a press of +). Keys: the arrows or W A S D, Return, Esc or Backspace to go
-// back, Delete to clear a binding; the mouse; a gamepad's D-pad, A and B.
+//while it's up the game gets no input, and a game in play gets paused first (a press of +)
+//keys: arrows or WASD, Return, Esc or Backspace to go back, Delete to clear a binding
+//the mouse and a gamepad's D-pad, A and B work too
 //
-// Drawn by the overlay (overlay.cpp), on the renderer's thread.
+//drawn by the overlay (overlay.cpp) on the renderer's thread
 //
-//     GE_SETTINGS=N   start with the menu up, on page N (0 the first: for pictures of it)
+//GE_SETTINGS=N start with the menu up on page N, handy for screenshots
 #include "ge.h"
 #include <algorithm>
 #include <atomic>
@@ -45,11 +45,11 @@ namespace {
 
 using Clock = std::chrono::steady_clock;
 std::atomic<bool> g_open{false};
-std::atomic<Clock::rep> g_pause_until{0};            // + is held until then (settings_buttons)
+std::atomic<Clock::rep> g_pause_until{0}; //+ is held until then (settings_buttons)
 const uint32_t kClPlus = 0x0400;
 
 #ifdef GE_IMGUI
-// ---- the two files -----------------------------------------------------------------------------
+//the two files
 std::string trim(const std::string& t) {
     size_t a = t.find_first_not_of(" \t\r"), b = t.find_last_not_of(" \t\r");
     return a == std::string::npos ? std::string() : t.substr(a, b - a + 1);
@@ -71,9 +71,9 @@ bool write_lines(const std::string& path, const std::vector<std::string>& lines)
     return f.good();
 }
 
-bool g_fps_changed = false;                          // the frame rate was changed in the menu
+bool g_fps_changed = false; //the frame rate was changed in the menu
 
-// The launcher's file: LAUNCH_NAME="value" lines, the others kept.
+//the launcher's file, LAUNCH_NAME="value" lines. other lines are kept
 void save_launch_settings() {
     char fov_text[16], mouse_text[16];
     std::snprintf(fov_text, sizeof fov_text, "%.0f", fov());
@@ -85,7 +85,7 @@ void save_launch_settings() {
         {"LAUNCH_MOUSEEVERYWHERE", mouse_everywhere() ? "1" : "0"},
         {"LAUNCH_SKIPCUTSCENES", skip_cutscenes() ? "1" : "0"},
         {"LAUNCH_LEVELTIMER", level_timer() ? "1" : "0"}, {"LAUNCH_EXTRASMENU", extras_menu() ? "1" : "0"}};
-    if (g_fps_changed) values.push_back({"LAUNCH_FPS", std::to_string(fps_limit())});   // "auto" kept until it is changed
+    if (g_fps_changed) values.push_back({"LAUNCH_FPS", std::to_string(fps_limit())}); //"auto" stays until it's changed
     auto lines = read_lines(GE_SETTINGS_FILE);
     if (lines.empty()) lines.push_back("# written by the launcher, read when the game is started");
     for (auto& [name, value] : values) {
@@ -98,7 +98,7 @@ void save_launch_settings() {
     if (!write_lines(GE_SETTINGS_FILE, lines)) rt_log("goldeneye: settings not saved: cannot write %s", GE_SETTINGS_FILE);
 }
 
-// The key file's [Classic Controller] section, by name.
+//the key file's [Classic Controller] section, by name
 struct KeyFile {
     std::vector<std::string> lines;
 
@@ -120,11 +120,11 @@ struct KeyFile {
     }
     void set(const std::string& name, const std::string& value) {
         int i = find(name);
-        if (i >= 0) {                                // the file's own spacing kept
+        if (i >= 0) { //keep the file's own spacing
             lines[i] = trim(lines[i].substr(0, lines[i].find('=') + 1) + " " + value);
             return;
         }
-        int end = -1;                                // a new line: at the section's end
+        int end = -1; //a new line goes at the section's end
         bool inside = false;
         for (size_t k = 0; k < lines.size(); ++k) {
             std::string t = trim(lines[k]);
@@ -157,8 +157,8 @@ void save_keys() {
     video_reload_keys();
 }
 
-// ---- the pages ---------------------------------------------------------------------------------
-// what the game does with each Classic Controller button (its default layout), and the key file's name for it
+//the pages
+//what the game does with each classic controller button, and the key file's name for it
 struct Action { const char* label; const char* name; };
 const Action kActions[] = {
     {"Fire", "ZR"}, {"Aim", "ZL"}, {"Melee Attack", "L"}, {"Throw Grenade (doubles as R button)", "R"}, {"Reload", "Y"},
@@ -169,34 +169,33 @@ const Action kActions[] = {
 
 struct Row {
     std::string label, hint;
-    std::function<std::string()> value;              // none: a row that is only selected
-    std::function<void(int)> adjust;                 // left and right: -1, +1
+    std::function<std::string()> value; //none for a row that's only selected
+    std::function<void(int)> adjust; //left and right, -1 or +1
     std::function<void()> select;
-    std::function<void()> clear;                     // Delete
-    bool binding = false;                            // the value is a list of keys, not something to step through
-    std::function<float()> slider;                   // a slider's row: where its knob is, 0..1
-    std::function<void(float)> slide;                // and the knob dragged there
+    std::function<void()> clear; //Delete
+    bool binding = false; //the value is a list of keys, not something to step through
+    std::function<float()> slider; //for a slider, where its knob is in 0..1
+    std::function<void(float)> slide; //and the knob dragged there
 };
 struct Page { std::string title; std::vector<Row> rows; };
 
 enum { kRoot, kScreen, kControls, kBindings, kEnhancements, kCheats, kPageCount };
 std::vector<Page> g_pages;
 int g_page = kRoot, g_row = 0, g_scroll = 0;
-int g_root_row = 0;                                  // where the cursor was on the first page
-int g_listening = -1;                                // the binding row waiting for a key
-int g_dragging = -1;                                 // the slider row the mouse has by the knob
-bool g_dirty = false;                                // the launcher's file is to be written
+int g_root_row = 0; //where the cursor was on the first page
+int g_listening = -1; //the binding row waiting for a key
+int g_dragging = -1; //the slider row the mouse has by the knob
+bool g_dirty = false; //the launcher's file needs writing
 
 template <size_t N> int index_of(const char* const (&names)[N], const std::string& v, int otherwise) {
     for (size_t i = 0; i < N; ++i)
         if (!SDL_strcasecmp(names[i], v.c_str())) return (int)i;
     return otherwise;
 }
-// The frame rates the slider stops at (the launcher's are the same): the
-// console's 30, the usual screens' rates and their halves, up to 275.
+//the frame rates the slider stops at, same as the launcher's
 const uint32_t kFpsStops[] = {30, 40, 50, 60, 75, 90, 100, 120, 144, 165, 180, 200, 240, 275};
 const int kFpsStopCount = (int)std::size(kFpsStops);
-int fps_stop() {                                     // the stop nearest to the rate as it is
+int fps_stop() { //the stop nearest to the current rate
     int best = 0;
     for (int i = 1; i < kFpsStopCount; ++i)
         if (std::abs((int)kFpsStops[i] - (int)fps_limit()) < std::abs((int)kFpsStops[best] - (int)fps_limit())) best = i;
@@ -210,7 +209,7 @@ const char* const kInputNames[] = {"Auto", "Pad", "Keyboard"};
 const char* const kFaceNames[] = {"Position", "Label"};
 const float kDeadZoneMax = 0.9f;
 float dead_zone() { return std::clamp((float)std::atof(g_keys.get("Dead Zone", "0.15").c_str()), 0.0f, kDeadZoneMax); }
-void set_dead_zone(float z) {                        // in hundredths; the file written only when it changes
+void set_dead_zone(float z) { //in hundredths, only writes the file when it changes
     char b[16];
     std::snprintf(b, sizeof b, "%.2f", std::clamp(z, 0.0f, kDeadZoneMax));
     if (g_keys.get("Dead Zone") == b) return;
@@ -351,8 +350,7 @@ void build_pages() {
         [](int) { set_extras_menu(!extras_menu()); g_dirty = true; }});
 }
 
-// The key or mouse button pressed for the action that is listening: on that
-// action, and off every other one.
+//the key or mouse button pressed for the listening action goes on that one and off every other
 void bind(const std::string& key) {
     const char* name = kActions[g_listening].name;
     for (auto& a : kActions) {
@@ -367,7 +365,7 @@ void bind(const std::string& key) {
     g_listening = -1;
 }
 
-// ---- opening, closing, moving ------------------------------------------------------------------
+//opening, closing, moving
 void open(bool on) {
     if (on == g_open) return;
     g_open = on;
@@ -377,7 +375,7 @@ void open(bool on) {
         g_page = kRoot;
         g_row = g_scroll = 0;
         g_listening = g_dragging = -1;
-        if (in_play())                               // the game's own pause, before the menu takes the input
+        if (in_play()) //the game's own pause, before the menu takes the input away
             g_pause_until = (Clock::now() + std::chrono::milliseconds(150)).time_since_epoch().count();
     } else if (g_dirty) {
         save_launch_settings();
@@ -408,9 +406,9 @@ void select() {
     else if (r.adjust) r.adjust(1);
 }
 
-// ---- the picture -------------------------------------------------------------------------------
+//the picture
 ImFont* g_font = nullptr;
-const float kFontSize = 48, kNarrow = 0.80f;         // the game's face is a narrow one: the glyphs are drawn squeezed
+const float kFontSize = 48, kNarrow = 0.80f; //the game's font is narrow, so the glyphs get drawn squeezed
 const ImU32 kCream = IM_COL32(243, 232, 208, 255), kBlue = IM_COL32(88, 124, 170, 255),
             kBar = IM_COL32(70, 100, 146, 150), kSelected = IM_COL32(255, 255, 255, 245),
             kSelectedText = IM_COL32(84, 146, 212, 255), kShadow = IM_COL32(0, 0, 0, 150),
@@ -439,7 +437,7 @@ void text(ImDrawList* dl, ImVec2 at, float size, ImU32 colour, const std::string
     }
 }
 
-// as large as size, smaller if that is what fits in width
+//as large as size, smaller if that's what fits in width
 float fit(const std::string& s, float size, float width) {
     float w = text_width(s, size);
     return w > width ? size * width / w : size;
@@ -447,18 +445,18 @@ float fit(const std::string& s, float size, float width) {
 
 ImU32 fade(ImU32 c, float a) { return (c & ~IM_COL32_A_MASK) | ((ImU32)((float)(c >> IM_COL32_A_SHIFT) * a) << IM_COL32_A_SHIFT); }
 
-struct Layout {                                      // the game's 1280 x 720 menu screen, centred in the window
+struct Layout { //the game's 1280 x 720 menu screen, centred in the window
     float u, cx, w, h;
     float x(float ref) const { return cx + (ref - 640) * u; }
     float y(float ref) const { return ref * u; }
 };
 const float kRowLeft = 340, kRowRight = 940, kRowHeight = 38, kRowPitch = 41, kValueWidth = 230;
-const float kSliderLeft = kRowRight - 262, kSliderRight = kRowRight - 66;   // a slider's track, its number after it
+const float kSliderLeft = kRowRight - 262, kSliderRight = kRowRight - 66; //a slider's track, its number after it
 const int kVisible = 8;
 Layout g_layout;
 float rows_top() { return g_pages[g_page].rows.size() > 4 ? 178.0f : 276.0f; }
 
-// a key's cap, and what it does: the game's "(b) Back"
+//a key's cap and what it does, like the game's "(b) Back"
 float key_hint(ImDrawList* dl, const Layout& L, float x, float y, const char* key, const char* what, bool right) {
     float size = 24 * L.u, cap = 17 * L.u, pad = 7 * L.u;
     float kw = text_width(key, cap) + 2 * pad, ww = text_width(what, size), gap = 12 * L.u;
@@ -477,7 +475,7 @@ void draw_frame(ImDrawList* dl, const Layout& L, const Page& page) {
     for (float gx = std::fmod(L.cx, 64 * u); gx < L.w; gx += 64 * u) dl->AddLine(ImVec2(gx, 0), ImVec2(gx, L.h), kGrid, u);
     for (float gy = 0; gy < L.h; gy += 64 * u) dl->AddLine(ImVec2(0, gy), ImVec2(L.w, gy), kGrid, u);
 
-    // the title: its node, the bar that runs off to the right
+    //the title with its node and the bar that runs off to the right
     ImVec2 node(L.x(260), L.y(128));
     dl->AddLine(ImVec2(L.x(150), L.y(18)), node, kCream, 5 * u);
     dl->AddRectFilled(ImVec2(node.x, L.y(79)), ImVec2(L.x(318), L.y(123)), kCream);
@@ -494,7 +492,7 @@ void draw_frame(ImDrawList* dl, const Layout& L, const Page& page) {
     dl->AddRectFilled(ImVec2(L.x(322), L.y(123)), ImVec2(L.w, L.y(126)), kCream);
     text(dl, ImVec2(L.x(323), L.y(78)), 40 * u, kCream, page.title);
 
-    // the foot: what the row under the cursor is for, and the keys
+    //the foot, what the row under the cursor is for and the keys
     for (float y : {545.0f, 668.0f}) {
         dl->AddRectFilledMultiColor(ImVec2(L.x(200), L.y(y)), ImVec2(L.x(300), L.y(y + 3)), none, kCream, kCream, none);
         dl->AddRectFilled(ImVec2(L.x(300), L.y(y)), ImVec2(L.x(980), L.y(y + 3)), kCream);
@@ -527,14 +525,14 @@ void draw_rows(ImDrawList* dl, const Layout& L, const Page& page) {
         text(dl, ImVec2(x0 + 14 * u, ty), size, colour, r.label, !sel);
         if (!r.value) continue;
         std::string v = r.value();
-        if (r.binding) {                             // the keys, against the right edge
+        if (r.binding) { //the keys, against the right edge
             if (g_listening == i) v = std::fmod(ImGui::GetTime(), 1.0) < 0.6 ? "Press a key..." : "";
             float room = x1 - x0 - 44 * u - text_width(r.label, size), vs = fit(v, 26 * u, room);
             text(dl, ImVec2(x1 - 14 * u - text_width(v, vs), ty + (size - vs) * 0.55f), vs, colour, v, !sel);
             continue;
         }
         float mid = (y0 + y1) / 2;
-        if (r.slider) {                              // the track, filled up to the knob, and the number
+        if (r.slider) { //the track, filled up to the knob, and the number
             float sx0 = L.x(kSliderLeft), sx1 = L.x(kSliderRight), kx = sx0 + (sx1 - sx0) * std::clamp(r.slider(), 0.0f, 1.0f);
             dl->AddRectFilled(ImVec2(sx0, mid - 2 * u), ImVec2(sx1, mid + 2 * u), fade(colour, 0.35f));
             dl->AddRectFilled(ImVec2(sx0, mid - 4 * u), ImVec2(kx, mid + 4 * u), colour);
@@ -551,7 +549,7 @@ void draw_rows(ImDrawList* dl, const Layout& L, const Page& page) {
             dl->AddTriangleFilled(ImVec2(vx1, mid), ImVec2(vx1 - a, mid - a), ImVec2(vx1 - a, mid + a), colour);
         }
     }
-    // more above, more below
+    //more above, more below
     float mx = (x0 + x1) / 2, a = 9 * u;
     if (g_scroll > 0) {
         float y = L.y(rows_top() - 10);
@@ -563,7 +561,7 @@ void draw_rows(ImDrawList* dl, const Layout& L, const Page& page) {
     }
 }
 
-// the row under a point of the window, -1 for none
+//the row under a point of the window, -1 for none
 int row_at(float x, float y) {
     const Layout& L = g_layout;
     if (L.u <= 0 || x < L.x(kRowLeft) || x > L.x(kRowRight)) return -1;
@@ -586,7 +584,7 @@ void click(float x, float y) {
     g_row = i;
     Row& r = g_pages[g_page].rows[i];
     if (r.select || !r.adjust) { select(); return; }
-    if (r.slide) {                                   // on the track: the knob comes to the mouse, and follows it
+    if (r.slide) { //on the track the knob jumps to the mouse and follows it
         if (x >= g_layout.x(kSliderLeft) - 12 * g_layout.u && x <= g_layout.x(kSliderRight) + 12 * g_layout.u) {
             g_dragging = i;
             drag(x);
@@ -637,7 +635,7 @@ void key_down(const SDL_KeyboardEvent& k) {
 }
 
 void pad_down(int button) {
-    if (g_listening >= 0) {                          // a pad's buttons are not bound here: B leaves it
+    if (g_listening >= 0) { //pad buttons aren't bound here, B just leaves
         if (button == SDL_GAMEPAD_BUTTON_EAST) g_listening = -1;
         return;
     }
@@ -654,7 +652,7 @@ void pad_down(int button) {
 }
 #endif
 
-}  // namespace
+} //namespace
 
 bool settings_open() { return g_open; }
 
@@ -675,8 +673,8 @@ void settings_init() {
     }
 }
 
-// True for the events the menu takes: while it is up, every key but the
-// window's own (fullscreen, the GX trace), the mouse and the pads' buttons.
+//true for the events the menu takes: while it's up that's every key except the window's own
+//(fullscreen, the GX trace), the mouse and the pads' buttons
 bool settings_event(const SDL_Event* e) {
     if (e->type == SDL_EVENT_KEY_DOWN && e->key.scancode == SDL_SCANCODE_F1) {
         if (!e->key.repeat) open(!g_open);
@@ -693,7 +691,7 @@ bool settings_event(const SDL_Event* e) {
         case SDL_EVENT_KEY_UP: case SDL_EVENT_TEXT_INPUT:
             return true;
         case SDL_EVENT_MOUSE_MOTION:
-            if (!(e->motion.state & SDL_BUTTON_LMASK)) g_dragging = -1;   // let go where the window did not see it
+            if (!(e->motion.state & SDL_BUTTON_LMASK)) g_dragging = -1; //let go where the window didn't see it
             if (g_dragging >= 0) drag(e->motion.x);
             else if (int i = row_at(e->motion.x, e->motion.y); i >= 0 && g_listening < 0) g_row = i;
             return true;
@@ -722,10 +720,10 @@ bool settings_event(const SDL_Event* e) {
     }
 }
 
-// Inside the overlay's ImGui frame.
+//runs inside the overlay's ImGui frame
 void settings_draw() {
     if (!g_open) return;
-    if (g_keys.lines.empty()) load_keys();           // opened before the window had read the key file
+    if (g_keys.lines.empty()) load_keys(); //opened before the window had read the key file
     ImVec2 size = ImGui::GetIO().DisplaySize;
     Layout& L = g_layout;
     L.w = size.x;
@@ -741,4 +739,4 @@ void settings_draw() {
 }
 #endif
 
-}  // namespace ge
+} //namespace ge
