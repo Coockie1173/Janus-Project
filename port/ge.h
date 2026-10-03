@@ -43,6 +43,7 @@ uint32_t fps_limit();                                // the most frames a second
 void set_fps_limit(uint32_t fps);
 void install_crash_handler();                        // crashdump.cpp
 void crash_test();
+void crash_thread_stack();                           // the calling thread's stack for the crash handler
 void install_profiler();                             // diagnostics.cpp
 void install_mouse();                                // input.cpp
 void mouse_frame(uint32_t frame);

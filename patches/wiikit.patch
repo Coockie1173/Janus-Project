@@ -442,7 +442,7 @@ index 0000000..bb49877
 +            res[a] = v
 +        return res
 diff --git a/runtime/core.cpp b/runtime/core.cpp
-index d0baebf..1981b1d 100644
+index d0baebf..8f66089 100644
 --- a/runtime/core.cpp
 +++ b/runtime/core.cpp
 @@ -11,6 +11,7 @@
@@ -509,7 +509,7 @@ index d0baebf..1981b1d 100644
      for (uint32_t i = 0; i < n; ++i)
          st8(ea + i, (uint8_t)(c.r[(rs + i / 4) & 31] >> (24 - 8 * (i % 4))));
  }
-@@ -223,13 +237,28 @@ std::string rt_name(uint32_t a) {
+@@ -223,20 +237,38 @@ std::string rt_name(uint32_t a) {
      return buf;
  }
  
@@ -536,10 +536,22 @@ index d0baebf..1981b1d 100644
 +    for (unsigned i = n > kTailLines ? n - kTailLines : 0; i < n; ++i) std::fprintf(out, "%s\n", g_tail[i % kTailLines]);
 +}
 +void (*g_rt_on_die)(const char* message) = nullptr;
++void (*g_rt_on_thread)() = nullptr;
  
  void rt_backtrace(const PPCContext& c, FILE* out, int max) {
      std::fprintf(out, "  lr  %08X  %s\n", c.lr, rt_name(c.lr).c_str());
-@@ -244,13 +273,15 @@ void rt_backtrace(const PPCContext& c, FILE* out, int max) {
++    // a broken stack pointer is what a crash report often has to work with: only what is mapped
++    auto mapped = [](uint32_t a) { return (a >= 0x80000000u && a < 0x817FFFF8u) || (a >= 0x90000000u && a < 0x93FFFFF8u); };
+     uint32_t sp = c.r[1];
+-    for (int i = 0; i < max && sp >= 0x80000000u && sp < 0x94000000u; ++i) {
++    for (int i = 0; i < max && mapped(sp); ++i) {
+         uint32_t next = ld32(sp);
+-        if (next <= sp || next >= 0x94000000u) break;
++        if (next <= sp || !mapped(next)) break;
+         uint32_t lr = ld32(next + 4);
+         std::fprintf(out, "  %08X  %s\n", lr, rt_name(lr).c_str());
+         sp = next;
+@@ -244,13 +276,15 @@ void rt_backtrace(const PPCContext& c, FILE* out, int max) {
  }
  
  [[noreturn]] void rt_die(const char* fmt, ...) {
@@ -2813,10 +2825,18 @@ index c544428..d46f70a 100644
 +void mem_watch_tick();
 +uint64_t mem_watch_faults();
 diff --git a/runtime/os.cpp b/runtime/os.cpp
-index aa1274e..b25eda2 100644
+index aa1274e..f59b7dd 100644
 --- a/runtime/os.cpp
 +++ b/runtime/os.cpp
-@@ -435,7 +435,7 @@ void os_raise() {
+@@ -109,6 +109,7 @@ void load_regs(PPCContext& c, uint32_t ctx) {
+ void thread_body(HostThread* h, uint32_t entry) {
+     t_self = h;
+     t_ppc = &h->c;
++    if (g_rt_on_thread) g_rt_on_thread();
+     try {
+         {
+             std::unique_lock<std::mutex> lk(g_mx);
+@@ -435,7 +436,7 @@ void os_raise() {
  
  // Nothing but an interrupt can end the loop: wait for one (with a 1 ms
  // bound, in case a line is raised some other way), then deliver it.
@@ -2825,7 +2845,7 @@ index aa1274e..b25eda2 100644
      if (c.msr & MSR_EE) hw_cpu_idle();
      if (!g_ppc_pending.load(std::memory_order_relaxed) && (c.msr & MSR_EE)) {
          g_idle_waiting.store(true, std::memory_order_seq_cst);
-@@ -445,7 +445,7 @@ void ppc_idle(PPCContext& c) {
+@@ -445,7 +446,7 @@ void ppc_idle(PPCContext& c) {
      PPC_POLL(c);
  }
  
@@ -2834,7 +2854,7 @@ index aa1274e..b25eda2 100644
      while (c.msr & MSR_EE) {
          g_ppc_pending.store(0);
          int exc = hw_external_pending() ? EXC_EXTERNAL : dec_due() ? EXC_DECREMENTER : -1;
-@@ -455,12 +455,12 @@ void ppc_poll(PPCContext& c) {
+@@ -455,12 +456,12 @@ void ppc_poll(PPCContext& c) {
      }
  }
  
@@ -2850,7 +2870,7 @@ index aa1274e..b25eda2 100644
      t_ppc = &c;
      rt_die("%s at %s", what, rt_name(addr).c_str());
  }
-@@ -495,6 +495,28 @@ void os_report_running(int depth) {
+@@ -495,6 +496,28 @@ void os_report_running(int depth) {
      rt_backtrace(c, stderr, depth);
  }
  
@@ -3078,20 +3098,21 @@ index 99351d5..af71db9 100644
      if (!w) ps_quant(type, scale, ea + sz, c.ps1[s], &sz);
  }
 diff --git a/runtime/rt.h b/runtime/rt.h
-index 75fec5e..6a57975 100644
+index 75fec5e..0ca3f8d 100644
 --- a/runtime/rt.h
 +++ b/runtime/rt.h
-@@ -17,6 +17,9 @@ void rt_load_symbols(const char* tsv);
+@@ -17,6 +17,10 @@ void rt_load_symbols(const char* tsv);
  std::string rt_name(uint32_t addr);               // "func+0x12", or the hex address
  [[noreturn]] void rt_die(const char* fmt, ...);
  void rt_log(const char* fmt, ...);                 // stderr, one line
 +void rt_log_tail(FILE* out);                       // the last lines rt_log wrote (it keeps 256), oldest first
 +// Called by rt_die with its message before the process ends: a port's crash report.
 +extern void (*g_rt_on_die)(const char* message);
++extern void (*g_rt_on_thread)();                 // every host thread that runs guest code, as it starts
  // The guest call chain from a context: LR, then the saved LRs up the back chain.
  void rt_backtrace(const PPCContext& c, FILE* out, int max = 24);
  
-@@ -58,6 +61,9 @@ static inline uint64_t tb_hz() { return (uint64_t)g_bus_mhz * 250000; }
+@@ -58,6 +62,9 @@ static inline uint64_t tb_hz() { return (uint64_t)g_bus_mhz * 250000; }
  
  // ---- the OS layer (os.cpp) --------------------------------------------------------------
  void os_report_running(int depth);                // stderr: where the running guest thread is
@@ -3101,7 +3122,7 @@ index 75fec5e..6a57975 100644
  void os_install();                                // hooks, time
  void os_start_main(uint32_t entry);               // run __start on a guest host thread, and return
  void os_raise();                                  // a device changed its interrupt line
-@@ -74,6 +80,14 @@ void gx_submit_pending();                         // after a burst, outside g_hw
+@@ -74,6 +81,14 @@ void gx_submit_pending();                         // after a burst, outside g_hw
  // game that reads the copy on the CPU (the renderer otherwise keeps copies
  // on the host GPU only). False if no copy was made to addr (physical).
  bool gx_copy_to_ram(uint32_t addr);
@@ -3116,7 +3137,7 @@ index 75fec5e..6a57975 100644
  void gx_draw_done_reached();                      // the renderer: the game's draw-done point is drawn
  void hw_run_locked(const std::function<void()>& fn);   // run fn holding the hardware lock
  
-@@ -123,6 +137,10 @@ extern bool g_sysconf_eurgb60;                     // IPL.E60, after sysconf_pre
+@@ -123,6 +138,10 @@ extern bool g_sysconf_eurgb60;                     // IPL.E60, after sysconf_pre
  
  // ---- IOS (ios.cpp) ------------------------------------------------------------------
  void ios_init(const char* disc_root, const char* nand_root);
