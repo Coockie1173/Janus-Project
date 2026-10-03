@@ -7,6 +7,7 @@
 #     ./launch.sh --fov 70             the field of view in degrees (the game's is 49)
 #     ./launch.sh --mouse 1.5          mouse look sensitivity (1 by default; 0: mouse look off)
 #     ./launch.sh --fast-start         hurry through the screens before the menu (config/gecko/faststart.txt)
+#     ./launch.sh --cheats             every cheat in config/gecko/cheats.txt on (the window's Cheats tab picks them)
 #     ./launch.sh --mouse-mode stick   the mouse as right-stick input (auto does this in a game someone
 #                                      else hosts; direct never does)
 #     ./launch.sh --trace              log the mouse's player, its angles and the look state (for a report)
@@ -41,6 +42,7 @@ while [ $# -gt 0 ]; do
         --offline) LAUNCH_ONLINE=0; shift ;;
         --fullscreen) LAUNCH_FULLSCREEN=1; shift ;;
         --fast-start) LAUNCH_FASTSTART=1; shift ;;
+        --cheats) cp config/gecko/cheats.txt build/cheats.txt; shift ;;
         --trace) GE_TRACE=1; GE_TRACELOOK=1; export GE_TRACE GE_TRACELOOK; shift ;;
         *) ARGS="$ARGS $1"; shift ;;
     esac
@@ -56,6 +58,9 @@ if [ -z "$SDL_VIDEODRIVER" ] && [ -n "$DISPLAY" ]; then SDL_VIDEODRIVER=x11,wayl
 if [ "$LAUNCH_ONLINE" = 0 ]; then GE_HOSTS=; export GE_HOSTS; fi
 [ "$LAUNCH_FULLSCREEN" = 1 ] && ARGS="$ARGS --fullscreen"
 if [ "$LAUNCH_FASTSTART" = 1 ]; then GE_GECKO_EXTRA="$PWD/config/gecko/faststart.txt${GE_GECKO_EXTRA:+:$GE_GECKO_EXTRA}"; export GE_GECKO_EXTRA; fi
+
+# whatever the Cheats tab ticked lives in build/cheats.txt, nothing in there means no cheats
+if grep -q '^\$' build/cheats.txt 2>/dev/null; then GE_GECKO_EXTRA="$PWD/build/cheats.txt${GE_GECKO_EXTRA:+:$GE_GECKO_EXTRA}"; export GE_GECKO_EXTRA; fi
 
 make build || exit 1
 echo "keys: build/keys.txt   log: build/run.log"

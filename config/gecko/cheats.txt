@@ -1,0 +1,8 @@
+# cheats, one checkbox each in the launcher's Cheats tab (./launch.sh --cheats turns them all on).
+# same notation as config/gecko.txt: a "$Name" line, the code's lines, "*" for notes.
+# the ones ticked get copied to build/cheats.txt, which the port's code handler runs every frame.
+
+$Code 04774704
+04774704 80580990
+0077470B 00000019
+*not named yet: points the word at 80774704 to the table entry at 80580990 and sets the byte at 8077470B to 0x19

@@ -17,6 +17,8 @@ ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
 KEYS = os.path.join(ROOT, "build", "keys.txt")
 KEYS_DEFAULT = os.path.join(ROOT, "config", "keys.txt")
 SETTINGS = os.path.join(ROOT, "build", "settings.env")
+CHEATS = os.path.join(ROOT, "config", "gecko", "cheats.txt")
+CHEATS_ON = os.path.join(ROOT, "build", "cheats.txt")
 
 # what the game does with each Classic Controller button (its default layout), and the key file's name for it
 ACTIONS = [
@@ -116,6 +118,31 @@ def save_keys(lines, binds):
             lines.append(f"{name} = " + ", ".join(binds[name]))
     with open(KEYS, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
+
+
+def load_cheats(path):
+    """every code in a gecko file as (name, its lines, its notes)"""
+    cheats = []
+    if not os.path.exists(path):
+        return cheats
+    for line in open(path):
+        line = line.strip()
+        if line.startswith("$"):
+            cheats.append((line[1:].strip(), [], []))
+        elif cheats and line.startswith("*"):
+            cheats[-1][2].append(line[1:].strip())
+        elif cheats and line and not line.startswith("#"):
+            cheats[-1][1].append(line)
+    return cheats
+
+
+def save_cheats(cheats, ticked):
+    # only the ticked ones end up in the file the game reads, an empty file means no cheats
+    os.makedirs(os.path.dirname(CHEATS_ON), exist_ok=True)
+    with open(CHEATS_ON, "w") as f:
+        for name, code, _ in cheats:
+            if name in ticked:
+                f.write("$" + name + "\n" + "\n".join(code) + "\n\n")
 
 
 def refresh_rate():
@@ -299,6 +326,23 @@ def run_gui():
     ttk.Button(bottom, text="Defaults", command=reset_keys).pack(side="left")
     ttk.Label(bottom, textvariable=status).pack(side="left", padx=10)
 
+    # -- cheats
+    #the tab just lists whatever is in config/gecko/cheats.txt, so adding a cheat is adding it to that file
+    ch = ttk.Frame(book)
+    book.add(ch, text="Cheats")
+    cheats = load_cheats(CHEATS)
+    already_on = {name for name, _, _ in load_cheats(CHEATS_ON)}
+    cheat_vars = {}
+    ttk.Label(ch, text="Gecko codes from config/gecko/cheats.txt. They apply the next time the game starts.",
+              justify="left").grid(row=0, column=0, sticky="w", **pad)
+    for i, (name, code, notes) in enumerate(cheats):
+        cheat_vars[name] = tk.BooleanVar(value=name in already_on)
+        ttk.Checkbutton(ch, text=name, variable=cheat_vars[name]).grid(row=1 + 2 * i, column=0, sticky="w", **pad)
+        ttk.Label(ch, text="\n".join(notes) or "  ".join(code), foreground="gray", wraplength=520,
+                  justify="left").grid(row=2 + 2 * i, column=0, sticky="w", padx=(30, 8))
+    if not cheats:
+        ttk.Label(ch, text="No cheats in there yet.").grid(row=1, column=0, sticky="w", **pad)
+
     # -- play
     result = {"play": False}
 
@@ -312,6 +356,7 @@ def run_gui():
         settings["mousemode"] = next((k for k, v in modes.items() if v == mousemode.get()), "auto")
         save_settings(settings)
         save_keys(lines, binds)
+        save_cheats(cheats, {name for name, var in cheat_vars.items() if var.get()})
 
     def play():
         collect()
