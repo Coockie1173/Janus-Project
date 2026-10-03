@@ -6,6 +6,9 @@
 #     ./launch.sh --fps 120            the frame rate, up to 240 (60 by default; 30 is the console's)
 #     ./launch.sh --fov 70             the field of view in degrees (the game's is 49)
 #     ./launch.sh --mouse 1.5          mouse look sensitivity (1 by default; 0: mouse look off)
+#     ./launch.sh --crash-dumps        write a dump into build/crashes when the game dies or stalls (on by
+#                                      default; --no-crash-dumps turns it off, --crash-mem adds the game's
+#                                      memory to each dump, 88 MB)
 #     ./launch.sh --fast-start         hurry through the screens before the menu (config/gecko/faststart.txt)
 #     ./launch.sh --cheats             every cheat in config/gecko/cheats.txt on (the window's Cheats tab picks them)
 #     ./launch.sh --mouse-mode stick   the mouse as right-stick input (auto does this in a game someone
@@ -31,6 +34,7 @@ fi
 
 # the saved settings, then the command line over them
 LAUNCH_FPS=auto; LAUNCH_FOV=49; LAUNCH_MOUSE=1.0; LAUNCH_ONLINE=1; LAUNCH_FULLSCREEN=0; LAUNCH_FASTSTART=0; LAUNCH_MOUSEMODE=auto
+LAUNCH_CRASHDUMP=1; LAUNCH_CRASHMEM=0
 [ -f build/settings.env ] && . ./build/settings.env
 ARGS=
 while [ $# -gt 0 ]; do
@@ -43,6 +47,9 @@ while [ $# -gt 0 ]; do
         --offline) LAUNCH_ONLINE=0; shift ;;
         --fullscreen) LAUNCH_FULLSCREEN=1; shift ;;
         --fast-start) LAUNCH_FASTSTART=1; shift ;;
+        --crash-dumps) LAUNCH_CRASHDUMP=1; shift ;;
+        --no-crash-dumps) LAUNCH_CRASHDUMP=0; shift ;;
+        --crash-mem) LAUNCH_CRASHDUMP=1; LAUNCH_CRASHMEM=1; shift ;;
         --cheats) cp config/gecko/cheats.txt build/cheats.txt; shift ;;
         --trace) GE_TRACE=1; GE_TRACELOOK=1; export GE_TRACE GE_TRACELOOK; shift ;;
         *) ARGS="$ARGS $1"; shift ;;
@@ -60,6 +67,9 @@ if [ "$LAUNCH_ONLINE" = 0 ]; then GE_HOSTS=; export GE_HOSTS; fi
 [ "$LAUNCH_FULLSCREEN" = 1 ] && ARGS="$ARGS --fullscreen"
 if [ "$LAUNCH_FASTSTART" = 1 ]; then GE_GECKO_EXTRA="$PWD/config/gecko/faststart.txt${GE_GECKO_EXTRA:+:$GE_GECKO_EXTRA}"; export GE_GECKO_EXTRA; fi
 
+# the crash handler: dumps unless switched off, the memory only when asked for
+if [ "$LAUNCH_CRASHDUMP" = 0 ]; then GE_NO_CRASHDUMP=1; export GE_NO_CRASHDUMP; else unset GE_NO_CRASHDUMP; fi
+if [ "$LAUNCH_CRASHMEM" = 1 ]; then GE_CRASH_MEM=1; export GE_CRASH_MEM; fi
 # whatever the Cheats tab ticked lives in build/cheats.txt, nothing in there means no cheats
 if grep -q '^\$' build/cheats.txt 2>/dev/null; then GE_GECKO_EXTRA="$PWD/build/cheats.txt${GE_GECKO_EXTRA:+:$GE_GECKO_EXTRA}"; export GE_GECKO_EXTRA; fi
 

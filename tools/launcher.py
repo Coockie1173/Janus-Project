@@ -31,7 +31,8 @@ ACTIONS = [
     ("Move forward", "Left Stick Up"), ("Move back", "Left Stick Down"),
     ("Move left", "Left Stick Left"), ("Move right", "Left Stick Right"),
 ]
-DEFAULTS = {"fps": "auto", "fov": "49", "mouse": "1.0", "online": "1", "fullscreen": "0", "faststart": "0", "mousemode": "auto"}
+DEFAULTS = {"fps": "auto", "fov": "49", "mouse": "1.0", "online": "1", "fullscreen": "0", "faststart": "0", "mousemode": "auto",
+            "crashdump": "1", "crashmem": "0"}
 
 # Tk's key names -> SDL's (the key file's)
 TK_TO_SDL = {
@@ -241,6 +242,13 @@ def run_gui():
     faststart = tk.BooleanVar(value=settings["faststart"] == "1")
     ttk.Checkbutton(st, text="Quicker start: hurry through the screens before the menu (a Gecko code)",
                     variable=faststart).grid(row=5, column=0, columnspan=2, sticky="w", **pad)
+    #crash dumps are on unless someone unticks them, the memory is big so that one's opt in
+    crashdump = tk.BooleanVar(value=settings["crashdump"] == "1")
+    ttk.Checkbutton(st, text="Crash dumps: write a report into build/crashes when the game dies or stalls",
+                    variable=crashdump).grid(row=6, column=0, columnspan=2, sticky="w", **pad)
+    crashmem = tk.BooleanVar(value=settings["crashmem"] == "1")
+    ttk.Checkbutton(st, text="...with the game's memory in each dump (88 MB)",
+                    variable=crashmem).grid(row=7, column=0, columnspan=2, sticky="w", padx=(30, 8))
 
     # -- controls
     ct = ttk.Frame(book)
@@ -355,6 +363,8 @@ def run_gui():
         settings["online"] = "1" if online.get() else "0"
         settings["fullscreen"] = "1" if fullscreen.get() else "0"
         settings["faststart"] = "1" if faststart.get() else "0"
+        settings["crashdump"] = "1" if crashdump.get() else "0"
+        settings["crashmem"] = "1" if crashmem.get() else "0"
         settings["mousemode"] = next((k for k, v in modes.items() if v == mousemode.get()), "auto")
         save_settings(settings)
         save_keys(lines, binds)
