@@ -8,6 +8,7 @@
 //   native.cpp       the engine's hot math routines written for the host (GE_NATIVE)
 //   net.cpp          the hosts file for the game's servers (GE_HOSTS, GE_NETLOG)
 //   overlay.cpp      the debug overlay (F3): memory watches from a .dmw file (dmw.cpp)
+//   settings.cpp     the settings menu (F1): field of view, mouse, gamepad, key bindings
 //   crashdump.cpp    crash, die and stall dumps into build/crashes (GE_CRASH_MEM, GE_NO_CRASHDUMP)
 //   diagnostics.cpp  the sampling profiler (GE_PROFILE)
 //   debug.cpp        aids for finding things in the running game (scans, probes, scripted input)
@@ -41,13 +42,25 @@ void install_profiler();                             // diagnostics.cpp
 void install_mouse();                                // input.cpp
 void mouse_frame(uint32_t frame);
 void mouse_capture(bool on);
+const float kMouseSensMax = 5.0f;
+float mouse_sens();                                  // 1 is the default, 0 no mouse look
+void set_mouse_sens(float s);
+int mouse_mode();                                    // 0 auto, 1 direct, 2 stick
+void set_mouse_mode(int m);
+bool mouse_invert();
+void set_mouse_invert(bool on);
 void install_hosts();                                // net.cpp
 void install_gecko();                                // gecko.cpp
 void gecko_apply();
 void install_fov();                                  // fov.cpp
 void fov_apply();
+const float kGameFov = 49.0f, kFovMin = 20.0f, kFovMax = 140.0f;
+float fov();                                         // degrees
+void set_fov(float degrees);
 void install_native();                               // native.cpp
 void install_overlay();                              // overlay.cpp
-bool overlay_open();
+bool overlay_open();                                 // the watches or the settings menu: the mouse is free
+bool settings_open();                                // settings.cpp
+uint32_t settings_buttons();                         // Classic buttons the menu presses itself (+ to pause as it opens)
 
 }  // namespace ge

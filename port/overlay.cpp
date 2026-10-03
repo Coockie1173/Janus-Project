@@ -5,6 +5,7 @@
 // overlay hooks: after the context is made, on each event, before each
 // swap). While it is up the mouse is free and does not turn the view.
 // Without a watch list there is no overlay: F3 does nothing.
+// The settings menu (F1, settings.cpp) is drawn in the same frame, over it.
 //
 //     GE_DMW=F       the watch list (default: the first .dmw in the project's folder)
 //     GE_OVERLAY=1   start with the overlay up
@@ -26,6 +27,13 @@
 #endif
 
 namespace ge {
+
+#ifdef GE_IMGUI
+void settings_init();                                // settings.cpp
+bool settings_event(const SDL_Event* e);
+void settings_draw();
+#endif
+
 namespace {
 
 std::atomic<bool> g_open{false};
@@ -112,21 +120,20 @@ void init(SDL_Window* win, void* gl) {
     g_have = g_error.empty() && g_watches.count() > 0;
     if (!g_have) rt_log("goldeneye: no overlay (F3 does nothing): %s", g_error.empty() ? "the list is empty" : g_error.c_str());
     if (g_have && std::getenv("GE_OVERLAY")) { g_open = true; mouse_capture(false); }
+    settings_init();
 }
 
-void event(const SDL_Event* e) {
+bool event(const SDL_Event* e) {
+    if (settings_event(e)) return true;
     if (g_have && e->type == SDL_EVENT_KEY_DOWN && e->key.scancode == SDL_SCANCODE_F3 && !e->key.repeat) {
         g_open = !g_open;
-        mouse_capture(!g_open);
+        mouse_capture(!overlay_open());
     }
     if (g_open) ImGui_ImplSDL3_ProcessEvent(e);
+    return false;
 }
 
-void draw() {
-    if (!g_open) return;
-    ImGui_ImplOpenGL3_NewFrame();
-    ImGui_ImplSDL3_NewFrame();
-    ImGui::NewFrame();
+void watches() {
     ImGui::SetNextWindowPos(ImVec2(12, 12), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(620, 560), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowBgAlpha(0.88f);
@@ -149,6 +156,15 @@ void draw() {
         ImGui::EndChild();
     }
     ImGui::End();
+}
+
+void draw() {
+    if (!overlay_open()) return;
+    ImGui_ImplOpenGL3_NewFrame();
+    ImGui_ImplSDL3_NewFrame();
+    ImGui::NewFrame();
+    if (g_open) watches();
+    settings_draw();
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 }
@@ -156,7 +172,7 @@ void draw() {
 
 }  // namespace
 
-bool overlay_open() { return g_open; }
+bool overlay_open() { return g_open || settings_open(); }
 
 void install_overlay() {
 #ifdef GE_IMGUI

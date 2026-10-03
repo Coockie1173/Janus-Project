@@ -15,6 +15,8 @@
 //     GE_GECKO=F   the Gecko codes the port runs each frame (default build/patched/gecko.txt,
 //                  from tools/gecko.py; empty: none); GE_GECKO_EXTRA=F[:F...] adds files
 //     GE_FOV=D     the field of view in play, degrees (the game's is 49)
+//     GE_MOUSE_INVERT=1  the mouse pushed forward looks down
+//     GE_SETTINGS=N  start with the settings menu (F1, settings.cpp) up, on its page N
 //     GE_FPS=N     the frame rate the engine may reach (default: its own 30); auto: 60
 //     GE_NATIVE=0  the engine's math routines as recompiled, not the host versions (check: compare them)
 //     GE_CRASH_MEM=1  crash dumps (build/crashes, see crashdump.cpp) with the guest's memory in them

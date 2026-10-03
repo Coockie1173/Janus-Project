@@ -70,6 +70,11 @@ The game's online servers are gone. `config/hosts.txt` points their names at
 a community server, as lines of `/etc/hosts` would. Needs OpenSSL's
 development files. Gecko codes go in `config/gecko.txt` (RAM writes only).
 
+F1 opens the settings menu, drawn like the game's own: the field of view,
+the mouse (sensitivity, invert, how it turns the view), the gamepad (face
+buttons, dead zone) and the key bindings. Changes count at once and are
+kept in `build/settings.env` and `build/keys.txt`, the launcher's files.
+
 F3 opens a debug overlay: the memory watches of a Dolphin Memory Engine
 list (a `.dmw` file in the project's folder, or `GE_DMW=file`), read live
 from the running game, with a filter. It is drawn with Dear ImGui, fetched

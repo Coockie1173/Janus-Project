@@ -21,7 +21,7 @@
 # Any option skips the window. Settings are kept in build/settings.env, the keys in build/keys.txt.
 # Keyboard and mouse by default: W A S D move, the mouse looks, left button fires, right button aims,
 # the wheel changes weapon, R reloads, Ctrl crouches, Shift sprints, E acts, G grenade, V melee;
-# in menus the left button selects and the right one goes back. Esc frees the mouse.
+# in menus the left button selects and the right one goes back. Esc frees the mouse. F1: the settings menu.
 # The window goes through X11 (XWayland) when DISPLAY is set: SDL_VIDEODRIVER=wayland for Wayland's own.
 # The log of the run is kept in build/run.log. A crash, the runtime giving up or a 20 s stall leaves
 # a dump in build/crashes/<date>-<time>-<kind>/ (send that folder along with a report).
@@ -41,7 +41,7 @@ fi
 
 # the saved settings, then the command line over them
 LAUNCH_FPS=auto; LAUNCH_FOV=49; LAUNCH_MOUSE=1.0; LAUNCH_ONLINE=1; LAUNCH_FULLSCREEN=0; LAUNCH_FASTSTART=0; LAUNCH_MOUSEMODE=auto
-LAUNCH_CRASHDUMP=1; LAUNCH_CRASHMEM=0
+LAUNCH_CRASHDUMP=1; LAUNCH_CRASHMEM=0; LAUNCH_MOUSEINVERT=0
 [ -f build/settings.env ] && . ./build/settings.env
 ARGS=
 while [ $# -gt 0 ]; do
@@ -65,8 +65,8 @@ done
 # 240 at most, auto is 60 (GE_FPS in the environment still overrides)
 case $LAUNCH_FPS in auto) ;; *) [ "$LAUNCH_FPS" -gt 240 ] 2>/dev/null && LAUNCH_FPS=240 ;; esac
 GE_FPS=${GE_FPS:-$LAUNCH_FPS}; GE_FOV=${GE_FOV:-$LAUNCH_FOV}; GE_MOUSE=${GE_MOUSE:-$LAUNCH_MOUSE}
-GE_MOUSE_MODE=${GE_MOUSE_MODE:-$LAUNCH_MOUSEMODE}
-export GE_FPS GE_FOV GE_MOUSE GE_MOUSE_MODE
+GE_MOUSE_MODE=${GE_MOUSE_MODE:-$LAUNCH_MOUSEMODE}; GE_MOUSE_INVERT=${GE_MOUSE_INVERT:-$LAUNCH_MOUSEINVERT}
+export GE_FPS GE_FOV GE_MOUSE GE_MOUSE_MODE GE_MOUSE_INVERT
 # through X11 when there is one: a present on Wayland costs the renderer 2 ms, 0.3 there
 # (SDL_VIDEODRIVER in the environment overrides)
 if [ -z "$SDL_VIDEODRIVER" ] && [ -n "$DISPLAY" ]; then SDL_VIDEODRIVER=x11,wayland; export SDL_VIDEODRIVER; fi

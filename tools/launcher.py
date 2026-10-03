@@ -48,7 +48,7 @@ ACTIONS = [
     ("Move left", "Left Stick Left"), ("Move right", "Left Stick Right"),
 ]
 DEFAULTS = {"fps": "auto", "fov": "49", "mouse": "1.0", "online": "1", "fullscreen": "0", "faststart": "0", "mousemode": "auto",
-            "crashdump": "1", "crashmem": "0"}
+            "mouseinvert": "0", "crashdump": "1", "crashmem": "0"}
 
 # Tk's key names -> SDL's (the key file's)
 TK_TO_SDL = {
@@ -516,7 +516,8 @@ def run_game(args):
         return 1
     if s["fps"] != "auto" and s["fps"].isdigit() and int(s["fps"]) > FPS_MAX:
         s["fps"] = str(FPS_MAX)
-    for var, key in (("GE_FPS", "fps"), ("GE_FOV", "fov"), ("GE_MOUSE", "mouse"), ("GE_MOUSE_MODE", "mousemode")):
+    for var, key in (("GE_FPS", "fps"), ("GE_FOV", "fov"), ("GE_MOUSE", "mouse"), ("GE_MOUSE_MODE", "mousemode"),
+                     ("GE_MOUSE_INVERT", "mouseinvert")):
         env.setdefault(var, s[key])
     if s["faststart"] == "1":
         extra.append("config/gecko/faststart.txt")

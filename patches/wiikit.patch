@@ -3165,7 +3165,7 @@ index 8a4e097..8b1b1a8 100644
  void ppc_mmio_write(uint32_t addr, uint32_t, int) { rt_die("mmio write %08X", addr); }
  uint64_t ppc_timebase() { return 0; }
 diff --git a/runtime/video.cpp b/runtime/video.cpp
-index 5726093..01eeb4b 100644
+index 5726093..f40cd75 100644
 --- a/runtime/video.cpp
 +++ b/runtime/video.cpp
 @@ -67,7 +67,8 @@ ClassicState classic[4];
@@ -3954,7 +3954,43 @@ index 5726093..01eeb4b 100644
          case VC_DRAWDONE: gx_draw_done_reached(); break;
          default: rt_die("video: bad record byte %02X", p[-1]);
          }
-@@ -1266,7 +1586,10 @@ void update_pad() {
+@@ -843,6 +1163,7 @@ std::vector<Binding> bindings;
+ int keys_input = INPUT_MODE_AUTO;                        // the key file's Input
+ bool face_by_label = false;                         // the key file's Face Buttons = Label
+ float dead_zone = 0.15f;                            // the key file's Dead Zone: of the sticks' travel, radial
++std::atomic<bool> input_blocked{false};             // video_block_input: an overlay has the input
+ 
+ const char* DEFAULT_KEYS =
+     "# wiiboot's keys: each Wii Remote button, then the keys and mouse buttons that press it.\n"
+@@ -1006,7 +1327,9 @@ bool parse_keys(const std::string& text, const std::string& path, bool remote, b
+     return has_classic;
+ }
+ 
++std::string keys_path;
+ void load_keys(const std::string& path) {
++    keys_path = path;
+     std::string text;
+     if (FILE* f = std::fopen(path.c_str(), "rb")) {
+         char buf[4096];
+@@ -1186,7 +1509,7 @@ void update_pad() {
+     p.buttons &= ~(kRaisePlus | kRaiseMinus | kWalk | (kStick * 0xF));
+     int ww = 0, wh = 0;
+     SDL_GetWindowSize(win, &ww, &wh);                        // mouse coordinates are in window units
+-    if (ww > 0 && wh > 0 && (SDL_GetWindowFlags(win) & SDL_WINDOW_MOUSE_FOCUS)) {
++    if (ww > 0 && wh > 0 && !input_blocked && (SDL_GetWindowFlags(win) & SDL_WINDOW_MOUSE_FOCUS)) {
+         // -1..1 spans the picture as present() shows it, so that the game's
+         // cursor lands under the mouse
+         Rect r = picture_rect((float)ww, (float)wh);
+@@ -1261,12 +1584,19 @@ void update_pad() {
+     for (int i = 0; i < 4; ++i)
+         if (chan_pad[i] && !(i == 0 && mode == INPUT_MODE_KEYBOARD)) merge(c[i], classic_from_pad(chan_pad[i]));
+     update_rumble();
++    if (input_blocked) {                                      // an overlay has the input: pads stay connected, and idle
++        p = PadState{};
++        for (ClassicState& s : c) s = ClassicState{s.connected};
++    }
+     std::lock_guard<std::mutex> lk(pad_mx);
+     pad = p;
      for (int i = 0; i < 4; ++i) classic[i] = c[i];
  }
  
@@ -3965,7 +4001,7 @@ index 5726093..01eeb4b 100644
      ++cnt.presents;
      int ww = 0, wh = 0;
      SDL_GetWindowSizeInPixels(win, &ww, &wh);
-@@ -1275,17 +1598,17 @@ void present() {
+@@ -1275,17 +1605,17 @@ void present() {
      glColorMask(1, 1, 1, 1);
      glClearColor(0, 0, 0, 1);
      glClear(GL_COLOR_BUFFER_BIT);
@@ -3986,7 +4022,7 @@ index 5726093..01eeb4b 100644
      if (opt.dump_dir && cnt.presents % (uint64_t)opt.dump_every == 0 && ww > 0 && wh > 0) {
          std::vector<uint8_t> px((size_t)ww * wh * 4), flip(px.size());   // the window, as shown
          glReadPixels(0, 0, ww, wh, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
-@@ -1317,7 +1640,6 @@ void setup() {
+@@ -1317,7 +1647,6 @@ void setup() {
      glNamedFramebufferTexture(efb_fbo, GL_DEPTH_ATTACHMENT, efb_dep, 0);
      if (glCheckNamedFramebufferStatus(efb_fbo, GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
          rt_die("video: the EFB framebuffer is incomplete");
@@ -3994,7 +4030,7 @@ index 5726093..01eeb4b 100644
      glBindFramebuffer(GL_FRAMEBUFFER, efb_fbo);
      glClearColor(0, 0, 0, 1);
      glClearDepth(1.0);
-@@ -1327,45 +1649,25 @@ void setup() {
+@@ -1327,45 +1656,25 @@ void setup() {
      const GLbitfield map = GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT;
      glNamedBufferStorage(vbo, VBO_CAP, nullptr, map);
      vbo_ptr = static_cast<uint8_t*>(glMapNamedBufferRange(vbo, 0, VBO_CAP, map));
@@ -4057,17 +4093,21 @@ index 5726093..01eeb4b 100644
  
      copy_prog = link(FULLSCREEN_VS, COPY_FS);
      if (!copy_prog) rt_die("video: the EFB copy program does not build");
-@@ -1462,6 +1764,9 @@ std::atomic<bool> want_relative{false};
+@@ -1462,6 +1771,13 @@ std::atomic<bool> want_relative{false};
  std::mutex motion_mx;
  float motion_x = 0, motion_y = 0;
  void video_set_relative_mouse(bool on) { want_relative = on; }
 +void video_set_overlay(const VideoOverlay& o) { overlay_cb = o; }
++void video_block_input(bool on) { input_blocked = on; }
++const std::string& video_keys_path() { return keys_path; }
++void video_reload_keys() { if (!keys_path.empty()) load_keys(keys_path); }
++void video_set_input(int mode) { opt.input = mode; }
 +std::atomic<int> wheel_y{0};
 +int video_take_wheel() { return wheel_y.exchange(0); }
  void video_take_mouse_motion(float& dx, float& dy) {
      std::lock_guard<std::mutex> lk(motion_mx);
      dx = motion_x; dy = motion_y;
-@@ -1479,6 +1784,7 @@ ClassicState video_classic(int chan) {
+@@ -1479,6 +1795,7 @@ ClassicState video_classic(int chan) {
  void video_set_rumble(int chan, bool on) {
      if (chan >= 0 && chan < 4) rumble_want[chan] = on;
  }
@@ -4075,7 +4115,7 @@ index 5726093..01eeb4b 100644
  void video_retrace() {
      retraces.fetch_add(1);
      if (wake) SDL_SignalSemaphore(wake);
-@@ -1506,6 +1812,7 @@ void video_run(const char* title) {
+@@ -1506,6 +1823,7 @@ void video_run(const char* title) {
      SDL_GL_MakeCurrent(win, ctx);
      SDL_GL_SetSwapInterval(0);                   // VI paces the presents
      if (!gl_load()) rt_die("video: OpenGL functions missing");
@@ -4083,7 +4123,7 @@ index 5726093..01eeb4b 100644
      rt_log("video: %s, %s", (const char*)glGetString(GL_RENDERER), (const char*)glGetString(GL_VERSION));
      if (debug) {
          glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
-@@ -1529,11 +1836,15 @@ void video_run(const char* title) {
+@@ -1529,11 +1847,15 @@ void video_run(const char* title) {
      uint64_t frames_then = 0;
      uint32_t seen = retraces.load();
      std::string base_title = title;
@@ -4093,13 +4133,13 @@ index 5726093..01eeb4b 100644
          SDL_Event e;
          bool quit = false;
          while (SDL_PollEvent(&e)) {
-+            if (overlay_cb.event) overlay_cb.event(&e);
              if (e.type == SDL_EVENT_QUIT) quit = true;
++            if (overlay_cb.event && overlay_cb.event(&e)) continue;
 +            if (e.type == SDL_EVENT_MOUSE_WHEEL) wheel_y.fetch_add(e.wheel.y > 0 ? 1 : e.wheel.y < 0 ? -1 : 0);
              if (e.type == SDL_EVENT_GAMEPAD_ADDED) pad_added(e.gdevice.which);
              if (e.type == SDL_EVENT_GAMEPAD_REMOVED) pad_removed(e.gdevice.which);
              // F11 or Alt+Enter: fullscreen and back
-@@ -1592,7 +1903,14 @@ void video_run(const char* title) {
+@@ -1592,7 +1914,14 @@ void video_run(const char* title) {
                  double vtx = ms(g_vperf.vtx), tex = ms(g_vperf.tex), wait = ms(g_vperf.wait), draw = ms(g_vperf.draw),
                         pres = ms(g_vperf.present);
                  rt_log("perf: %.1f fps; frame %.1f ms; game thread: vertices %.1f, textures %.1f, waiting for the renderer %.1f; "
@@ -4115,7 +4155,7 @@ index 5726093..01eeb4b 100644
              }
              frames_then = cnt.frames;
              t_title = now;
-@@ -1608,6 +1926,8 @@ void video_run(const char* title) {
+@@ -1608,6 +1937,8 @@ void video_run(const char* title) {
              }
              if (c.readback) { if (c.copy) copy_readback(c.copy); else efb_readback(); busy = true; continue; }
              auto te = Clock::now();
@@ -4124,7 +4164,7 @@ index 5726093..01eeb4b 100644
              exec(c.data);
              if (g_vperf_on) g_vperf.draw += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - te).count();
              {
-@@ -1621,6 +1941,17 @@ void video_run(const char* title) {
+@@ -1621,6 +1952,17 @@ void video_run(const char* title) {
              if (retraces.load() != seen) break;
          }
          uint32_t r = retraces.load();
@@ -4143,7 +4183,7 @@ index 5726093..01eeb4b 100644
              seen = r;
              auto tp = Clock::now();
 diff --git a/runtime/video.h b/runtime/video.h
-index ecfb499..5b40dc8 100644
+index ecfb499..1f6a3d8 100644
 --- a/runtime/video.h
 +++ b/runtime/video.h
 @@ -3,7 +3,7 @@
@@ -4217,21 +4257,32 @@ index ecfb499..5b40dc8 100644
  
  // video.cpp
  bool video_enabled();                       // false with --no-video: the stream is parsed only
-@@ -98,6 +124,20 @@ void video_set_rumble(int chan, bool on);
+@@ -98,6 +124,31 @@ void video_set_rumble(int chan, bool on);
  void video_set_relative_mouse(bool on);
  void video_take_mouse_motion(float& dx, float& dy);
  
-+// A port's overlay over the picture (a debug window): init once the window
-+// and its OpenGL context exist, event for every SDL event, draw before each
-+// swap, with the window's framebuffer bound. All on the renderer's thread.
++// A port's overlay over the picture (a debug window, a menu): init once the
++// window and its OpenGL context exist, event for every SDL event (true: the
++// overlay took it, and the window's own keys, Esc and the rest, do not see
++// it), draw before each swap, with the window's framebuffer bound. All on
++// the renderer's thread.
 +struct SDL_Window;
 +union SDL_Event;
 +struct VideoOverlay {
 +    void (*init)(SDL_Window* window, void* gl_context) = nullptr;
-+    void (*event)(const SDL_Event* e) = nullptr;
++    bool (*event)(const SDL_Event* e) = nullptr;
 +    void (*draw)() = nullptr;
 +};
 +void video_set_overlay(const VideoOverlay& o);
++// For an overlay that has the keyboard and the mouse to itself (a menu):
++// while blocked the game sees no button, no stick and no pointer.
++void video_block_input(bool on);
++// The key file, for an overlay that edits it: its path, and reading it again
++// (on the renderer's thread). video_set_input: channel 1's sources from now
++// on (INPUT_MODE_*), over the key file's and --input.
++const std::string& video_keys_path();
++void video_reload_keys();
++void video_set_input(int mode);
 +// The mouse wheel's notches since the last call: up positive, down negative.
 +int video_take_wheel();
 +

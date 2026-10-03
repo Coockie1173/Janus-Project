@@ -43,11 +43,15 @@ Keyboard and mouse:
     T                cycle grenades       B                firing mode
     F                smartphone           Tab              night vision / scoreboard
     P                pause                Esc              free the mouse
-    F11, Alt+Enter   fullscreen
+    F11, Alt+Enter   fullscreen           F1               settings menu
 In menus the left mouse button selects and the right one goes back
 (Return and Backspace do too).
 
 A gamepad works as a Classic Controller: plug it in before starting.
+
+F1 in the game opens its settings menu: the field of view, the mouse, the
+gamepad and the key bindings, changed while you play (a mission is paused
+first). It writes the same settings.env and keys.txt as the window.
 
 keys.txt holds every binding, with the names to use explained at its top.
 Delete it to get the defaults back (a copy is in config\keys.txt).

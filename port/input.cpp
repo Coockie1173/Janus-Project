@@ -2,6 +2,7 @@
 #include "ge.h"
 #include "debug.h"
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -33,7 +34,8 @@ extern bool g_stick_took;                            // the mouse is on the stic
 // points to, at +0x768, radians, negative up (+0x760 follows it).
 const uint32_t kControllerNotLocal = 0x80108D70;     // (controller) -> 0 if this console plays it
 const float kPi = 3.14159265f;
-float g_mouse_sens = 1.0f;                           // GE_MOUSE: 1 is 0.0022 radians a pixel
+std::atomic<float> g_mouse_sens{1.0f};               // GE_MOUSE: 1 is 0.0022 radians a pixel
+std::atomic<bool> g_mouse_invert{false};             // GE_MOUSE_INVERT: the mouse pushed forward looks down
 const float kRadPerPixel = 0.0022f, kPitchLimit = 1.35f;
 
 
@@ -44,7 +46,7 @@ const float kRadPerPixel = 0.0022f, kPitchLimit = 1.35f;
 // tests: the word at 805D5490 is 1 or 2 in a network game, the one at
 // 805D5470 non-zero on the host. GE_MOUSE_MODE=direct or stick forces one.
 const uint32_t kNetState = 0x805D5460;
-int g_mouse_mode = 0;                                // 0 auto, 1 direct, 2 stick
+std::atomic<int> g_mouse_mode{0};                    // 0 auto, 1 direct, 2 stick
 
 bool joined_game() {
     uint32_t mode = ld32(kNetState + 0x30);
@@ -100,6 +102,7 @@ void mouse_look(uint32_t ctrl, uint32_t player) {
     float dx = 0, dy = 0;
     video_take_mouse_motion(dx, dy);
     debug_mouse(dx, dy);
+    if (g_mouse_invert) dy = -dy;
     if (dx == 0 && dy == 0) return;
     static uint32_t seen = 0;
     if (player != seen && std::getenv("GE_TRACE")) {
@@ -253,7 +256,7 @@ void mouse_stick(ClassicState& s) {
     video_take_mouse_motion(dx, dy);
     debug_mouse(dx, dy);
     ax += dx;
-    ay += dy;
+    ay += g_mouse_invert ? -dy : dy;
     if (dt >= 0.004f) {
         defl_x = defl_y = 0;
         if (dt <= 0.25f) {
@@ -285,6 +288,7 @@ template <int I> void look_sens(PPCContext& c) {
 
 void classic_filter(int chan, ClassicState& s) {
     if (chan != 0) return;
+    s.buttons |= settings_buttons();
     mouse_stick(s);
     wheel_buttons(s);
     debug_classic(s);
@@ -293,9 +297,10 @@ void classic_filter(int chan, ClassicState& s) {
 
 void install_mouse() {
     if (const char* m = std::getenv("GE_MOUSE")) g_mouse_sens = (float)std::atof(m);
+    if (const char* m = std::getenv("GE_MOUSE_INVERT")) g_mouse_invert = std::atoi(m) != 0;
     if (const char* m = std::getenv("GE_MOUSE_MODE")) g_mouse_mode = !std::strcmp(m, "direct") ? 1 : !std::strcmp(m, "stick") ? 2 : 0;
     wpad_set_classic_filter(classic_filter);
-    if (g_mouse_sens <= 0) return;
+    // hooked whatever the sensitivity: the settings menu turns mouse look on and off in play
     controller_not_local = ppc_lookup(kControllerNotLocal);
     orig_controller_update = ppc_hook("ge_controller_update", controller_update);
     orig_look_apply = ppc_hook("ge_look_apply", look_apply);
@@ -303,8 +308,15 @@ void install_mouse() {
     orig_look_sens[0] = ppc_hook("ge_look_sens", look_sens<0>);
     orig_look_sens[1] = ppc_hook("ge_look_sens_ads", look_sens<1>);
     if (!orig_look_sens[0] || !orig_look_sens[1]) rt_die("goldeneye: the sensitivity readers are not hooked in this build");
-    video_set_relative_mouse(true);
+    video_set_relative_mouse(g_mouse_sens > 0);
 }
+
+float mouse_sens() { return g_mouse_sens; }
+void set_mouse_sens(float s) { g_mouse_sens = std::clamp(s, 0.0f, kMouseSensMax); }
+int mouse_mode() { return g_mouse_mode; }
+void set_mouse_mode(int m) { g_mouse_mode = m; }
+bool mouse_invert() { return g_mouse_invert; }
+void set_mouse_invert(bool on) { g_mouse_invert = on; }
 
 // Once a game frame: with nobody to turn (a menu, a pause) the mouse's motion is dropped.
 void mouse_frame(uint32_t f) {
@@ -314,7 +326,7 @@ void mouse_frame(uint32_t f) {
     }
 }
 
-// The cursor is the game's while it plays, and free while the debug overlay is up.
+// The cursor is the game's while it plays, and free while an overlay (F1, F3) is up.
 void mouse_capture(bool on) { video_set_relative_mouse(on && g_mouse_sens > 0); }
 
 }  // namespace ge
