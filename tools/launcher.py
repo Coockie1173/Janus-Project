@@ -17,6 +17,7 @@ ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
 KEYS = os.path.join(ROOT, "build", "keys.txt")
 KEYS_DEFAULT = os.path.join(ROOT, "config", "keys.txt")
 SETTINGS = os.path.join(ROOT, "build", "settings.env")
+FPS_MAX = 240
 CHEATS = os.path.join(ROOT, "config", "gecko", "cheats.txt")
 CHEATS_ON = os.path.join(ROOT, "build", "cheats.txt")
 
@@ -184,8 +185,8 @@ def run_gui():
     fps_mode = tk.StringVar(value="auto" if settings["fps"] == "auto" else "custom")
     if settings["fps"] != "auto" and not settings["fps"].isdigit():
         settings["fps"] = "auto"
-    if settings["fps"] != "auto" and int(settings["fps"]) >= 60:
-        settings["fps"] = "auto"                 # 60 is the most, and the default
+    if settings["fps"] != "auto" and int(settings["fps"]) == 60:
+        settings["fps"] = "auto"                 # 60 is the default
     fps_val = tk.StringVar(value="60" if settings["fps"] == "auto" else settings["fps"])
     ttk.Label(st, text="Frame rate").grid(row=0, column=0, sticky="w", **pad)
     fr = ttk.Frame(st)
@@ -194,7 +195,8 @@ def run_gui():
     row = ttk.Frame(fr)
     row.pack(anchor="w")
     ttk.Radiobutton(row, text="Limit to", variable=fps_mode, value="custom").pack(side="left")
-    ttk.Spinbox(row, from_=30, to=60, width=5, textvariable=fps_val).pack(side="left", padx=4)
+    #above 60 the game shows frames as it draws them, heavy levels sit around 90 on a decent machine
+    ttk.Spinbox(row, from_=30, to=FPS_MAX, width=5, textvariable=fps_val).pack(side="left", padx=4)
     ttk.Label(row, text="(30 is the console's)").pack(side="left")
 
     fov = tk.DoubleVar(value=float(settings["fov"]))
@@ -347,7 +349,7 @@ def run_gui():
     result = {"play": False}
 
     def collect():
-        settings["fps"] = "auto" if fps_mode.get() == "auto" else str(max(30, min(60, int(float(fps_val.get() or 60)))))
+        settings["fps"] = "auto" if fps_mode.get() == "auto" else str(max(30, min(FPS_MAX, int(float(fps_val.get() or 60)))))
         settings["fov"] = str(round(fov.get()))
         settings["mouse"] = f"{mouse.get():.2f}"
         settings["online"] = "1" if online.get() else "0"
