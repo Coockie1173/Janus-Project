@@ -245,10 +245,10 @@ def run_gui():
     #crash dumps are on unless someone unticks them, the memory is big so that one's opt in
     crashdump = tk.BooleanVar(value=settings["crashdump"] == "1")
     ttk.Checkbutton(st, text="Crash dumps: write a report into build/crashes when the game dies or stalls",
-                    variable=crashdump).grid(row=6, column=0, columnspan=2, sticky="w", **pad)
+                    variable=crashdump).grid(row=7, column=0, columnspan=2, sticky="w", **pad)
     crashmem = tk.BooleanVar(value=settings["crashmem"] == "1")
     ttk.Checkbutton(st, text="...with the game's memory in each dump (88 MB)",
-                    variable=crashmem).grid(row=7, column=0, columnspan=2, sticky="w", padx=(30, 8))
+                    variable=crashmem).grid(row=8, column=0, columnspan=2, sticky="w", padx=(30, 8))
 
     # -- controls
     ct = ttk.Frame(book)
