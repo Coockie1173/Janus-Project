@@ -183,7 +183,6 @@ void watches() {
         ImGui::Text("%s", in_play() ? "in play" : guest_ptr(player) ? "paused" : "no player (menus)");
         ImGui::SameLine();
         ImGui::TextDisabled("  frame %u   %zu watches", ld32(kFrameCount), g_watches.count());
-        ImGui::SameLine();
         ImGui::Checkbox("player state on screen", &g_show_state);
         if (!g_error.empty()) ImGui::TextColored(ImVec4(1, 0.5f, 0.4f, 1), "%s", g_error.c_str());
         ImGui::SetNextItemWidth(260);
