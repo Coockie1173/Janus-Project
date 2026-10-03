@@ -3,7 +3,7 @@
 # the mouse's sensitivity, online on or off, and the key bindings; then Play.
 #     ./launch.sh                      the settings window, then the game
 #     ./launch.sh --no-gui             straight to the game, with the saved settings
-#     ./launch.sh --fps 120            the frame rate, up to 240 (60 by default; 30 is the console's)
+#     ./launch.sh --fps 120            the frame rate, up to 275 (60 by default; 30 is the console's)
 #     ./launch.sh --fov 70             the field of view in degrees (the game's is 49)
 #     ./launch.sh --mouse 1.5          mouse look sensitivity (1 by default; 0: mouse look off)
 #     ./launch.sh --crash-dumps        write a dump into build/crashes when the game dies or stalls (on by
@@ -62,8 +62,8 @@ while [ $# -gt 0 ]; do
         *) ARGS="$ARGS $1"; shift ;;
     esac
 done
-# 240 at most, auto is 60 (GE_FPS in the environment still overrides)
-case $LAUNCH_FPS in auto) ;; *) [ "$LAUNCH_FPS" -gt 240 ] 2>/dev/null && LAUNCH_FPS=240 ;; esac
+# 275 at most, auto is 60 (GE_FPS in the environment still overrides)
+case $LAUNCH_FPS in auto) ;; *) [ "$LAUNCH_FPS" -gt 275 ] 2>/dev/null && LAUNCH_FPS=275 ;; esac
 GE_FPS=${GE_FPS:-$LAUNCH_FPS}; GE_FOV=${GE_FOV:-$LAUNCH_FOV}; GE_MOUSE=${GE_MOUSE:-$LAUNCH_MOUSE}
 GE_MOUSE_MODE=${GE_MOUSE_MODE:-$LAUNCH_MOUSEMODE}; GE_MOUSE_INVERT=${GE_MOUSE_INVERT:-$LAUNCH_MOUSEINVERT}
 export GE_FPS GE_FOV GE_MOUSE GE_MOUSE_MODE GE_MOUSE_INVERT

@@ -36,6 +36,9 @@ inline bool in_play() { return guest_ptr(ld32(kPlayerPtr)) && ld8(kPaused) == 0;
 void each_frame(uint32_t frame);                     // goldeneye.cpp: called by the limiter's hook, once a game frame
 
 void install_fps();                                  // framerate.cpp
+const uint32_t kGameFps = 30;
+uint32_t fps_limit();                                // the most frames a second the engine may run
+void set_fps_limit(uint32_t fps);
 void install_crash_handler();                        // crashdump.cpp
 void crash_test();
 void install_profiler();                             // diagnostics.cpp

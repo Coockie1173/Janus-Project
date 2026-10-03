@@ -49,7 +49,7 @@ In menus the left mouse button selects and the right one goes back
 
 A gamepad works as a Classic Controller: plug it in before starting.
 
-F1 in the game opens its settings menu: the field of view, the mouse, the
+F1 in the game opens its settings menu: the field of view, the frame rate, the mouse, the
 gamepad and the key bindings, changed while you play (a mission is paused
 first). It writes the same settings.env and keys.txt as the window.
 

@@ -71,6 +71,7 @@ a community server, as lines of `/etc/hosts` would. Needs OpenSSL's
 development files. Gecko codes go in `config/gecko.txt` (RAM writes only).
 
 F1 opens the settings menu, drawn like the game's own: the field of view,
+the frame rate (30 to 275),
 the mouse (sensitivity, invert, how it turns the view), the gamepad (face
 buttons, dead zone) and the key bindings. Changes count at once and are
 kept in `build/settings.env` and `build/keys.txt`, the launcher's files.

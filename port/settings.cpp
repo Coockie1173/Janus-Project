@@ -1,7 +1,7 @@
 // GoldenEye 007 — the settings menu (F1), drawn the way the game draws its own
 // menus: the cream lines, the blue bars, the white bar under the cursor.
 //
-// Three pages: the screen (the field of view, a slider), the controls (the mouse, the
+// Three pages: the screen (the field of view and the frame rate, sliders), the controls (the mouse, the
 // gamepad) and the key bindings. What is changed counts at once. The field
 // of view and the mouse are kept in the launcher's settings file, the rest in
 // the runtime's key file ([Classic Controller]: only the lines changed here
@@ -71,15 +71,18 @@ bool write_lines(const std::string& path, const std::vector<std::string>& lines)
     return f.good();
 }
 
+bool g_fps_changed = false;                          // the frame rate was changed in the menu
+
 // The launcher's file: LAUNCH_NAME="value" lines, the others kept.
 void save_launch_settings() {
     char fov_text[16], mouse_text[16];
     std::snprintf(fov_text, sizeof fov_text, "%.0f", fov());
     std::snprintf(mouse_text, sizeof mouse_text, "%.2f", mouse_sens());
     static const char* modes[] = {"auto", "direct", "stick"};
-    const std::pair<std::string, std::string> values[] = {
+    std::vector<std::pair<std::string, std::string>> values = {
         {"LAUNCH_FOV", fov_text}, {"LAUNCH_MOUSE", mouse_text},
         {"LAUNCH_MOUSEMODE", modes[mouse_mode()]}, {"LAUNCH_MOUSEINVERT", mouse_invert() ? "1" : "0"}};
+    if (g_fps_changed) values.push_back({"LAUNCH_FPS", std::to_string(fps_limit())});   // "auto" kept until it is changed
     auto lines = read_lines(GE_SETTINGS_FILE);
     if (lines.empty()) lines.push_back("# written by the launcher, read when the game is started");
     for (auto& [name, value] : values) {
@@ -186,6 +189,20 @@ template <size_t N> int index_of(const char* const (&names)[N], const std::strin
         if (!SDL_strcasecmp(names[i], v.c_str())) return (int)i;
     return otherwise;
 }
+// The frame rates the slider stops at (the launcher's are the same): the
+// console's 30, the usual screens' rates and their halves, up to 275.
+const uint32_t kFpsStops[] = {30, 40, 50, 60, 75, 90, 100, 120, 144, 165, 180, 200, 240, 275};
+const int kFpsStopCount = (int)std::size(kFpsStops);
+int fps_stop() {                                     // the stop nearest to the rate as it is
+    int best = 0;
+    for (int i = 1; i < kFpsStopCount; ++i)
+        if (std::abs((int)kFpsStops[i] - (int)fps_limit()) < std::abs((int)kFpsStops[best] - (int)fps_limit())) best = i;
+    return best;
+}
+void set_fps_stop(int i) {
+    set_fps_limit(kFpsStops[std::clamp(i, 0, kFpsStopCount - 1)]);
+    g_fps_changed = g_dirty = true;
+}
 const char* const kInputNames[] = {"Auto", "Pad", "Keyboard"};
 const char* const kFaceNames[] = {"Position", "Label"};
 float dead_zone() { return std::clamp((float)std::atof(g_keys.get("Dead Zone", "0.15").c_str()), 0.0f, 0.9f); }
@@ -221,8 +238,16 @@ void build_pages() {
         [](int d) { set_fov(std::clamp(fov() + (float)d, kFovMin, kFovMax)); g_dirty = true; }, {}, {}, false,
         [] { return (fov() - kFovMin) / (kFovMax - kFovMin); },
         [](float f) { set_fov(std::round(kFovMin + f * (kFovMax - kFovMin))); g_dirty = true; }});
-    screen.rows.push_back({"Restore Defaults", "Back to the game's own field of view.", {}, {},
-        [] { set_fov(kGameFov); g_dirty = true; }});
+    screen.rows.push_back({"Max Frame Rate", "The most frames a second the game runs at. 30 is the console's; heavy levels may not hold the highest.",
+        [] { return std::to_string(fps_limit()); },
+        [](int d) { set_fps_stop(fps_stop() + d); }, {}, {}, false,
+        [] { return (float)fps_stop() / (float)(kFpsStopCount - 1); },
+        [](float f) { set_fps_stop((int)std::lround(f * (float)(kFpsStopCount - 1))); }});
+    screen.rows.push_back({"Restore Defaults", "Back to the game's own field of view, and 60 frames a second.", {}, {}, [] {
+        set_fov(kGameFov);
+        set_fps_limit(60);
+        g_fps_changed = g_dirty = true;
+    }});
 
     Page& controls = g_pages[kControls];
     controls.title = "Control Settings";

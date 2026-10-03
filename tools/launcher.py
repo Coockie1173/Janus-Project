@@ -30,7 +30,9 @@ STATE = ROOT if PORTABLE else os.path.join(ROOT, "build")
 KEYS = os.path.join(STATE, "keys.txt")
 KEYS_DEFAULT = os.path.join(ROOT, "config", "keys.txt")
 SETTINGS = os.path.join(STATE, "settings.env")
-FPS_MAX = 240
+# the frame rates the slider stops at (the game's own settings menu, port/settings.cpp, has the same)
+FPS_STOPS = [30, 40, 50, 60, 75, 90, 100, 120, 144, 165, 180, 200, 240, 275]
+FPS_MAX = FPS_STOPS[-1]
 CHEATS = os.path.join(ROOT, "config", "gecko", "cheats.txt")
 CHEATS_ON = os.path.join(STATE, "cheats.txt")
 GAME = os.path.join(ROOT, "game")
@@ -201,22 +203,24 @@ def run_gui():
     book.add(st, text="Settings")
 
     hz = refresh_rate()
-    fps_mode = tk.StringVar(value="auto" if settings["fps"] == "auto" else "custom")
-    if settings["fps"] != "auto" and not settings["fps"].isdigit():
-        settings["fps"] = "auto"
-    if settings["fps"] != "auto" and int(settings["fps"]) == 60:
-        settings["fps"] = "auto"                 # 60 is the default
-    fps_val = tk.StringVar(value="60" if settings["fps"] == "auto" else settings["fps"])
-    ttk.Label(st, text="Frame rate").grid(row=0, column=0, sticky="w", **pad)
+    # the slider goes over the stops, 60 is the default and is saved as "auto"
+    now = int(settings["fps"]) if settings["fps"].isdigit() else 60
+    fps = tk.DoubleVar(value=min(range(len(FPS_STOPS)), key=lambda i: abs(FPS_STOPS[i] - now)))
+    fps_text = tk.StringVar()
+    ttk.Label(st, text="Max frame rate").grid(row=0, column=0, sticky="w", **pad)
     fr = ttk.Frame(st)
     fr.grid(row=0, column=1, sticky="w", **pad)
-    ttk.Radiobutton(fr, text="60 (the default)", variable=fps_mode, value="auto").pack(anchor="w")
-    row = ttk.Frame(fr)
-    row.pack(anchor="w")
-    ttk.Radiobutton(row, text="Limit to", variable=fps_mode, value="custom").pack(side="left")
+
+    def fps_value():
+        return FPS_STOPS[max(0, min(len(FPS_STOPS) - 1, round(fps.get())))]
+
+    def fps_changed(*_):
+        v = fps_value()
+        fps_text.set(f"{v}" + ("  (the default)" if v == 60 else "  (the console's)" if v == 30 else f"  (screen: {hz} Hz)"))
     #above 60 the game shows frames as it draws them, heavy levels sit around 90 on a decent machine
-    ttk.Spinbox(row, from_=30, to=FPS_MAX, width=5, textvariable=fps_val).pack(side="left", padx=4)
-    ttk.Label(row, text="(30 is the console's)").pack(side="left")
+    ttk.Scale(fr, from_=0, to=len(FPS_STOPS) - 1, variable=fps, length=260, command=fps_changed).pack(side="left")
+    ttk.Label(fr, textvariable=fps_text, width=18).pack(side="left", padx=6)
+    fps_changed()
 
     fov = tk.DoubleVar(value=float(settings["fov"]))
     fov_text = tk.StringVar()
@@ -227,7 +231,7 @@ def run_gui():
     def fov_changed(*_):
         v = round(fov.get())
         fov_text.set(f"{v}°" + ("  (the game's)" if v == 49 else ""))
-    ttk.Scale(fr, from_=40, to=110, variable=fov, length=260, command=fov_changed).pack(side="left")
+    ttk.Scale(fr, from_=20, to=120, variable=fov, length=260, command=fov_changed).pack(side="left")
     ttk.Label(fr, textvariable=fov_text, width=18).pack(side="left", padx=6)
     fov_changed()
 
@@ -377,7 +381,7 @@ def run_gui():
     result = {"play": False}
 
     def collect():
-        settings["fps"] = "auto" if fps_mode.get() == "auto" else str(max(30, min(FPS_MAX, int(float(fps_val.get() or 60)))))
+        settings["fps"] = "auto" if fps_value() == 60 else str(fps_value())
         settings["fov"] = str(round(fov.get()))
         settings["mouse"] = f"{mouse.get():.2f}"
         settings["online"] = "1" if online.get() else "0"
