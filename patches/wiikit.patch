@@ -88,8 +88,20 @@ index d0baebf..5d41849 100644
      for (uint32_t i = 0; i < n; ++i)
          st8(ea + i, (uint8_t)(c.r[(rs + i / 4) & 31] >> (24 - 8 * (i % 4))));
  }
+diff --git a/runtime/gl.h b/runtime/gl.h
+index 3d2da4e..682aca2 100644
+--- a/runtime/gl.h
++++ b/runtime/gl.h
+@@ -59,6 +59,7 @@
+     X(PFNGLDELETESYNCPROC, glDeleteSync)                                                            \
+     X(PFNGLCREATEVERTEXARRAYSPROC, glCreateVertexArrays)                                            \
+     X(PFNGLBINDVERTEXARRAYPROC, glBindVertexArray)                                                  \
++    X(PFNGLVERTEXATTRIB4FPROC, glVertexAttrib4f)                                                    \
+     X(PFNGLVERTEXARRAYVERTEXBUFFERPROC, glVertexArrayVertexBuffer)                                  \
+     X(PFNGLVERTEXARRAYELEMENTBUFFERPROC, glVertexArrayElementBuffer)                                \
+     X(PFNGLENABLEVERTEXARRAYATTRIBPROC, glEnableVertexArrayAttrib)                                  \
 diff --git a/runtime/gx.cpp b/runtime/gx.cpp
-index a6b37f2..363a916 100644
+index a6b37f2..153b0f6 100644
 --- a/runtime/gx.cpp
 +++ b/runtime/gx.cpp
 @@ -35,6 +35,14 @@
@@ -257,7 +269,7 @@ index a6b37f2..363a916 100644
  }
  
  // bytes per vertex for vertex format `v`
-@@ -378,6 +452,26 @@ int vertex_size(const VtxFmt& f) {
+@@ -378,6 +452,29 @@ int vertex_size(const VtxFmt& f) {
      return n;
  }
  
@@ -265,12 +277,15 @@ index a6b37f2..363a916 100644
 +// out when a draw first uses it after one of its registers (the VCD, its
 +// VAT) was written, not for every draw. The current matrix indices are not
 +// part of it.
-+struct VtxPlan { bool valid = false; int size = 0; VtxFmt f; } vtx_plans[8];
++uint8_t vertex_flags(const VtxFmt& f);
++struct VtxPlan { bool valid = false; int size = 0; uint8_t flags = 0, stride = 0; VtxFmt f; } vtx_plans[8];
 +VtxPlan& vtx_plan(int v) {
 +    VtxPlan& pl = vtx_plans[v];
 +    if (!pl.valid) {
 +        pl.f = vtx_fmt(v);
 +        pl.size = vertex_size(pl.f);
++        pl.flags = vertex_flags(pl.f);
++        pl.stride = vtx_layout(pl.flags).stride;
 +        pl.valid = true;
 +    }
 +    vtx_mtx_default(pl.f);
@@ -284,10 +299,19 @@ index a6b37f2..363a916 100644
  // an attribute's data: in the stream (direct) or in its array (indexed)
  const uint8_t* fetch(uint32_t mode, int arr, int size, const uint8_t*& p, uint32_t sub = 0) {
      if (mode == 1) { const uint8_t* q = p; p += size; return q; }
-@@ -387,52 +481,116 @@ const uint8_t* fetch(uint32_t mode, int arr, int size, const uint8_t*& p, uint32
+@@ -387,52 +484,124 @@ const uint8_t* fetch(uint32_t mode, int arr, int size, const uint8_t*& p, uint32
      return host(virt(cp[0xA0 + arr] + idx * cp[0xB0 + arr] + sub));
  }
  
+-uint8_t decode_vertices(const VtxFmt& f, const uint8_t* p, uint32_t count, GVtx* out) {
+-    uint32_t pos = f.lo >> 9 & 3, nrm = f.lo >> 11 & 3, col[2] = {f.lo >> 13 & 3, f.lo >> 15 & 3};
+-    uint8_t flags = (col[0] ? VTX_COL0 : 0) | (col[1] ? VTX_COL1 : 0) | (nrm ? VTX_NRM : 0) |
+-                    (nrm && f.nbt ? VTX_NBT : 0);
+-    int nsz = fmt_size(f.nrm_fmt);
+-    for (uint32_t k = 0; k < count; ++k) {
+-        GVtx& v = out[k];
+-        std::memset(&v, 0, sizeof v);
+-        for (int i = 0; i < 9; ++i) v.mtx[i] = (f.lo >> i & 1) ? *p++ : f.mtx_default[i];
 +// Tens of thousands of vertices a frame come through here on the game's
 +// thread: what does not change from one vertex to the next (which attributes
 +// there are, where their arrays are, the vertex's defaults) is worked out once
@@ -310,12 +334,21 @@ index a6b37f2..363a916 100644
 +    return s.base + idx * s.stride + sub;
 +}
 +
- uint8_t decode_vertices(const VtxFmt& f, const uint8_t* p, uint32_t count, GVtx* out) {
--    uint32_t pos = f.lo >> 9 & 3, nrm = f.lo >> 11 & 3, col[2] = {f.lo >> 13 & 3, f.lo >> 15 & 3};
++// what a draw in this format keeps of a vertex (video.h's layout)
++uint8_t vertex_flags(const VtxFmt& f) {
++    const uint32_t nrm = f.lo >> 11 & 3;
++    int sets = 0;
++    for (int t = 0; t < 8; ++t)
++        if (f.hi >> (2 * t) & 3) sets = t + 1;
++    return (uint8_t)((f.lo >> 13 & 3 ? VTX_COL0 : 0) | (f.lo >> 15 & 3 ? VTX_COL1 : 0) | (nrm ? VTX_NRM : 0) |
++                     (nrm && f.nbt ? VTX_NBT : 0) | (sets + 1) / 2 << VTX_TC_SHIFT);
++}
++
++static inline void putf(uint8_t* d, float v) { std::memcpy(d, &v, 4); }
++
++void decode_vertices(const VtxFmt& f, uint8_t flags, const uint8_t* p, uint32_t count, uint8_t* out) {
 +    const uint32_t pos = f.lo >> 9 & 3, nrm = f.lo >> 11 & 3, col[2] = {f.lo >> 13 & 3, f.lo >> 15 & 3};
-     uint8_t flags = (col[0] ? VTX_COL0 : 0) | (col[1] ? VTX_COL1 : 0) | (nrm ? VTX_NRM : 0) |
-                     (nrm && f.nbt ? VTX_NBT : 0);
--    int nsz = fmt_size(f.nrm_fmt);
++    const VtxLayout lay = vtx_layout(flags);
 +    auto src = [](uint32_t mode, int arr) {
 +        return VtxSrc{mode, mode >= 2 ? host(virt(cp[0xA0 + arr])) : nullptr, mode >= 2 ? cp[0xB0 + arr] : 0};
 +    };
@@ -331,35 +364,31 @@ index a6b37f2..363a916 100644
 +        if (m) tcs[ntc++] = Tc{t, f.tc_n[t], fmt_size(f.tc_fmt[t]), f.tc_fmt[t], f.tc_sc[t], src(m, 4 + t)};
 +    }
 +    const uint32_t mtx_bits = f.lo & 0x1FF;          // matrix indices in the stream, in this order
-+    // The record's new bytes are zero already (grow): only what is not zero
-+    // in a vertex with nothing read is written, the matrix indices and a
-+    // missing colour's white.
++    // The record's new bytes are zero already (grow): of a vertex with
++    // nothing read only the matrix indices are not zero. (A colour the draw
++    // does not have is not in the vertex: the renderer reads it white.)
 +    uint8_t mtx0[12] = {};
 +    for (int i = 0; i < 9; ++i) mtx0[i] = f.mtx_default[i];
-+    const uint32_t white[2] = {col[0] ? 0u : 0xFFFFFFFFu, col[1] ? 0u : 0xFFFFFFFFu};
++    const uint8_t nrm_at[3] = {lay.nrm, lay.bin, lay.tan};
 +
-     for (uint32_t k = 0; k < count; ++k) {
-         GVtx& v = out[k];
--        std::memset(&v, 0, sizeof v);
--        for (int i = 0; i < 9; ++i) v.mtx[i] = (f.lo >> i & 1) ? *p++ : f.mtx_default[i];
-+        std::memcpy(v.mtx, mtx0, sizeof mtx0);
-+        std::memcpy(v.col, white, sizeof white);
-+        for (uint32_t m = mtx_bits; m; m &= m - 1) v.mtx[__builtin_ctz(m)] = *p++;
++    for (uint32_t k = 0; k < count; ++k, out += lay.stride) {
++        std::memcpy(out + VtxLayout::mtx, mtx0, sizeof mtx0);
++        for (uint32_t m = mtx_bits; m; m &= m - 1) out[VtxLayout::mtx + __builtin_ctz(m)] = *p++;
          if (pos) {
 -            const uint8_t* q = fetch(pos, 0, f.pos_n * fmt_size(f.pos_fmt), p);
 -            for (int i = 0; i < f.pos_n; ++i) v.pos[i] = comp(q + i * fmt_size(f.pos_fmt), f.pos_fmt, f.pos_sc);
 +            const uint8_t* q = vtx_at(spos, pos_n * psz, p);
-+            for (int i = 0; i < pos_n; ++i) v.pos[i] = compf(q + i * psz, f.pos_fmt, f.pos_sc);
++            for (int i = 0; i < pos_n; ++i) putf(out + 4 * i, compf(q + i * psz, f.pos_fmt, f.pos_sc));
          }
          if (nrm) {
-             float* dst[3] = {v.nrm, v.bin, v.tan};
+-            float* dst[3] = {v.nrm, v.bin, v.tan};
 -            if (f.nbt && f.nidx3 && nrm != 1) {
 +            if (nbt3) {
                  for (int j = 0; j < 3; ++j) {
 -                    const uint8_t* q = fetch(nrm, 1, 0, p, (uint32_t)(j * 3 * nsz));
 -                    for (int i = 0; i < 3; ++i) dst[j][i] = comp(q + i * nsz, f.nrm_fmt, f.nrm_sc);
 +                    const uint8_t* q = vtx_at(snrm, 0, p, (uint32_t)(j * 3 * nsz));
-+                    for (int i = 0; i < 3; ++i) dst[j][i] = compf(q + i * nsz, f.nrm_fmt, f.nrm_sc);
++                    for (int i = 0; i < 3; ++i) putf(out + nrm_at[j] + 4 * i, compf(q + i * nsz, f.nrm_fmt, f.nrm_sc));
                  }
              } else {
 -                int n = f.nbt ? 3 : 1;
@@ -368,7 +397,8 @@ index a6b37f2..363a916 100644
 -                    for (int i = 0; i < 3; ++i) dst[j][i] = comp(q + (j * 3 + i) * nsz, f.nrm_fmt, f.nrm_sc);
 +                const uint8_t* q = vtx_at(snrm, 3 * nn * nsz, p);
 +                for (int j = 0; j < nn; ++j)
-+                    for (int i = 0; i < 3; ++i) dst[j][i] = compf(q + (j * 3 + i) * nsz, f.nrm_fmt, f.nrm_sc);
++                    for (int i = 0; i < 3; ++i)
++                        putf(out + nrm_at[j] + 4 * i, compf(q + (j * 3 + i) * nsz, f.nrm_fmt, f.nrm_sc));
              }
          }
 -        for (int c = 0; c < 2; ++c) {
@@ -382,14 +412,14 @@ index a6b37f2..363a916 100644
 -            const uint8_t* q = fetch(m, 4 + t, f.tc_n[t] * cs, p);
 -            for (int i = 0; i < f.tc_n[t]; ++i) v.tc[t][i] = comp(q + i * cs, f.tc_fmt[t], f.tc_sc[t]);
 +        for (int c = 0; c < 2; ++c)
-+            if (col[c]) read_col(vtx_at(scol[c], csz[c], p), f.col_fmt[c], v.col[c]);
++            if (col[c]) read_col(vtx_at(scol[c], csz[c], p), f.col_fmt[c], out + lay.col[c]);
 +        for (int i = 0; i < ntc; ++i) {
 +            const Tc& t = tcs[i];
 +            const uint8_t* q = vtx_at(t.s, t.n * t.cs, p);
-+            for (int j = 0; j < t.n; ++j) v.tc[t.t][j] = compf(q + j * t.cs, t.fmt, t.sc);
++            for (int j = 0; j < t.n; ++j) putf(out + lay.tc + 8 * t.t + 4 * j, compf(q + j * t.cs, t.fmt, t.sc));
          }
      }
-     return flags;
+-    return flags;
  }
  
  // ---- BP ----------------------------------------------------------------------------------------
@@ -424,7 +454,7 @@ index a6b37f2..363a916 100644
          if (video) {
              put<uint8_t>(VC_FRAME);
              ++rec_frames;
-@@ -454,13 +612,15 @@ void bp_write(uint32_t v) {
+@@ -454,13 +623,15 @@ void bp_write(uint32_t v) {
      if (reg == 0xFE) { bp_mask = val; return; }
      bp[reg] = (bp[reg] & ~bp_mask) | (val & bp_mask);
      bp_mask = 0xFFFFFF;
@@ -441,7 +471,7 @@ index a6b37f2..363a916 100644
          pe_ctrl |= 8; ++st.done; os_raise();
          return;
      case 0x47: pe_token = (uint16_t)val; return;                      // token
-@@ -525,6 +685,7 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
+@@ -525,6 +696,7 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
      case 0x08:
          if (n < 6) return 0;
          cp[p[1]] = be32(p + 2);
@@ -449,7 +479,7 @@ index a6b37f2..363a916 100644
          TRACE("CP %02X %08X\n", p[1], cp[p[1]]);
          return 6;
      case 0x10: {
-@@ -556,8 +717,9 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
+@@ -556,8 +728,9 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
      if (op >= 0x80 && op < 0xC0) {
          if (n < 3) return 0;
          uint32_t count = (uint32_t)p[1] << 8 | p[2];
@@ -461,7 +491,7 @@ index a6b37f2..363a916 100644
          if (n < len) return 0;
          ++st.draws;
          st.verts += count;
-@@ -566,9 +728,9 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
+@@ -566,38 +739,32 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
              if (bp[0xF1] >> 21 & 7) warn_once("fog (not drawn), type", bp[0xF1] >> 21 & 7);
              if (bp[0xF4] >> 2 & 3) warn_once("Z texture (not drawn), op", bp[0xF4] >> 2 & 3);
              if (g_vperf_on) {
@@ -473,19 +503,46 @@ index a6b37f2..363a916 100644
              } else {
                  sync_textures();
              }
-@@ -586,9 +748,9 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
-             GVtx* out = reinterpret_cast<GVtx*>(grow(count * sizeof(GVtx)));
-             uint8_t fl;
+-            // VC_DRAW, prim, vertex flags, pieces (u32), then each piece: n (u32), n vertices
+-            bool extend = rec.size() == draw_end && rec[draw_hdr + 1] == (op & 0xF8);
++            // VC_DRAW, prim, vertex flags, pieces (u32), then each piece: n (u32), n vertices.
++            // Other attributes (another layout): a draw of its own.
++            const uint8_t fl = pl.flags;
++            bool extend = rec.size() == draw_end && rec[draw_hdr + 1] == (op & 0xF8) && rec[draw_hdr + 2] == fl;
+             if (!extend) {
+                 draw_hdr = rec.size();
+                 put<uint8_t>(VC_DRAW);
+                 put<uint8_t>(op & 0xF8);
+-                put<uint8_t>(0);
++                put<uint8_t>(fl);
+                 put<uint32_t>(0);
+             }
+-            size_t at = rec.size();
+             put<uint32_t>(count);
+-            GVtx* out = reinterpret_cast<GVtx*>(grow(count * sizeof(GVtx)));
+-            uint8_t fl;
++            uint8_t* out = grow((size_t)count * pl.stride);
              if (g_vperf_on) {
 -                auto t0 = std::chrono::steady_clock::now();
-+                uint64_t t0 = perf_ticks();
-                 fl = decode_vertices(f, p + 3, count, out);
+-                fl = decode_vertices(f, p + 3, count, out);
 -                g_vperf.vtx += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count();
++                uint64_t t0 = perf_ticks();
++                decode_vertices(f, fl, p + 3, count, out);
 +                perf_vtx += perf_ticks() - t0;
              } else {
-                 fl = decode_vertices(f, p + 3, count, out);
+-                fl = decode_vertices(f, p + 3, count, out);
++                decode_vertices(f, fl, p + 3, count, out);
              }
-@@ -614,8 +776,17 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
+-            if (extend && rec[draw_hdr + 2] != fl) {      // other attributes: a draw of its own
+-                const uint8_t hdr[7] = {VC_DRAW, (uint8_t)(op & 0xF8), 0, 0, 0, 0, 0};
+-                rec.insert(rec.begin() + (ptrdiff_t)at, hdr, hdr + sizeof hdr);
+-                draw_hdr = at;
+-            }
+-            rec[draw_hdr + 2] = fl;
+             uint32_t pieces;
+             std::memcpy(&pieces, &rec[draw_hdr + 3], 4);
+             ++pieces;
+@@ -614,8 +781,17 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
  
  void feed(const uint8_t* b, int n) {
      if (desync) return;
@@ -504,7 +561,7 @@ index a6b37f2..363a916 100644
      while (off < stream.size()) {
          size_t k = parse(stream.data() + off, stream.size() - off, false);
          if (!k) { --st.cmds; break; }
-@@ -729,6 +900,7 @@ void gx_init() {
+@@ -729,6 +905,7 @@ void gx_init() {
  // AI's, which start each audio frame's mix, above all. So does this wait.
  // A handler may switch guest threads, and another thread may hand the
  // record over in the meantime.
@@ -1679,10 +1736,46 @@ index 8a4e097..8b1b1a8 100644
  void ppc_mmio_write(uint32_t addr, uint32_t, int) { rt_die("mmio write %08X", addr); }
  uint64_t ppc_timebase() { return 0; }
 diff --git a/runtime/video.cpp b/runtime/video.cpp
-index 5726093..6b8410a 100644
+index 5726093..b6e3e32 100644
 --- a/runtime/video.cpp
 +++ b/runtime/video.cpp
-@@ -100,6 +100,8 @@ bool sampler_set[8];
+@@ -79,7 +79,34 @@ struct PSUniforms {                                // gxshader.cpp's uniform blo
+ // ---- GL objects -------------------------------------------------------------------------------
+ SDL_Window* win = nullptr;
+ int S = 1;                                         // EFB scale
+-GLuint efb_fbo, efb_col, efb_dep, copy_fbo, vao, empty_vao, vbo, quad_ibo, xf_ubo, ps_ubo, samplers[8];
++GLuint efb_fbo, efb_col, efb_dep, copy_fbo, empty_vao, vbo, quad_ibo, xf_ubo, ps_ubo, samplers[8];
++// A vertex array for each layout a draw's vertices come in (video.h), made
++// when a draw first has it. An attribute a layout leaves out is not enabled:
++// it reads the context's value for it, zero, and white for the colours.
++GLuint layout_vao[128], bound_vao = 0;
++GLuint vao_for(uint8_t flags) {
++    GLuint& vao = layout_vao[flags & 127];
++    if (vao) return vao;
++    const VtxLayout l = vtx_layout(flags);
++    glCreateVertexArrays(1, &vao);
++    glVertexArrayVertexBuffer(vao, 0, vbo, 0, l.stride);
++    glVertexArrayElementBuffer(vao, quad_ibo);
++    auto attr = [&](GLuint loc, int n, GLenum type, bool norm, bool integer, GLuint off) {
++        glEnableVertexArrayAttrib(vao, loc);
++        if (integer) glVertexArrayAttribIFormat(vao, loc, n, type, off);
++        else glVertexArrayAttribFormat(vao, loc, n, type, norm, off);
++        glVertexArrayAttribBinding(vao, loc, 0);
++    };
++    attr(0, 3, GL_FLOAT, false, false, VtxLayout::pos);
++    if (l.nrm) attr(1, 3, GL_FLOAT, false, false, l.nrm);
++    if (l.bin) attr(2, 3, GL_FLOAT, false, false, l.bin);
++    if (l.tan) attr(3, 3, GL_FLOAT, false, false, l.tan);
++    for (GLuint c = 0; c < 2; ++c)
++        if (l.col[c]) attr(4 + c, 4, GL_UNSIGNED_BYTE, true, false, l.col[c]);
++    for (GLuint t = 0; t < (GLuint)(flags >> VTX_TC_SHIFT & 7); ++t) attr(6 + t, 4, GL_FLOAT, false, false, l.tc + 16 * t);
++    for (GLuint m = 0; m < 3; ++m) attr(10 + m, 4, GL_UNSIGNED_BYTE, false, true, VtxLayout::mtx + 4 * m);
++    return vao;
++}
+ GLuint copy_prog;
+ GLint copy_rect_loc, copy_mode_loc;
+ constexpr size_t VBO_CAP = 64u << 20;
+@@ -100,6 +127,8 @@ bool sampler_set[8];
  struct Tex { GLuint name = 0; int w = 0, h = 0, levels = 0; };
  std::unordered_map<uint32_t, Tex> texs;            // decoded textures, by id
  std::unordered_map<uint32_t, Tex> efb_copies;      // EFB copies to texture, by address
@@ -1691,7 +1784,7 @@ index 5726093..6b8410a 100644
  std::unordered_map<uint32_t, Tex> xfbs;            // EFB copies to the XFB, by address
  uint64_t map_src[8];                               // per map: texture id, or 1 << 32 | EFB copy address
  uint32_t last_xfb = 0;
-@@ -295,7 +297,14 @@ void main() {
+@@ -295,7 +324,14 @@ void main() {
  )";
  
  // ---- register side effects ----------------------------------------------------------------------
@@ -1706,7 +1799,7 @@ index 5726093..6b8410a 100644
      bool has_alpha = (bp[0x43] & 7) == 1;
      bool cu = bp[0x41] >> 3 & 1, au = bp[0x41] >> 4 & 1, zu = bp[0x40] >> 4 & 1;
      if (!cu && !au && !zu) return;
-@@ -325,7 +334,10 @@ void efb_dump(const char* tag) {
+@@ -325,7 +361,10 @@ void efb_dump(const char* tag) {
      write_png(name, EFB_W * S, EFB_H * S, px.data());
  }
  
@@ -1717,7 +1810,17 @@ index 5726093..6b8410a 100644
      int x = (int)(bp[0x49] & 0x3FF), y = (int)(bp[0x49] >> 10 & 0x3FF);
      int w = (int)(bp[0x4A] & 0x3FF) + 1, h = (int)(bp[0x4A] >> 10 & 0x3FF) + 1;
      uint32_t dest = (bp[0x4B] & 0xFFFFFF) << 5;
-@@ -475,7 +487,10 @@ void bind_textures() {
+@@ -366,8 +405,8 @@ void efb_copy(uint32_t v) {
+         glBindSampler(0, 0);
+         glBindSampler(1, 0);
+         glBindVertexArray(empty_vao);
++        bound_vao = 0;
+         glDrawArrays(GL_TRIANGLES, 0, 3);
+-        glBindVertexArray(vao);
+     }
+     if (v >> 11 & 1) efb_clear(x, y, w, h);
+ }
+@@ -475,7 +514,10 @@ void bind_textures() {
      for (int m = 0; m < 8; ++m) {
          if (!(used >> m & 1)) continue;
          GLuint name = 0;
@@ -1729,8 +1832,27 @@ index 5726093..6b8410a 100644
              auto it = efb_copies.find((uint32_t)map_src[m]);
              if (it != efb_copies.end()) name = it->second.name;
          } else {
-@@ -516,60 +531,73 @@ void draw(uint8_t prim, uint8_t vflags, const uint8_t* pieces, uint32_t npieces)
-     GLuint prog = program_for(vflags);
+@@ -504,72 +546,90 @@ void bind_textures() {
+ 
+ // A VC_DRAW's pieces (each n, then n vertices), drawn with one call.
+ void draw(uint8_t prim, uint8_t vflags, const uint8_t* pieces, uint32_t npieces) {
++    const size_t stride = vtx_layout(vflags).stride;
+     uint32_t n = 0;
+     const uint8_t* vtx = pieces + 4;                           // the first vertex
+     for (uint32_t i = 0, k; i < npieces; ++i) {
+-        std::memcpy(&k, pieces + (size_t)n * sizeof(GVtx) + 4 * i, 4);
++        std::memcpy(&k, pieces + (size_t)n * stride + 4 * i, 4);
+         n += k;
+     }
+     uint32_t cull = bp[0x00] >> 14 & 3;
+     bool tri = prim < 0xA8;
+     if (tri && cull == 3) return;
+-    GLuint prog = program_for(vflags);
++    GLuint prog = program_for(vflags & VTX_ATTRS);
++    if (GLuint vao = vao_for(vflags); vao != bound_vao) {
++        glBindVertexArray(vao);
++        bound_vao = vao;
++    }
      if (!prog) return;
      ++cnt.draws;
 -    glBindFramebuffer(GL_FRAMEBUFFER, efb_fbo);
@@ -1854,7 +1976,56 @@ index 5726093..6b8410a 100644
  
      if (xf_lo < xf_hi) {
          glNamedBufferSubData(xf_ubo, xf_lo * 4, (xf_hi - xf_lo) * 4, &xf[xf_lo]);
-@@ -646,7 +674,8 @@ void draw(uint8_t prim, uint8_t vflags, const uint8_t* pieces, uint32_t npieces)
+@@ -581,7 +641,8 @@ void draw(uint8_t prim, uint8_t vflags, const uint8_t* pieces, uint32_t npieces)
+ 
+     if (efb_dumping() && std::getenv("WIIKIT_DRAWLOG")) {         // debugging: where each draw lands
+         static FILE* lf = std::fopen("drawlog.txt", "w");
+-        const GVtx& v0 = *reinterpret_cast<const GVtx*>(vtx);
++        struct { float pos[3]; uint8_t mtx[12]; } v0;
++        std::memcpy(&v0, vtx, sizeof v0);
+         uint32_t pm = v0.mtx[0] * 4u;
+         float pos[3];
+         for (int r = 0; r < 3; ++r)
+@@ -599,20 +660,21 @@ void draw(uint8_t prim, uint8_t vflags, const uint8_t* pieces, uint32_t npieces)
+                      v0.mtx[0], v0.pos[0], v0.pos[1], v0.pos[2], pos[0], pos[1], pos[2], c[0] / c[3], c[1] / c[3], c[3],
+                      (bp[0x00] >> 10 & 15) + 1, xf[0x1009] & 3);
+     }
+-    size_t bytes = (size_t)n * sizeof(GVtx);
+-    // a draw never straddles two quarters; offsets stay whole vertices
++    size_t bytes = (size_t)n * stride;
++    // a draw never straddles two quarters; offsets are whole vertices of its layout
++    vbo_off = (vbo_off + stride - 1) / stride * stride;
+     size_t q = vbo_off / VBO_QUARTER;
+     if ((vbo_off + bytes - 1) / VBO_QUARTER != q) {          // on to the next quarter: fence this one
+         vbo_fence[q] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+         q = (q + 1) % 4;
+-        vbo_off = (q * VBO_QUARTER + sizeof(GVtx) - 1) / sizeof(GVtx) * sizeof(GVtx);
++        vbo_off = (q * VBO_QUARTER + stride - 1) / stride * stride;
+         if (vbo_fence[q]) {
+             glClientWaitSync(vbo_fence[q], GL_SYNC_FLUSH_COMMANDS_BIT, 1000000000ull);
+             glDeleteSync(vbo_fence[q]);
+             vbo_fence[q] = nullptr;
+         }
+     }
+-    GLint base = (GLint)(vbo_off / sizeof(GVtx));
++    GLint base = (GLint)(vbo_off / stride);
+     static std::vector<GLint> firsts;
+     static std::vector<GLsizei> counts;
+     static std::vector<const void*> offsets;
+@@ -620,10 +682,10 @@ void draw(uint8_t prim, uint8_t vflags, const uint8_t* pieces, uint32_t npieces)
+     counts.clear();
+     for (uint32_t i = 0, at = 0, k; i < npieces; ++i) {       // the pieces' vertices, one after another
+         std::memcpy(&k, pieces, 4);
+-        std::memcpy(vbo_ptr + vbo_off + (size_t)at * sizeof(GVtx), pieces + 4, (size_t)k * sizeof(GVtx));
++        std::memcpy(vbo_ptr + vbo_off + (size_t)at * stride, pieces + 4, (size_t)k * stride);
+         firsts.push_back(base + (GLint)at);
+         counts.push_back((GLsizei)k);
+-        pieces += 4 + (size_t)k * sizeof(GVtx);
++        pieces += 4 + (size_t)k * stride;
+         at += k;
+     }
+     vbo_off += bytes;
+@@ -646,7 +708,8 @@ void draw(uint8_t prim, uint8_t vflags, const uint8_t* pieces, uint32_t npieces)
      }
      if (mode && npieces == 1) glDrawArrays(mode, base, counts[0]);
      else if (mode) glMultiDrawArrays(mode, firsts.data(), counts.data(), (GLsizei)npieces);
@@ -1864,7 +2035,7 @@ index 5726093..6b8410a 100644
          static long k = 0;
          if (++k % efb_dump_every == 0) {
              char tag[32];
-@@ -662,6 +691,7 @@ template <class T> T rd(const uint8_t*& p) { T v; std::memcpy(&v, p, sizeof v);
+@@ -662,6 +725,7 @@ template <class T> T rd(const uint8_t*& p) { T v; std::memcpy(&v, p, sizeof v);
  // The EFB at its native size: the pixel at each native position's top-left
  // sample of the scaled EFB (rows from the top, as the EFB copies read it).
  void efb_readback() {
@@ -1872,7 +2043,7 @@ index 5726093..6b8410a 100644
      int W = EFB_W * S, H = EFB_H * S;
      std::vector<uint8_t> px((size_t)W * H * 4);
      std::vector<float> dz((size_t)W * H);
-@@ -703,6 +733,7 @@ void copy_readback(uint32_t addr) {
+@@ -703,6 +767,7 @@ void copy_readback(uint32_t addr) {
  }
  
  void exec(const std::vector<uint8_t>& data) {
@@ -1880,7 +2051,19 @@ index 5726093..6b8410a 100644
      const uint8_t* p = data.data();
      const uint8_t* end = p + data.size();
      while (p < end) {
-@@ -742,6 +773,33 @@ void exec(const std::vector<uint8_t>& data) {
+@@ -720,9 +785,10 @@ void exec(const std::vector<uint8_t>& data) {
+             uint8_t prim = rd<uint8_t>(p), fl = rd<uint8_t>(p);
+             uint32_t pieces = rd<uint32_t>(p);
+             draw(prim, fl, p, pieces);
++            const size_t stride = vtx_layout(fl).stride;
+             for (uint32_t i = 0; i < pieces; ++i) {
+                 uint32_t n = rd<uint32_t>(p);
+-                p += (size_t)n * sizeof(GVtx);
++                p += (size_t)n * stride;
+             }
+             break;
+         }
+@@ -742,6 +808,33 @@ void exec(const std::vector<uint8_t>& data) {
          }
          case VC_TEXBIND: { uint8_t m = rd<uint8_t>(p); map_src[m] = rd<uint32_t>(p); break; }
          case VC_TEXEFB: { uint8_t m = rd<uint8_t>(p); map_src[m] = 1ull << 32 | rd<uint32_t>(p); break; }
@@ -1914,7 +2097,7 @@ index 5726093..6b8410a 100644
          case VC_FRAME: break;
          case VC_DRAWDONE: gx_draw_done_reached(); break;
          default: rt_die("video: bad record byte %02X", p[-1]);
-@@ -1266,7 +1324,10 @@ void update_pad() {
+@@ -1266,7 +1359,10 @@ void update_pad() {
      for (int i = 0; i < 4; ++i) classic[i] = c[i];
  }
  
@@ -1925,7 +2108,7 @@ index 5726093..6b8410a 100644
      ++cnt.presents;
      int ww = 0, wh = 0;
      SDL_GetWindowSizeInPixels(win, &ww, &wh);
-@@ -1275,7 +1336,7 @@ void present() {
+@@ -1275,7 +1371,7 @@ void present() {
      glColorMask(1, 1, 1, 1);
      glClearColor(0, 0, 0, 1);
      glClear(GL_COLOR_BUFFER_BIT);
@@ -1934,7 +2117,7 @@ index 5726093..6b8410a 100644
      if (it == xfbs.end()) it = xfbs.find(last_xfb);
      if (it != xfbs.end() && ww > 0 && wh > 0) {
          const Tex& t = it->second;
-@@ -1286,6 +1347,7 @@ void present() {
+@@ -1286,6 +1382,7 @@ void present() {
          glBlitNamedFramebuffer(copy_fbo, 0, 0, 0, t.w, t.h, dx, dy + dh, dx + dw, dy,   // top row first
                                 GL_COLOR_BUFFER_BIT, GL_LINEAR);
      }
@@ -1942,7 +2125,42 @@ index 5726093..6b8410a 100644
      if (opt.dump_dir && cnt.presents % (uint64_t)opt.dump_every == 0 && ww > 0 && wh > 0) {
          std::vector<uint8_t> px((size_t)ww * wh * 4), flip(px.size());   // the window, as shown
          glReadPixels(0, 0, ww, wh, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
-@@ -1462,6 +1524,9 @@ std::atomic<bool> want_relative{false};
+@@ -1333,31 +1430,10 @@ void setup() {
+         for (uint32_t d : {0u, 1u, 2u, 0u, 2u, 3u}) qi.push_back(4 * k + d);
+     glCreateBuffers(1, &quad_ibo);
+     glNamedBufferStorage(quad_ibo, qi.size() * 4, qi.data(), 0);
+-    glCreateVertexArrays(1, &vao);
+     glCreateVertexArrays(1, &empty_vao);
+-    glVertexArrayVertexBuffer(vao, 0, vbo, 0, sizeof(GVtx));
+-    glVertexArrayElementBuffer(vao, quad_ibo);
+-    struct A { GLuint loc; int n; GLenum type; bool norm, integer; size_t off; };
+-    const A attrs[] = {{0, 3, GL_FLOAT, false, false, offsetof(GVtx, pos)},
+-                       {1, 3, GL_FLOAT, false, false, offsetof(GVtx, nrm)},
+-                       {2, 3, GL_FLOAT, false, false, offsetof(GVtx, bin)},
+-                       {3, 3, GL_FLOAT, false, false, offsetof(GVtx, tan)},
+-                       {4, 4, GL_UNSIGNED_BYTE, true, false, offsetof(GVtx, col)},
+-                       {5, 4, GL_UNSIGNED_BYTE, true, false, offsetof(GVtx, col) + 4},
+-                       {6, 4, GL_FLOAT, false, false, offsetof(GVtx, tc)},
+-                       {7, 4, GL_FLOAT, false, false, offsetof(GVtx, tc) + 16},
+-                       {8, 4, GL_FLOAT, false, false, offsetof(GVtx, tc) + 32},
+-                       {9, 4, GL_FLOAT, false, false, offsetof(GVtx, tc) + 48},
+-                       {10, 4, GL_UNSIGNED_BYTE, false, true, offsetof(GVtx, mtx)},
+-                       {11, 4, GL_UNSIGNED_BYTE, false, true, offsetof(GVtx, mtx) + 4},
+-                       {12, 4, GL_UNSIGNED_BYTE, false, true, offsetof(GVtx, mtx) + 8}};
+-    for (const A& a : attrs) {
+-        glEnableVertexArrayAttrib(vao, a.loc);
+-        if (a.integer) glVertexArrayAttribIFormat(vao, a.loc, a.n, a.type, (GLuint)a.off);
+-        else glVertexArrayAttribFormat(vao, a.loc, a.n, a.type, a.norm, (GLuint)a.off);
+-        glVertexArrayAttribBinding(vao, a.loc, 0);
+-    }
+-    glBindVertexArray(vao);
++    glVertexAttrib4f(4, 1.0f, 1.0f, 1.0f, 1.0f);     // a colour its draw does not have: white
++    glVertexAttrib4f(5, 1.0f, 1.0f, 1.0f, 1.0f);
++    for (GLuint t = 6; t < 10; ++t) glVertexAttrib4f(t, 0.0f, 0.0f, 0.0f, 0.0f);   // texture coordinates: zero, all four
+ 
+     glCreateBuffers(1, &xf_ubo);
+     glNamedBufferStorage(xf_ubo, sizeof xf, nullptr, GL_DYNAMIC_STORAGE_BIT);
+@@ -1462,6 +1538,9 @@ std::atomic<bool> want_relative{false};
  std::mutex motion_mx;
  float motion_x = 0, motion_y = 0;
  void video_set_relative_mouse(bool on) { want_relative = on; }
@@ -1952,7 +2170,7 @@ index 5726093..6b8410a 100644
  void video_take_mouse_motion(float& dx, float& dy) {
      std::lock_guard<std::mutex> lk(motion_mx);
      dx = motion_x; dy = motion_y;
-@@ -1479,6 +1544,7 @@ ClassicState video_classic(int chan) {
+@@ -1479,6 +1558,7 @@ ClassicState video_classic(int chan) {
  void video_set_rumble(int chan, bool on) {
      if (chan >= 0 && chan < 4) rumble_want[chan] = on;
  }
@@ -1960,7 +2178,7 @@ index 5726093..6b8410a 100644
  void video_retrace() {
      retraces.fetch_add(1);
      if (wake) SDL_SignalSemaphore(wake);
-@@ -1506,6 +1572,7 @@ void video_run(const char* title) {
+@@ -1506,6 +1586,7 @@ void video_run(const char* title) {
      SDL_GL_MakeCurrent(win, ctx);
      SDL_GL_SetSwapInterval(0);                   // VI paces the presents
      if (!gl_load()) rt_die("video: OpenGL functions missing");
@@ -1968,7 +2186,7 @@ index 5726093..6b8410a 100644
      rt_log("video: %s, %s", (const char*)glGetString(GL_RENDERER), (const char*)glGetString(GL_VERSION));
      if (debug) {
          glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
-@@ -1533,7 +1600,9 @@ void video_run(const char* title) {
+@@ -1533,7 +1614,9 @@ void video_run(const char* title) {
          SDL_Event e;
          bool quit = false;
          while (SDL_PollEvent(&e)) {
@@ -1978,7 +2196,7 @@ index 5726093..6b8410a 100644
              if (e.type == SDL_EVENT_GAMEPAD_ADDED) pad_added(e.gdevice.which);
              if (e.type == SDL_EVENT_GAMEPAD_REMOVED) pad_removed(e.gdevice.which);
              // F11 or Alt+Enter: fullscreen and back
-@@ -1621,6 +1690,17 @@ void video_run(const char* title) {
+@@ -1621,6 +1704,17 @@ void video_run(const char* title) {
              if (retraces.load() != seen) break;
          }
          uint32_t r = retraces.load();
@@ -1997,22 +2215,76 @@ index 5726093..6b8410a 100644
              seen = r;
              auto tp = Clock::now();
 diff --git a/runtime/video.h b/runtime/video.h
-index ecfb499..f03e4d3 100644
+index ecfb499..7171c63 100644
 --- a/runtime/video.h
 +++ b/runtime/video.h
-@@ -34,7 +34,10 @@ struct GVtx {
+@@ -3,7 +3,7 @@
+ //
+ // The command processor runs where the game writes the FIFO, and does there
+ // everything that reads guest memory: vertices are decoded through the vertex
+-// descriptor and the arrays into one fixed layout (GVtx), XF matrices are
++// descriptor and the arrays into a packed layout (VtxLayout), XF matrices are
+ // loaded from indexed arrays, textures are decoded to RGBA through TMEM's
+ // palettes. What it records reads no guest memory any more: the renderer can
+ // run behind the game on its own thread, and the game may reuse its buffers
+@@ -12,7 +12,8 @@
+ // The record is a byte stream of commands:
+ //   BP      u32 (reg << 24 | value): a BP register after its mask
+ //   XF      u16 addr, u16 n, n x u32
+-//   DRAW    u8 primitive (0x80..0xB8), u8 flags (VTX_*), u32 count, count x GVtx
++//   DRAW    u8 primitive (0x80..0xB8), u8 flags (VTX_*), u32 pieces, then each
++//           piece: u32 count, count vertices in the flags' layout
+ //   TEXUP   u8 map, u32 id, u16 w, u16 h, u8 levels, RGBA8 pixels of every level
+ //   TEXBIND u8 map, u32 id
+ //   TEXEFB  u8 map, u32 address: the EFB copy made to that address
+@@ -25,17 +26,37 @@
+ #include <string>
+ #include <vector>
+ 
+-struct GVtx {
+-    float pos[3];
+-    float nrm[3], bin[3], tan[3];
+-    float tc[8][2];
+-    uint8_t col[2][4];
+-    uint8_t mtx[12];                 // position matrix index, then TEX0..TEX7 matrix indices
++// A vertex holds what its draw has and nothing else: tens of thousands a
++// frame are decoded on the game's thread and copied into the vertex buffer on
++// the renderer's, and with every attribute's room in each (132 bytes) most of
++// that was zeros. Always: the position (3 floats) and the matrix indices (12
++// bytes: the position's, then TEX0..TEX7's). Then, as the draw's flags say:
++// the normal, binormal and tangent (3 floats each), the colours (RGBA8 each),
++// the texture coordinates two sets (4 floats) at a time. An attribute left
++// out reads as it did when it was stored empty: zero, a colour white.
++struct VtxLayout {
++    uint8_t stride, nrm, bin, tan, col[2], tc;       // offsets in the vertex; 0: not there
++    static constexpr uint8_t pos = 0, mtx = 12;
  };
- static_assert(sizeof(GVtx) == 132, "GVtx layout");
+-static_assert(sizeof(GVtx) == 132, "GVtx layout");
  
 -enum : uint8_t { VC_BP = 1, VC_XF, VC_DRAW, VC_TEXUP, VC_TEXBIND, VC_TEXEFB, VC_FRAME, VC_DRAWDONE };
+-enum : uint8_t { VTX_COL0 = 1, VTX_COL1 = 2, VTX_NRM = 4, VTX_NBT = 8 };
 +enum : uint8_t { VC_BP = 1, VC_XF, VC_DRAW, VC_TEXUP, VC_TEXBIND, VC_TEXEFB, VC_FRAME, VC_DRAWDONE,
 +                 // a texture made of several EFB copies, one after the other in memory: map (u8),
 +                 // width, height (u16), pieces (u8), then each piece's address (u32) and first row (u16)
 +                 VC_TEXEFBN };
- enum : uint8_t { VTX_COL0 = 1, VTX_COL1 = 2, VTX_NRM = 4, VTX_NBT = 8 };
++enum : uint8_t { VTX_COL0 = 1, VTX_COL1 = 2, VTX_NRM = 4, VTX_NBT = 8,
++                 VTX_ATTRS = 0x0F,                   // what the shaders are made from
++                 VTX_TC_SHIFT = 4 };                 // bits 4-6: how many pairs of texture coordinate sets (0-4)
++inline VtxLayout vtx_layout(uint8_t flags) {
++    VtxLayout l{};
++    uint8_t at = 24;
++    if (flags & VTX_NRM) { l.nrm = at; at += 12; }
++    if (flags & VTX_NBT) { l.bin = at; l.tan = at + 12; at += 24; }
++    if (flags & VTX_COL0) { l.col[0] = at; at += 4; }
++    if (flags & VTX_COL1) { l.col[1] = at; at += 4; }
++    if (flags >> VTX_TC_SHIFT & 7) { l.tc = at; at += 16 * (flags >> VTX_TC_SHIFT & 7); }
++    l.stride = at;
++    return l;
++}
  
  // video.cpp
-@@ -98,6 +101,20 @@ void video_set_rumble(int chan, bool on);
+ bool video_enabled();                       // false with --no-video: the stream is parsed only
+@@ -98,6 +119,20 @@ void video_set_rumble(int chan, bool on);
  void video_set_relative_mouse(bool on);
  void video_take_mouse_motion(float& dx, float& dy);
  
