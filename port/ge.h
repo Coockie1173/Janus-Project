@@ -54,7 +54,7 @@ void install_gecko();                                // gecko.cpp
 void gecko_apply();
 void install_fov();                                  // fov.cpp
 void fov_apply();
-const float kGameFov = 49.0f, kFovMin = 20.0f, kFovMax = 140.0f;
+const float kGameFov = 49.0f, kFovMin = 20.0f, kFovMax = 120.0f;
 float fov();                                         // degrees
 void set_fov(float degrees);
 void install_native();                               // native.cpp

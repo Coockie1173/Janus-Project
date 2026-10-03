@@ -33,7 +33,7 @@ void install_fov() {
     const char* e = std::getenv("GE_FOV");
     if (!e) return;
     float f = (float)std::atof(e);
-    if (f < kFovMin || f > kFovMax) { rt_log("goldeneye: GE_FOV is 20..140 degrees; the game's 49 kept"); return; }
+    if (f < kFovMin || f > kFovMax) { rt_log("goldeneye: GE_FOV is 20..120 degrees; the game's 49 kept"); return; }
     if (f != kGameFov) { g_fov = f; rt_log("goldeneye: field of view %.0f degrees", f); }
 }
 
