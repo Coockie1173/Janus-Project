@@ -16,6 +16,7 @@
 # Keyboard and mouse by default: W A S D move, the mouse looks, left button fires, right button aims,
 # the wheel changes weapon, R reloads, Ctrl crouches, Shift sprints, E acts, G grenade, V melee;
 # in menus the left button selects and the right one goes back. Esc frees the mouse.
+# The window goes through X11 (XWayland) when DISPLAY is set: SDL_VIDEODRIVER=wayland for Wayland's own.
 # The log of the run is kept in build/run.log (send it along with a report).
 cd "$(dirname "$0")" || exit 1
 mkdir -p build
@@ -49,6 +50,9 @@ case $LAUNCH_FPS in auto) ;; *) [ "$LAUNCH_FPS" -gt 60 ] 2>/dev/null && LAUNCH_F
 GE_FPS=${GE_FPS:-$LAUNCH_FPS}; GE_FOV=${GE_FOV:-$LAUNCH_FOV}; GE_MOUSE=${GE_MOUSE:-$LAUNCH_MOUSE}
 GE_MOUSE_MODE=${GE_MOUSE_MODE:-$LAUNCH_MOUSEMODE}
 export GE_FPS GE_FOV GE_MOUSE GE_MOUSE_MODE
+# through X11 when there is one: a present on Wayland costs the renderer 2 ms, 0.3 there
+# (SDL_VIDEODRIVER in the environment overrides)
+if [ -z "$SDL_VIDEODRIVER" ] && [ -n "$DISPLAY" ]; then SDL_VIDEODRIVER=x11,wayland; export SDL_VIDEODRIVER; fi
 if [ "$LAUNCH_ONLINE" = 0 ]; then GE_HOSTS=; export GE_HOSTS; fi
 [ "$LAUNCH_FULLSCREEN" = 1 ] && ARGS="$ARGS --fullscreen"
 if [ "$LAUNCH_FASTSTART" = 1 ]; then GE_GECKO_EXTRA="$PWD/config/gecko/faststart.txt${GE_GECKO_EXTRA:+:$GE_GECKO_EXTRA}"; export GE_GECKO_EXTRA; fi
