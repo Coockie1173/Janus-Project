@@ -9,9 +9,16 @@
 //
 //     GE_DMW=F       the watch list (default: the first .dmw in the project's folder)
 //     GE_OVERLAY=1   start with the overlay up
+//     GE_STATE=1     start with the player state shown
+//
+// "Player state on screen" in the window puts the state of the player this
+// console plays (the controller's +0x704, by the Ghidra project's names) in
+// the picture's top right corner, and it stays there with the window closed.
 #include "dmw.h"
 #include "ge.h"
 #include <atomic>
+#include <cfloat>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 
@@ -43,6 +50,38 @@ WatchGroup g_watches;
 std::string g_source, g_error;
 char g_filter[64] = "";
 bool g_have = false;                                 // a watch list was read: without one there is no overlay
+bool g_show_state = false;                           // the player state in the top right corner
+
+const char* state_name(uint32_t st) {                // the Ghidra project's PlayerStates
+    switch (st) {
+        case 0x00: return "Standing";
+        case 0x02: return "Moving";
+        case 0x03: return "Sprinting";
+        case 0x04: return "Landing";
+        case 0x05: return "Death";
+        case 0x08: return "ClimbVault";
+        case 0x09: return "Melee";
+        case 0x22: return "FPSCutscene";
+        case 0x23: return "StartSlide";
+        case 0x24: return "Sliding";
+        case 0x25: return "EndSlide";
+    }
+    return "Unknown";
+}
+
+void player_state() {
+    char text[64];
+    uint32_t st;
+    if (local_player_state(st)) std::snprintf(text, sizeof text, "%s (0x%02X)", state_name(st), st);
+    else std::snprintf(text, sizeof text, "no player");
+    ImFont* font = ImGui::GetFont();
+    float size = font->FontSize * 1.5f, pad = 6;
+    ImVec2 box = font->CalcTextSizeA(size, FLT_MAX, 0, text), screen = ImGui::GetIO().DisplaySize;
+    ImVec2 at(screen.x - box.x - 12 - pad, 12 + pad);
+    ImDrawList* dl = ImGui::GetBackgroundDrawList();
+    dl->AddRectFilled(ImVec2(at.x - pad, at.y - pad), ImVec2(at.x + box.x + pad, at.y + box.y + pad), IM_COL32(0, 0, 0, 150), 3);
+    dl->AddText(font, size, at, IM_COL32(255, 255, 255, 255), text);
+}
 
 std::string find_dmw() {
     if (const char* e = std::getenv("GE_DMW")) return e;
@@ -111,6 +150,8 @@ void init(SDL_Window* win, void* gl) {
     ImGui::CreateContext();
     ImGui::GetIO().IniFilename = nullptr;            // no imgui.ini left in the folder
     ImGui::StyleColorsDark();
+    ImGui::GetIO().Fonts->AddFontDefault();          // the window's; the settings menu adds its own after it
+    g_show_state = std::getenv("GE_STATE") != nullptr;
     ImGui_ImplSDL3_InitForOpenGL(win, gl);
     ImGui_ImplOpenGL3_Init("#version 450");
     g_source = find_dmw();
@@ -135,13 +176,15 @@ bool event(const SDL_Event* e) {
 
 void watches() {
     ImGui::SetNextWindowPos(ImVec2(12, 12), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(620, 560), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(470, 340), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowBgAlpha(0.88f);
     if (ImGui::Begin("GoldenEye 007: memory watches (F3)")) {
         uint32_t player = ld32(kPlayerPtr);
         ImGui::Text("%s", in_play() ? "in play" : guest_ptr(player) ? "paused" : "no player (menus)");
         ImGui::SameLine();
         ImGui::TextDisabled("  frame %u   %zu watches", ld32(kFrameCount), g_watches.count());
+        ImGui::SameLine();
+        ImGui::Checkbox("player state on screen", &g_show_state);
         if (!g_error.empty()) ImGui::TextColored(ImVec4(1, 0.5f, 0.4f, 1), "%s", g_error.c_str());
         ImGui::SetNextItemWidth(260);
         ImGui::InputTextWithHint("##filter", "filter (name or group)", g_filter, sizeof g_filter);
@@ -159,10 +202,15 @@ void watches() {
 }
 
 void draw() {
-    if (!overlay_open()) return;
+    if (!overlay_open() && !g_show_state) return;
+    // with only the state shown the cursor stays the window's (hidden over the picture)
+    ImGuiIO& io = ImGui::GetIO();
+    if (overlay_open()) io.ConfigFlags &= ~ImGuiConfigFlags_NoMouseCursorChange;
+    else io.ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
+    if (g_show_state) player_state();
     if (g_open) watches();
     settings_draw();
     ImGui::Render();

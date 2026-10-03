@@ -50,6 +50,7 @@ float mouse_sens();                                  // 1 is the default, 0 no m
 void set_mouse_sens(float s);
 int mouse_mode();                                    // 0 auto, 1 direct, 2 stick
 void set_mouse_mode(int m);
+bool local_player_state(uint32_t& state);           // the controller's +0x704, of the player this console plays
 bool mouse_invert();
 void set_mouse_invert(bool on);
 void install_hosts();                                // net.cpp

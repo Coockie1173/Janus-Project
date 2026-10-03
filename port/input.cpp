@@ -90,6 +90,14 @@ float g_look_yaw = 0;
 const uint32_t kPlayerState = 0x704;
 uint32_t g_local_frame = ~0u, g_local_ctrl = 0;      // the controller this console plays, as of that frame
 
+// For the overlay: the state of the player this console plays, false with none (menus, loading).
+bool local_player_state(uint32_t& state) {
+    uint32_t ctrl = g_local_ctrl;
+    if (!guest_ptr(ctrl) || !guest_ptr(ld32(kPlayerPtr)) || ld32(kFrameCount) - g_local_frame >= 4) return false;
+    state = ld32(ctrl + kPlayerState);
+    return true;
+}
+
 bool look_allowed(uint32_t ctrl) {
     uint32_t st = ld32(ctrl + kPlayerState);
     return st == 0 || st == 2 || st == 3 || st == 4;
