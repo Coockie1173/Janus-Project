@@ -29,6 +29,8 @@ PGO       := $(wildcard $(BUILD)/pgo/ge.profdata)
 PGO_USE   := $(if $(PGO),-fprofile-instr-use=$(abspath $(PGO)) -Wno-profile-instr-unprofiled -Wno-profile-instr-out-of-date)
 OPT_BASE  ?= -O2 -fno-strict-aliasing -fwrapv $(ARCH)
 OPT       ?= $(OPT_BASE) $(PGO_USE)
+# the recompiler's own options (--no-cr-live, --cr-check: wiikit/recomp/crlive.py)
+RECOMP_FLAGS ?=
 SMOKE_SECS ?= 30
 RUN_ARGS  ?=
 PY        := python3
@@ -73,7 +75,7 @@ $(PATCHED)/main.dol: config/gecko.txt tools/gecko.py | check-game
 recomp: $(RECOMP)/report.txt
 $(RECOMP)/report.txt: $(NAMES) $(PATCHED)/main.dol config/hooks.txt $(wildcard wiikit/recomp/*.py wiikit/*.py wiikit/runtime/hooks.txt)
 	$(PY) -m wiikit.recomp $(PATCHED)/main.dol --out $(RECOMP) --symbols $(NAMES) \
-	    --hooks config/hooks.txt --no-comments > $(BUILD)/recomp.log 2>&1 || { tail -20 $(BUILD)/recomp.log; exit 1; }
+	    --hooks config/hooks.txt --no-comments $(RECOMP_FLAGS) > $(BUILD)/recomp.log 2>&1 || { tail -20 $(BUILD)/recomp.log; exit 1; }
 	@grep -v '^  hook: no symbol' $(BUILD)/recomp.log | tail -12
 	@echo "hooks the executable has no name for yet: $$(grep -c 'hook: no symbol' $(BUILD)/recomp.log) (see $(BUILD)/recomp.log)"
 

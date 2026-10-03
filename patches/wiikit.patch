@@ -1,5 +1,5 @@
 diff --git a/recomp/__main__.py b/recomp/__main__.py
-index db1b158..622e9e7 100644
+index db1b158..25fb179 100644
 --- a/recomp/__main__.py
 +++ b/recomp/__main__.py
 @@ -22,6 +22,7 @@ boundaries and the hook names. The generated code needs wiikit/runtime/ppc.h.
@@ -10,34 +10,110 @@ index db1b158..622e9e7 100644
  import time
  
  from .. import cw
-@@ -177,13 +178,15 @@ def generate(img, out, per_file=8000, comments=True, hook_files=(), modules=(),
+@@ -154,7 +155,51 @@ def hook_names(img, files, log=print):
+     return hooks, syms
+ 
+ 
+-def generate(img, out, per_file=8000, comments=True, hook_files=(), modules=(), log=print):
++_CMP_RE = re.compile(r"^cr_cmp_([su])\(c, (\d), (.*), ([^,]*)\);$")
++_RC_RE = re.compile(r" ?\bcr0_rc\(c, ([^;]*)\);")
++_CR_READ = re.compile(r"c\.cr\[(\d+)\]")
++_CR_TESTS = ("x < y", "x > y", "x == y", "c.xer_so")
++
++
++def _cr_stores(fld, live, check):
++    """The stores of a compare's bits that are read again (crlive.py); with check, a bit
++    taken for dead gets a value no CR bit has, and a read of it stops the game."""
++    out = []
++    for k in range(4):
++        bit = 4 * fld + k
++        if live >> bit & 1:
++            out.append(f"c.cr[{bit}] = {_CR_TESTS[k]};")
++        elif check:
++            out.append(f"c.cr[{bit}] = 2;")
++    return " ".join(out)
++
++
++def _cr_narrow(code, ins, addr, live, check):
++    """An instruction's lines with its compare storing only the CR bits in live."""
++    res = []
++    for line in code:
++        m = _CMP_RE.match(line)
++        if m and (live >> 4 * int(m.group(2)) & 0xF) != 0xF:
++            t = "int32_t" if m.group(1) == "s" else "uint32_t"
++            stores = _cr_stores(int(m.group(2)), live, check)
++            line = f"{{ const {t} x = {m.group(3)}, y = {m.group(4)}; (void)x; (void)y; {stores} }}" if stores else ";"
++        elif (live & 0xF) != 0xF and "cr0_rc(" in line:
++            def rc(m):
++                stores = _cr_stores(0, live, check)
++                return f" {{ const int32_t x = (int32_t)({m.group(1)}), y = 0; (void)x; (void)y; {stores} }}" if stores else ""
++            line = _RC_RE.sub(rc, line)
++        if check:
++            if ins.op in ("bc", "bclr", "bcctr"):
++                line = _CR_READ.sub(lambda m: f"PPC_CRCHK(c, {m.group(1)}, 0x{addr:08X}u)", line)
++            elif line.startswith("c.cr[") and "= (uint8_t)((" in line:
++                head, tail = line.split(" = ", 1)
++                line = head + " = " + _CR_READ.sub(lambda m: f"PPC_CRCHK(c, {m.group(1)}, 0x{addr:08X}u)", tail)
++        res.append(line)
++    return res
++
++
++def generate(img, out, per_file=8000, comments=True, hook_files=(), modules=(), log=print,
++             cr_live=True, cr_check=False):
+     t0 = time.time()
+     prog = Program(img, log=log)
+     entries = set(prog.entries)
+@@ -177,21 +222,43 @@ def generate(img, out, per_file=8000, comments=True, hook_files=(), modules=(),
          files.append(name)
          buf, count, idx = [], 0, idx + 1
  
 +    # an access through r1, r2 or r13 is to RAM (ppc.h: ld32r...)
 +    _RAM = re.compile(r"\b((?:ld|st)(?:8|16|32))\(\(c\.r\[(1|2|13)\] \+")
++    # every instruction's C++ first: the CR bits a compare must store are those read
++    # again, here or in another function (crlive.py), and that is read off the code
++    emitted = {}
      for e in prog.entries:
          unit, body = prog.body(e)
          fn = FnCtx(prog, e, entries, next((m for m in modules if m.contains(e)), None))
-         labels = prog.labels(e)
-         title = unit.name if e == unit.start else f"{unit.name}+0x{e - unit.start:X}"
-         cname = f"orig_{e:08X}" if e in hooks else E.fname(e)
+-        labels = prog.labels(e)
+-        title = unit.name if e == unit.start else f"{unit.name}+0x{e - unit.start:X}"
+-        cname = f"orig_{e:08X}" if e in hooks else E.fname(e)
 -        lines = [f"// {cw.demangle(title)}", f"void {cname}(PPCContext& c) {{"]
-+        lines = [f"// {cw.demangle(title)}", f"void {cname}(PPC_CTX PPC_RESTRICT c) {{"]
++        rows = []
          for a, ins in body:
-             if a in labels:
-                 lines.append(f"L_{a:08X}:")
-@@ -192,6 +195,9 @@ def generate(img, out, per_file=8000, comments=True, hook_files=(), modules=(),
+-            if a in labels:
+-                lines.append(f"L_{a:08X}:")
+             try:
+                 code = E.emit(ins, a, fn)
              except E.Unsupported as ex:
                  unsupported[str(ex)] = unsupported.get(str(ex), 0) + 1
                  code = [f'ppc_unimplemented(c, 0x{a:08X}u, "{ex}");']
 +            code = [_RAM.sub(r"\1r((c.r[\2] +", x) for x in code]
 +            if any("c.r[1] = " in x for x in code):     # the stack pointer: see PPC_COMMIT
 +                code = code + ["PPC_COMMIT(c.r[1]);"]
++            rows.append(code)
++        emitted[e] = rows
++    cr = None
++    if cr_live:
++        from .crlive import Analysis
++        cr = Analysis(prog, emitted, log)
++    for e in prog.entries:
++        unit, body = prog.body(e)
++        fn = FnCtx(prog, e, entries, next((m for m in modules if m.contains(e)), None))
++        labels = prog.labels(e)
++        title = unit.name if e == unit.start else f"{unit.name}+0x{e - unit.start:X}"
++        cname = f"orig_{e:08X}" if e in hooks else E.fname(e)
++        lines = [f"// {cw.demangle(title)}", f"void {cname}(PPC_CTX PPC_RESTRICT c) {{"]
++        live = cr.live_after(e) if cr else None
++        for (a, ins), code in zip(body, emitted.pop(e)):
++            if a in labels:
++                lines.append(f"L_{a:08X}:")
++            if cr:
++                code = _cr_narrow(code, ins, a, live[a], cr_check)
              note = f"  // {a:08X} {_text(ins, a)}" if comments else ""
              lines.append("    " + code[0] + note)
              lines.extend("    " + x for x in code[1:])
-@@ -211,7 +217,7 @@ def generate(img, out, per_file=8000, comments=True, hook_files=(), modules=(),
+@@ -211,7 +278,7 @@ def generate(img, out, per_file=8000, comments=True, hook_files=(), modules=(),
          f.write("#pragma once\n#include \"ppc.h\"\n\n")
          f.write("extern uint32_t g_rso_base[];   // where each RSO module is loaded (rso.cpp)\n\n")
          for e in prog.entries:
@@ -46,7 +122,7 @@ index db1b158..622e9e7 100644
      with Out(os.path.join(out, "table.cpp")) as f:
          f.write('#include "funcs.h"\n#include <cstddef>\n\n')
          f.write("extern const PPCFuncEntry g_ppc_funcs[] = {\n")
-@@ -223,9 +229,9 @@ def generate(img, out, per_file=8000, comments=True, hook_files=(), modules=(),
+@@ -223,9 +290,9 @@ def generate(img, out, per_file=8000, comments=True, hook_files=(), modules=(),
          f.write(HOOKS_HEAD)
          for a, name in sorted(hooks.items()):
              f.write(f"// {name}\n"
@@ -58,6 +134,313 @@ index db1b158..622e9e7 100644
                      f"else orig_{a:08X}(c); }}\n\n")
          f.write("extern const PPCHook g_ppc_hooks[] = {\n")
          for a, name in sorted(hooks.items()):
+@@ -315,6 +382,10 @@ def main():
+     ap.add_argument("--symbols", metavar="TSV",
+                     help="names for a stripped executable (addr, ..., name); its functions "
+                          "are found by discovery (recomp/discover.py)")
++    ap.add_argument("--no-cr-live", action="store_true",
++                    help="every compare stores all four CR bits (recomp/crlive.py follows which are read)")
++    ap.add_argument("--cr-check", action="store_true",
++                    help="a CR bit taken for dead is marked, and reading one stops the game: a test of crlive.py")
+     a = ap.parse_args()
+     img = Image(a.image)
+     modules, module_names = [], {}
+@@ -328,7 +399,8 @@ def main():
+             names.setdefault(v, n)
+         symbolise(img, names)
+     generate(img, a.out, a.per_file, not a.no_comments,
+-             [os.path.join(RUNTIME, "hooks.txt")] + a.hooks, modules)
++             [os.path.join(RUNTIME, "hooks.txt")] + a.hooks, modules,
++             cr_live=not a.no_cr_live, cr_check=a.cr_check)
+ 
+ 
+ if __name__ == "__main__":
+diff --git a/recomp/crlive.py b/recomp/crlive.py
+new file mode 100644
+index 0000000..bb49877
+--- /dev/null
++++ b/recomp/crlive.py
+@@ -0,0 +1,280 @@
++"""Which condition register bits an instruction's result is still read from.
++
++A compare writes four CR bits and the branch after it reads one; the next
++compare overwrites them all. Written into the context, the four stores stay
++(a call in between could read them, for all the C++ compiler knows): about a
++tenth of the recompiled code's time. Here each function's CR bits are followed
++backwards from where they are read, across calls: a bit nothing reads before
++it is written again need not be stored (emit narrows the compare).
++
++Bit i of a mask is CR bit i (c.cr[i]: field i / 4; 0 LT, 1 GT, 2 EQ, 3 SO).
++
++Across a direct call nothing is assumed of the ABI: a function's `use` is what
++it reads before writing (its callees' too), its `ret` is what any caller reads
++after the call before writing. Any function may be called from outside (a
++callback, a thread's entry): `ret` always has CR2-CR4 (callee-saved). An
++indirect call is taken to reach a function that keeps to the ABI (see there).
++The recompiler's --cr-check makes a build that stops where a bit taken for
++dead is read.
++"""
++import re
++
++from .. import ppc
++
++ALL = 0xFFFFFFFF
++
++
++def field(n):
++    return 0xF << (4 * n)
++
++
++SAVED = field(2) | field(3) | field(4)
++
++# what an instruction does to the flow of control
++NEXT, JUMP, COND, CALL, ICALL, RET, TAIL, ITAIL, SWITCH, DIE = range(10)
++
++
++_DEF_FIELD = re.compile(r"\b(?:cr_cmp_[su]|cr_set|fcmp)\(c, (\d)")
++_DEF_BIT = re.compile(r"c\.cr\[(\d+)\] = ")
++_USE_BIT = re.compile(r"c\.cr\[(\d+)\](?! = )")
++_MTCRF = re.compile(r"\bmtcrf\(c, 0x([0-9A-Fa-f]+)u?,")
++
++
++_REG_FIELDS = ("A", "B", "S", "D")
++
++
++def _touches(ins, reg):
++    """Whether the instruction may read or write GPR reg (when in doubt, yes)."""
++    op, f = ins.op, ins.f
++    if op.startswith(("lf", "stf", "psq_")):             # D or S is a floating-point register
++        return f.get("A") == reg or f.get("B") == reg
++    if op in ("addi", "addis"):                          # rA of 0 is the number 0
++        return f["D"] == reg or (f["A"] == reg and reg != 0)
++    return any(f.get(k) == reg for k in _REG_FIELDS)
++
++
++def _mfcr_use(ins, following):
++    """The CR bits an mfcr's value is used for. The compiler takes the whole register to
++    make a truth value of one bit (mfcr rX; rlwinm rX, rX, n, 31, 31); a prologue, a
++    context save or an exception's entry stores it to put it back later (what is put
++    back is read, if ever, by code that had it stored: only the callee-saved fields are
++    counted). Anything else reads it all."""
++    reg = ins.f["D"]
++    for nxt in following:
++        f = nxt.f
++        if nxt.op in ("b", "bc", "bclr", "bcctr"):
++            break
++        if (nxt.op == "stw" and f.get("D") == reg) or (nxt.op == "mtspr" and f.get("D") == reg):
++            return SAVED
++        if nxt.op == "rlwinm" and f.get("S") == reg and f.get("A") == reg:
++            sh, mb, me = f["SH"], f["MB"], f["ME"]
++            use, j = 0, mb
++            while True:                                  # the mask's bits, back where they were
++                use |= 1 << ((j + sh) & 31)
++                if j == me:
++                    break
++                j = (j + 1) & 31
++            return use
++        if _touches(nxt, reg):
++            break
++    return ALL
++
++
++def use_def(lines, ins, following):
++    """(bits read, bits written) by an instruction, from the C++ emitted for it: what
++    the code does, not what the instruction's fields promise."""
++    use = d = 0
++    for text in lines:
++        for m in _DEF_FIELD.finditer(text):
++            d |= field(int(m.group(1)))
++        if "cr0_rc(" in text:
++            d |= field(0)
++        if "cr1_rc(" in text:
++            d |= field(1)
++        for m in _DEF_BIT.finditer(text):
++            d |= 1 << int(m.group(1))
++        for m in _USE_BIT.finditer(text):
++            use |= 1 << int(m.group(1))
++        for m in _MTCRF.finditer(text):
++            for n in range(8):
++                if int(m.group(1), 16) & (0x80 >> n):
++                    d |= field(n)
++        if "mfcr(c)" in text:
++            use = _mfcr_use(ins, following)
++    if ins.op in ("crxor", "creqv") and ins.f["crbA"] == ins.f["crbB"]:
++        use = 0                                          # crclr, crset: the bit is not read
++    return use, d
++
++
++class Analysis:
++    """live(entry, addr): the CR bits read after the instruction at addr, before they are written."""
++
++    def __init__(self, prog, code, log=print):
++        """code: {entry: [lines of each instruction of its body]}."""
++        self.prog = prog
++        self.code = code
++        entries = prog.entries
++        self.entry_set = set(entries)
++        self.fns = {e: self._shape(e) for e in entries}
++        self.use = dict.fromkeys(entries, 0)           # read by the function before it writes them
++        self.ret = dict.fromkeys(entries, SAVED)       # read by a caller after the function returns
++        self.use_any = 0                               # the union of use: what an indirect call may read
++        self.ret_any = SAVED                           # read after an indirect call
++        self.out = {}
++        rounds = 0
++        while True:
++            rounds += 1
++            changed = False
++            for e in entries:
++                changed |= self._flow(e)
++            # An indirect call's target is compiled code or a callback written to be
++            # called from it: of the bits it finds, it reads what the ABI passes (CR1 EQ,
++            # for a variadic function) or has it keep (CR2-CR4). The few functions with
++            # conventions of their own (hand-written, with direct callers) do not count
++            # here; --cr-check finds a target that reads more.
++            any_use = 0
++            for e in entries:
++                any_use |= self.use[e]
++            any_use &= SAVED | 1 << 6
++            if any_use != self.use_any:
++                self.use_any, changed = any_use, True
++            if not changed:
++                break
++        odd = sum(1 for e in entries if self.use[e] & ~SAVED & ~(1 << 6))
++        log(f"  CR liveness: {rounds} rounds; an indirect call reads {self.use_any:08X}, "
++            f"is followed by reads of {self.ret_any:08X}; {odd} functions read CR0/1/5-7 bits "
++            f"(other than CR1 EQ) they did not write")
++
++    def _shape(self, entry):
++        """Per instruction of the entry's body: (use, def, kind, argument)."""
++        prog = self.prog
++        unit, body = prog.body(entry)
++        index = {a: k for k, (a, _) in enumerate(body)}
++        rows = []
++        for k, (a, ins) in enumerate(body):
++            op, f = ins.op, ins.f
++            use, d = use_def(self.code[entry][k], ins, [i for _, i in body[k + 1:k + 5]])
++            kind, arg = NEXT, None
++            cond = op in ("bc", "bclr", "bcctr") and f["BO"] & 0x14 != 0x14
++            if op in ("b", "bc"):
++                t = ppc.branch_target(ins, a)
++                if f["LK"]:
++                    if not (op == "bc" and t == a + 4):
++                        kind, arg = (CALL, (t, True)) if t in self.entry_set else (NEXT, None)
++                elif entry <= t < unit.end and t in index:
++                    kind, arg = (COND if cond else JUMP), index[t]
++                elif t in self.entry_set:
++                    kind, arg = TAIL, (t, cond)
++                else:
++                    kind, arg = DIE, cond
++            elif op == "bclr":
++                kind, arg = (ICALL, None) if f["LK"] else (RET, cond)
++            elif op == "bcctr":
++                if f["LK"]:
++                    kind = ICALL
++                elif not cond and a in prog.tables:
++                    kind, arg = SWITCH, [index[t] for t in set(prog.tables[a]) if t in index]
++                else:
++                    kind, arg = ITAIL, cond
++            elif op == "rfi":
++                kind, arg = DIE, False
++            rows.append((use, d, kind, arg))
++        # past the last instruction: into the next function, or nowhere
++        last = body[-1][1] if body else None
++        from .emit import terminates
++        end = None
++        if last is None or not terminates(last):
++            end = unit.end if unit.end in self.entry_set else -1
++        return rows, end
++
++    def _flow(self, entry):
++        rows, end = self.fns[entry]
++        n = len(rows)
++        ret_self = self.ret[entry] | self.ret_any
++        changed = False
++        live = self.out.get(entry)
++        if live is None:
++            live = self.out[entry] = [0] * (n + 1)     # live[k]: before instruction k; live[n]: off the end
++        if end is None:
++            off_end = 0
++        elif end < 0:
++            off_end = 0
++        else:
++            off_end = self.use[end] | ret_self
++            changed |= self._returns_to(end, ret_self)
++        if live[n] != off_end:
++            live[n] = off_end
++        while True:
++            again = False
++            for k in range(n - 1, -1, -1):
++                use, d, kind, arg = rows[k]
++                after = live[k + 1]
++                if kind == NEXT:
++                    v = after
++                elif kind == JUMP:
++                    v = live[arg]
++                elif kind == COND:
++                    v = after | live[arg]
++                elif kind == CALL:
++                    t = arg[0]
++                    v = after | self.use[t]
++                    changed |= self._returns_to(t, after)
++                elif kind == ICALL:
++                    v = after | self.use_any
++                    if after & ~self.ret_any:
++                        self.ret_any |= after
++                        changed = True
++                elif kind == RET:
++                    v = ret_self | (after if arg else 0)
++                elif kind == TAIL:
++                    t, cond = arg
++                    v = self.use[t] | ret_self | (after if cond else 0)
++                    changed |= self._returns_to(t, ret_self)
++                elif kind == ITAIL:
++                    v = self.use_any | ret_self | (after if arg else 0)
++                    if ret_self & ~self.ret_any:
++                        self.ret_any |= ret_self
++                        changed = True
++                elif kind == SWITCH:
++                    v = self.use_any | ret_self          # (the default: an indirect jump)
++                    for t in arg:
++                        v |= live[t]
++                else:                                    # DIE
++                    v = after if arg else 0
++                v = (v & ~d) | use
++                if v != live[k]:
++                    live[k] = v
++                    again = True
++            if not again:
++                break
++            changed = True
++        if n and live[0] != self.use[entry]:
++            self.use[entry] = live[0]
++            changed = True
++        return changed
++
++    def _returns_to(self, t, after):
++        if after & ~self.ret[t]:
++            self.ret[t] |= after
++            return True
++        return False
++
++    def live_after(self, entry):
++        """{addr: CR bits read after the instruction there} for the entry's body."""
++        _, body = self.prog.body(entry)
++        rows, _ = self.fns[entry]
++        live = self.out[entry]
++        res = {}
++        for k, (a, _) in enumerate(body):
++            use, d, kind, arg = rows[k]
++            # what the instruction's own writes are read by: every way on from it
++            if kind in (NEXT, CALL, ICALL):
++                v = live[k + 1]
++                if kind == CALL:
++                    v |= self.use[arg[0]]
++                elif kind == ICALL:
++                    v |= self.use_any
++            else:
++                v = ALL                                  # (a branch writes no CR: never asked)
++            res[a] = v
++        return res
 diff --git a/runtime/core.cpp b/runtime/core.cpp
 index d0baebf..1981b1d 100644
 --- a/runtime/core.cpp
@@ -196,10 +579,30 @@ index 356b1e4..8d1cede 100644
          (void)got;
      }
 diff --git a/runtime/gl.h b/runtime/gl.h
-index 3d2da4e..682aca2 100644
+index 3d2da4e..d6e9264 100644
 --- a/runtime/gl.h
 +++ b/runtime/gl.h
-@@ -59,6 +59,7 @@
+@@ -6,6 +6,7 @@
+ #define WIIKIT_GL_FUNCS(X)                                                                          \
+     X(PFNGLGETERRORPROC, glGetError)                                                                \
+     X(PFNGLGETSTRINGPROC, glGetString)                                                              \
++    X(PFNGLGETINTEGERVPROC, glGetIntegerv)                                                          \
+     X(PFNGLENABLEPROC, glEnable)                                                                    \
+     X(PFNGLDISABLEPROC, glDisable)                                                                  \
+     X(PFNGLVIEWPORTPROC, glViewport)                                                                \
+@@ -52,13 +53,19 @@
+     X(PFNGLNAMEDBUFFERSTORAGEPROC, glNamedBufferStorage)                                            \
+     X(PFNGLNAMEDBUFFERSUBDATAPROC, glNamedBufferSubData)                                            \
+     X(PFNGLBINDBUFFERBASEPROC, glBindBufferBase)                                                    \
++    X(PFNGLBINDBUFFERRANGEPROC, glBindBufferRange)                                                  \
+     X(PFNGLINVALIDATEBUFFERDATAPROC, glInvalidateBufferData)                                        \
+     X(PFNGLMAPNAMEDBUFFERRANGEPROC, glMapNamedBufferRange)                                          \
+     X(PFNGLFENCESYNCPROC, glFenceSync)                                                              \
++    X(PFNGLGENQUERIESPROC, glGenQueries)                                                            \
++    X(PFNGLBEGINQUERYPROC, glBeginQuery)                                                            \
++    X(PFNGLENDQUERYPROC, glEndQuery)                                                                \
++    X(PFNGLGETQUERYOBJECTUI64VPROC, glGetQueryObjectui64v)                                          \
+     X(PFNGLCLIENTWAITSYNCPROC, glClientWaitSync)                                                    \
      X(PFNGLDELETESYNCPROC, glDeleteSync)                                                            \
      X(PFNGLCREATEVERTEXARRAYSPROC, glCreateVertexArrays)                                            \
      X(PFNGLBINDVERTEXARRAYPROC, glBindVertexArray)                                                  \
@@ -208,7 +611,7 @@ index 3d2da4e..682aca2 100644
      X(PFNGLVERTEXARRAYELEMENTBUFFERPROC, glVertexArrayElementBuffer)                                \
      X(PFNGLENABLEVERTEXARRAYATTRIBPROC, glEnableVertexArrayAttrib)                                  \
 diff --git a/runtime/gx.cpp b/runtime/gx.cpp
-index a6b37f2..3898422 100644
+index a6b37f2..4152f18 100644
 --- a/runtime/gx.cpp
 +++ b/runtime/gx.cpp
 @@ -25,6 +25,7 @@
@@ -234,10 +637,52 @@ index a6b37f2..3898422 100644
  namespace {
  
  uint32_t pi_base, pi_end, pi_wptr;                 // PI CPU FIFO (physical addresses)
-@@ -152,6 +161,21 @@ uint64_t hash_mem(const uint8_t* p, size_t n) {
+@@ -139,7 +148,9 @@ void flush(bool force) {
+     submit_pending = true;
+ }
+ 
++uint64_t hashed_bytes = 0;                          // by hash_mem (gx_report)
+ uint64_t hash_mem(const uint8_t* p, size_t n) {
++    hashed_bytes += n;
+     uint64_t h = 0x9E3779B97F4A7C15ull ^ n;
+     size_t i = 0;
+     for (; i + 8 <= n; i += 8) {
+@@ -152,6 +163,53 @@ uint64_t hash_mem(const uint8_t* p, size_t n) {
      return h;
  }
  
++// What the runtime keeps of a range of guest memory is good while the range
++// is not written. Its pages are watched (mem.h); where the range's first or
++// last page is one written all the time (another allocation's bytes next to
++// it), the whole pages inside are watched and the two ends hashed.
++uint64_t dl_hash(const uint8_t* p, size_t n);
++struct Guard { uint64_t stamp = 0, edges = 0; bool inner = false; };
++uint64_t guard_edges(const uint8_t* p, size_t n, const uint8_t*& in, size_t& inn) {
++    const uint8_t* a = reinterpret_cast<const uint8_t*>(((uintptr_t)p + 4095) & ~(uintptr_t)4095);
++    const uint8_t* b = reinterpret_cast<const uint8_t*>(((uintptr_t)p + n) & ~(uintptr_t)4095);
++    if (b <= a) { inn = 0; return 0; }
++    in = a;
++    inn = (size_t)(b - a);
++    return dl_hash(p, (size_t)(a - p)) * 31 + dl_hash(b, (size_t)(p + n - b));
++}
++Guard guard_set(const uint8_t* p, size_t n) {
++    Guard g;
++    if ((g.stamp = mem_watch(p, n))) return g;
++    const uint8_t* in = nullptr;
++    size_t inn = 0;
++    const uint64_t e = guard_edges(p, n, in, inn);
++    if (inn && (g.stamp = mem_watch(in, inn))) { g.edges = e; g.inner = true; }
++    return g;
++}
++bool guard_same(const uint8_t* p, size_t n, const Guard& g) {
++    if (!g.stamp) return false;
++    if (!g.inner) return mem_watch_same(p, n, g.stamp);
++    const uint8_t* in = nullptr;
++    size_t inn = 0;
++    const uint64_t e = guard_edges(p, n, in, inn);
++    return inn && e == g.edges && mem_watch_same(in, inn, g.stamp);
++}
++
 +// 512 words spread over the data: enough to see a texture rewritten, at a
 +// fraction of hashing all of it (a 256 x 256 CMPR texture is 4 000 words).
 +uint64_t hash_quick(const uint8_t* p, size_t n) {
@@ -256,12 +701,12 @@ index a6b37f2..3898422 100644
  // ---- textures --------------------------------------------------------------------------------
  // Decoded textures are cached by what names them (address, format, size,
  // levels, palette) and re-uploaded when their bytes change. Bytes are hashed
-@@ -169,14 +193,22 @@ struct TexKeyHash {
+@@ -169,14 +227,22 @@ struct TexKeyHash {
          return (size_t)(k.addr * 0x9E3779B1u ^ k.shape * 0x85EBCA77u ^ k.levels ^ k.tlut);
      }
  };
 -struct TexEntry { uint32_t id; uint64_t hash; uint32_t gen; };
-+struct TexEntry { uint32_t id; uint64_t hash; uint32_t gen; uint64_t quick = 0; uint64_t stamp = 0; };   // stamp: mem_watch's
++struct TexEntry { uint32_t id; uint64_t hash; uint32_t gen; uint64_t quick = 0; Guard guard; };
  std::unordered_map<TexKey, TexEntry, TexKeyHash> tcache;
  uint32_t tex_next_id = 1, tex_gen = 1;
  uint8_t tex_dirty = 0xFF;                          // maps whose binding must be looked at again
@@ -269,9 +714,9 @@ index a6b37f2..3898422 100644
  
 -struct CopyRec { size_t size; uint64_t hash; uint32_t fmt; int w, h; };
 +struct CopyRec { size_t size; uint64_t hash; uint32_t fmt; int w, h;
-+                 uint32_t gen = 0; bool same = false; uint64_t stamp = 0; };   // whether RAM still holds the copy, looked at once a generation
++                 uint32_t gen = 0; bool same = false; Guard guard; };   // whether RAM still holds the copy, looked at once a generation
  std::unordered_map<uint32_t, CopyRec> copies;      // EFB copies to texture, by address
-+struct CopyHash { uint64_t hash = 0, stamp = 0; };
++struct CopyHash { uint64_t hash = 0; Guard guard; };
 +std::unordered_map<uint64_t, CopyHash> copy_hashes;   // memory's hash where a copy was made, by address and size
 +// Hundreds of textures are bound a frame and a handful are copies: a bit for
 +// each address a copy was ever made to (some share one) says when to look.
@@ -281,7 +726,7 @@ index a6b37f2..3898422 100644
  
  // texture format an EFB copy format produces in RAM (for its size)
  uint32_t copy_tex_fmt(uint32_t cf) {
-@@ -184,7 +216,11 @@ uint32_t copy_tex_fmt(uint32_t cf) {
+@@ -184,7 +250,11 @@ uint32_t copy_tex_fmt(uint32_t cf) {
      return f[cf & 15];
  }
  
@@ -293,7 +738,7 @@ index a6b37f2..3898422 100644
      uint32_t gen = bp[0x00], used = 0;
      int ntev = (int)(gen >> 10 & 15) + 1, nind = (int)(gen >> 16 & 7);
      for (int s = 0; s < ntev; ++s) {
-@@ -192,7 +228,7 @@ uint32_t used_maps() {
+@@ -192,7 +262,7 @@ uint32_t used_maps() {
          if (t & 0x40) used |= 1u << (t & 7);
      }
      for (int i = 0; i < nind && i < 4; ++i) used |= 1u << (bp[0x27] >> (6 * i) & 7);
@@ -302,7 +747,7 @@ index a6b37f2..3898422 100644
  }
  
  void bind_map(int m) {
-@@ -203,9 +239,48 @@ void bind_map(int m) {
+@@ -203,9 +273,48 @@ void bind_map(int m) {
      uint32_t fmt = img0 >> 20 & 15, addr = (img3 & 0xFFFFFF) << 5;
      if (img1 >> 21 & 1) warn_once("texture preloaded in TMEM (not modelled), map", m);
  
@@ -315,9 +760,9 @@ index a6b37f2..3898422 100644
 +        if (it == copies.end() || !mem_ok(a, it->second.size)) return nullptr;
 +        if (it->second.gen != tex_gen) {
 +            CopyRec& r = it->second;                 // (its pages watched and unwritten: not read at all)
-+            if (mem_watch_same(host(virt(a)), r.size, r.stamp)) r.same = true;
++            if (guard_same(host(virt(a)), r.size, r.guard)) r.same = true;
 +            else {
-+                r.stamp = mem_watch(host(virt(a)), r.size);
++                r.guard = guard_set(host(virt(a)), r.size);
 +                r.same = hash_mem(host(virt(a)), r.size) == r.hash;
 +            }
 +            it->second.gen = tex_gen;
@@ -354,7 +799,7 @@ index a6b37f2..3898422 100644
          uint64_t tag = 1ull << 32 | addr;
          if (map_bound[m] != tag) {
              put<uint8_t>(VC_TEXEFB);
-@@ -224,6 +299,19 @@ void bind_map(int m) {
+@@ -224,6 +333,19 @@ void bind_map(int m) {
          levels = (int)((mode1 >> 8 & 0xFF) + 15) / 16 + 1;
          if (levels > full) levels = full;
      }
@@ -374,7 +819,7 @@ index a6b37f2..3898422 100644
      size_t total = 0;
      for (int l = 0; l < levels; ++l) total += gxtex_size(fmt, std::max(1, w >> l), std::max(1, h >> l));
      if (!addr || !mem_ok(addr, total)) { warn_once("texture outside memory at", addr); return; }
-@@ -246,9 +334,21 @@ void bind_map(int m) {
+@@ -246,9 +368,21 @@ void bind_map(int m) {
      TexEntry& e = it->second;
      bool upload = false;
      if (fresh || e.gen != tex_gen) {
@@ -386,8 +831,8 @@ index a6b37f2..3898422 100644
 +        // sample of the texture is looked at each time, and all of it hashed
 +        // only when the sample has changed (or the texture is new).
 +        // Not even that while its pages are watched and unwritten (mem.h).
-+        if (fresh || !mem_watch_same(src, total, e.stamp)) {
-+            e.stamp = mem_watch(src, total);
++        if (fresh || !guard_same(src, total, e.guard)) {
++            e.guard = guard_set(src, total);
 +            uint64_t q = hash_quick(src, total);
 +            if (fresh || q != e.quick) {
 +                uint64_t hh = hash_mem(src, total);
@@ -399,7 +844,7 @@ index a6b37f2..3898422 100644
          e.gen = tex_gen;
      }
      if (upload) {
-@@ -283,6 +383,7 @@ void bind_map(int m) {
+@@ -283,6 +417,7 @@ void bind_map(int m) {
  }
  
  void sync_textures() {
@@ -407,7 +852,7 @@ index a6b37f2..3898422 100644
      uint32_t todo = used_maps() & tex_dirty;
      for (int m = 0; m < 8; ++m)
          if (todo >> m & 1) bind_map(m);
-@@ -351,11 +452,14 @@ VtxFmt vtx_fmt(int v) {
+@@ -351,11 +486,14 @@ VtxFmt vtx_fmt(int v) {
          f.tc_fmt[i] = t[i][1];
          f.tc_sc[i] = 1.0f / (float)(1u << t[i][2]);
      }
@@ -423,7 +868,7 @@ index a6b37f2..3898422 100644
  }
  
  // bytes per vertex for vertex format `v`
-@@ -378,6 +482,35 @@ int vertex_size(const VtxFmt& f) {
+@@ -378,6 +516,35 @@ int vertex_size(const VtxFmt& f) {
      return n;
  }
  
@@ -459,7 +904,7 @@ index a6b37f2..3898422 100644
  // an attribute's data: in the stream (direct) or in its array (indexed)
  const uint8_t* fetch(uint32_t mode, int arr, int size, const uint8_t*& p, uint32_t sub = 0) {
      if (mode == 1) { const uint8_t* q = p; p += size; return q; }
-@@ -387,52 +520,125 @@ const uint8_t* fetch(uint32_t mode, int arr, int size, const uint8_t*& p, uint32
+@@ -387,52 +554,125 @@ const uint8_t* fetch(uint32_t mode, int arr, int size, const uint8_t*& p, uint32
      return host(virt(cp[0xA0 + arr] + idx * cp[0xB0 + arr] + sub));
  }
  
@@ -615,7 +1060,7 @@ index a6b37f2..3898422 100644
          if (video) {
              put<uint8_t>(VC_FRAME);
              ++rec_frames;
-@@ -445,7 +651,19 @@ void efb_copy(uint32_t v) {
+@@ -445,7 +685,19 @@ void efb_copy(uint32_t v) {
      if (v >> 9 & 1) { w = (w + 1) / 2; h = (h + 1) / 2; }
      uint32_t tpf = v >> 3 & 15, real = tpf / 2 + (tpf & 1) * 8;
      size_t size = gxtex_size(copy_tex_fmt(real), w, h);
@@ -627,16 +1072,16 @@ index a6b37f2..3898422 100644
 +        // with its pages unwritten since, has that hash already
 +        const uint8_t* at = host(virt(dest));
 +        CopyHash& known = copy_hashes[(uint64_t)dest << 32 | size];
-+        if (!mem_watch_same(at, size, known.stamp)) {
-+            known.stamp = mem_watch(at, size);
++        if (!guard_same(at, size, known.guard)) {
++            known.guard = guard_set(at, size);
 +            known.hash = hash_mem(at, size);
 +        }
-+        copies[dest] = CopyRec{size, known.hash, copy_tex_fmt(real), w, h, 0, false, known.stamp};
++        copies[dest] = CopyRec{size, known.hash, copy_tex_fmt(real), w, h, 0, false, known.guard};
 +    }
      tex_dirty = 0xFF;
  }
  
-@@ -454,13 +672,15 @@ void bp_write(uint32_t v) {
+@@ -454,13 +706,15 @@ void bp_write(uint32_t v) {
      if (reg == 0xFE) { bp_mask = val; return; }
      bp[reg] = (bp[reg] & ~bp_mask) | (val & bp_mask);
      bp_mask = 0xFFFFFF;
@@ -653,7 +1098,7 @@ index a6b37f2..3898422 100644
          pe_ctrl |= 8; ++st.done; os_raise();
          return;
      case 0x47: pe_token = (uint16_t)val; return;                      // token
-@@ -504,16 +724,322 @@ void xf_load(uint32_t addr, uint32_t n, const uint8_t* src) {
+@@ -504,16 +758,323 @@ void xf_load(uint32_t addr, uint32_t n, const uint8_t* src) {
  // parse one command at p (n bytes available); returns its length, 0 if incomplete
  size_t parse(const uint8_t* p, size_t n, bool in_dl);
  
@@ -698,13 +1143,14 @@ index a6b37f2..3898422 100644
 +// draws are parsed as ever. A list that changes the vertex format itself, or
 +// whose inputs keep changing (skinned vertices), is parsed as before.
 +struct DlDraw { uint32_t off, len, count, at, bytes, first; uint8_t prim, flags; };
-+struct DlArr { uint32_t addr, len; uint64_t hash, stamp; };
++struct DlArr { uint32_t addr, len; uint64_t hash; Guard guard; };
 +struct DlEntry {
 +    enum : uint8_t { NEW, KEPT, PLAIN } state = NEW;
 +    bool plain = false;                              // found while building: cannot be kept
 +    uint8_t fails = 0;
 +    uint32_t size = 0, wait = 0, gen = 0;            // gen: the static buffer's round its vertices were put in
-+    uint64_t hash = 0, sig = 0, stamp = 0;           // stamp: mem_watch's, of the list's bytes
++    uint64_t hash = 0, sig = 0;
++    Guard guard;                                     // of the list's bytes
 +    uint32_t lo[12], hi[12], elem[12], verts[12];    // per array: indices reached, bytes an element, vertices
 +    std::vector<DlArr> arrs;
 +    std::vector<DlDraw> draws;
@@ -888,23 +1334,23 @@ index a6b37f2..3898422 100644
 +        while (i < n && parts[i].lo <= m.hi + 64) { m.hi = std::max(m.hi, parts[i].hi); ++i; }
 +        if (!mem_ok((uint32_t)m.lo, m.hi - m.lo)) return false;
 +        const uint8_t* at = host(virt((uint32_t)m.lo));
-+        const uint64_t stamp = mem_watch(at, m.hi - m.lo);
-+        e.arrs.push_back(DlArr{(uint32_t)m.lo, (uint32_t)(m.hi - m.lo), dl_hash(at, m.hi - m.lo), stamp});
++        const Guard guard = guard_set(at, m.hi - m.lo);
++        e.arrs.push_back(DlArr{(uint32_t)m.lo, (uint32_t)(m.hi - m.lo), dl_hash(at, m.hi - m.lo), guard});
 +        dl_stat.bytes += m.hi - m.lo;
 +    }
 +    return true;
 +}
 +// are they still what they were (the registers are: the signature was compared first)
 +// Watched pages nothing wrote to are not read at all; otherwise they are watched (again) and hashed.
-+bool dl_mem_same(const uint8_t* p, size_t n, uint64_t hash, uint64_t& stamp) {
-+    if (mem_watch_same(p, n, stamp)) return true;
-+    stamp = mem_watch(p, n);
++bool dl_mem_same(const uint8_t* p, size_t n, uint64_t hash, Guard& guard) {
++    if (guard_same(p, n, guard)) return true;
++    guard = guard_set(p, n);
 +    dl_stat.bytes += n;
 +    return dl_hash(p, n) == hash;
 +}
 +bool dl_arrays_same(DlEntry& e) {
 +    for (DlArr& a : e.arrs)
-+        if (!dl_mem_same(host(virt(a.addr)), a.len, a.hash, a.stamp)) return false;
++        if (!dl_mem_same(host(virt(a.addr)), a.len, a.hash, a.guard)) return false;
 +    return true;
 +}
 +
@@ -929,7 +1375,7 @@ index a6b37f2..3898422 100644
 +        e.fails = 0;
 +    }
 +    if (e.state == DlEntry::KEPT) {
-+        if (e.size == size && e.sig == dl_signature() && dl_mem_same(p, size, e.hash, e.stamp) && dl_arrays_same(e)) {
++        if (e.size == size && e.sig == dl_signature() && dl_mem_same(p, size, e.hash, e.guard) && dl_arrays_same(e)) {
 +            ++dl_stat.kept;
 +            e.fails = 0;
 +            const bool stat = dl_static_on && (e.gen == arena_gen || dl_upload(e));
@@ -965,7 +1411,7 @@ index a6b37f2..3898422 100644
 +    e.fails = fails;
 +    e.size = size;
 +    e.sig = dl_signature();
-+    e.stamp = mem_watch(p, size);
++    e.guard = guard_set(p, size);
 +    e.hash = dl_hash(p, size);
 +    for (int a = 0; a < 12; ++a) { e.lo[a] = UINT32_MAX; e.hi[a] = 0; e.elem[a] = 0; e.verts[a] = 0; }
 +    dl_building = &e;
@@ -981,7 +1427,7 @@ index a6b37f2..3898422 100644
      }
  }
  
-@@ -525,6 +1051,9 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
+@@ -525,6 +1086,9 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
      case 0x08:
          if (n < 6) return 0;
          cp[p[1]] = be32(p + 2);
@@ -991,7 +1437,7 @@ index a6b37f2..3898422 100644
          TRACE("CP %02X %08X\n", p[1], cp[p[1]]);
          return 6;
      case 0x10: {
-@@ -556,8 +1085,9 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
+@@ -556,8 +1120,9 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
      if (op >= 0x80 && op < 0xC0) {
          if (n < 3) return 0;
          uint32_t count = (uint32_t)p[1] << 8 | p[2];
@@ -1003,7 +1449,7 @@ index a6b37f2..3898422 100644
          if (n < len) return 0;
          ++st.draws;
          st.verts += count;
-@@ -565,45 +1095,18 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
+@@ -565,45 +1130,18 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
          if (video && count) {
              if (bp[0xF1] >> 21 & 7) warn_once("fog (not drawn), type", bp[0xF1] >> 21 & 7);
              if (bp[0xF4] >> 2 & 3) warn_once("Z texture (not drawn), op", bp[0xF4] >> 2 & 3);
@@ -1039,13 +1485,13 @@ index a6b37f2..3898422 100644
 +                perf_vtx += perf_ticks() - t0;
              } else {
 -                fl = decode_vertices(f, p + 3, count, out);
-+                decode_vertices(f, fl, p + 3, count, out);
-             }
+-            }
 -            if (extend && rec[draw_hdr + 2] != fl) {      // other attributes: a draw of its own
 -                const uint8_t hdr[7] = {VC_DRAW, (uint8_t)(op & 0xF8), 0, 0, 0, 0, 0};
 -                rec.insert(rec.begin() + (ptrdiff_t)at, hdr, hdr + sizeof hdr);
 -                draw_hdr = at;
--            }
++                decode_vertices(f, fl, p + 3, count, out);
+             }
 -            rec[draw_hdr + 2] = fl;
 -            uint32_t pieces;
 -            std::memcpy(&pieces, &rec[draw_hdr + 3], 4);
@@ -1058,7 +1504,7 @@ index a6b37f2..3898422 100644
          }
          return len;
      }
-@@ -614,8 +1117,17 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
+@@ -614,8 +1152,17 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
  
  void feed(const uint8_t* b, int n) {
      if (desync) return;
@@ -1077,7 +1523,19 @@ index a6b37f2..3898422 100644
      while (off < stream.size()) {
          size_t k = parse(stream.data() + off, stream.size() - off, false);
          if (!k) { --st.cmds; break; }
-@@ -729,6 +1241,7 @@ void gx_init() {
+@@ -714,7 +1261,10 @@ bool gx_copy_to_ram(uint32_t addr) {
+     hw_run_locked([&] {
+         std::memcpy(host(virt(addr)), out.data(), out.size());
+         auto c = copies.find(addr);                          // the GPU's copy still stands for these bytes
+-        if (c != copies.end()) c->second.hash = hash_mem(host(virt(addr)), c->second.size);
++        if (c != copies.end()) {
++            c->second.guard = guard_set(host(virt(addr)), c->second.size);
++            c->second.hash = hash_mem(host(virt(addr)), c->second.size);
++        }
+     });
+     return true;
+ }
+@@ -729,6 +1279,7 @@ void gx_init() {
  // AI's, which start each audio frame's mix, above all. So does this wait.
  // A handler may switch guest threads, and another thread may hand the
  // record over in the meantime.
@@ -1085,7 +1543,7 @@ index a6b37f2..3898422 100644
  void gx_draw_done_reached() {
      hw_run_locked([] { pe_ctrl |= 8; ++st.done; os_raise(); });
  }
-@@ -738,7 +1251,7 @@ void gx_submit_pending() {
+@@ -738,7 +1289,7 @@ void gx_submit_pending() {
      submit_pending = false;
      while (!rec.empty()) {
          int frames = rec_frames;
@@ -1094,7 +1552,7 @@ index a6b37f2..3898422 100644
          if (t_ppc && g_ppc_pending.load(std::memory_order_relaxed)) ppc_poll(*t_ppc);
      }
  }
-@@ -768,12 +1281,17 @@ static void gp_run() {
+@@ -768,12 +1319,17 @@ static void gp_run() {
  
  void gx_pipe_burst(const uint8_t* b, int n) {
      uint32_t at = pi_wptr_addr();
@@ -1118,18 +1576,79 @@ index a6b37f2..3898422 100644
      }
      if (!linked()) return;
      if (held.empty() && !(bp_enabled() && at == bp_addr())) { feed(b, n); return; }
-@@ -861,4 +1379,11 @@ void gx_report() {
+@@ -861,4 +1417,11 @@ void gx_report() {
             (unsigned long long)st.dls, (unsigned long long)st.copies, (unsigned long long)st.frames,
             (unsigned long long)st.done, (unsigned long long)st.uploads, (unsigned long long)st.peeks,
             (unsigned long long)st.readbacks);
 +    if (dl_stat.calls)
 +        rt_log("gx: display lists kept decoded: %llu of %llu calls used again, %llu decoded and kept, %llu parsed as before; "
 +               "%llu MB hashed to check them, %llu MB of vertices copied again; the static buffer started over %u times; "
-+               "%llu writes to watched pages",
++               "%llu MB of textures and copies hashed, %llu writes to watched pages",
 +               (unsigned long long)dl_stat.kept, (unsigned long long)dl_stat.calls, (unsigned long long)dl_stat.built,
 +               (unsigned long long)dl_stat.plain, (unsigned long long)(dl_stat.bytes >> 20),
-+               (unsigned long long)(dl_stat.copied >> 20), arena_gen - 1, (unsigned long long)mem_watch_faults());
++               (unsigned long long)(dl_stat.copied >> 20), arena_gen - 1, (unsigned long long)(hashed_bytes >> 20), (unsigned long long)mem_watch_faults());
  }
+diff --git a/runtime/gxshader.cpp b/runtime/gxshader.cpp
+index 7943c4d..59da23b 100644
+--- a/runtime/gxshader.cpp
++++ b/runtime/gxshader.cpp
+@@ -30,10 +30,21 @@ void w(std::string& s, const char* f, ...) {
+ 
+ // ---- vertex shader ----------------------------------------------------------------------------
+ const char* VS_HEAD = R"(#version 450 core
+-// a uniform block, not a storage buffer: the renderer rewrites it between
+-// draws, and drivers stream uniform updates without waiting for the GPU
+-layout(std140, binding = 0) uniform XFMem { uvec4 xf4[0x416]; };
+-uint XU(uint a) { return xf4[a >> 2][a & 3u]; }
++// XF memory comes from a storage buffer the renderer only ever appends to
++// (video.cpp): what a draw needs of it is three blocks there, at the word
++// offsets in u_off: x the position/texture matrices (XF 0x000-0x0FF) with
++// the normal matrices (0x400-0x45F) after them, y the post-transform
++// matrices and the lights (0x500-0x67F), z the registers (0x1000-0x1057).
++// (w is the fragment shader's block.) A uniform block rewritten or bound
++// anew between draws had the GPU copy it for each draw.
++layout(std430, binding = 0) readonly buffer Ring { uint ring[]; };
++uniform ivec4 u_off;
++uint XU(uint a) {
++    if (a < 0x100u) return ring[uint(u_off.x) + a];
++    if (a < 0x500u) return ring[uint(u_off.x) + a - 0x300u];
++    if (a < 0x1000u) return ring[uint(u_off.y) + a - 0x500u];
++    return ring[uint(u_off.z) + a - 0x1000u];
++}
+ layout(location = 0) in vec3 a_pos;
+ layout(location = 1) in vec3 a_nrm;
+ layout(location = 2) in vec3 a_bin;
+@@ -170,14 +181,23 @@ std::string vertex_shader(const uint32_t* xf, uint8_t vflags) {
+ 
+ // ---- fragment shader --------------------------------------------------------------------------
+ const char* FS_HEAD = R"(#version 450 core
+-layout(std140, binding = 1) uniform PS {
+-    ivec4 u_reg[4];       // PREV, C0, C1, C2 as set by the game
+-    ivec4 u_konst[4];
+-    ivec4 u_alpha;        // alpha test references, destination alpha value
+-    vec4 u_texdim[8];     // xy: 1 / (map size * 128); zw: texcoord scale * 128
+-    ivec4 u_indscale[4];  // indirect stage: coordinate shift s, t
+-    ivec4 u_indmtx[6];    // indirect matrices, two rows each: (a, b, c, shift)
++// the stage's values: a record in the same buffer (video.cpp, PSUniforms), u_off.w its index
++struct PSData {
++    ivec4 reg[4];         // PREV, C0, C1, C2 as set by the game
++    ivec4 konst[4];
++    ivec4 alpha;          // alpha test references, destination alpha value
++    vec4 texdim[8];       // xy: 1 / (map size * 128); zw: texcoord scale * 128
++    ivec4 indscale[4];    // indirect stage: coordinate shift s, t
++    ivec4 indmtx[6];      // indirect matrices, two rows each: (a, b, c, shift)
+ };
++layout(std430, binding = 1) readonly buffer PSRing { PSData ps_ring[]; };
++uniform ivec4 u_off;
++#define u_reg ps_ring[u_off.w].reg
++#define u_konst ps_ring[u_off.w].konst
++#define u_alpha ps_ring[u_off.w].alpha
++#define u_texdim ps_ring[u_off.w].texdim
++#define u_indscale ps_ring[u_off.w].indscale
++#define u_indmtx ps_ring[u_off.w].indmtx
+ layout(binding = 0) uniform sampler2D s0;
+ layout(binding = 1) uniform sampler2D s1;
+ layout(binding = 2) uniform sampler2D s2;
 diff --git a/runtime/hw.cpp b/runtime/hw.cpp
 index c53d227..319db62 100644
 --- a/runtime/hw.cpp
@@ -2361,7 +2880,7 @@ index aa1274e..b25eda2 100644
  void watch_main(int seconds) {
      for (;;) {
 diff --git a/runtime/ppc.h b/runtime/ppc.h
-index 99351d5..adcfa44 100644
+index 99351d5..af71db9 100644
 --- a/runtime/ppc.h
 +++ b/runtime/ppc.h
 @@ -23,11 +23,13 @@
@@ -2513,7 +3032,25 @@ index 99351d5..adcfa44 100644
  static inline void ppc_dcbz(uint32_t ea) {
      ea &= ~31u;
      for (int i = 0; i < 32; i += 4) st32(ea + i, 0);
-@@ -278,12 +316,24 @@ static inline void ps_quant(uint32_t type, int scale, uint32_t ea, double v, int
+@@ -165,6 +203,8 @@ static inline void cr_cmp_s(PPCContext& c, int field, int32_t a, int32_t b) {
+ static inline void cr_cmp_u(PPCContext& c, int field, uint32_t a, uint32_t b) {
+     cr_set(c, field, a < b, a > b, a == b, c.xer_so);
+ }
++// A build made with the recompiler's --cr-check: a CR bit it took for dead (stored as 2) is read.
++#define PPC_CRCHK(c, i, a) ((c).cr[i] > 1 ? (ppc_unimplemented(c, a, "a CR bit read that was taken for dead"), (uint8_t)0) : (c).cr[i])
+ static inline void cr0_rc(PPCContext& c, uint32_t v) { cr_cmp_s(c, 0, (int32_t)v, 0); }
+ static inline void cr1_rc(PPCContext& c) {          // FP record form: CR1 = FPSCR[FX FEX VX OX]
+     uint32_t f = c.fpscr;
+@@ -172,7 +212,7 @@ static inline void cr1_rc(PPCContext& c) {          // FP record form: CR1 = FPS
+ }
+ static inline uint32_t mfcr(const PPCContext& c) {
+     uint32_t v = 0;
+-    for (int i = 0; i < 32; ++i) v |= (uint32_t)c.cr[i] << (31 - i);
++    for (int i = 0; i < 32; ++i) v |= (uint32_t)(c.cr[i] & 1) << (31 - i);   // (& 1: PPC_CRCHK's mark)
+     return v;
+ }
+ static inline void mtcrf(PPCContext& c, uint32_t crm, uint32_t v) {
+@@ -278,12 +318,24 @@ static inline void ps_quant(uint32_t type, int scale, uint32_t ea, double v, int
  }
  static inline int gqr_scale(uint32_t s6) { return (int)(s6 & 0x20 ? s6 | ~0x3Fu : s6); }
  static inline void psq_load(PPCContext& c, int d, uint32_t ea, int w, int i) {
@@ -2628,15 +3165,25 @@ index 8a4e097..8b1b1a8 100644
  void ppc_mmio_write(uint32_t addr, uint32_t, int) { rt_die("mmio write %08X", addr); }
  uint64_t ppc_timebase() { return 0; }
 diff --git a/runtime/video.cpp b/runtime/video.cpp
-index 5726093..dd72559 100644
+index 5726093..01eeb4b 100644
 --- a/runtime/video.cpp
 +++ b/runtime/video.cpp
-@@ -79,7 +79,35 @@ struct PSUniforms {                                // gxshader.cpp's uniform blo
+@@ -67,7 +67,8 @@ ClassicState classic[4];
+ 
+ // ---- GX state, as the record left it --------------------------------------------------------
+ uint32_t bp[0x100], xf[0x1058];
+-uint32_t xf_lo = 0, xf_hi = 0x1058;                // XF words not yet uploaded
++// XF as the shaders get it, in three blocks (gxshader.cpp): which are not yet written out
++bool xf_mtx_dirty = true, xf_post_dirty = true, xf_reg_dirty = true;
+ int32_t tev_reg[4][4], tev_konst[4][4];
+ 
+ struct PSUniforms {                                // gxshader.cpp's uniform block PS (std140)
+@@ -79,7 +80,35 @@ struct PSUniforms {                                // gxshader.cpp's uniform blo
  // ---- GL objects -------------------------------------------------------------------------------
  SDL_Window* win = nullptr;
  int S = 1;                                         // EFB scale
 -GLuint efb_fbo, efb_col, efb_dep, copy_fbo, vao, empty_vao, vbo, quad_ibo, xf_ubo, ps_ubo, samplers[8];
-+GLuint efb_fbo, efb_col, efb_dep, copy_fbo, empty_vao, vbo, quad_ibo, xf_ubo, ps_ubo, samplers[8];
++GLuint efb_fbo, efb_col, efb_dep, empty_vao, vbo, ibo, ubo;
 +// A vertex array for each layout a draw's vertices come in (video.h), made
 +// when a draw first has it. An attribute a layout leaves out is not enabled:
 +// it reads the context's value for it, zero, and white for the colours.
@@ -2648,7 +3195,7 @@ index 5726093..dd72559 100644
 +    const VtxLayout l = vtx_layout(flags);
 +    glCreateVertexArrays(1, &vao);
 +    glVertexArrayVertexBuffer(vao, 0, stat ? static_vbo : vbo, 0, l.stride);
-+    glVertexArrayElementBuffer(vao, quad_ibo);
++    glVertexArrayElementBuffer(vao, ibo);
 +    auto attr = [&](GLuint loc, int n, GLenum type, bool norm, bool integer, GLuint off) {
 +        glEnableVertexArrayAttrib(vao, loc);
 +        if (integer) glVertexArrayAttribIFormat(vao, loc, n, type, off);
@@ -2668,9 +3215,36 @@ index 5726093..dd72559 100644
  GLuint copy_prog;
  GLint copy_rect_loc, copy_mode_loc;
  constexpr size_t VBO_CAP = 64u << 20;
-@@ -97,9 +125,16 @@ bool ps_valid = false;
- uint32_t sampler_mode[8][2];
- bool sampler_set[8];
+@@ -94,12 +123,41 @@ GLsync vbo_fence[4] = {};
+ constexpr size_t VBO_QUARTER = VBO_CAP / 4;
+ PSUniforms ps_last;
+ bool ps_valid = false;
+-uint32_t sampler_mode[8][2];
+-bool sampler_set[8];
++// What the shaders read between draws (XF memory in three blocks, the
++// fragment shader's values) is written the same way: a block that changed
++// goes to a new place in a mapped ring, bound whole as a storage buffer, and
++// the program is told where its blocks are with one small uniform. A uniform
++// block rewritten (glNamedBufferSubData) or bound at a new range between
++// draws, hundreds of times a frame, had the GPU copy the block before each
++// draw that followed: most of a frame's GPU time. Entering a quarter, all the
++// blocks are written again: nothing is read from the quarter reused next.
++constexpr size_t UBO_CAP = 64u << 20, UBO_QUARTER = UBO_CAP / 4;
++uint8_t* ubo_ptr = nullptr;
++size_t ubo_off = 0;
++GLsync ubo_fence[4] = {};
++int32_t blk_off[4];                                // u_off: the blocks' places (words; w: a PSUniforms index)
++struct ProgInfo { GLint loc = -2; int32_t off[4] = {-1, -1, -1, -1}; };
++std::vector<ProgInfo> prog_info;                   // by program name
++uint8_t* ring_at(size_t n, size_t align) {
++    ubo_off = (ubo_off + align - 1) / align * align;
++    uint8_t* at = ubo_ptr + ubo_off;
++    ubo_off += n;
++    return at;
++}
++std::unordered_map<uint64_t, GLuint> sampler_for;  // by a map's mode registers
++GLuint unit_sampler[8], unit_tex[8];               // what is bound there
++void units_unknown() { std::memset(unit_sampler, 0xFF, sizeof unit_sampler); std::memset(unit_tex, 0xFF, sizeof unit_tex); }
  
 -struct Tex { GLuint name = 0; int w = 0, h = 0, levels = 0; };
 +struct Tex { GLuint name = 0; int w = 0, h = 0, levels = 0; GLuint fbo = 0; };
@@ -2686,7 +3260,23 @@ index 5726093..dd72559 100644
  std::unordered_map<uint32_t, Tex> xfbs;            // EFB copies to the XFB, by address
  uint64_t map_src[8];                               // per map: texture id, or 1 << 32 | EFB copy address
  uint32_t last_xfb = 0;
-@@ -231,6 +266,16 @@ void ensure_tex(Tex& t, int w, int h, int levels) {
+@@ -109,7 +167,7 @@ std::unordered_map<std::string, GLuint> programs;       // by the registers that
+ // (Crystal Bearers: 1 160 keys for 396 programs in its title's first minute)
+ std::unordered_map<std::string, GLuint> programs_by_source;
+ 
+-struct Counters { uint64_t frames, presents, draws, programs, linked, cached; } cnt;
++struct Counters { uint64_t frames, presents, draws, programs, linked, cached, verts; } cnt;
+ bool dump_ps = false;                              // WIIKIT_SHADERDUMP: log the next uniforms
+ 
+ int32_t s11(uint32_t v) { return (int32_t)((v & 0x7FF) << 21) >> 21; }
+@@ -225,12 +283,22 @@ void save_program(GLuint p, uint64_t hash) {
+ 
+ void ensure_tex(Tex& t, int w, int h, int levels) {
+     if (t.name && t.w == w && t.h == h && t.levels == levels) return;
+-    if (t.name) glDeleteTextures(1, &t.name);
++    if (t.name) { glDeleteTextures(1, &t.name); units_unknown(); }
+     glCreateTextures(GL_TEXTURE_2D, 1, &t.name);
+     glTextureStorage2D(t.name, levels, GL_RGBA8, w, h);
      t.w = w; t.h = h; t.levels = levels;
  }
  
@@ -2703,7 +3293,7 @@ index 5726093..dd72559 100644
  void APIENTRY gl_debug(GLenum, GLenum type, GLuint, GLenum severity, GLsizei, const GLchar* msg, const void*) {
      if (severity == GL_DEBUG_SEVERITY_NOTIFICATION) return;
      rt_log("gl: %s%s", type == GL_DEBUG_TYPE_ERROR ? "error: " : "", msg);
-@@ -295,7 +340,14 @@ void main() {
+@@ -295,7 +363,15 @@ void main() {
  )";
  
  // ---- register side effects ----------------------------------------------------------------------
@@ -2711,6 +3301,7 @@ index 5726093..dd72559 100644
 +// touched that state since (copies, clears, presenting, the overlay).
 +struct DrawState { GLuint prog; uint32_t bits, reg[6], viewport[6]; };
 +DrawState draw_state;
++uint32_t dbg_changed = 0;
 +bool gl_state_stale = true;
 +
  void efb_clear(int x, int y, int w, int h) {
@@ -2718,7 +3309,7 @@ index 5726093..dd72559 100644
      bool has_alpha = (bp[0x43] & 7) == 1;
      bool cu = bp[0x41] >> 3 & 1, au = bp[0x41] >> 4 & 1, zu = bp[0x40] >> 4 & 1;
      if (!cu && !au && !zu) return;
-@@ -325,7 +377,10 @@ void efb_dump(const char* tag) {
+@@ -325,7 +401,10 @@ void efb_dump(const char* tag) {
      write_png(name, EFB_W * S, EFB_H * S, px.data());
  }
  
@@ -2729,7 +3320,7 @@ index 5726093..dd72559 100644
      int x = (int)(bp[0x49] & 0x3FF), y = (int)(bp[0x49] >> 10 & 0x3FF);
      int w = (int)(bp[0x4A] & 0x3FF) + 1, h = (int)(bp[0x4A] >> 10 & 0x3FF) + 1;
      uint32_t dest = (bp[0x4B] & 0xFFFFFF) << 5;
-@@ -336,10 +391,8 @@ void efb_copy(uint32_t v) {
+@@ -336,10 +415,8 @@ void efb_copy(uint32_t v) {
          efb_dump(tag);
      }
      if (v >> 14 & 1) {                                           // to the XFB
@@ -2742,7 +3333,7 @@ index 5726093..dd72559 100644
                                 GL_COLOR_BUFFER_BIT, GL_NEAREST);
          last_xfb = dest;
          ++cnt.frames;
-@@ -347,10 +400,8 @@ void efb_copy(uint32_t v) {
+@@ -347,10 +424,8 @@ void efb_copy(uint32_t v) {
          bool half = v >> 9 & 1;
          int tw = half ? (w + 1) / 2 : w, th = half ? (h + 1) / 2 : h;
          uint32_t tpf = v >> 3 & 15, fmt = tpf / 2 + (tpf & 1) * 8;
@@ -2755,9 +3346,11 @@ index 5726093..dd72559 100644
          glViewport(0, 0, tw * S, th * S);
          glDisable(GL_BLEND);
          glDisable(GL_COLOR_LOGIC_OP);
-@@ -366,8 +417,8 @@ void efb_copy(uint32_t v) {
+@@ -365,9 +440,10 @@ void efb_copy(uint32_t v) {
+         glBindTextureUnit(1, efb_dep);
          glBindSampler(0, 0);
          glBindSampler(1, 0);
++        units_unknown();
          glBindVertexArray(empty_vao);
 +        bound_vao = 0;
          glDrawArrays(GL_TRIANGLES, 0, 3);
@@ -2765,7 +3358,21 @@ index 5726093..dd72559 100644
      }
      if (v >> 11 & 1) efb_clear(x, y, w, h);
  }
-@@ -475,7 +526,10 @@ void bind_textures() {
+@@ -462,9 +538,12 @@ void set_ps_uniforms() {
+         rt_log("%s", t.c_str());
+     }
+     if (ps_valid && !std::memcmp(&u, &ps_last, sizeof u)) return;
+-    glNamedBufferSubData(ps_ubo, 0, sizeof u, &u);
++    uint8_t* at = ring_at(sizeof u, sizeof u);
++    std::memcpy(at, &u, sizeof u);
++    blk_off[3] = (int32_t)((size_t)(at - ubo_ptr) / sizeof u);
+     ps_last = u;
+     ps_valid = true;
++    dbg_changed |= 16;
+ }
+ 
+ void bind_textures() {
+@@ -475,113 +554,324 @@ void bind_textures() {
      for (int m = 0; m < 8; ++m) {
          if (!(used >> m & 1)) continue;
          GLuint name = 0;
@@ -2777,7 +3384,41 @@ index 5726093..dd72559 100644
              auto it = efb_copies.find((uint32_t)map_src[m]);
              if (it != efb_copies.end()) name = it->second.name;
          } else {
-@@ -502,74 +556,86 @@ void bind_textures() {
+             auto it = texs.find((uint32_t)map_src[m]);
+             if (it != texs.end()) name = it->second.name;
+         }
+-        glBindTextureUnit(m, name);
++        // a sampler object for each mode in use, made once: one object a unit with its
++        // parameters rewritten as textures changed cost the GPU ~10 us at every such draw
+         int off = (m & 3) + (m >= 4 ? 0x20 : 0);
+-        uint32_t m0 = bp[0x80 + off], m1 = bp[0x84 + off];
+-        if (!sampler_set[m] || sampler_mode[m][0] != m0 || sampler_mode[m][1] != m1) {
+-            GLuint s = samplers[m];
+-            glSamplerParameteri(s, GL_TEXTURE_WRAP_S, wrap[m0 & 3]);
+-            glSamplerParameteri(s, GL_TEXTURE_WRAP_T, wrap[m0 >> 2 & 3]);
+-            glSamplerParameteri(s, GL_TEXTURE_MAG_FILTER, (m0 >> 4 & 1) ? GL_LINEAR : GL_NEAREST);
+-            glSamplerParameteri(s, GL_TEXTURE_MIN_FILTER, minf[m0 >> 5 & 7]);
+-            glSamplerParameterf(s, GL_TEXTURE_LOD_BIAS, (float)(int8_t)(m0 >> 9 & 0xFF) / 32.0f);
+-            glSamplerParameterf(s, GL_TEXTURE_MIN_LOD, (float)(m1 & 0xFF) / 16.0f);
+-            glSamplerParameterf(s, GL_TEXTURE_MAX_LOD, (float)(m1 >> 8 & 0xFF) / 16.0f);
+-            sampler_mode[m][0] = m0;
+-            sampler_mode[m][1] = m1;
+-            sampler_set[m] = true;
++        const uint32_t m0 = bp[0x80 + off] & 0x1FFFF, m1 = bp[0x84 + off] & 0xFFFF;
++        GLuint& smp = sampler_for[(uint64_t)m0 << 16 | m1];
++        if (!smp) {
++            glCreateSamplers(1, &smp);
++            glSamplerParameteri(smp, GL_TEXTURE_WRAP_S, wrap[m0 & 3]);
++            glSamplerParameteri(smp, GL_TEXTURE_WRAP_T, wrap[m0 >> 2 & 3]);
++            glSamplerParameteri(smp, GL_TEXTURE_MAG_FILTER, (m0 >> 4 & 1) ? GL_LINEAR : GL_NEAREST);
++            glSamplerParameteri(smp, GL_TEXTURE_MIN_FILTER, minf[m0 >> 5 & 7]);
++            glSamplerParameterf(smp, GL_TEXTURE_LOD_BIAS, (float)(int8_t)(m0 >> 9 & 0xFF) / 32.0f);
++            glSamplerParameterf(smp, GL_TEXTURE_MIN_LOD, (float)(m1 & 0xFF) / 16.0f);
++            glSamplerParameterf(smp, GL_TEXTURE_MAX_LOD, (float)(m1 >> 8 & 0xFF) / 16.0f);
+         }
+-        glBindSampler(m, samplers[m]);
++        if (unit_sampler[m] != smp) { glBindSampler(m, smp); unit_sampler[m] = smp; }
++        if (unit_tex[m] != name) { glBindTextureUnit(m, name); unit_tex[m] = name; dbg_changed |= 32; }
      }
  }
  
@@ -2844,6 +3485,7 @@ index 5726093..dd72559 100644
 +    std::memcpy(ds.viewport, &xf[0x101A], sizeof ds.viewport);
 +    if (gl_state_stale || std::memcmp(&ds, &draw_state, sizeof ds)) {
 +        gl_state_stale = true;                                 // until all of it is set
++        dbg_changed |= 1 | (ds.prog != draw_state.prog ? 64 : 0);
 +        glBindFramebuffer(GL_FRAMEBUFFER, efb_fbo);
 +        glUseProgram(prog);
 +
@@ -2924,32 +3566,171 @@ index 5726093..dd72559 100644
 -    if (tri && cull) { glEnable(GL_CULL_FACE); glCullFace(cull == 1 ? GL_BACK : GL_FRONT); }
 -    else glDisable(GL_CULL_FACE);
  
-     if (xf_lo < xf_hi) {
-         glNamedBufferSubData(xf_ubo, xf_lo * 4, (xf_hi - xf_lo) * 4, &xf[xf_lo]);
-@@ -578,10 +644,61 @@ void draw(uint8_t prim, uint8_t vflags, const uint8_t* pieces, uint32_t npieces)
+-    if (xf_lo < xf_hi) {
+-        glNamedBufferSubData(xf_ubo, xf_lo * 4, (xf_hi - xf_lo) * 4, &xf[xf_lo]);
+-        xf_lo = 0x1058;
+-        xf_hi = 0;
++    // room for all the blocks in this quarter of the ring, or on to the next
++    const size_t q = ubo_off / UBO_QUARTER;
++    if ((ubo_off + 8192) / UBO_QUARTER != q) {
++        ubo_fence[q] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
++        const size_t nq = (q + 1) % 4;
++        ubo_off = nq * UBO_QUARTER;
++        if (ubo_fence[nq]) {
++            glClientWaitSync(ubo_fence[nq], GL_SYNC_FLUSH_COMMANDS_BIT, 1000000000ull);
++            glDeleteSync(ubo_fence[nq]);
++            ubo_fence[nq] = nullptr;
++        }
++        xf_mtx_dirty = xf_post_dirty = xf_reg_dirty = true;
++        ps_valid = false;
++    }
++    if (xf_mtx_dirty) {
++        dbg_changed |= 2;
++        uint8_t* at = ring_at(0x160 * 4, 4);
++        std::memcpy(at, &xf[0], 0x100 * 4);
++        std::memcpy(at + 0x100 * 4, &xf[0x400], 0x60 * 4);
++        blk_off[0] = (int32_t)((at - ubo_ptr) / 4);
++        xf_mtx_dirty = false;
++    }
++    if (xf_post_dirty) {
++        dbg_changed |= 4;
++        uint8_t* at = ring_at(0x180 * 4, 4);
++        std::memcpy(at, &xf[0x500], 0x180 * 4);
++        blk_off[1] = (int32_t)((at - ubo_ptr) / 4);
++        xf_post_dirty = false;
++    }
++    if (xf_reg_dirty) {
++        dbg_changed |= 8;
++        uint8_t* at = ring_at(0x58 * 4, 4);
++        std::memcpy(at, &xf[0x1000], 0x58 * 4);
++        blk_off[2] = (int32_t)((at - ubo_ptr) / 4);
++        xf_reg_dirty = false;
      }
      set_ps_uniforms();
++    if (prog_info.size() <= prog) prog_info.resize(prog + 64);
++    ProgInfo& pi = prog_info[prog];
++    if (pi.loc == -2) pi.loc = glGetUniformLocation(prog, "u_off");
++    if (std::memcmp(pi.off, blk_off, sizeof blk_off)) {
++        glProgramUniform4i(prog, pi.loc, blk_off[0], blk_off[1], blk_off[2], blk_off[3]);
++        std::memcpy(pi.off, blk_off, sizeof blk_off);
++    }
      bind_textures();
 +    return true;
 +}
 +
 +std::vector<GLint> firsts;
 +std::vector<GLsizei> counts;
-+std::vector<const void*> offsets;
-+// the pieces in firsts and counts, with one call
++// A draw's pieces are thousands of short strips a frame, and to the GPU each
++// piece of a multi-draw is a draw of its own: at that many it is what a frame
++// costs there. The pieces of one draw become one indexed draw instead: strips
++// and fans one after the other with the restart index between them, quads
++// and triangles as triangles. The indices are written into a mapped ring
++// (the vertex arrays' element buffer), fenced in quarters like the vertices.
++constexpr size_t IBO_CAP = 32u << 20, IBO_QUARTER = IBO_CAP / 4;
++uint32_t* ibo_ptr = nullptr;
++size_t ibo_off = 0;                                // in indices
++GLsync ibo_fence[4] = {};
++uint32_t* index_room(size_t n) {
++    constexpr size_t quarter = IBO_QUARTER / 4;
++    size_t q = ibo_off / quarter;
++    if ((ibo_off + n - 1) / quarter != q) {
++        ibo_fence[q] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
++        q = (q + 1) % 4;
++        ibo_off = q * quarter;
++        if (ibo_fence[q]) {
++            glClientWaitSync(ibo_fence[q], GL_SYNC_FLUSH_COMMANDS_BIT, 1000000000ull);
++            glDeleteSync(ibo_fence[q]);
++            ibo_fence[q] = nullptr;
++        }
++    }
++    return ibo_ptr + ibo_off;
++}
++// WIIKIT_GPUTIME=N: the GPU's time for each draw of frame N (a timer query a draw), reported
++// by program with the slowest draws (debugging: what a frame costs on the GPU)
++const long gputime_frame = std::getenv("WIIKIT_GPUTIME") ? std::atol(std::getenv("WIIKIT_GPUTIME")) : -1;
++struct GpuDraw { GLuint query, prog; uint32_t verts, pieces; uint8_t prim; uint32_t zm, cm, ntev, changed; };
++std::vector<GpuDraw> gpu_draws;
++void draw_issue_(uint8_t prim);
 +void draw_issue(uint8_t prim) {
++    if ((long)cnt.frames != gputime_frame) { draw_issue_(prim); dbg_changed = 0; return; }
++    GpuDraw d{};
++    glGenQueries(1, &d.query);
++    d.prog = draw_state.prog;
++    d.pieces = (uint32_t)firsts.size();
++    for (GLsizei k : counts) d.verts += (uint32_t)k;
++    d.prim = prim; d.zm = bp[0x40]; d.cm = bp[0x41]; d.ntev = (bp[0x00] >> 10 & 15) + 1;
++    d.changed = dbg_changed;
++    glBeginQuery(GL_TIME_ELAPSED, d.query);
++    draw_issue_(prim);
++    glEndQuery(GL_TIME_ELAPSED);
++    gpu_draws.push_back(d);
++    dbg_changed = 0;
++}
++void gputime_report() {
++    if (gpu_draws.empty()) return;
++    struct Row { GpuDraw d; uint64_t ns; };
++    std::vector<Row> rows;
++    uint64_t total = 0;
++    for (const GpuDraw& d : gpu_draws) {
++        uint64_t ns = 0;
++        glGetQueryObjectui64v(d.query, GL_QUERY_RESULT, &ns);
++        rows.push_back({d, ns});
++        total += ns;
++    }
++    rt_log("gputime: %zu draws, %.2f ms on the GPU", rows.size(), (double)total / 1e6);
++    uint64_t buckets[8] = {}, bn[8] = {};
++    for (const Row& r : rows) {
++        int b = r.ns < 1000 ? 0 : r.ns < 2000 ? 1 : r.ns < 5000 ? 2 : r.ns < 10000 ? 3 : r.ns < 50000 ? 4 : r.ns < 200000 ? 5 : 6;
++        buckets[b] += r.ns; ++bn[b];
++    }
++    static const char* names[] = {"<1us", "1-2us", "2-5us", "5-10us", "10-50us", "50-200us", ">200us"};
++    for (int b = 0; b < 7; ++b) rt_log("gputime:   %-8s %5llu draws %8.2f ms", names[b], (unsigned long long)bn[b], (double)buckets[b] / 1e6);
++    for (uint32_t bit = 0; bit < 7; ++bit) {
++        uint64_t on = 0, off = 0, non = 0, noff = 0;
++        for (const Row& r : rows) { if (r.d.changed >> bit & 1) { on += r.ns; ++non; } else { off += r.ns; ++noff; } }
++        static const char* what[] = {"fixed state", "matrices", "post/lights", "registers", "ps block", "texture", "program"};
++        rt_log("gputime:   %-12s changed: %4llu draws avg %5.1f us; not: %4llu draws avg %5.1f us", what[bit],
++               (unsigned long long)non, non ? (double)on / 1e3 / (double)non : 0.0, (unsigned long long)noff, noff ? (double)off / 1e3 / (double)noff : 0.0);
++    }
++    {
++        uint64_t t0 = 0, n0 = 0;
++        for (const Row& r : rows) if (!r.d.changed) { t0 += r.ns; ++n0; }
++        rt_log("gputime:   nothing changed: %llu draws avg %.1f us", (unsigned long long)n0, n0 ? (double)t0 / 1e3 / (double)n0 : 0.0);
++        uint64_t t1 = 0, n1 = 0;
++        for (const Row& r : rows) if (r.d.changed == 2) { t1 += r.ns; ++n1; }
++        rt_log("gputime:   only matrices changed: %llu draws avg %.1f us", (unsigned long long)n1, n1 ? (double)t1 / 1e3 / (double)n1 : 0.0);
++        uint64_t t2 = 0, n2 = 0;
++        for (const Row& r : rows) if (r.d.changed == 32) { t2 += r.ns; ++n2; }
++        rt_log("gputime:   only a texture changed: %llu draws avg %.1f us", (unsigned long long)n2, n2 ? (double)t2 / 1e3 / (double)n2 : 0.0);
++    }
++    std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) { return a.ns > b.ns; });
++    for (size_t i = 0; i < rows.size() && i < 25; ++i)
++        rt_log("gputime:   %7.1f us  chg %02X prog %u prim %02X pieces %u verts %u zm %X cm %X tev %u", (double)rows[i].ns / 1e3,
++               rows[i].d.changed, rows[i].d.prog, rows[i].d.prim, rows[i].d.pieces, rows[i].d.verts, rows[i].d.zm, rows[i].d.cm, rows[i].d.ntev);
++    gpu_draws.clear();
++}
++// the pieces in firsts and counts, with one call
++void draw_issue_(uint8_t prim) {
 +    const uint32_t npieces = (uint32_t)firsts.size();
-+    const GLint base = firsts[0];
++    size_t total = 0;
++    for (GLsizei k : counts) total += (size_t)k;
++    cnt.verts += total;
 +    GLenum mode;
 +    switch (prim) {
-+    case 0x80: case 0x88:                                      // quads: a static index buffer of their triangles
-+        for (GLsizei& k : counts) k = k / 4 * 6;
-+        offsets.assign(npieces, nullptr);
-+        if (npieces == 1) glDrawElementsBaseVertex(GL_TRIANGLES, counts[0], GL_UNSIGNED_INT, nullptr, base);
-+        else glMultiDrawElementsBaseVertex(GL_TRIANGLES, counts.data(), GL_UNSIGNED_INT, offsets.data(),
-+                                           (GLsizei)npieces, firsts.data());
++    case 0x80: case 0x88: {                                    // quads: two triangles each
++        uint32_t* out = index_room(total / 4 * 6);
++        size_t n = 0;
++        for (uint32_t i = 0; i < npieces; ++i)
++            for (uint32_t v = (uint32_t)firsts[i], end = v + (uint32_t)counts[i] / 4 * 4; v < end; v += 4) {
++                out[n] = v; out[n + 1] = v + 1; out[n + 2] = v + 2;
++                out[n + 3] = v; out[n + 4] = v + 2; out[n + 5] = v + 3;
++                n += 6;
++            }
++        glDrawElementsBaseVertex(GL_TRIANGLES, (GLsizei)n, GL_UNSIGNED_INT, reinterpret_cast<const void*>(ibo_off * 4), 0);
++        ibo_off += n;
 +        mode = 0;
 +        break;
++    }
 +    case 0x90: mode = GL_TRIANGLES; break;
 +    case 0x98: mode = GL_TRIANGLE_STRIP; break;
 +    case 0xA0: mode = GL_TRIANGLE_FAN; break;
@@ -2957,8 +3738,18 @@ index 5726093..dd72559 100644
 +    case 0xB0: mode = GL_LINE_STRIP; break;
 +    default: mode = GL_POINTS; break;
 +    }
-+    if (mode && npieces == 1) glDrawArrays(mode, base, counts[0]);
-+    else if (mode) glMultiDrawArrays(mode, firsts.data(), counts.data(), (GLsizei)npieces);
++    if (mode && npieces == 1) glDrawArrays(mode, firsts[0], counts[0]);
++    else if (mode == GL_TRIANGLES || mode == GL_TRIANGLE_STRIP || mode == GL_TRIANGLE_FAN) {
++        const bool restart = mode != GL_TRIANGLES;
++        uint32_t* out = index_room(total + npieces);
++        size_t n = 0;
++        for (uint32_t i = 0; i < npieces; ++i) {
++            for (uint32_t v = (uint32_t)firsts[i], end = v + (uint32_t)counts[i]; v < end; ++v) out[n++] = v;
++            if (restart) out[n++] = 0xFFFFFFFFu;
++        }
++        glDrawElementsBaseVertex(mode, (GLsizei)n, GL_UNSIGNED_INT, reinterpret_cast<const void*>(ibo_off * 4), 0);
++        ibo_off += n;
++    } else if (mode) glMultiDrawArrays(mode, firsts.data(), counts.data(), (GLsizei)npieces);
 +    static const long dump_after = std::getenv("WIIKIT_EFBDUMP_AFTERCOPY") ? std::atol(std::getenv("WIIKIT_EFBDUMP_AFTERCOPY")) : -1;
 +    if (efb_dump_every && efb_dumping() && efb_copies_this_frame > dump_after) {   // (AFTERCOPY=n: only past the frame's nth copy)
 +        static long k = 0;
@@ -2989,7 +3780,7 @@ index 5726093..dd72559 100644
          uint32_t pm = v0.mtx[0] * 4u;
          float pos[3];
          for (int r = 0; r < 3; ++r)
-@@ -599,61 +716,48 @@ void draw(uint8_t prim, uint8_t vflags, const uint8_t* pieces, uint32_t npieces)
+@@ -599,61 +889,48 @@ void draw(uint8_t prim, uint8_t vflags, const uint8_t* pieces, uint32_t npieces)
                       v0.mtx[0], v0.pos[0], v0.pos[1], v0.pos[2], pos[0], pos[1], pos[2], c[0] / c[3], c[1] / c[3], c[3],
                       (bp[0x00] >> 10 & 15) + 1, xf[0x1009] & 3);
      }
@@ -3073,7 +3864,7 @@ index 5726093..dd72559 100644
  }
  
  // ---- the record -----------------------------------------------------------------------------------
-@@ -662,6 +766,7 @@ template <class T> T rd(const uint8_t*& p) { T v; std::memcpy(&v, p, sizeof v);
+@@ -662,6 +939,7 @@ template <class T> T rd(const uint8_t*& p) { T v; std::memcpy(&v, p, sizeof v);
  // The EFB at its native size: the pixel at each native position's top-left
  // sample of the scaled EFB (rows from the top, as the EFB copies read it).
  void efb_readback() {
@@ -3081,15 +3872,28 @@ index 5726093..dd72559 100644
      int W = EFB_W * S, H = EFB_H * S;
      std::vector<uint8_t> px((size_t)W * H * 4);
      std::vector<float> dz((size_t)W * H);
-@@ -703,6 +808,7 @@ void copy_readback(uint32_t addr) {
+@@ -703,6 +981,8 @@ void copy_readback(uint32_t addr) {
  }
  
  void exec(const std::vector<uint8_t>& data) {
 +    gl_state_stale = true;
++    units_unknown();
      const uint8_t* p = data.data();
      const uint8_t* end = p + data.size();
      while (p < end) {
-@@ -720,12 +826,26 @@ void exec(const std::vector<uint8_t>& data) {
+@@ -712,20 +992,36 @@ void exec(const std::vector<uint8_t>& data) {
+             uint16_t a = rd<uint16_t>(p), n = rd<uint16_t>(p);
+             std::memcpy(&xf[a], p, 4u * n);
+             p += 4u * n;
+-            xf_lo = std::min<uint32_t>(xf_lo, a);
+-            xf_hi = std::max<uint32_t>(xf_hi, a + n);
++            const uint32_t to = (uint32_t)a + n;
++            if (a < 0x100 || (a < 0x460 && to > 0x400)) xf_mtx_dirty = true;
++            if (a < 0x680 && to > 0x500) xf_post_dirty = true;
++            if (to > 0x1000) xf_reg_dirty = true;
+             break;
+         }
+         case VC_DRAW: {
              uint8_t prim = rd<uint8_t>(p), fl = rd<uint8_t>(p);
              uint32_t pieces = rd<uint32_t>(p);
              draw(prim, fl, p, pieces);
@@ -3117,10 +3921,11 @@ index 5726093..dd72559 100644
          case VC_TEXUP: {
              uint8_t m = rd<uint8_t>(p);
              uint32_t id = rd<uint32_t>(p);
-@@ -742,6 +862,30 @@ void exec(const std::vector<uint8_t>& data) {
+@@ -742,7 +1038,31 @@ void exec(const std::vector<uint8_t>& data) {
          }
          case VC_TEXBIND: { uint8_t m = rd<uint8_t>(p); map_src[m] = rd<uint32_t>(p); break; }
          case VC_TEXEFB: { uint8_t m = rd<uint8_t>(p); map_src[m] = 1ull << 32 | rd<uint32_t>(p); break; }
+-        case VC_FRAME: break;
 +        case VC_TEXEFBN: {                           // several copies, one above the other, as one texture
 +            uint8_t m = rd<uint8_t>(p);
 +            int w = rd<uint16_t>(p), h = rd<uint16_t>(p), n = rd<uint8_t>(p);
@@ -3145,10 +3950,11 @@ index 5726093..dd72559 100644
 +            map_src[m] = 2ull << 32 | first;
 +            break;
 +        }
-         case VC_FRAME: break;
++        case VC_FRAME: gputime_report(); break;
          case VC_DRAWDONE: gx_draw_done_reached(); break;
          default: rt_die("video: bad record byte %02X", p[-1]);
-@@ -1266,7 +1410,10 @@ void update_pad() {
+         }
+@@ -1266,7 +1586,10 @@ void update_pad() {
      for (int i = 0; i < 4; ++i) classic[i] = c[i];
  }
  
@@ -3159,7 +3965,7 @@ index 5726093..dd72559 100644
      ++cnt.presents;
      int ww = 0, wh = 0;
      SDL_GetWindowSizeInPixels(win, &ww, &wh);
-@@ -1275,17 +1422,17 @@ void present() {
+@@ -1275,17 +1598,17 @@ void present() {
      glColorMask(1, 1, 1, 1);
      glClearColor(0, 0, 0, 1);
      glClear(GL_COLOR_BUFFER_BIT);
@@ -3180,19 +3986,32 @@ index 5726093..dd72559 100644
      if (opt.dump_dir && cnt.presents % (uint64_t)opt.dump_every == 0 && ww > 0 && wh > 0) {
          std::vector<uint8_t> px((size_t)ww * wh * 4), flip(px.size());   // the window, as shown
          glReadPixels(0, 0, ww, wh, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
-@@ -1327,37 +1474,18 @@ void setup() {
+@@ -1317,7 +1640,6 @@ void setup() {
+     glNamedFramebufferTexture(efb_fbo, GL_DEPTH_ATTACHMENT, efb_dep, 0);
+     if (glCheckNamedFramebufferStatus(efb_fbo, GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+         rt_die("video: the EFB framebuffer is incomplete");
+-    glCreateFramebuffers(1, &copy_fbo);
+     glBindFramebuffer(GL_FRAMEBUFFER, efb_fbo);
+     glClearColor(0, 0, 0, 1);
+     glClearDepth(1.0);
+@@ -1327,45 +1649,25 @@ void setup() {
      const GLbitfield map = GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT;
      glNamedBufferStorage(vbo, VBO_CAP, nullptr, map);
      vbo_ptr = static_cast<uint8_t*>(glMapNamedBufferRange(vbo, 0, VBO_CAP, map));
 +    glCreateBuffers(1, &static_vbo);
 +    glNamedBufferStorage(static_vbo, VTX_STATIC_CAP, nullptr, GL_DYNAMIC_STORAGE_BIT);
      if (!vbo_ptr) rt_die("video: the vertex buffer cannot be mapped");
-     std::vector<uint32_t> qi;
-     for (uint32_t k = 0; k < 0x10000 / 4; ++k)
-         for (uint32_t d : {0u, 1u, 2u, 0u, 2u, 3u}) qi.push_back(4 * k + d);
-     glCreateBuffers(1, &quad_ibo);
-     glNamedBufferStorage(quad_ibo, qi.size() * 4, qi.data(), 0);
+-    std::vector<uint32_t> qi;
+-    for (uint32_t k = 0; k < 0x10000 / 4; ++k)
+-        for (uint32_t d : {0u, 1u, 2u, 0u, 2u, 3u}) qi.push_back(4 * k + d);
+-    glCreateBuffers(1, &quad_ibo);
+-    glNamedBufferStorage(quad_ibo, qi.size() * 4, qi.data(), 0);
 -    glCreateVertexArrays(1, &vao);
++    glCreateBuffers(1, &ibo);
++    glNamedBufferStorage(ibo, IBO_CAP, nullptr, map);
++    ibo_ptr = static_cast<uint32_t*>(glMapNamedBufferRange(ibo, 0, IBO_CAP, map));
++    if (!ibo_ptr) rt_die("video: the index buffer cannot be mapped");
++    glEnable(GL_PRIMITIVE_RESTART_FIXED_INDEX);
      glCreateVertexArrays(1, &empty_vao);
 -    glVertexArrayVertexBuffer(vao, 0, vbo, 0, sizeof(GVtx));
 -    glVertexArrayElementBuffer(vao, quad_ibo);
@@ -3217,13 +4036,28 @@ index 5726093..dd72559 100644
 -        glVertexArrayAttribBinding(vao, a.loc, 0);
 -    }
 -    glBindVertexArray(vao);
+-
+-    glCreateBuffers(1, &xf_ubo);
+-    glNamedBufferStorage(xf_ubo, sizeof xf, nullptr, GL_DYNAMIC_STORAGE_BIT);
+-    glBindBufferBase(GL_UNIFORM_BUFFER, 0, xf_ubo);
+-    glCreateBuffers(1, &ps_ubo);
+-    glNamedBufferStorage(ps_ubo, sizeof(PSUniforms), nullptr, GL_DYNAMIC_STORAGE_BIT);
+-    glBindBufferBase(GL_UNIFORM_BUFFER, 1, ps_ubo);
+-    glCreateSamplers(8, samplers);
 +    glVertexAttrib4f(4, 1.0f, 1.0f, 1.0f, 1.0f);     // a colour its draw does not have: white
 +    glVertexAttrib4f(5, 1.0f, 1.0f, 1.0f, 1.0f);
 +    for (GLuint t = 6; t < 10; ++t) glVertexAttrib4f(t, 0.0f, 0.0f, 0.0f, 0.0f);   // texture coordinates: zero, all four
++
++    glCreateBuffers(1, &ubo);
++    glNamedBufferStorage(ubo, UBO_CAP, nullptr, map);
++    ubo_ptr = static_cast<uint8_t*>(glMapNamedBufferRange(ubo, 0, UBO_CAP, map));
++    if (!ubo_ptr) rt_die("video: the uniform buffer cannot be mapped");
++    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, ubo);
++    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, ubo);
  
-     glCreateBuffers(1, &xf_ubo);
-     glNamedBufferStorage(xf_ubo, sizeof xf, nullptr, GL_DYNAMIC_STORAGE_BIT);
-@@ -1462,6 +1590,9 @@ std::atomic<bool> want_relative{false};
+     copy_prog = link(FULLSCREEN_VS, COPY_FS);
+     if (!copy_prog) rt_die("video: the EFB copy program does not build");
+@@ -1462,6 +1764,9 @@ std::atomic<bool> want_relative{false};
  std::mutex motion_mx;
  float motion_x = 0, motion_y = 0;
  void video_set_relative_mouse(bool on) { want_relative = on; }
@@ -3233,7 +4067,7 @@ index 5726093..dd72559 100644
  void video_take_mouse_motion(float& dx, float& dy) {
      std::lock_guard<std::mutex> lk(motion_mx);
      dx = motion_x; dy = motion_y;
-@@ -1479,6 +1610,7 @@ ClassicState video_classic(int chan) {
+@@ -1479,6 +1784,7 @@ ClassicState video_classic(int chan) {
  void video_set_rumble(int chan, bool on) {
      if (chan >= 0 && chan < 4) rumble_want[chan] = on;
  }
@@ -3241,7 +4075,7 @@ index 5726093..dd72559 100644
  void video_retrace() {
      retraces.fetch_add(1);
      if (wake) SDL_SignalSemaphore(wake);
-@@ -1506,6 +1638,7 @@ void video_run(const char* title) {
+@@ -1506,6 +1812,7 @@ void video_run(const char* title) {
      SDL_GL_MakeCurrent(win, ctx);
      SDL_GL_SetSwapInterval(0);                   // VI paces the presents
      if (!gl_load()) rt_die("video: OpenGL functions missing");
@@ -3249,11 +4083,11 @@ index 5726093..dd72559 100644
      rt_log("video: %s, %s", (const char*)glGetString(GL_RENDERER), (const char*)glGetString(GL_VERSION));
      if (debug) {
          glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
-@@ -1529,11 +1662,15 @@ void video_run(const char* title) {
+@@ -1529,11 +1836,15 @@ void video_run(const char* title) {
      uint64_t frames_then = 0;
      uint32_t seen = retraces.load();
      std::string base_title = title;
-+    uint64_t perf_loops = 0, perf_chunks = 0, perf_bytes = 0;
++    uint64_t perf_loops = 0, perf_chunks = 0, perf_bytes = 0, draws_then = 0, verts_then = 0;
      for (;;) {
 +        ++perf_loops;
          SDL_Event e;
@@ -3265,19 +4099,23 @@ index 5726093..dd72559 100644
              if (e.type == SDL_EVENT_GAMEPAD_ADDED) pad_added(e.gdevice.which);
              if (e.type == SDL_EVENT_GAMEPAD_REMOVED) pad_removed(e.gdevice.which);
              // F11 or Alt+Enter: fullscreen and back
-@@ -1592,7 +1729,10 @@ void video_run(const char* title) {
+@@ -1592,7 +1903,14 @@ void video_run(const char* title) {
                  double vtx = ms(g_vperf.vtx), tex = ms(g_vperf.tex), wait = ms(g_vperf.wait), draw = ms(g_vperf.draw),
                         pres = ms(g_vperf.present);
                  rt_log("perf: %.1f fps; frame %.1f ms; game thread: vertices %.1f, textures %.1f, waiting for the renderer %.1f; "
 -                       "renderer %.1f, presenting %.1f ms", f / s, 1000.0 * s / f, vtx, tex, wait, draw, pres);
-+                       "renderer %.1f, presenting %.1f ms; a frame: %.1f records, %.0f KiB, %.1f turns of the renderer's loop",
++                       "renderer %.1f, presenting %.1f ms; a frame: %.1f records, %.0f KiB, %.1f turns of the renderer's loop, "
++                       "%.0f draws, %.0f vertices",
 +                       f / s, 1000.0 * s / f, vtx, tex, wait, draw, pres, (double)perf_chunks / f,
-+                       (double)perf_bytes / 1024 / f, (double)perf_loops / f);
++                       (double)perf_bytes / 1024 / f, (double)perf_loops / f, (double)(cnt.draws - draws_then) / f,
++                       (double)(cnt.verts - verts_then) / f);
++                draws_then = cnt.draws;
++                verts_then = cnt.verts;
 +                perf_loops = perf_chunks = perf_bytes = 0;
              }
              frames_then = cnt.frames;
              t_title = now;
-@@ -1608,6 +1748,8 @@ void video_run(const char* title) {
+@@ -1608,6 +1926,8 @@ void video_run(const char* title) {
              }
              if (c.readback) { if (c.copy) copy_readback(c.copy); else efb_readback(); busy = true; continue; }
              auto te = Clock::now();
@@ -3286,7 +4124,7 @@ index 5726093..dd72559 100644
              exec(c.data);
              if (g_vperf_on) g_vperf.draw += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - te).count();
              {
-@@ -1621,6 +1763,17 @@ void video_run(const char* title) {
+@@ -1621,6 +1941,17 @@ void video_run(const char* title) {
              if (retraces.load() != seen) break;
          }
          uint32_t r = retraces.load();
