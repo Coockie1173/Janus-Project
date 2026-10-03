@@ -13,6 +13,8 @@
 #     ./launch.sh --cheats             every cheat in config/gecko/cheats.txt on (the window's Cheats tab picks them)
 #     ./launch.sh --mouse-mode stick   the mouse as right-stick input (auto does this in a game someone
 #                                      else hosts; direct never does)
+#     ./launch.sh --always-mouse       the cheat "Always Enable Mouse": mouse look in every player state
+#                                      (cutscenes, melee, climbing...), also in the F1 menu's Cheats
 #     ./launch.sh --trace              log the mouse's player, its angles and the look state (for a report)
 #     ./launch.sh --extract GAME.rvz   take the game's files out of a disc image (.rvz .iso .wbfs) into ./game
 #                                      and stop; the window's "Extract disc..." does the same
@@ -51,6 +53,7 @@ while [ $# -gt 0 ]; do
         --fov) LAUNCH_FOV=$2; shift 2 ;;
         --mouse) LAUNCH_MOUSE=$2; shift 2 ;;
         --mouse-mode) LAUNCH_MOUSEMODE=$2; shift 2 ;;
+        --always-mouse) LAUNCH_MOUSEEVERYWHERE=1; shift ;;
         --offline) LAUNCH_ONLINE=0; shift ;;
         --fullscreen) LAUNCH_FULLSCREEN=1; shift ;;
         --fast-start) LAUNCH_FASTSTART=1; shift ;;

@@ -505,6 +505,8 @@ def run_game(args):
             i += 1
         elif a == "--fullscreen":
             s["fullscreen"] = "1"
+        elif a == "--always-mouse":
+            s["mouseeverywhere"] = "1"
         elif a == "--fast-start":
             s["faststart"] = "1"
         elif a == "--cheats":

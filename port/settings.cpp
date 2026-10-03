@@ -331,7 +331,7 @@ void build_pages() {
 
     Page& cheats = g_pages[kCheats];
     cheats.title = "Cheats";
-    cheats.rows.push_back({"Mouse Look In Every State", "On: the mouse turns the view where the game locks it: cutscenes, melee, climbing, death.",
+    cheats.rows.push_back({"Always Enable Mouse", "On: the mouse turns the view where the game locks it: cutscenes, melee, climbing, death.",
         [] { return std::string(mouse_everywhere() ? "On" : "Off"); },
         [](int) { set_mouse_everywhere(!mouse_everywhere()); g_dirty = true; }});
 }
