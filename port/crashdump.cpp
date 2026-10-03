@@ -14,6 +14,7 @@
 //tools/crash_report.py names the host frames and disassembles around the guest addresses
 //afterwards (launch.sh runs it when a run leaves a new dump).
 #include "ge.h"
+#include "mem.h"
 #include <atomic>
 #include <chrono>
 #include <cstdio>
@@ -227,6 +228,11 @@ namespace
 	//itself), then the dump. if the dump itself gets stuck or faults the alarm ends us
 	void OnCrash(int Sig, siginfo_t* Info, void* Context)
 	{
+		//a write to a page the runtime watches isn't a crash, it lets it through and we go on
+		if (Sig == SIGSEGV && mem_watch_fault(Info->si_addr))
+		{
+			return;
+		}
 		if (g_Dumping.exchange(true))
 		{
 			_exit(128 + Sig);

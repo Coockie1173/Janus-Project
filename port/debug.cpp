@@ -34,6 +34,7 @@
 //   GE_TRACEW="80776B10"               log that word whenever it changes (looked at 200 times a second)
 //   GE_PEEK="80ABCDEF,80ABCDF0"        log those floats every half second
 #include "debug.h"
+#include "mem.h"
 #include "rt.h"
 #include "video.h"
 #ifndef _WIN32
@@ -236,10 +237,12 @@ void watch_segv(int sig, siginfo_t* si, void* uc_) {
     ucontext_t* uc = (ucontext_t*)uc_;
     uint8_t* a = (uint8_t*)si->si_addr;
     if (!watch_page || a < watch_page || a >= watch_page + 4096) {
+        if (mem_watch_fault(a)) return;
         if (watch_prev_segv.sa_flags & SA_SIGINFO) watch_prev_segv.sa_sigaction(sig, si, uc_);
         else _exit(128 + sig);
         return;
     }
+    mem_watch_fault(a);                               // (the runtime may watch the page too)
     if (a >= watch_addr && a < watch_addr + 4 && watch_hits < 12) {
         ++watch_hits;
         uintptr_t pc = (uintptr_t)uc->uc_mcontext.gregs[REG_RIP];
