@@ -12,3 +12,11 @@ ge_look_input          # the look input: the mouse is added to what the stick gi
 ge_look_apply          # the mouse, as angular velocity for one frame
 ge_look_sens           # the mouse on the stick: a very high sensitivity while the game reads it
 ge_look_sens_ads
+ge_box_clip_codes      # the engine's paired-single math, replaced by host code (port/native.cpp)
+ge_skin1
+ge_skin2
+ge_plane_ray
+ge_tri_contains
+ge_vec4_transform
+ge_vec4_sub
+ge_segment_closest

@@ -16,6 +16,7 @@
 //                  from tools/gecko.py; empty: none); GE_GECKO_EXTRA=F[:F...] adds files
 //     GE_FOV=D     the field of view in play, degrees (the game's is 49)
 //     GE_FPS=N     the frame rate the engine may reach (default: its own 30); auto: 60
+//     GE_NATIVE=0  the engine's math routines as recompiled, not the host versions (check: compare them)
 //     GE_DMW=F     the memory watch list the debug overlay shows (F3); default: the .dmw in the
 //                  project's folder
 #include "debug.h"
@@ -42,6 +43,7 @@ void install() {
     install_profiler();
     debug_install();
     install_fps();
+    install_native();
     if (std::getenv("GE_TRACE")) {
         orig_main = ppc_hook("main", [](PPCContext& c) {
             rt_log("goldeneye: main() reached");

@@ -5,6 +5,7 @@
 //   input.cpp        mouse look, the wheel, mouse buttons in menus (GE_MOUSE, GE_MOUSE_MODE)
 //   fov.cpp          the field of view (GE_FOV)
 //   gecko.cpp        Gecko codes run each frame (GE_GECKO, GE_GECKO_EXTRA)
+//   native.cpp       the engine's hot math routines written for the host (GE_NATIVE)
 //   net.cpp          the hosts file for the game's servers (GE_HOSTS, GE_NETLOG)
 //   overlay.cpp      the debug overlay (F3): memory watches from a .dmw file (dmw.cpp)
 //   diagnostics.cpp  the crash report and the sampling profiler (GE_PROFILE)
@@ -43,6 +44,7 @@ void install_gecko();                                // gecko.cpp
 void gecko_apply();
 void install_fov();                                  // fov.cpp
 void fov_apply();
+void install_native();                               // native.cpp
 void install_overlay();                              // overlay.cpp
 bool overlay_open();
 

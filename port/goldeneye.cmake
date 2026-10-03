@@ -5,7 +5,7 @@ get_filename_component(GE_ROOT ${GE_PORT}/.. ABSOLUTE)
 target_sources(wiiboot PRIVATE
     ${GE_PORT}/goldeneye.cpp ${GE_PORT}/framerate.cpp ${GE_PORT}/input.cpp ${GE_PORT}/fov.cpp
     ${GE_PORT}/gecko.cpp ${GE_PORT}/net.cpp ${GE_PORT}/overlay.cpp ${GE_PORT}/dmw.cpp
-    ${GE_PORT}/diagnostics.cpp ${GE_PORT}/debug.cpp)
+    ${GE_PORT}/diagnostics.cpp ${GE_PORT}/debug.cpp ${GE_PORT}/native.cpp)
 # files found wherever the game is started from
 target_compile_definitions(wiiboot PRIVATE
     GE_ROOT="${GE_ROOT}"
