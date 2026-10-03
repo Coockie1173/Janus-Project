@@ -623,7 +623,7 @@ index 3d2da4e..d6e9264 100644
      X(PFNGLVERTEXARRAYELEMENTBUFFERPROC, glVertexArrayElementBuffer)                                \
      X(PFNGLENABLEVERTEXARRAYATTRIBPROC, glEnableVertexArrayAttrib)                                  \
 diff --git a/runtime/gx.cpp b/runtime/gx.cpp
-index a6b37f2..505d86c 100644
+index a6b37f2..003e9a8 100644
 --- a/runtime/gx.cpp
 +++ b/runtime/gx.cpp
 @@ -25,6 +25,7 @@
@@ -713,7 +713,7 @@ index a6b37f2..505d86c 100644
  // ---- textures --------------------------------------------------------------------------------
  // Decoded textures are cached by what names them (address, format, size,
  // levels, palette) and re-uploaded when their bytes change. Bytes are hashed
-@@ -169,14 +227,22 @@ struct TexKeyHash {
+@@ -169,14 +227,25 @@ struct TexKeyHash {
          return (size_t)(k.addr * 0x9E3779B1u ^ k.shape * 0x85EBCA77u ^ k.levels ^ k.tlut);
      }
  };
@@ -728,6 +728,9 @@ index a6b37f2..505d86c 100644
 +struct CopyRec { size_t size; uint64_t hash; uint32_t fmt; int w, h;
 +                 uint32_t gen = 0; bool same = false; Guard guard; uint64_t seq = 0; };   // whether RAM still holds the copy, looked at once a generation
  std::unordered_map<uint32_t, CopyRec> copies;      // EFB copies to texture, by address
++// a copy with a smaller one made over its start since, by address and size
++std::unordered_map<uint64_t, CopyRec> copies_under;
++inline uint64_t copy_key(uint32_t addr, int w, int h) { return (uint64_t)addr | (uint64_t)w << 32 | (uint64_t)h << 48; }
 +struct CopyHash { uint64_t hash = 0; Guard guard; };
 +std::unordered_map<uint64_t, CopyHash> copy_hashes;   // memory's hash where a copy was made, by address and size
 +// Hundreds of textures are bound a frame and a handful are copies: a bit for
@@ -738,7 +741,7 @@ index a6b37f2..505d86c 100644
  
  // texture format an EFB copy format produces in RAM (for its size)
  uint32_t copy_tex_fmt(uint32_t cf) {
-@@ -184,7 +250,11 @@ uint32_t copy_tex_fmt(uint32_t cf) {
+@@ -184,7 +253,11 @@ uint32_t copy_tex_fmt(uint32_t cf) {
      return f[cf & 15];
  }
  
@@ -750,7 +753,7 @@ index a6b37f2..505d86c 100644
      uint32_t gen = bp[0x00], used = 0;
      int ntev = (int)(gen >> 10 & 15) + 1, nind = (int)(gen >> 16 & 7);
      for (int s = 0; s < ntev; ++s) {
-@@ -192,7 +262,7 @@ uint32_t used_maps() {
+@@ -192,7 +265,7 @@ uint32_t used_maps() {
          if (t & 0x40) used |= 1u << (t & 7);
      }
      for (int i = 0; i < nind && i < 4; ++i) used |= 1u << (bp[0x27] >> (6 * i) & 7);
@@ -759,7 +762,7 @@ index a6b37f2..505d86c 100644
  }
  
  void bind_map(int m) {
-@@ -203,9 +273,57 @@ void bind_map(int m) {
+@@ -203,9 +276,75 @@ void bind_map(int m) {
      uint32_t fmt = img0 >> 20 & 15, addr = (img3 & 0xFFFFFF) << 5;
      if (img1 >> 21 & 1) warn_once("texture preloaded in TMEM (not modelled), map", m);
  
@@ -767,19 +770,21 @@ index a6b37f2..505d86c 100644
 -    if (c != copies.end() && mem_ok(addr, c->second.size) &&
 -        hash_mem(host(virt(addr)), c->second.size) == c->second.hash) {
 +    auto c = copy_maybe(addr) ? copies.find(addr) : copies.end();
-+    auto still = [](uint32_t a) -> CopyRec* {       // the copy made to a, if memory still holds it
-+        auto it = copies.find(a);
-+        if (it == copies.end() || !mem_ok(a, it->second.size)) return nullptr;
-+        if (it->second.gen != tex_gen) {
-+            CopyRec& r = it->second;                 // (its pages watched and unwritten: not read at all)
++    auto same = [](uint32_t a, CopyRec& r) {        // whether memory still holds what it did when r was made at a
++        if (!mem_ok(a, r.size)) return false;
++        if (r.gen != tex_gen) {                      // (its pages watched and unwritten: not read at all)
 +            if (guard_same(host(virt(a)), r.size, r.guard)) r.same = true;
 +            else {
 +                r.guard = guard_set(host(virt(a)), r.size);
 +                r.same = hash_mem(host(virt(a)), r.size) == r.hash;
 +            }
-+            it->second.gen = tex_gen;
++            r.gen = tex_gen;
 +        }
-+        return it->second.same ? &it->second : nullptr;
++        return r.same;
++    };
++    auto still = [&same](uint32_t a) -> CopyRec* {  // the copy made to a, if memory still holds it
++        auto it = copies.find(a);
++        return it != copies.end() && same(a, it->second) ? &it->second : nullptr;
 +    };
 +    // A texture may be several copies in memory. A game whose scratch area of
 +    // the EFB is lower than the picture it builds there copies it out in
@@ -816,11 +821,27 @@ index a6b37f2..505d86c 100644
 +            return;
 +        }
 +    }
++    // A smaller copy made over the start of a larger one leaves the rest of
++    // it in memory, and a game goes on drawing from that rest (the lower
++    // strip of a bloom's first pass, after the upper one was copied to where
++    // the picture was): the texture is the larger copy still.
++    if (c != copies.end() && (c->second.w != w || c->second.h != h)) {
++        auto u = copies_under.find(copy_key(addr, w, h));
++        if (u != copies_under.end() && same(addr, u->second)) {
++            put<uint8_t>(VC_TEXEFBS);
++            put<uint8_t>((uint8_t)m);
++            put<uint32_t>(addr);
++            put<uint16_t>((uint16_t)w);
++            put<uint16_t>((uint16_t)h);
++            map_bound[m] = ~0ull;
++            return;
++        }
++    }
 +    if (c != copies.end() && still(addr)) {
          uint64_t tag = 1ull << 32 | addr;
          if (map_bound[m] != tag) {
              put<uint8_t>(VC_TEXEFB);
-@@ -224,6 +342,19 @@ void bind_map(int m) {
+@@ -224,6 +363,19 @@ void bind_map(int m) {
          levels = (int)((mode1 >> 8 & 0xFF) + 15) / 16 + 1;
          if (levels > full) levels = full;
      }
@@ -840,7 +861,7 @@ index a6b37f2..505d86c 100644
      size_t total = 0;
      for (int l = 0; l < levels; ++l) total += gxtex_size(fmt, std::max(1, w >> l), std::max(1, h >> l));
      if (!addr || !mem_ok(addr, total)) { warn_once("texture outside memory at", addr); return; }
-@@ -246,9 +377,21 @@ void bind_map(int m) {
+@@ -246,9 +398,21 @@ void bind_map(int m) {
      TexEntry& e = it->second;
      bool upload = false;
      if (fresh || e.gen != tex_gen) {
@@ -865,7 +886,7 @@ index a6b37f2..505d86c 100644
          e.gen = tex_gen;
      }
      if (upload) {
-@@ -283,6 +426,7 @@ void bind_map(int m) {
+@@ -283,6 +447,7 @@ void bind_map(int m) {
  }
  
  void sync_textures() {
@@ -873,7 +894,7 @@ index a6b37f2..505d86c 100644
      uint32_t todo = used_maps() & tex_dirty;
      for (int m = 0; m < 8; ++m)
          if (todo >> m & 1) bind_map(m);
-@@ -351,11 +495,14 @@ VtxFmt vtx_fmt(int v) {
+@@ -351,11 +516,14 @@ VtxFmt vtx_fmt(int v) {
          f.tc_fmt[i] = t[i][1];
          f.tc_sc[i] = 1.0f / (float)(1u << t[i][2]);
      }
@@ -889,7 +910,7 @@ index a6b37f2..505d86c 100644
  }
  
  // bytes per vertex for vertex format `v`
-@@ -378,6 +525,35 @@ int vertex_size(const VtxFmt& f) {
+@@ -378,6 +546,35 @@ int vertex_size(const VtxFmt& f) {
      return n;
  }
  
@@ -925,7 +946,7 @@ index a6b37f2..505d86c 100644
  // an attribute's data: in the stream (direct) or in its array (indexed)
  const uint8_t* fetch(uint32_t mode, int arr, int size, const uint8_t*& p, uint32_t sub = 0) {
      if (mode == 1) { const uint8_t* q = p; p += size; return q; }
-@@ -387,52 +563,125 @@ const uint8_t* fetch(uint32_t mode, int arr, int size, const uint8_t*& p, uint32
+@@ -387,52 +584,125 @@ const uint8_t* fetch(uint32_t mode, int arr, int size, const uint8_t*& p, uint32
      return host(virt(cp[0xA0 + arr] + idx * cp[0xB0 + arr] + sub));
  }
  
@@ -1081,7 +1102,7 @@ index a6b37f2..505d86c 100644
          if (video) {
              put<uint8_t>(VC_FRAME);
              ++rec_frames;
-@@ -445,7 +694,19 @@ void efb_copy(uint32_t v) {
+@@ -445,7 +715,21 @@ void efb_copy(uint32_t v) {
      if (v >> 9 & 1) { w = (w + 1) / 2; h = (h + 1) / 2; }
      uint32_t tpf = v >> 3 & 15, real = tpf / 2 + (tpf & 1) * 8;
      size_t size = gxtex_size(copy_tex_fmt(real), w, h);
@@ -1097,12 +1118,14 @@ index a6b37f2..505d86c 100644
 +            known.guard = guard_set(at, size);
 +            known.hash = hash_mem(at, size);
 +        }
++        if (auto was = copies.find(dest); was != copies.end() && was->second.size > size)
++            copies_under[copy_key(dest, was->second.w, was->second.h)] = was->second;
 +        copies[dest] = CopyRec{size, known.hash, copy_tex_fmt(real), w, h, 0, false, known.guard, st.copies};
 +    }
      tex_dirty = 0xFF;
  }
  
-@@ -454,13 +715,15 @@ void bp_write(uint32_t v) {
+@@ -454,13 +738,15 @@ void bp_write(uint32_t v) {
      if (reg == 0xFE) { bp_mask = val; return; }
      bp[reg] = (bp[reg] & ~bp_mask) | (val & bp_mask);
      bp_mask = 0xFFFFFF;
@@ -1119,7 +1142,7 @@ index a6b37f2..505d86c 100644
          pe_ctrl |= 8; ++st.done; os_raise();
          return;
      case 0x47: pe_token = (uint16_t)val; return;                      // token
-@@ -504,16 +767,323 @@ void xf_load(uint32_t addr, uint32_t n, const uint8_t* src) {
+@@ -504,16 +790,323 @@ void xf_load(uint32_t addr, uint32_t n, const uint8_t* src) {
  // parse one command at p (n bytes available); returns its length, 0 if incomplete
  size_t parse(const uint8_t* p, size_t n, bool in_dl);
  
@@ -1448,7 +1471,7 @@ index a6b37f2..505d86c 100644
      }
  }
  
-@@ -525,6 +1095,9 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
+@@ -525,6 +1118,9 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
      case 0x08:
          if (n < 6) return 0;
          cp[p[1]] = be32(p + 2);
@@ -1458,7 +1481,7 @@ index a6b37f2..505d86c 100644
          TRACE("CP %02X %08X\n", p[1], cp[p[1]]);
          return 6;
      case 0x10: {
-@@ -556,8 +1129,9 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
+@@ -556,8 +1152,9 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
      if (op >= 0x80 && op < 0xC0) {
          if (n < 3) return 0;
          uint32_t count = (uint32_t)p[1] << 8 | p[2];
@@ -1470,7 +1493,7 @@ index a6b37f2..505d86c 100644
          if (n < len) return 0;
          ++st.draws;
          st.verts += count;
-@@ -565,45 +1139,18 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
+@@ -565,45 +1162,18 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
          if (video && count) {
              if (bp[0xF1] >> 21 & 7) warn_once("fog (not drawn), type", bp[0xF1] >> 21 & 7);
              if (bp[0xF4] >> 2 & 3) warn_once("Z texture (not drawn), op", bp[0xF4] >> 2 & 3);
@@ -1506,13 +1529,13 @@ index a6b37f2..505d86c 100644
 +                perf_vtx += perf_ticks() - t0;
              } else {
 -                fl = decode_vertices(f, p + 3, count, out);
--            }
++                decode_vertices(f, fl, p + 3, count, out);
+             }
 -            if (extend && rec[draw_hdr + 2] != fl) {      // other attributes: a draw of its own
 -                const uint8_t hdr[7] = {VC_DRAW, (uint8_t)(op & 0xF8), 0, 0, 0, 0, 0};
 -                rec.insert(rec.begin() + (ptrdiff_t)at, hdr, hdr + sizeof hdr);
 -                draw_hdr = at;
-+                decode_vertices(f, fl, p + 3, count, out);
-             }
+-            }
 -            rec[draw_hdr + 2] = fl;
 -            uint32_t pieces;
 -            std::memcpy(&pieces, &rec[draw_hdr + 3], 4);
@@ -1525,7 +1548,7 @@ index a6b37f2..505d86c 100644
          }
          return len;
      }
-@@ -614,8 +1161,17 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
+@@ -614,8 +1184,17 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
  
  void feed(const uint8_t* b, int n) {
      if (desync) return;
@@ -1544,7 +1567,7 @@ index a6b37f2..505d86c 100644
      while (off < stream.size()) {
          size_t k = parse(stream.data() + off, stream.size() - off, false);
          if (!k) { --st.cmds; break; }
-@@ -714,7 +1270,10 @@ bool gx_copy_to_ram(uint32_t addr) {
+@@ -714,7 +1293,10 @@ bool gx_copy_to_ram(uint32_t addr) {
      hw_run_locked([&] {
          std::memcpy(host(virt(addr)), out.data(), out.size());
          auto c = copies.find(addr);                          // the GPU's copy still stands for these bytes
@@ -1556,7 +1579,7 @@ index a6b37f2..505d86c 100644
      });
      return true;
  }
-@@ -729,6 +1288,7 @@ void gx_init() {
+@@ -729,6 +1311,7 @@ void gx_init() {
  // AI's, which start each audio frame's mix, above all. So does this wait.
  // A handler may switch guest threads, and another thread may hand the
  // record over in the meantime.
@@ -1564,7 +1587,7 @@ index a6b37f2..505d86c 100644
  void gx_draw_done_reached() {
      hw_run_locked([] { pe_ctrl |= 8; ++st.done; os_raise(); });
  }
-@@ -738,7 +1298,7 @@ void gx_submit_pending() {
+@@ -738,7 +1321,7 @@ void gx_submit_pending() {
      submit_pending = false;
      while (!rec.empty()) {
          int frames = rec_frames;
@@ -1573,7 +1596,7 @@ index a6b37f2..505d86c 100644
          if (t_ppc && g_ppc_pending.load(std::memory_order_relaxed)) ppc_poll(*t_ppc);
      }
  }
-@@ -768,12 +1328,17 @@ static void gp_run() {
+@@ -768,12 +1351,17 @@ static void gp_run() {
  
  void gx_pipe_burst(const uint8_t* b, int n) {
      uint32_t at = pi_wptr_addr();
@@ -1597,7 +1620,7 @@ index a6b37f2..505d86c 100644
      }
      if (!linked()) return;
      if (held.empty() && !(bp_enabled() && at == bp_addr())) { feed(b, n); return; }
-@@ -861,4 +1426,11 @@ void gx_report() {
+@@ -861,4 +1449,11 @@ void gx_report() {
             (unsigned long long)st.dls, (unsigned long long)st.copies, (unsigned long long)st.frames,
             (unsigned long long)st.done, (unsigned long long)st.uploads, (unsigned long long)st.peeks,
             (unsigned long long)st.readbacks);
@@ -3195,7 +3218,7 @@ index 8a4e097..8b1b1a8 100644
  void ppc_mmio_write(uint32_t addr, uint32_t, int) { rt_die("mmio write %08X", addr); }
  uint64_t ppc_timebase() { return 0; }
 diff --git a/runtime/video.cpp b/runtime/video.cpp
-index 5726093..7bcf978 100644
+index 5726093..3552878 100644
 --- a/runtime/video.cpp
 +++ b/runtime/video.cpp
 @@ -67,7 +67,8 @@ ClassicState classic[4];
@@ -3245,7 +3268,7 @@ index 5726093..7bcf978 100644
  GLuint copy_prog;
  GLint copy_rect_loc, copy_mode_loc;
  constexpr size_t VBO_CAP = 64u << 20;
-@@ -94,12 +123,41 @@ GLsync vbo_fence[4] = {};
+@@ -94,14 +123,44 @@ GLsync vbo_fence[4] = {};
  constexpr size_t VBO_QUARTER = VBO_CAP / 4;
  PSUniforms ps_last;
  bool ps_valid = false;
@@ -3289,8 +3312,11 @@ index 5726093..7bcf978 100644
 +std::unordered_map<uint32_t, Tex> efb_joined;      // textures put together from several copies, by the first's address
  std::unordered_map<uint32_t, Tex> xfbs;            // EFB copies to the XFB, by address
  uint64_t map_src[8];                               // per map: texture id, or 1 << 32 | EFB copy address
++uint64_t map_sized[8];                             // per map with map_src 3 << 32: its copy's key in copy_pool
  uint32_t last_xfb = 0;
-@@ -109,7 +167,7 @@ std::unordered_map<std::string, GLuint> programs;       // by the registers that
+ std::unordered_map<std::string, GLuint> programs;       // by the registers that shape the code (gx_shader_key)
+ // by the code itself: registers a game rewrites with bits the generator
+@@ -109,7 +168,7 @@ std::unordered_map<std::string, GLuint> programs;       // by the registers that
  // (Crystal Bearers: 1 160 keys for 396 programs in its title's first minute)
  std::unordered_map<std::string, GLuint> programs_by_source;
  
@@ -3299,7 +3325,7 @@ index 5726093..7bcf978 100644
  bool dump_ps = false;                              // WIIKIT_SHADERDUMP: log the next uniforms
  
  int32_t s11(uint32_t v) { return (int32_t)((v & 0x7FF) << 21) >> 21; }
-@@ -225,12 +283,22 @@ void save_program(GLuint p, uint64_t hash) {
+@@ -225,12 +284,22 @@ void save_program(GLuint p, uint64_t hash) {
  
  void ensure_tex(Tex& t, int w, int h, int levels) {
      if (t.name && t.w == w && t.h == h && t.levels == levels) return;
@@ -3323,7 +3349,7 @@ index 5726093..7bcf978 100644
  void APIENTRY gl_debug(GLenum, GLenum type, GLuint, GLenum severity, GLsizei, const GLchar* msg, const void*) {
      if (severity == GL_DEBUG_SEVERITY_NOTIFICATION) return;
      rt_log("gl: %s%s", type == GL_DEBUG_TYPE_ERROR ? "error: " : "", msg);
-@@ -295,7 +363,15 @@ void main() {
+@@ -295,7 +364,15 @@ void main() {
  )";
  
  // ---- register side effects ----------------------------------------------------------------------
@@ -3339,7 +3365,7 @@ index 5726093..7bcf978 100644
      bool has_alpha = (bp[0x43] & 7) == 1;
      bool cu = bp[0x41] >> 3 & 1, au = bp[0x41] >> 4 & 1, zu = bp[0x40] >> 4 & 1;
      if (!cu && !au && !zu) return;
-@@ -325,7 +401,10 @@ void efb_dump(const char* tag) {
+@@ -325,7 +402,10 @@ void efb_dump(const char* tag) {
      write_png(name, EFB_W * S, EFB_H * S, px.data());
  }
  
@@ -3350,7 +3376,7 @@ index 5726093..7bcf978 100644
      int x = (int)(bp[0x49] & 0x3FF), y = (int)(bp[0x49] >> 10 & 0x3FF);
      int w = (int)(bp[0x4A] & 0x3FF) + 1, h = (int)(bp[0x4A] >> 10 & 0x3FF) + 1;
      uint32_t dest = (bp[0x4B] & 0xFFFFFF) << 5;
-@@ -336,10 +415,8 @@ void efb_copy(uint32_t v) {
+@@ -336,10 +416,8 @@ void efb_copy(uint32_t v) {
          efb_dump(tag);
      }
      if (v >> 14 & 1) {                                           // to the XFB
@@ -3363,7 +3389,7 @@ index 5726093..7bcf978 100644
                                 GL_COLOR_BUFFER_BIT, GL_NEAREST);
          last_xfb = dest;
          ++cnt.frames;
-@@ -347,10 +424,8 @@ void efb_copy(uint32_t v) {
+@@ -347,10 +425,8 @@ void efb_copy(uint32_t v) {
          bool half = v >> 9 & 1;
          int tw = half ? (w + 1) / 2 : w, th = half ? (h + 1) / 2 : h;
          uint32_t tpf = v >> 3 & 15, fmt = tpf / 2 + (tpf & 1) * 8;
@@ -3376,7 +3402,7 @@ index 5726093..7bcf978 100644
          glViewport(0, 0, tw * S, th * S);
          glDisable(GL_BLEND);
          glDisable(GL_COLOR_LOGIC_OP);
-@@ -365,9 +440,10 @@ void efb_copy(uint32_t v) {
+@@ -365,9 +441,10 @@ void efb_copy(uint32_t v) {
          glBindTextureUnit(1, efb_dep);
          glBindSampler(0, 0);
          glBindSampler(1, 0);
@@ -3388,7 +3414,7 @@ index 5726093..7bcf978 100644
      }
      if (v >> 11 & 1) efb_clear(x, y, w, h);
  }
-@@ -462,9 +538,12 @@ void set_ps_uniforms() {
+@@ -462,9 +539,12 @@ void set_ps_uniforms() {
          rt_log("%s", t.c_str());
      }
      if (ps_valid && !std::memcmp(&u, &ps_last, sizeof u)) return;
@@ -3402,7 +3428,7 @@ index 5726093..7bcf978 100644
  }
  
  void bind_textures() {
-@@ -475,113 +554,324 @@ void bind_textures() {
+@@ -475,113 +555,327 @@ void bind_textures() {
      for (int m = 0; m < 8; ++m) {
          if (!(used >> m & 1)) continue;
          GLuint name = 0;
@@ -3410,6 +3436,9 @@ index 5726093..7bcf978 100644
 +        if (map_src[m] >> 32 == 2) {
 +            auto it = efb_joined.find((uint32_t)map_src[m]);
 +            if (it != efb_joined.end()) name = it->second.name;
++        } else if (map_src[m] >> 32 == 3) {
++            auto it = copy_pool.find(map_sized[m]);
++            if (it != copy_pool.end()) name = it->second.name;
 +        } else if (map_src[m] >> 32) {
              auto it = efb_copies.find((uint32_t)map_src[m]);
              if (it != efb_copies.end()) name = it->second.name;
@@ -3810,7 +3839,7 @@ index 5726093..7bcf978 100644
          uint32_t pm = v0.mtx[0] * 4u;
          float pos[3];
          for (int r = 0; r < 3; ++r)
-@@ -599,61 +889,48 @@ void draw(uint8_t prim, uint8_t vflags, const uint8_t* pieces, uint32_t npieces)
+@@ -599,61 +893,48 @@ void draw(uint8_t prim, uint8_t vflags, const uint8_t* pieces, uint32_t npieces)
                       v0.mtx[0], v0.pos[0], v0.pos[1], v0.pos[2], pos[0], pos[1], pos[2], c[0] / c[3], c[1] / c[3], c[3],
                       (bp[0x00] >> 10 & 15) + 1, xf[0x1009] & 3);
      }
@@ -3894,7 +3923,7 @@ index 5726093..7bcf978 100644
  }
  
  // ---- the record -----------------------------------------------------------------------------------
-@@ -662,6 +939,7 @@ template <class T> T rd(const uint8_t*& p) { T v; std::memcpy(&v, p, sizeof v);
+@@ -662,6 +943,7 @@ template <class T> T rd(const uint8_t*& p) { T v; std::memcpy(&v, p, sizeof v);
  // The EFB at its native size: the pixel at each native position's top-left
  // sample of the scaled EFB (rows from the top, as the EFB copies read it).
  void efb_readback() {
@@ -3902,7 +3931,7 @@ index 5726093..7bcf978 100644
      int W = EFB_W * S, H = EFB_H * S;
      std::vector<uint8_t> px((size_t)W * H * 4);
      std::vector<float> dz((size_t)W * H);
-@@ -703,6 +981,8 @@ void copy_readback(uint32_t addr) {
+@@ -703,6 +985,8 @@ void copy_readback(uint32_t addr) {
  }
  
  void exec(const std::vector<uint8_t>& data) {
@@ -3911,7 +3940,7 @@ index 5726093..7bcf978 100644
      const uint8_t* p = data.data();
      const uint8_t* end = p + data.size();
      while (p < end) {
-@@ -712,20 +992,36 @@ void exec(const std::vector<uint8_t>& data) {
+@@ -712,20 +996,36 @@ void exec(const std::vector<uint8_t>& data) {
              uint16_t a = rd<uint16_t>(p), n = rd<uint16_t>(p);
              std::memcpy(&xf[a], p, 4u * n);
              p += 4u * n;
@@ -3951,7 +3980,7 @@ index 5726093..7bcf978 100644
          case VC_TEXUP: {
              uint8_t m = rd<uint8_t>(p);
              uint32_t id = rd<uint32_t>(p);
-@@ -742,7 +1038,28 @@ void exec(const std::vector<uint8_t>& data) {
+@@ -742,7 +1042,36 @@ void exec(const std::vector<uint8_t>& data) {
          }
          case VC_TEXBIND: { uint8_t m = rd<uint8_t>(p); map_src[m] = rd<uint32_t>(p); break; }
          case VC_TEXEFB: { uint8_t m = rd<uint8_t>(p); map_src[m] = 1ull << 32 | rd<uint32_t>(p); break; }
@@ -3977,11 +4006,19 @@ index 5726093..7bcf978 100644
 +            map_src[m] = 2ull << 32 | at;
 +            break;
 +        }
++        case VC_TEXEFBS: {
++            uint8_t m = rd<uint8_t>(p);
++            uint32_t addr = rd<uint32_t>(p);
++            int w = rd<uint16_t>(p), h = rd<uint16_t>(p);
++            map_sized[m] = (uint64_t)addr | (uint64_t)(w * S) << 32 | (uint64_t)(h * S) << 48;
++            map_src[m] = 3ull << 32 | addr;
++            break;
++        }
 +        case VC_FRAME: gputime_report(); break;
          case VC_DRAWDONE: gx_draw_done_reached(); break;
          default: rt_die("video: bad record byte %02X", p[-1]);
          }
-@@ -843,6 +1160,7 @@ std::vector<Binding> bindings;
+@@ -843,6 +1172,7 @@ std::vector<Binding> bindings;
  int keys_input = INPUT_MODE_AUTO;                        // the key file's Input
  bool face_by_label = false;                         // the key file's Face Buttons = Label
  float dead_zone = 0.15f;                            // the key file's Dead Zone: of the sticks' travel, radial
@@ -3989,7 +4026,7 @@ index 5726093..7bcf978 100644
  
  const char* DEFAULT_KEYS =
      "# wiiboot's keys: each Wii Remote button, then the keys and mouse buttons that press it.\n"
-@@ -1006,7 +1324,9 @@ bool parse_keys(const std::string& text, const std::string& path, bool remote, b
+@@ -1006,7 +1336,9 @@ bool parse_keys(const std::string& text, const std::string& path, bool remote, b
      return has_classic;
  }
  
@@ -3999,7 +4036,7 @@ index 5726093..7bcf978 100644
      std::string text;
      if (FILE* f = std::fopen(path.c_str(), "rb")) {
          char buf[4096];
-@@ -1186,7 +1506,7 @@ void update_pad() {
+@@ -1186,7 +1518,7 @@ void update_pad() {
      p.buttons &= ~(kRaisePlus | kRaiseMinus | kWalk | (kStick * 0xF));
      int ww = 0, wh = 0;
      SDL_GetWindowSize(win, &ww, &wh);                        // mouse coordinates are in window units
@@ -4008,7 +4045,7 @@ index 5726093..7bcf978 100644
          // -1..1 spans the picture as present() shows it, so that the game's
          // cursor lands under the mouse
          Rect r = picture_rect((float)ww, (float)wh);
-@@ -1261,12 +1581,19 @@ void update_pad() {
+@@ -1261,12 +1593,19 @@ void update_pad() {
      for (int i = 0; i < 4; ++i)
          if (chan_pad[i] && !(i == 0 && mode == INPUT_MODE_KEYBOARD)) merge(c[i], classic_from_pad(chan_pad[i]));
      update_rumble();
@@ -4028,7 +4065,7 @@ index 5726093..7bcf978 100644
      ++cnt.presents;
      int ww = 0, wh = 0;
      SDL_GetWindowSizeInPixels(win, &ww, &wh);
-@@ -1275,17 +1602,17 @@ void present() {
+@@ -1275,17 +1614,17 @@ void present() {
      glColorMask(1, 1, 1, 1);
      glClearColor(0, 0, 0, 1);
      glClear(GL_COLOR_BUFFER_BIT);
@@ -4049,7 +4086,7 @@ index 5726093..7bcf978 100644
      if (opt.dump_dir && cnt.presents % (uint64_t)opt.dump_every == 0 && ww > 0 && wh > 0) {
          std::vector<uint8_t> px((size_t)ww * wh * 4), flip(px.size());   // the window, as shown
          glReadPixels(0, 0, ww, wh, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
-@@ -1317,7 +1644,6 @@ void setup() {
+@@ -1317,7 +1656,6 @@ void setup() {
      glNamedFramebufferTexture(efb_fbo, GL_DEPTH_ATTACHMENT, efb_dep, 0);
      if (glCheckNamedFramebufferStatus(efb_fbo, GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
          rt_die("video: the EFB framebuffer is incomplete");
@@ -4057,7 +4094,7 @@ index 5726093..7bcf978 100644
      glBindFramebuffer(GL_FRAMEBUFFER, efb_fbo);
      glClearColor(0, 0, 0, 1);
      glClearDepth(1.0);
-@@ -1327,45 +1653,25 @@ void setup() {
+@@ -1327,45 +1665,25 @@ void setup() {
      const GLbitfield map = GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT;
      glNamedBufferStorage(vbo, VBO_CAP, nullptr, map);
      vbo_ptr = static_cast<uint8_t*>(glMapNamedBufferRange(vbo, 0, VBO_CAP, map));
@@ -4120,7 +4157,7 @@ index 5726093..7bcf978 100644
  
      copy_prog = link(FULLSCREEN_VS, COPY_FS);
      if (!copy_prog) rt_die("video: the EFB copy program does not build");
-@@ -1462,6 +1768,13 @@ std::atomic<bool> want_relative{false};
+@@ -1462,6 +1780,13 @@ std::atomic<bool> want_relative{false};
  std::mutex motion_mx;
  float motion_x = 0, motion_y = 0;
  void video_set_relative_mouse(bool on) { want_relative = on; }
@@ -4134,7 +4171,7 @@ index 5726093..7bcf978 100644
  void video_take_mouse_motion(float& dx, float& dy) {
      std::lock_guard<std::mutex> lk(motion_mx);
      dx = motion_x; dy = motion_y;
-@@ -1479,6 +1792,7 @@ ClassicState video_classic(int chan) {
+@@ -1479,6 +1804,7 @@ ClassicState video_classic(int chan) {
  void video_set_rumble(int chan, bool on) {
      if (chan >= 0 && chan < 4) rumble_want[chan] = on;
  }
@@ -4142,7 +4179,7 @@ index 5726093..7bcf978 100644
  void video_retrace() {
      retraces.fetch_add(1);
      if (wake) SDL_SignalSemaphore(wake);
-@@ -1506,6 +1820,7 @@ void video_run(const char* title) {
+@@ -1506,6 +1832,7 @@ void video_run(const char* title) {
      SDL_GL_MakeCurrent(win, ctx);
      SDL_GL_SetSwapInterval(0);                   // VI paces the presents
      if (!gl_load()) rt_die("video: OpenGL functions missing");
@@ -4150,7 +4187,7 @@ index 5726093..7bcf978 100644
      rt_log("video: %s, %s", (const char*)glGetString(GL_RENDERER), (const char*)glGetString(GL_VERSION));
      if (debug) {
          glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
-@@ -1529,11 +1844,15 @@ void video_run(const char* title) {
+@@ -1529,11 +1856,15 @@ void video_run(const char* title) {
      uint64_t frames_then = 0;
      uint32_t seen = retraces.load();
      std::string base_title = title;
@@ -4166,7 +4203,7 @@ index 5726093..7bcf978 100644
              if (e.type == SDL_EVENT_GAMEPAD_ADDED) pad_added(e.gdevice.which);
              if (e.type == SDL_EVENT_GAMEPAD_REMOVED) pad_removed(e.gdevice.which);
              // F11 or Alt+Enter: fullscreen and back
-@@ -1592,7 +1911,14 @@ void video_run(const char* title) {
+@@ -1592,7 +1923,14 @@ void video_run(const char* title) {
                  double vtx = ms(g_vperf.vtx), tex = ms(g_vperf.tex), wait = ms(g_vperf.wait), draw = ms(g_vperf.draw),
                         pres = ms(g_vperf.present);
                  rt_log("perf: %.1f fps; frame %.1f ms; game thread: vertices %.1f, textures %.1f, waiting for the renderer %.1f; "
@@ -4182,7 +4219,7 @@ index 5726093..7bcf978 100644
              }
              frames_then = cnt.frames;
              t_title = now;
-@@ -1608,6 +1934,8 @@ void video_run(const char* title) {
+@@ -1608,6 +1946,8 @@ void video_run(const char* title) {
              }
              if (c.readback) { if (c.copy) copy_readback(c.copy); else efb_readback(); busy = true; continue; }
              auto te = Clock::now();
@@ -4191,7 +4228,7 @@ index 5726093..7bcf978 100644
              exec(c.data);
              if (g_vperf_on) g_vperf.draw += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - te).count();
              {
-@@ -1621,6 +1949,17 @@ void video_run(const char* title) {
+@@ -1621,6 +1961,17 @@ void video_run(const char* title) {
              if (retraces.load() != seen) break;
          }
          uint32_t r = retraces.load();
@@ -4210,7 +4247,7 @@ index 5726093..7bcf978 100644
              seen = r;
              auto tp = Clock::now();
 diff --git a/runtime/video.h b/runtime/video.h
-index ecfb499..db43997 100644
+index ecfb499..5406cf8 100644
 --- a/runtime/video.h
 +++ b/runtime/video.h
 @@ -3,7 +3,7 @@
@@ -4236,7 +4273,7 @@ index ecfb499..db43997 100644
  //   TEXUP   u8 map, u32 id, u16 w, u16 h, u8 levels, RGBA8 pixels of every level
  //   TEXBIND u8 map, u32 id
  //   TEXEFB  u8 map, u32 address: the EFB copy made to that address
-@@ -25,17 +30,38 @@
+@@ -25,17 +30,41 @@
  #include <string>
  #include <vector>
  
@@ -4265,7 +4302,10 @@ index ecfb499..db43997 100644
 +enum : uint8_t { VC_BP = 1, VC_XF, VC_DRAW, VC_TEXUP, VC_TEXBIND, VC_TEXEFB, VC_FRAME, VC_DRAWDONE,
 +                 // a texture made of several EFB copies in memory: map (u8), its address (u32),
 +                 // width, height (u16), pieces (u8), then each piece's address (u32) and first row (u16), oldest first
-+                 VC_TEXEFBN, VC_VTXUP, VC_DRAWS };
++                 VC_TEXEFBN, VC_VTXUP, VC_DRAWS,
++                 // the EFB copy last made at an address at this size, a later one of another size
++                 // there notwithstanding: map (u8), address (u32), width, height (u16)
++                 VC_TEXEFBS };
 +constexpr uint32_t VTX_STATIC_CAP = 192u << 20;      // the static vertex buffer: gx.cpp gives its room out
 +enum : uint8_t { VTX_COL0 = 1, VTX_COL1 = 2, VTX_NRM = 4, VTX_NBT = 8,
 +                 VTX_ATTRS = 0x0F,                   // what the shaders are made from
@@ -4284,7 +4324,7 @@ index ecfb499..db43997 100644
  
  // video.cpp
  bool video_enabled();                       // false with --no-video: the stream is parsed only
-@@ -98,6 +124,31 @@ void video_set_rumble(int chan, bool on);
+@@ -98,6 +127,31 @@ void video_set_rumble(int chan, bool on);
  void video_set_relative_mouse(bool on);
  void video_take_mouse_motion(float& dx, float& dy);
  
