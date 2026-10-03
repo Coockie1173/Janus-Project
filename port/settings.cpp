@@ -1,7 +1,7 @@
 // GoldenEye 007 — the settings menu (F1), drawn the way the game draws its own
 // menus: the cream lines, the blue bars, the white bar under the cursor.
 //
-// Three pages: the screen (the field of view), the controls (the mouse, the
+// Three pages: the screen (the field of view, a slider), the controls (the mouse, the
 // gamepad) and the key bindings. What is changed counts at once. The field
 // of view and the mouse are kept in the launcher's settings file, the rest in
 // the runtime's key file ([Classic Controller]: only the lines changed here
@@ -168,6 +168,8 @@ struct Row {
     std::function<void()> select;
     std::function<void()> clear;                     // Delete
     bool binding = false;                            // the value is a list of keys, not something to step through
+    std::function<float()> slider;                   // a slider's row: where its knob is, 0..1
+    std::function<void(float)> slide;                // and the knob dragged there
 };
 struct Page { std::string title; std::vector<Row> rows; };
 
@@ -176,6 +178,7 @@ std::vector<Page> g_pages;
 int g_page = kRoot, g_row = 0, g_scroll = 0;
 int g_root_row = 0;                                  // where the cursor was on the first page
 int g_listening = -1;                                // the binding row waiting for a key
+int g_dragging = -1;                                 // the slider row the mouse has by the knob
 bool g_dirty = false;                                // the launcher's file is to be written
 
 template <size_t N> int index_of(const char* const (&names)[N], const std::string& v, int otherwise) {
@@ -200,7 +203,7 @@ void go(int page, int row = 0) {
     g_page = page;
     g_row = row;
     g_scroll = 0;
-    g_listening = -1;
+    g_listening = g_dragging = -1;
 }
 
 void build_pages() {
@@ -215,7 +218,9 @@ void build_pages() {
     screen.title = "Screen Settings";
     screen.rows.push_back({"Field of View", "How wide the view is in play, in degrees. The game's own is 49.",
         [] { return std::to_string((int)fov()); },
-        [](int d) { set_fov(std::clamp(fov() + (float)d, kFovMin, kFovMax)); g_dirty = true; }});
+        [](int d) { set_fov(std::clamp(fov() + (float)d, kFovMin, kFovMax)); g_dirty = true; }, {}, {}, false,
+        [] { return (fov() - kFovMin) / (kFovMax - kFovMin); },
+        [](float f) { set_fov(std::round(kFovMin + f * (kFovMax - kFovMin))); g_dirty = true; }});
     screen.rows.push_back({"Restore Defaults", "Back to the game's own field of view.", {}, {},
         [] { set_fov(kGameFov); g_dirty = true; }});
 
@@ -316,7 +321,7 @@ void open(bool on) {
         load_keys();
         g_page = kRoot;
         g_row = g_scroll = 0;
-        g_listening = -1;
+        g_listening = g_dragging = -1;
         if (in_play())                               // the game's own pause, before the menu takes the input
             g_pause_until = (Clock::now() + std::chrono::milliseconds(150)).time_since_epoch().count();
     } else if (g_dirty) {
@@ -393,6 +398,7 @@ struct Layout {                                      // the game's 1280 x 720 me
     float y(float ref) const { return ref * u; }
 };
 const float kRowLeft = 340, kRowRight = 940, kRowHeight = 38, kRowPitch = 41, kValueWidth = 230;
+const float kSliderLeft = kRowRight - 262, kSliderRight = kRowRight - 66;   // a slider's track, its number after it
 const int kVisible = 8;
 Layout g_layout;
 float rows_top() { return g_pages[g_page].rows.size() > 4 ? 178.0f : 276.0f; }
@@ -472,7 +478,17 @@ void draw_rows(ImDrawList* dl, const Layout& L, const Page& page) {
             text(dl, ImVec2(x1 - 14 * u - text_width(v, vs), ty + (size - vs) * 0.55f), vs, colour, v, !sel);
             continue;
         }
-        float vx1 = x1 - 12 * u, vx0 = vx1 - kValueWidth * u, mid = (y0 + y1) / 2, a = 8 * u;
+        float mid = (y0 + y1) / 2;
+        if (r.slider) {                              // the track, filled up to the knob, and the number
+            float sx0 = L.x(kSliderLeft), sx1 = L.x(kSliderRight), kx = sx0 + (sx1 - sx0) * std::clamp(r.slider(), 0.0f, 1.0f);
+            dl->AddRectFilled(ImVec2(sx0, mid - 2 * u), ImVec2(sx1, mid + 2 * u), fade(colour, 0.35f));
+            dl->AddRectFilled(ImVec2(sx0, mid - 4 * u), ImVec2(kx, mid + 4 * u), colour);
+            dl->AddRectFilled(ImVec2(kx - 4 * u, mid - 13 * u), ImVec2(kx + 4 * u, mid + 13 * u), colour);
+            float vs = 28 * u;
+            text(dl, ImVec2(x1 - 14 * u - text_width(v, vs), ty + (size - vs) * 0.55f), vs, colour, v, !sel);
+            continue;
+        }
+        float vx1 = x1 - 12 * u, vx0 = vx1 - kValueWidth * u, a = 8 * u;
         float vs = fit(v, 28 * u, (kValueWidth - 50) * u);
         text(dl, ImVec2((vx0 + vx1 - text_width(v, vs)) / 2, ty + (size - vs) * 0.55f), vs, colour, v, !sel);
         if (sel) {
@@ -503,12 +519,25 @@ int row_at(float x, float y) {
     return i < (int)g_pages[g_page].rows.size() ? i : -1;
 }
 
+void drag(float x) {
+    const Layout& L = g_layout;
+    float f = (x - L.x(kSliderLeft)) / (L.x(kSliderRight) - L.x(kSliderLeft));
+    g_pages[g_page].rows[g_dragging].slide(std::clamp(f, 0.0f, 1.0f));
+}
+
 void click(float x, float y) {
     int i = row_at(x, y);
     if (i < 0) return;
     g_row = i;
     Row& r = g_pages[g_page].rows[i];
     if (r.select || !r.adjust) { select(); return; }
+    if (r.slide) {                                   // on the track: the knob comes to the mouse, and follows it
+        if (x >= g_layout.x(kSliderLeft) - 12 * g_layout.u && x <= g_layout.x(kSliderRight) + 12 * g_layout.u) {
+            g_dragging = i;
+            drag(x);
+        }
+        return;
+    }
     float vx1 = g_layout.x(kRowRight) - 12 * g_layout.u, vx0 = vx1 - kValueWidth * g_layout.u;
     if (x >= vx0 - 10 * g_layout.u) r.adjust(x < (vx0 + vx1) / 2 ? -1 : 1);
 }
@@ -609,7 +638,9 @@ bool settings_event(const SDL_Event* e) {
         case SDL_EVENT_KEY_UP: case SDL_EVENT_TEXT_INPUT:
             return true;
         case SDL_EVENT_MOUSE_MOTION:
-            if (int i = row_at(e->motion.x, e->motion.y); i >= 0 && g_listening < 0) g_row = i;
+            if (!(e->motion.state & SDL_BUTTON_LMASK)) g_dragging = -1;   // let go where the window did not see it
+            if (g_dragging >= 0) drag(e->motion.x);
+            else if (int i = row_at(e->motion.x, e->motion.y); i >= 0 && g_listening < 0) g_row = i;
             return true;
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
             if (g_listening >= 0) {
@@ -618,6 +649,7 @@ bool settings_event(const SDL_Event* e) {
             else if (e->button.button == SDL_BUTTON_RIGHT) back();
             return true;
         case SDL_EVENT_MOUSE_BUTTON_UP:
+            g_dragging = -1;
             return true;
         case SDL_EVENT_MOUSE_WHEEL:
             if (g_listening < 0 && e->wheel.y != 0) {
