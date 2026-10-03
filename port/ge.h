@@ -6,6 +6,7 @@
 //   fov.cpp          the field of view (GE_FOV)
 //   gecko.cpp        Gecko codes run each frame (GE_GECKO, GE_GECKO_EXTRA)
 //   cutscenes.cpp    skip cutscenes: a mission starts past its opening (GE_SKIP_CUTSCENES)
+//   tweaks.cpp      the level timer, the unused extras menu (GE_LEVEL_TIMER, GE_EXTRAS_MENU)
 //   native.cpp       the engine's hot math routines written for the host (GE_NATIVE)
 //   net.cpp          the hosts file for the game's servers (GE_HOSTS, GE_NETLOG)
 //   overlay.cpp      the debug overlay (F3): memory watches from a .dmw file (dmw.cpp)
@@ -69,6 +70,12 @@ void install_native();                               // native.cpp
 void install_cutscenes();                            // cutscenes.cpp
 bool skip_cutscenes();                               // a mission starts at the checkpoint after its opening
 void set_skip_cutscenes(bool on);
+void install_tweaks();                               // tweaks.cpp
+void tweaks_apply();
+bool level_timer();                                  // the hud shows the level's time
+void set_level_timer(bool on);
+bool extras_menu();                                  // the cheat: the menu's unused extras page
+void set_extras_menu(bool on);
 void install_overlay();                              // overlay.cpp
 bool overlay_open();                                 // the watches or the settings menu: the mouse is free
 bool settings_open();                                // settings.cpp

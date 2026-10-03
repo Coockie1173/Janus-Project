@@ -83,7 +83,8 @@ void save_launch_settings() {
         {"LAUNCH_FOV", fov_text}, {"LAUNCH_MOUSE", mouse_text},
         {"LAUNCH_MOUSEMODE", modes[mouse_mode()]}, {"LAUNCH_MOUSEINVERT", mouse_invert() ? "1" : "0"},
         {"LAUNCH_MOUSEEVERYWHERE", mouse_everywhere() ? "1" : "0"},
-        {"LAUNCH_SKIPCUTSCENES", skip_cutscenes() ? "1" : "0"}};
+        {"LAUNCH_SKIPCUTSCENES", skip_cutscenes() ? "1" : "0"},
+        {"LAUNCH_LEVELTIMER", level_timer() ? "1" : "0"}, {"LAUNCH_EXTRASMENU", extras_menu() ? "1" : "0"}};
     if (g_fps_changed) values.push_back({"LAUNCH_FPS", std::to_string(fps_limit())});   // "auto" kept until it is changed
     auto lines = read_lines(GE_SETTINGS_FILE);
     if (lines.empty()) lines.push_back("# written by the launcher, read when the game is started");
@@ -336,12 +337,18 @@ void build_pages() {
     enhancements.rows.push_back({"Skip Cutscenes", "On: a mission starts at the checkpoint after its opening cutscene.",
         [] { return std::string(skip_cutscenes() ? "On" : "Off"); },
         [](int) { set_skip_cutscenes(!skip_cutscenes()); g_dirty = true; }});
+    enhancements.rows.push_back({"Level Timer", "On: the hud shows the time played in the level.",
+        [] { return std::string(level_timer() ? "On" : "Off"); },
+        [](int) { set_level_timer(!level_timer()); g_dirty = true; }});
 
     Page& cheats = g_pages[kCheats];
     cheats.title = "Cheats";
     cheats.rows.push_back({"Always Enable Mouse", "On: the mouse turns the view where the game locks it: cutscenes, melee, climbing, death.",
         [] { return std::string(mouse_everywhere() ? "On" : "Off"); },
         [](int) { set_mouse_everywhere(!mouse_everywhere()); g_dirty = true; }});
+    cheats.rows.push_back({"Unused Extras Menu", "On: Extras also lists Mission Select, Character Viewer, Movies and the Calibration Menu.",
+        [] { return std::string(extras_menu() ? "On" : "Off"); },
+        [](int) { set_extras_menu(!extras_menu()); g_dirty = true; }});
 }
 
 // The key or mouse button pressed for the action that is listening: on that

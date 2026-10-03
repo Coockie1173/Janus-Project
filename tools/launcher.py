@@ -50,7 +50,8 @@ ACTIONS = [
     ("Move left", "Left Stick Left"), ("Move right", "Left Stick Right"),
 ]
 DEFAULTS = {"fps": "auto", "fov": "49", "mouse": "1.0", "online": "1", "fullscreen": "0", "faststart": "0", "mousemode": "auto",
-            "mouseinvert": "0", "mouseeverywhere": "0", "skipcutscenes": "0", "crashdump": "1", "crashmem": "0"}
+            "mouseinvert": "0", "mouseeverywhere": "0", "skipcutscenes": "0", "leveltimer": "1", "extrasmenu": "0",
+            "crashdump": "1", "crashmem": "0"}
 
 # Tk's key names -> SDL's (the key file's)
 TK_TO_SDL = {
@@ -368,6 +369,10 @@ def run_gui():
     ttk.Checkbutton(en, text="Skip Cutscenes", variable=skip_cutscenes).grid(row=0, column=0, sticky="w", **pad)
     ttk.Label(en, text="A mission starts at the checkpoint after its opening cutscene.",
               foreground="gray", wraplength=520, justify="left").grid(row=1, column=0, sticky="w", padx=(30, 8))
+    level_timer = tk.BooleanVar(value=settings["leveltimer"] == "1")
+    ttk.Checkbutton(en, text="Level Timer", variable=level_timer).grid(row=2, column=0, sticky="w", **pad)
+    ttk.Label(en, text="The hud shows the time played in the level.",
+              foreground="gray", wraplength=520, justify="left").grid(row=3, column=0, sticky="w", padx=(30, 8))
 
     # -- cheats
     #the tab just lists whatever is in config/gecko/cheats.txt, so adding a cheat is adding it to that file
@@ -376,20 +381,24 @@ def run_gui():
     cheats = load_cheats(CHEATS)
     already_on = {name for name, _, _ in load_cheats(CHEATS_ON)}
     cheat_vars = {}
-    # the port's own cheat (the F1 menu's Cheats page has it too), then the Gecko codes
+    # the port's own cheats (the F1 menu's Cheats page has them too), then the Gecko codes
     always_mouse = tk.BooleanVar(value=settings["mouseeverywhere"] == "1")
     ttk.Checkbutton(ch, text="Always Enable Mouse", variable=always_mouse).grid(row=0, column=0, sticky="w", **pad)
     ttk.Label(ch, text="The mouse turns the view where the game locks it: cutscenes, melee, climbing, death.",
               foreground="gray", wraplength=520, justify="left").grid(row=1, column=0, sticky="w", padx=(30, 8))
+    extras_menu = tk.BooleanVar(value=settings["extrasmenu"] == "1")
+    ttk.Checkbutton(ch, text="Unused Extras Menu", variable=extras_menu).grid(row=2, column=0, sticky="w", **pad)
+    ttk.Label(ch, text="Extras also lists Mission Select, Character Viewer, Movies and the Calibration Menu.",
+              foreground="gray", wraplength=520, justify="left").grid(row=3, column=0, sticky="w", padx=(30, 8))
     ttk.Label(ch, text="Gecko codes from config/gecko/cheats.txt. They apply the next time the game starts.",
-              justify="left").grid(row=2, column=0, sticky="w", **pad)
+              justify="left").grid(row=4, column=0, sticky="w", **pad)
     for i, (name, code, notes) in enumerate(cheats):
         cheat_vars[name] = tk.BooleanVar(value=name in already_on)
-        ttk.Checkbutton(ch, text=name, variable=cheat_vars[name]).grid(row=3 + 2 * i, column=0, sticky="w", **pad)
+        ttk.Checkbutton(ch, text=name, variable=cheat_vars[name]).grid(row=5 + 2 * i, column=0, sticky="w", **pad)
         ttk.Label(ch, text="\n".join(notes) or "  ".join(code), foreground="gray", wraplength=520,
-                  justify="left").grid(row=4 + 2 * i, column=0, sticky="w", padx=(30, 8))
+                  justify="left").grid(row=6 + 2 * i, column=0, sticky="w", padx=(30, 8))
     if not cheats:
-        ttk.Label(ch, text="No cheats in there yet.").grid(row=3, column=0, sticky="w", **pad)
+        ttk.Label(ch, text="No codes in there yet.", foreground="gray").grid(row=5, column=0, sticky="w", **pad)
 
     # -- play
     result = {"play": False}
@@ -405,6 +414,8 @@ def run_gui():
         settings["crashmem"] = "1" if crashmem.get() else "0"
         settings["mouseeverywhere"] = "1" if always_mouse.get() else "0"
         settings["skipcutscenes"] = "1" if skip_cutscenes.get() else "0"
+        settings["leveltimer"] = "1" if level_timer.get() else "0"
+        settings["extrasmenu"] = "1" if extras_menu.get() else "0"
         settings["mousemode"] = next((k for k, v in modes.items() if v == mousemode.get()), "auto")
         save_settings(settings)
         save_keys(lines, binds)
@@ -525,6 +536,10 @@ def run_game(args):
             s["mouseeverywhere"] = "1"
         elif a == "--skip-cutscenes":
             s["skipcutscenes"] = "1"
+        elif a == "--no-level-timer":
+            s["leveltimer"] = "0"
+        elif a == "--extras-menu":
+            s["extrasmenu"] = "1"
         elif a == "--fast-start":
             s["faststart"] = "1"
         elif a == "--cheats":
@@ -542,7 +557,8 @@ def run_game(args):
         s["fps"] = str(FPS_MAX)
     for var, key in (("GE_FPS", "fps"), ("GE_FOV", "fov"), ("GE_MOUSE", "mouse"), ("GE_MOUSE_MODE", "mousemode"),
                      ("GE_MOUSE_INVERT", "mouseinvert"), ("GE_MOUSE_EVERYWHERE", "mouseeverywhere"),
-                     ("GE_SKIP_CUTSCENES", "skipcutscenes")):
+                     ("GE_SKIP_CUTSCENES", "skipcutscenes"), ("GE_LEVEL_TIMER", "leveltimer"),
+                     ("GE_EXTRAS_MENU", "extrasmenu")):
         env.setdefault(var, s[key])
     if s["faststart"] == "1":
         extra.append("config/gecko/faststart.txt")

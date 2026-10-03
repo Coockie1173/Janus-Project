@@ -18,6 +18,8 @@
 //     GE_MOUSE_INVERT=1  the mouse pushed forward looks down
 //     GE_MOUSE_EVERYWHERE=1  the cheat: mouse look in every player state
 //     GE_SKIP_CUTSCENES=1  a mission starts at the checkpoint after its opening cutscene
+//     GE_LEVEL_TIMER=0  no level timer in the hud (it is on by default)
+//     GE_EXTRAS_MENU=1  the cheat: the menu's unused extras page
 //     GE_SETTINGS=N  start with the settings menu (F1, settings.cpp) up, on its page N
 //     GE_FPS=N     the frame rate the engine may reach (default: its own 30); auto: 60
 //     GE_NATIVE=0  the engine's math routines as recompiled, not the host versions (check: compare them)
@@ -33,6 +35,7 @@ namespace ge {
 void each_frame(uint32_t frame) {
     crash_test();
     gecko_apply();
+    tweaks_apply();
     fov_apply();
     mouse_frame(frame);
 }
@@ -51,6 +54,7 @@ void install() {
     install_fps();
     install_native();
     install_cutscenes();
+    install_tweaks();
     if (std::getenv("GE_TRACE")) {
         orig_main = ppc_hook("main", [](PPCContext& c) {
             rt_log("goldeneye: main() reached");
