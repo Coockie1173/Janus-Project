@@ -7,7 +7,7 @@
 Samples are program counters as offsets in build/out/wiiboot; recompiled
 functions (f_XXXXXXXX, orig_XXXXXXXX) are shown with their guest names.
 --last N keeps only the last N samples (the end of the run: the scene reached).
---inclusive: the busiest thread's functions by the time spent in them and in what
+--inclusive: the game thread's functions by the time spent in them and in what
 they call (from FILE.stacks, the call stack at each sample).
 """
 import argparse, bisect, collections, os, struct, subprocess
@@ -84,7 +84,9 @@ if a.inclusive:
         if len(p) > 5 and os.path.realpath(p[5]) == os.path.realpath(a.exe):
             lo, hi = (int(x, 16) for x in p[0].split("-"))
             exe_lo, exe_hi = (min(exe_lo, lo) if exe_lo else lo), max(exe_hi, hi)
-    tid = threads.most_common(1)[0][0]
+    # the game's thread is the one running recompiled code, not always the busiest one
+    game = collections.Counter(t for t, o in pairs if name_of(o).startswith(("f_", "orig_")))
+    tid = (game or threads).most_common(1)[0][0]
     inc, n = collections.Counter(), 0
     for (t, off), chain in zip(pairs, stacks):
         if t != tid:

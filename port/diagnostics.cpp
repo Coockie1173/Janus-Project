@@ -52,6 +52,7 @@ void install_crash_handler() {
 // any other), for the time a function takes with what it calls. FILE.maps
 // says where the libraries are.
 extern "C" char __executable_start;
+extern "C" char _end;
 std::atomic<uint32_t> g_nsamples{0};
 uint32_t* g_samples = nullptr;
 const uint32_t kMaxSamples = 4u << 20;
@@ -63,7 +64,10 @@ void on_prof(int, siginfo_t*, void* uc) {
     uint32_t i = g_nsamples.fetch_add(2, std::memory_order_relaxed);
     if (i + 1 < kMaxSamples) {                       // pairs: the thread, the offset (outside the executable: a huge one)
         g_samples[i] = (uint32_t)syscall(SYS_gettid);
-        g_samples[i + 1] = (uint32_t)(pc - (uintptr_t)&__executable_start);
+		//anything outside our own image gets one marker value, a library's address cut to
+		//32 bits can land right inside the executable's range and get a function's name
+		const bool Ours{ pc >= (uintptr_t)&__executable_start && pc < (uintptr_t)&_end };
+		g_samples[i + 1] = Ours ? (uint32_t)(pc - (uintptr_t)&__executable_start) : 0xFFFFFFFFu;
         void* frames[kDepth + 3];
         int n = backtrace(frames, kDepth + 3);       // the first ones are this handler and the signal's frame
         uint64_t* st = g_stacks + (size_t)(i / 2) * kDepth;

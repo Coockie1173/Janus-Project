@@ -101,7 +101,7 @@ index 3d2da4e..682aca2 100644
      X(PFNGLVERTEXARRAYELEMENTBUFFERPROC, glVertexArrayElementBuffer)                                \
      X(PFNGLENABLEVERTEXARRAYATTRIBPROC, glEnableVertexArrayAttrib)                                  \
 diff --git a/runtime/gx.cpp b/runtime/gx.cpp
-index a6b37f2..c90d4e3 100644
+index a6b37f2..0477f3e 100644
 --- a/runtime/gx.cpp
 +++ b/runtime/gx.cpp
 @@ -35,6 +35,14 @@
@@ -141,7 +141,7 @@ index a6b37f2..c90d4e3 100644
  // ---- textures --------------------------------------------------------------------------------
  // Decoded textures are cached by what names them (address, format, size,
  // levels, palette) and re-uploaded when their bytes change. Bytes are hashed
-@@ -169,13 +192,14 @@ struct TexKeyHash {
+@@ -169,14 +192,20 @@ struct TexKeyHash {
          return (size_t)(k.addr * 0x9E3779B1u ^ k.shape * 0x85EBCA77u ^ k.levels ^ k.tlut);
      }
  };
@@ -156,9 +156,15 @@ index a6b37f2..c90d4e3 100644
 +struct CopyRec { size_t size; uint64_t hash; uint32_t fmt; int w, h;
 +                 uint32_t gen = 0; bool same = false; };   // whether RAM still holds the copy, looked at once a generation
  std::unordered_map<uint32_t, CopyRec> copies;      // EFB copies to texture, by address
++// Hundreds of textures are bound a frame and a handful are copies: a bit for
++// each address a copy was ever made to (some share one) says when to look.
++uint64_t copy_bits[1024];
++inline uint32_t copy_bit(uint32_t addr) { return addr >> 5 & 0xFFFF; }
++inline bool copy_maybe(uint32_t addr) { return copy_bits[copy_bit(addr) >> 6] >> (copy_bit(addr) & 63) & 1; }
  
  // texture format an EFB copy format produces in RAM (for its size)
-@@ -184,7 +208,11 @@ uint32_t copy_tex_fmt(uint32_t cf) {
+ uint32_t copy_tex_fmt(uint32_t cf) {
+@@ -184,7 +213,11 @@ uint32_t copy_tex_fmt(uint32_t cf) {
      return f[cf & 15];
  }
  
@@ -170,7 +176,7 @@ index a6b37f2..c90d4e3 100644
      uint32_t gen = bp[0x00], used = 0;
      int ntev = (int)(gen >> 10 & 15) + 1, nind = (int)(gen >> 16 & 7);
      for (int s = 0; s < ntev; ++s) {
-@@ -192,7 +220,7 @@ uint32_t used_maps() {
+@@ -192,7 +225,7 @@ uint32_t used_maps() {
          if (t & 0x40) used |= 1u << (t & 7);
      }
      for (int i = 0; i < nind && i < 4; ++i) used |= 1u << (bp[0x27] >> (6 * i) & 7);
@@ -179,12 +185,14 @@ index a6b37f2..c90d4e3 100644
  }
  
  void bind_map(int m) {
-@@ -204,8 +232,42 @@ void bind_map(int m) {
+@@ -203,9 +236,43 @@ void bind_map(int m) {
+     uint32_t fmt = img0 >> 20 & 15, addr = (img3 & 0xFFFFFF) << 5;
      if (img1 >> 21 & 1) warn_once("texture preloaded in TMEM (not modelled), map", m);
  
-     auto c = copies.find(addr);
+-    auto c = copies.find(addr);
 -    if (c != copies.end() && mem_ok(addr, c->second.size) &&
 -        hash_mem(host(virt(addr)), c->second.size) == c->second.hash) {
++    auto c = copy_maybe(addr) ? copies.find(addr) : copies.end();
 +    auto still = [](uint32_t a) -> CopyRec* {       // the copy made to a, if memory still holds it
 +        auto it = copies.find(a);
 +        if (it == copies.end() || !mem_ok(a, it->second.size)) return nullptr;
@@ -199,7 +207,7 @@ index a6b37f2..c90d4e3 100644
 +    // the EFB is lower than the picture it builds there copies it out in
 +    // strips (a 160 x 112 bloom from 80 rows: 80, then 32). The renderer
 +    // puts the strips together.
-+    if (CopyRec* first = still(addr); first && first->w == w && first->h < h) {
++    if (CopyRec* first = c != copies.end() ? still(addr) : nullptr; first && first->w == w && first->h < h) {
 +        struct Piece { uint32_t addr; int row; } pieces[8];
 +        int n = 0, rows = 0;
 +        for (uint32_t a = addr; rows < h && n < 8;) {
@@ -224,7 +232,27 @@ index a6b37f2..c90d4e3 100644
          uint64_t tag = 1ull << 32 | addr;
          if (map_bound[m] != tag) {
              put<uint8_t>(VC_TEXEFB);
-@@ -246,9 +308,17 @@ void bind_map(int m) {
+@@ -224,6 +291,19 @@ void bind_map(int m) {
+         levels = (int)((mode1 >> 8 & 0xFF) + 15) / 16 + 1;
+         if (levels > full) levels = full;
+     }
++    // a texture already looked at since the last invalidate (most binds): only its name is needed
++    if (!gxtex_is_ci(fmt)) {
++        auto seen = tcache.find(TexKey{addr, fmt | (uint32_t)w << 4 | (uint32_t)h << 16, (uint32_t)levels, 0});
++        if (seen != tcache.end() && seen->second.gen == tex_gen) {
++            if (map_bound[m] != seen->second.id) {
++                put<uint8_t>(VC_TEXBIND);
++                put<uint8_t>((uint8_t)m);
++                put<uint32_t>(seen->second.id);
++                map_bound[m] = seen->second.id;
++            }
++            return;
++        }
++    }
+     size_t total = 0;
+     for (int l = 0; l < levels; ++l) total += gxtex_size(fmt, std::max(1, w >> l), std::max(1, h >> l));
+     if (!addr || !mem_ok(addr, total)) { warn_once("texture outside memory at", addr); return; }
+@@ -246,9 +326,17 @@ void bind_map(int m) {
      TexEntry& e = it->second;
      bool upload = false;
      if (fresh || e.gen != tex_gen) {
@@ -245,7 +273,7 @@ index a6b37f2..c90d4e3 100644
          e.gen = tex_gen;
      }
      if (upload) {
-@@ -283,6 +353,7 @@ void bind_map(int m) {
+@@ -283,6 +371,7 @@ void bind_map(int m) {
  }
  
  void sync_textures() {
@@ -253,7 +281,7 @@ index a6b37f2..c90d4e3 100644
      uint32_t todo = used_maps() & tex_dirty;
      for (int m = 0; m < 8; ++m)
          if (todo >> m & 1) bind_map(m);
-@@ -351,11 +422,14 @@ VtxFmt vtx_fmt(int v) {
+@@ -351,11 +440,14 @@ VtxFmt vtx_fmt(int v) {
          f.tc_fmt[i] = t[i][1];
          f.tc_sc[i] = 1.0f / (float)(1u << t[i][2]);
      }
@@ -269,7 +297,7 @@ index a6b37f2..c90d4e3 100644
  }
  
  // bytes per vertex for vertex format `v`
-@@ -378,6 +452,35 @@ int vertex_size(const VtxFmt& f) {
+@@ -378,6 +470,35 @@ int vertex_size(const VtxFmt& f) {
      return n;
  }
  
@@ -305,7 +333,7 @@ index a6b37f2..c90d4e3 100644
  // an attribute's data: in the stream (direct) or in its array (indexed)
  const uint8_t* fetch(uint32_t mode, int arr, int size, const uint8_t*& p, uint32_t sub = 0) {
      if (mode == 1) { const uint8_t* q = p; p += size; return q; }
-@@ -387,52 +490,124 @@ const uint8_t* fetch(uint32_t mode, int arr, int size, const uint8_t*& p, uint32
+@@ -387,52 +508,124 @@ const uint8_t* fetch(uint32_t mode, int arr, int size, const uint8_t*& p, uint32
      return host(virt(cp[0xA0 + arr] + idx * cp[0xB0 + arr] + sub));
  }
  
@@ -460,7 +488,15 @@ index a6b37f2..c90d4e3 100644
          if (video) {
              put<uint8_t>(VC_FRAME);
              ++rec_frames;
-@@ -454,13 +629,15 @@ void bp_write(uint32_t v) {
+@@ -445,6 +638,7 @@ void efb_copy(uint32_t v) {
+     if (v >> 9 & 1) { w = (w + 1) / 2; h = (h + 1) / 2; }
+     uint32_t tpf = v >> 3 & 15, real = tpf / 2 + (tpf & 1) * 8;
+     size_t size = gxtex_size(copy_tex_fmt(real), w, h);
++    copy_bits[copy_bit(dest) >> 6] |= 1ull << (copy_bit(dest) & 63);
+     if (mem_ok(dest, size)) copies[dest] = CopyRec{size, hash_mem(host(virt(dest)), size), copy_tex_fmt(real), w, h};
+     tex_dirty = 0xFF;
+ }
+@@ -454,13 +648,15 @@ void bp_write(uint32_t v) {
      if (reg == 0xFE) { bp_mask = val; return; }
      bp[reg] = (bp[reg] & ~bp_mask) | (val & bp_mask);
      bp_mask = 0xFFFFFF;
@@ -477,7 +513,7 @@ index a6b37f2..c90d4e3 100644
          pe_ctrl |= 8; ++st.done; os_raise();
          return;
      case 0x47: pe_token = (uint16_t)val; return;                      // token
-@@ -504,16 +681,292 @@ void xf_load(uint32_t addr, uint32_t n, const uint8_t* src) {
+@@ -504,16 +700,315 @@ void xf_load(uint32_t addr, uint32_t n, const uint8_t* src) {
  // parse one command at p (n bytes available); returns its length, 0 if incomplete
  size_t parse(const uint8_t* p, size_t n, bool in_dl);
  
@@ -553,12 +589,21 @@ index a6b37f2..c90d4e3 100644
 +    }
 +    uint64_t r = h[0];
 +    for (int j = 1; j < 4; ++j) r = (r ^ h[j]) * k + (r >> 31);
-+    for (; i < n; ++i) r = (r ^ p[i]) * 0x100000001B3ull;
++    for (; i < n; i += 8) {                            // the rest: a word at a time, the last one short
++        uint64_t w = 0;
++        std::memcpy(&w, p + i, std::min<size_t>(8, n - i));
++        r = (r ^ w) * k;
++        r ^= r >> 29;
++    }
 +    return r;
 +}
 +
 +// everything outside the list and the arrays that a vertex is decoded through
++bool sig_stale = true;                               // a CP register written since it was worked out
 +uint64_t dl_signature() {
++    static uint64_t sig = 0;
++    if (!sig_stale) return sig;
++    sig_stale = false;
 +    uint32_t w[4 + 24 + 24];
 +    w[0] = cp[0x30]; w[1] = cp[0x40]; w[2] = cp[0x50]; w[3] = cp[0x60];
 +    std::memcpy(w + 4, cp + 0x70, 8 * 4);
@@ -566,7 +611,7 @@ index a6b37f2..c90d4e3 100644
 +    std::memcpy(w + 20, cp + 0x90, 8 * 4);
 +    std::memcpy(w + 28, cp + 0xA0, 12 * 4);
 +    std::memcpy(w + 40, cp + 0xB0, 12 * 4);
-+    return hash_mem(reinterpret_cast<const uint8_t*>(w), sizeof w);
++    return sig = hash_mem(reinterpret_cast<const uint8_t*>(w), sizeof w);
 +}
 +
 +// a draw being decoded while its list is built: its vertices kept, and the indices it reaches
@@ -683,21 +728,35 @@ index a6b37f2..c90d4e3 100644
 +    }
 +}
 +
-+// the arrays' parts a list just built reaches, hashed; false: too much of them for what it uses
-+bool dl_arrays(DlEntry& e, bool check) {
-+    size_t n = 0;
++// The arrays' parts a list just built reaches, hashed. A game's arrays are
++// often one block of whole vertices (position, normal, colour side by side):
++// parts that overlap or touch are hashed as one, once. False: too much of the
++// arrays for what the list uses, or outside memory.
++bool dl_arrays_build(DlEntry& e) {
++    struct Part { uint64_t lo, hi; } parts[12];
++    int n = 0;
 +    for (int a = 0; a < 12; ++a) {
 +        if (e.lo[a] > e.hi[a]) continue;
 +        uint32_t stride = cp[0xB0 + a], addr = (cp[0xA0 + a] & 0x1FFFFFFF) + e.lo[a] * stride;
 +        uint64_t len = (uint64_t)(e.hi[a] - e.lo[a]) * stride + e.elem[a];
-+        if (!check) {
-+            if (len > 4ull * e.verts[a] * e.elem[a] + 4096 || !mem_ok(addr, len)) return false;
-+            e.arrs.push_back(DlArr{addr, (uint32_t)len, dl_hash(host(virt(addr)), len)});
-+            dl_stat.bytes += len;
-+        } else {
-+            dl_stat.bytes += len;
-+            if (dl_hash(host(virt(addr)), len) != e.arrs[n++].hash) return false;
-+        }
++        if (len > 4ull * e.verts[a] * e.elem[a] + 4096 || !mem_ok(addr, len)) return false;
++        parts[n++] = Part{addr, addr + len};
++    }
++    std::sort(parts, parts + n, [](const Part& x, const Part& y) { return x.lo < y.lo; });
++    for (int i = 0; i < n;) {
++        Part m = parts[i++];
++        while (i < n && parts[i].lo <= m.hi + 64) { m.hi = std::max(m.hi, parts[i].hi); ++i; }
++        if (!mem_ok((uint32_t)m.lo, m.hi - m.lo)) return false;
++        e.arrs.push_back(DlArr{(uint32_t)m.lo, (uint32_t)(m.hi - m.lo), dl_hash(host(virt((uint32_t)m.lo)), m.hi - m.lo)});
++        dl_stat.bytes += m.hi - m.lo;
++    }
++    return true;
++}
++// are they still what they were (the registers are: the signature was compared first)
++bool dl_arrays_same(const DlEntry& e) {
++    for (const DlArr& a : e.arrs) {
++        dl_stat.bytes += a.len;
++        if (dl_hash(host(virt(a.addr)), a.len) != a.hash) return false;
 +    }
 +    return true;
 +}
@@ -724,7 +783,7 @@ index a6b37f2..c90d4e3 100644
 +    }
 +    if (e.state == DlEntry::KEPT) {
 +        dl_stat.bytes += size;
-+        if (e.size == size && e.sig == dl_signature() && e.hash == dl_hash(p, size) && dl_arrays(e, true)) {
++        if (e.size == size && e.sig == dl_signature() && e.hash == dl_hash(p, size) && dl_arrays_same(e)) {
 +            ++dl_stat.kept;
 +            e.fails = 0;
 +            const bool stat = dl_static_on && (e.gen == arena_gen || dl_upload(e));
@@ -767,7 +826,7 @@ index a6b37f2..c90d4e3 100644
 +    dl_parse(p, 0, size);
 +    dl_building = nullptr;
 +    ++dl_stat.built;
-+    if (!e.plain && e.sig == dl_signature() && dl_arrays(e, false)) e.state = DlEntry::KEPT;
++    if (!e.plain && e.sig == dl_signature() && dl_arrays_build(e)) e.state = DlEntry::KEPT;
 +    else {
 +        e = DlEntry{};
 +        e.state = DlEntry::PLAIN;
@@ -775,16 +834,17 @@ index a6b37f2..c90d4e3 100644
      }
  }
  
-@@ -525,6 +978,8 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
+@@ -525,6 +1020,9 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
      case 0x08:
          if (n < 6) return 0;
          cp[p[1]] = be32(p + 2);
 +        vtx_plan_written(p[1]);
++        sig_stale = true;
 +        if (dl_building) dl_building->plain = true;    // the format changes inside the list: not kept
          TRACE("CP %02X %08X\n", p[1], cp[p[1]]);
          return 6;
      case 0x10: {
-@@ -556,8 +1011,9 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
+@@ -556,8 +1054,9 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
      if (op >= 0x80 && op < 0xC0) {
          if (n < 3) return 0;
          uint32_t count = (uint32_t)p[1] << 8 | p[2];
@@ -796,7 +856,7 @@ index a6b37f2..c90d4e3 100644
          if (n < len) return 0;
          ++st.draws;
          st.verts += count;
-@@ -565,45 +1021,18 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
+@@ -565,45 +1064,18 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
          if (video && count) {
              if (bp[0xF1] >> 21 & 7) warn_once("fog (not drawn), type", bp[0xF1] >> 21 & 7);
              if (bp[0xF4] >> 2 & 3) warn_once("Z texture (not drawn), op", bp[0xF4] >> 2 & 3);
@@ -807,10 +867,7 @@ index a6b37f2..c90d4e3 100644
 -                auto t0 = std::chrono::steady_clock::now();
 -                sync_textures();
 -                g_vperf.tex += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count();
-+                uint64_t t0 = perf_ticks();
-+                decode_vertices(f, fl, p + 3, count, out);
-+                perf_vtx += perf_ticks() - t0;
-             } else {
+-            } else {
 -                sync_textures();
 -            }
 -            // VC_DRAW, prim, vertex flags, pieces (u32), then each piece: n (u32), n vertices
@@ -830,15 +887,18 @@ index a6b37f2..c90d4e3 100644
 -                auto t0 = std::chrono::steady_clock::now();
 -                fl = decode_vertices(f, p + 3, count, out);
 -                g_vperf.vtx += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count();
--            } else {
++                uint64_t t0 = perf_ticks();
++                decode_vertices(f, fl, p + 3, count, out);
++                perf_vtx += perf_ticks() - t0;
+             } else {
 -                fl = decode_vertices(f, p + 3, count, out);
--            }
++                decode_vertices(f, fl, p + 3, count, out);
+             }
 -            if (extend && rec[draw_hdr + 2] != fl) {      // other attributes: a draw of its own
 -                const uint8_t hdr[7] = {VC_DRAW, (uint8_t)(op & 0xF8), 0, 0, 0, 0, 0};
 -                rec.insert(rec.begin() + (ptrdiff_t)at, hdr, hdr + sizeof hdr);
 -                draw_hdr = at;
-+                decode_vertices(f, fl, p + 3, count, out);
-             }
+-            }
 -            rec[draw_hdr + 2] = fl;
 -            uint32_t pieces;
 -            std::memcpy(&pieces, &rec[draw_hdr + 3], 4);
@@ -851,7 +911,7 @@ index a6b37f2..c90d4e3 100644
          }
          return len;
      }
-@@ -614,8 +1043,17 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
+@@ -614,8 +1086,17 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
  
  void feed(const uint8_t* b, int n) {
      if (desync) return;
@@ -870,7 +930,7 @@ index a6b37f2..c90d4e3 100644
      while (off < stream.size()) {
          size_t k = parse(stream.data() + off, stream.size() - off, false);
          if (!k) { --st.cmds; break; }
-@@ -729,6 +1167,7 @@ void gx_init() {
+@@ -729,6 +1210,7 @@ void gx_init() {
  // AI's, which start each audio frame's mix, above all. So does this wait.
  // A handler may switch guest threads, and another thread may hand the
  // record over in the meantime.
@@ -878,7 +938,7 @@ index a6b37f2..c90d4e3 100644
  void gx_draw_done_reached() {
      hw_run_locked([] { pe_ctrl |= 8; ++st.done; os_raise(); });
  }
-@@ -738,7 +1177,7 @@ void gx_submit_pending() {
+@@ -738,7 +1220,7 @@ void gx_submit_pending() {
      submit_pending = false;
      while (!rec.empty()) {
          int frames = rec_frames;
@@ -887,7 +947,7 @@ index a6b37f2..c90d4e3 100644
          if (t_ppc && g_ppc_pending.load(std::memory_order_relaxed)) ppc_poll(*t_ppc);
      }
  }
-@@ -768,12 +1207,17 @@ static void gp_run() {
+@@ -768,12 +1250,17 @@ static void gp_run() {
  
  void gx_pipe_burst(const uint8_t* b, int n) {
      uint32_t at = pi_wptr_addr();
@@ -911,7 +971,7 @@ index a6b37f2..c90d4e3 100644
      }
      if (!linked()) return;
      if (held.empty() && !(bp_enabled() && at == bp_addr())) { feed(b, n); return; }
-@@ -861,4 +1305,10 @@ void gx_report() {
+@@ -861,4 +1348,10 @@ void gx_report() {
             (unsigned long long)st.dls, (unsigned long long)st.copies, (unsigned long long)st.frames,
             (unsigned long long)st.done, (unsigned long long)st.uploads, (unsigned long long)st.peeks,
             (unsigned long long)st.readbacks);
