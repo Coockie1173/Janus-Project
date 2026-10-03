@@ -97,6 +97,7 @@ build: wiikit-patch recomp deps
 WIN_OUT   := $(BUILD)/out-win
 win: wiikit-patch recomp deps
 	@sh tools/get_mingw.sh $(BUILD)/deps
+	@sh tools/get_winpy.sh $(BUILD)/deps
 	@[ -f $(BUILD)/deps/sdl3-win/bin/SDL3.dll ] || sh tools/build_sdl3.sh $(BUILD)/deps win
 	cmake -S $(RECOMP) -B $(WIN_OUT) -G Ninja -DCMAKE_TOOLCHAIN_FILE=$(abspath tools/mingw.cmake) \
 	    -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS_RELEASE="$(OPT_BASE)" -DCMAKE_EXE_LINKER_FLAGS=-static \

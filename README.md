@@ -14,7 +14,8 @@ game-agnostic Wii recompiler and runtime, taken as a submodule at `wiikit/`.
 This repository holds tools, names and the port's own layer only: **no game
 data, no executables, no assets**. Extract your own disc into `./game`
 (Dolphin: right-click the game → Properties → Filesystem → Extract Entire
-Disc, or `dolphin-tool extract`), so that `game/sys/main.dol` and
+Disc, or `dolphin-tool extract`), or let the port do it from an image
+(`./launch.sh --extract GoldenEye.rvz`, .iso and .wbfs too), so that `game/sys/main.dol` and
 `game/files/` exist.
 
 ## Status
@@ -39,8 +40,9 @@ make smoke      # 30 s headless boot, log in build/run.log
 `make win` cross-compiles a 64-bit Windows build on Linux (llvm-mingw and
 SDL3 are fetched into `build/deps`) and packs it as
 `build/GoldenEye007-win64.zip`: the executable, `Play.bat` with the settings
-at its top, and `README.txt` (`port/win/`). The disc's files are not in it;
-the player extracts their own into its `game` folder. No online play there
+that opens the same settings window (a Python with Tk is in the package),
+and `README.txt` (`port/win/`). The disc's files are not in it; the player
+takes them out of their own image with the window's "Extract disc...". No online play there
 yet: the runtime's network devices are POSIX only.
 
 The boot ROM fonts and the DSP's resampling table (`font_western.bin`,

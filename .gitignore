@@ -42,3 +42,5 @@ compile_commands.json
 
 # Ghidra project exports hold the game's code
 *.gzf
+/game.extracting/
+/game.old*/

@@ -14,6 +14,8 @@
 #     ./launch.sh --mouse-mode stick   the mouse as right-stick input (auto does this in a game someone
 #                                      else hosts; direct never does)
 #     ./launch.sh --trace              log the mouse's player, its angles and the look state (for a report)
+#     ./launch.sh --extract GAME.rvz   take the game's files out of a disc image (.rvz .iso .wbfs) into ./game
+#                                      and stop; the window's "Extract disc..." does the same
 #     ./launch.sh --offline            no hosts file: the game does not find its servers
 #     ./launch.sh --fullscreen         (and any other option of wiiboot: --window 1920x1080, --input keyboard...)
 # Any option skips the window. Settings are kept in build/settings.env, the keys in build/keys.txt.
@@ -26,6 +28,11 @@
 cd "$(dirname "$0")" || exit 1
 mkdir -p build
 [ -f build/keys.txt ] || cp config/keys.txt build/keys.txt
+
+if [ "$1" = --extract ]; then
+    [ -n "$2" ] || { echo "--extract wants the disc image: ./launch.sh --extract GoldenEye.rvz"; exit 2; }
+    shift; exec python3 tools/extract_disc.py "$@"
+fi
 
 if [ $# -eq 0 ] && command -v python3 >/dev/null; then
     python3 tools/launcher.py

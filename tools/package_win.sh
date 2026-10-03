@@ -23,8 +23,15 @@ done
 cp build/deps/sdl3-win/share/licenses/SDL3/LICENSE.txt "$S/licenses/SDL3.txt"
 cp wiikit/LICENSE "$S/licenses/wiikit.txt" 2>/dev/null || true
 cp build/deps/llvm-mingw/LICENSE.TXT "$S/licenses/llvm-mingw-runtime.txt"
+# the window before the game and the disc extraction: the launcher, wiikit's disc readers, a Python to run them
+mkdir -p "$S/launcher/wiikit"
+cp tools/launcher.py tools/extract_disc.py "$S/launcher/"
+cp wiikit/disc.py wiikit/rvz.py wiikit/aes.py "$S/launcher/wiikit/"
+: > "$S/launcher/wiikit/__init__.py"
+cp -r build/deps/winpy/python "$S/python"
+cp "$S/python/LICENSE.txt" "$S/licenses/python.txt"
 # Windows line ends for what Notepad and cmd read
 for f in Play.bat README.txt; do sed 's/$/\r/' "port/win/$f" > "$S/$f"; done
-printf 'Extract your GoldenEye 007 (SJBE52) disc here, so that this folder holds sys\\main.dol and files\\.\r\nSee README.txt.\r\n' > "$S/game/PUT YOUR DISC HERE.txt"
+printf 'The game goes here: Play.bat, then "Extract disc..." and pick your GoldenEye 007 (SJBE52) image.\r\nWhen it is done this folder holds sys\\main.dol and files\\. See README.txt.\r\n' > "$S/game/PUT YOUR DISC HERE.txt"
 (cd build/win && zip -q -r -9 "../$NAME.zip" "$NAME")
 echo "build/$NAME.zip: $(du -h build/$NAME.zip | cut -f1)"

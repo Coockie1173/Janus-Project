@@ -20,18 +20,13 @@ Setting it up (once)
 1. Unzip this whole folder somewhere you can write to (not Program Files),
    for instance C:\Games\GoldenEye007.
 
-2. Extract the disc into the "game" folder. With Dolphin (dolphin-emu.org):
-       - add the folder holding your disc image to Dolphin's game list,
-       - right-click GoldenEye 007 -> Properties -> Filesystem tab,
-       - right-click "Data Partition" -> Extract Entire Partition...,
-       - choose this package's "game" folder.
-   When it is right, these exist:
-       game\sys\main.dol
-       game\files\        (many .000 / .bin files and a Movies folder)
-   If Dolphin made a DATA folder (game\DATA\sys\...), move what is inside DATA
-   up into "game".
+2. Double-click Play.bat. A small window opens.
 
-3. Double-click Play.bat.
+3. Click "Extract disc..." and pick your disc image. The game's files are
+   taken out of it into the "game" folder (about 4 GB; under a minute from
+   an SSD). This is needed once.
+
+4. Click Play.
 
 The first start takes a little longer and may stutter for a moment while the
 shaders are made; they are kept in the "shadercache" folder for next time.
@@ -60,26 +55,36 @@ Delete it to get the defaults back (a copy is in config\keys.txt).
 
 Settings
 --------
-Open Play.bat with Notepad (right-click -> Edit). The lines at the top set the
-frame rate, field of view, mouse sensitivity, fullscreen, a faster start and
-cheats. Options of the game itself can go after Play.bat on a command line:
-    Play.bat --window 1920x1080
-    Play.bat --input keyboard
+The window Play.bat opens has them: frame rate, field of view, mouse
+sensitivity and mode, fullscreen, a quicker start; the Controls tab rebinds
+every action (Set, then press a key or a mouse button); the Cheats tab lists
+the codes in config\gecko\cheats.txt.
+
+From a command line, any option skips the window:
+    Play.bat --no-gui                  start with what was saved
+    Play.bat --fps 120 --fov 70 --mouse 1.5 --fullscreen
+    Play.bat --extract D:\GoldenEye.rvz
+    Play.bat --window 1920x1080        (options of the game itself pass through)
 
 
 Where things are
 ----------------
     nand\           your saves and profiles (made on the first start). Back this up.
     keys.txt        key bindings
+    settings.env    what the settings window saved
     run.log         the log of the last run
     shadercache\    compiled shaders; safe to delete
     config\         Gecko codes, cheats, the server list, function names for the log
+    launcher\, python\   the settings window and the disc extraction, and what runs them
 
 
 If something goes wrong
 -----------------------
-- "game\sys\main.dol was not found": step 2 above is not done, or the files sit
-  one folder too deep.
+- "The game's files are missing": Extract disc... has not been done yet. If you
+  extracted with Dolphin instead, game\sys\main.dol and game\files\ must exist
+  (move what is inside a DATA folder up into "game").
+- Extract disc... says the image is another game: only the US version (SJBE52)
+  works with this build.
 - A window that closes at once, or a black one: update the graphics driver. On
   a laptop, make GoldenEye.exe use the dedicated graphics card (Windows
   Settings -> Display -> Graphics).
@@ -93,12 +98,13 @@ Not in this build
 -----------------
 - Online play: the network part is not ported to Windows yet. Everything
   offline (campaign, split-screen) is there.
-- The settings window and the crash-dump folders of the Linux version.
+- The crash-dump folders of the Linux version.
 
 
 Credits
 -------
-Built on wiikit (MIT) and SDL3 (zlib license, licenses\SDL3.txt). The fonts in
+Built on wiikit (MIT) and SDL3 (zlib license); the launcher runs on Python with
+Tk and pycryptodome. Their licenses are in licenses\. The fonts in
 "fonts" are Dolphin's free replacements for the console's (licenses\ has the note).
 GoldenEye 007 is the property of its owners; this package contains none of its
 data files.
