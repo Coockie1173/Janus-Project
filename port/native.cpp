@@ -71,7 +71,8 @@ struct Routine {
     const char* name;
     PPCFunc native;
     uint32_t (*out)(const PPCContext&, uint32_t* len);   // where it writes (for the check)
-    int kind;                                            // 0 floats, 1 skinned vertices, 2 words
+    int kind;                                            // 0 floats, 1 skinned vertices, 2 words; +8: no result in r3
+    uint32_t state = 0, state_len = 0;                   // bytes it reads and changes: put back between the two runs
     PPCFunc orig = nullptr;
     uint64_t calls = 0, differ = 0;
 };
@@ -229,6 +230,128 @@ void segment_closest(PPCContext& c) {
     c.r[3] = 2;
 }
 
+// ---- ge_matrix_flush (80297E80) ----------------------------------------------------------------
+//the renderer keeps its matrices in one block at 80641F60, 0x40 apart: three "outer" ones
+//(A0..A2), the model matrix M and another one N, then the products P = A * M and Q = P * N.
+//dirty bytes at 806EC2BC.. say which products to redo. called for pretty much every object
+//drawn, and recompiled it is six 4x4 multiplies in emulated paired singles.
+const uint32_t kMtxBlock = 0x80641F60;
+const uint32_t kMtxDirty = 0x806EC2BC;               //+0 the Qs, +1 everything, +2 P0, +3 P1, +5 P2
+
+void MatrixMultiply(uint32_t out, uint32_t a, uint32_t m)
+{
+	//column by column, the same order the game's paired-single code adds things up in
+	float A[16], M[16], O[16];
+	for (int i = 0; i < 16; ++i)
+	{
+		A[i] = F(a + 4 * i);
+		M[i] = F(m + 4 * i);
+	}
+	for (int col = 0; col < 4; ++col)
+	{
+		for (int row = 0; row < 4; ++row)
+		{
+			O[4 * col + row] = madd(A[12 + row], M[4 * col + 3],
+				madd(A[8 + row], M[4 * col + 2], madd(A[4 + row], M[4 * col + 1], A[row] * M[4 * col])));
+		}
+	}
+	for (int i = 0; i < 16; ++i)
+	{
+		S(out + 4 * i, O[i]);
+	}
+}
+
+void MatrixFlush(PPCContext&)
+{
+	const bool All{ ld8r(kMtxDirty + 1) != 0 };
+	const uint32_t M{ kMtxBlock + 0xC0 }, N{ kMtxBlock + 0x100 };
+	const uint32_t DirtyAt[3] = { kMtxDirty + 2, kMtxDirty + 3, kMtxDirty + 5 };
+	bool Redone[3] = {};
+	for (int i = 0; i < 3; ++i)
+	{
+		if (ld8r(DirtyAt[i]) != 0 || All)
+		{
+			MatrixMultiply(kMtxBlock + 0x180 + 0x40 * i, kMtxBlock + 0x40 * i, M);
+			Redone[i] = true;
+			st8r(DirtyAt[i], 0);
+		}
+	}
+	st8r(kMtxDirty + 1, 0);
+	const bool AllQ{ ld8r(kMtxDirty) != 0 };
+	for (int i = 0; i < 3; ++i)
+	{
+		if (Redone[i] || AllQ)
+		{
+			MatrixMultiply(kMtxBlock + 0x240 + 0x40 * i, kMtxBlock + 0x180 + 0x40 * i, N);
+		}
+	}
+	st8r(kMtxDirty, 0);
+}
+
+// ---- ge_box_in_rect (802F2340): (rect {min x, min y, max x, max y, near}, box, 4x4 matrix) ------
+//the box's eight corners through the matrix and the perspective divide, against a rectangle on
+//screen. 0 when all of them are behind the near plane or off the same side, -1 otherwise.
+void BoxInRect(PPCContext& c)
+{
+	const uint32_t Rect{ c.r[3] }, Box{ c.r[4] }, Mtx{ c.r[5] };
+	const float One{ F(c.r[2] - 0x31FC) }, Zero{ F(c.r[2] - 0x3200) };
+	const float Near{ F(Rect + 0x10) };
+	//the screen's centre offset, two ints the game keeps next to each other
+	const float OffX{ (float)(int32_t)ld32r(c.r[13] - 0x4CE8) }, OffY{ (float)(int32_t)ld32r(c.r[13] - 0x4CE4) };
+	float M[16];
+	for (int i = 0; i < 16; ++i)
+	{
+		M[i] = F(Mtx + 4 * i);
+	}
+	uint32_t Behind{ 0 }, Sides{ 0 };
+	for (uint32_t i = 0; i < 8; ++i)
+	{
+		const float x{ F(Box + (i & 1) * 0x10) }, y{ F(Box + 4 + (i >> 1 & 1) * 0x10) }, z{ F(Box + 8 + (i >> 2 & 1) * 0x10) };
+		float v[4];
+		for (int k = 0; k < 4; ++k)
+		{
+			v[k] = madd(M[12 + k], One, madd(M[8 + k], z, madd(M[4 + k], y, M[k] * x)));
+		}
+		const float w{ v[3] };
+		const uint32_t Bit{ 1u << i };
+		if (w < Near)
+		{
+			Behind |= Bit;
+		}
+		if (w <= Zero)
+		{
+			continue;
+		}
+		//1/w the way the game gets it: an estimate and two newton steps
+		float Inv{ (float)(1.0 / (double)w) };
+		Inv = madd(Inv, madd(-w, Inv, One), Inv);
+		Inv = madd(Inv, madd(-w, Inv, One), Inv);
+		const float sx{ v[0] * Inv - OffX }, sy{ v[1] * Inv - OffY };
+		if (sx < F(Rect))
+		{
+			Sides |= Bit;
+		}
+		else if (sx > F(Rect + 8))
+		{
+			Sides |= Bit << 8;
+		}
+		if (sy < F(Rect + 4))
+		{
+			Sides |= Bit << 16;
+		}
+		else if (sy > F(Rect + 0xC))
+		{
+			Sides |= Bit << 24;
+		}
+	}
+	bool Out{ Behind == 0xFF };
+	for (int Side = 0; Side < 4; ++Side)
+	{
+		Out = Out || (Sides >> (8 * Side) & 0xFF) == 0xFF;
+	}
+	c.r[3] = Out ? 0 : 0xFFFFFFFFu;
+}
+
 // ---- the table, and the check ------------------------------------------------------------------
 uint32_t out_r5_8(const PPCContext& c, uint32_t* len) { *len = 8; return c.r[5]; }
 uint32_t out_r6_n16(const PPCContext& c, uint32_t* len) { *len = c.r[3] * 16; return c.r[6]; }
@@ -236,6 +359,8 @@ uint32_t out_r4_4(const PPCContext& c, uint32_t* len) { *len = 4; return c.r[4];
 uint32_t out_none(const PPCContext&, uint32_t* len) { *len = 0; return 0; }
 uint32_t out_r3_16(const PPCContext& c, uint32_t* len) { *len = 16; return c.r[3]; }
 uint32_t out_r5_16(const PPCContext& c, uint32_t* len) { *len = 16; return c.r[5]; }
+
+uint32_t OutMatrices(const PPCContext&, uint32_t* len) { *len = 0x180; return kMtxBlock + 0x180; }
 
 Routine g_routines[] = {
     {"ge_box_clip_codes", box_clip_codes, out_r5_8, 2},
@@ -246,9 +371,11 @@ Routine g_routines[] = {
     {"ge_vec4_transform", vec4_transform, out_r3_16, 0},
     {"ge_vec4_sub", vec4_sub, out_r3_16, 0},
     {"ge_segment_closest", segment_closest, out_r5_16, 0},
+    {"ge_matrix_flush", MatrixFlush, OutMatrices, 8, kMtxDirty, 6},
+    {"ge_box_in_rect", BoxInRect, out_none, 0},
 };
 const int kRoutines = sizeof g_routines / sizeof g_routines[0];
-static_assert(kRoutines == 8, "install_native lists them by index");
+static_assert(kRoutines == 10, "install_native lists them by index");
 
 bool close_f(uint32_t a, uint32_t b) {
     float x = as_f32(a), y = as_f32(b);
@@ -263,17 +390,23 @@ template <int I> void checked(PPCContext& c) {
     uint32_t len = 0, at = r.out(c, &len);
     const PPCContext before = c;
     std::vector<uint8_t> was(PPC_MEM(at), PPC_MEM(at) + len);
+    uint8_t state_was[16], state_want[16];
+    std::memcpy(state_was, PPC_MEM(r.state), r.state_len);
     r.orig(c);
+    std::memcpy(state_want, PPC_MEM(r.state), r.state_len);
+    std::memcpy(PPC_MEM(r.state), state_was, r.state_len);
     std::vector<uint8_t> want(PPC_MEM(at), PPC_MEM(at) + len);
     uint32_t want_r3 = c.r[3];
     std::memcpy(PPC_MEM(at), was.data(), len);
     c = before;
     r.native(c);
-    bool same = c.r[3] == want_r3;
+    bool same = (r.kind & 8) || c.r[3] == want_r3;
+    same = same && !std::memcmp(state_want, PPC_MEM(r.state), r.state_len);
+    const int kind = r.kind & 7;
     for (uint32_t i = 0; i + 4 <= len && same; i += 4) {
         uint32_t a = ld32r(at + i), b = __builtin_bswap32(*(const uint32_t*)(want.data() + i));
-        if (r.kind == 2) same = a == b;
-        else if (r.kind == 1 && i % 16 == 12)
+        if (kind == 2) same = a == b;
+        else if (kind == 1 && i % 16 == 12)
             for (int k = 0; k < 4; ++k) same = same && std::abs((int)(int8_t)(a >> 8 * k) - (int)(int8_t)(b >> 8 * k)) <= 1;
         else same = close_f(a, b);
         if (!same && r.differ < 5)

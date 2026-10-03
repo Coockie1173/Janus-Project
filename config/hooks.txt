@@ -20,3 +20,5 @@ ge_tri_contains
 ge_vec4_transform
 ge_vec4_sub
 ge_segment_closest
+ge_matrix_flush
+ge_box_in_rect

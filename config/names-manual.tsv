@@ -48,3 +48,5 @@ addr	name	evidence
 800164B0	ge_vec4_transform	(v, 4x4 matrix): v = M v in place (ps_muls0/ps_madds over the matrix's four columns)
 80014CE0	ge_vec4_sub	(out, a, b): two ps_sub over four floats
 8033C7B0	ge_segment_closest	(segment {origin, direction}, point, out) -> 1 origin, 2 between, 3 end: the closest point of the segment
+80297E80	ge_matrix_flush	(): the renderer's matrix block at 80641F60 (matrices 0x40 apart): by the dirty bytes at 806EC2BC..C1 redoes P[i] = A[i] * M (three of them) and Q[i] = P[i] * N, each a 4x4 product in paired singles; 2.4% of the game thread on Dam
+802F2340	ge_box_in_rect	(rect {min x, min y, max x, max y, near}, box, 4x4 matrix) -> 0 / -1: the box's 8 corners through the matrix, w against the near value, then divided (ps_res and two Newton steps), less the two ints at -0x4CE8(r13), against the rectangle; 0 when all corners are behind or off one side
