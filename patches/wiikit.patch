@@ -2271,7 +2271,7 @@ index 8a4e097..8b1b1a8 100644
  void ppc_mmio_write(uint32_t addr, uint32_t, int) { rt_die("mmio write %08X", addr); }
  uint64_t ppc_timebase() { return 0; }
 diff --git a/runtime/video.cpp b/runtime/video.cpp
-index 5726093..a9d1233 100644
+index 5726093..dd72559 100644
 --- a/runtime/video.cpp
 +++ b/runtime/video.cpp
 @@ -79,7 +79,35 @@ struct PSUniforms {                                // gxshader.cpp's uniform blo
@@ -2311,16 +2311,42 @@ index 5726093..a9d1233 100644
  GLuint copy_prog;
  GLint copy_rect_loc, copy_mode_loc;
  constexpr size_t VBO_CAP = 64u << 20;
-@@ -100,6 +128,8 @@ bool sampler_set[8];
- struct Tex { GLuint name = 0; int w = 0, h = 0, levels = 0; };
+@@ -97,9 +125,16 @@ bool ps_valid = false;
+ uint32_t sampler_mode[8][2];
+ bool sampler_set[8];
+ 
+-struct Tex { GLuint name = 0; int w = 0, h = 0, levels = 0; };
++struct Tex { GLuint name = 0; int w = 0, h = 0, levels = 0; GLuint fbo = 0; };
  std::unordered_map<uint32_t, Tex> texs;            // decoded textures, by id
  std::unordered_map<uint32_t, Tex> efb_copies;      // EFB copies to texture, by address
++// Every copy texture ever made, by address and size, each with a framebuffer
++// of its own. A game copies to one address at several sizes within a frame
++// (a bloom chain); deleting the texture to make it again at the other size
++// had the driver wait for the GPU each time (half the renderer's time), and
++// one framebuffer re-attached for each copy was validated again at every bind.
++std::unordered_map<uint64_t, Tex> copy_pool;
 +std::unordered_map<uint32_t, Tex> efb_joined;      // textures put together from several copies, by the first's address
-+GLuint join_fbo = 0;
  std::unordered_map<uint32_t, Tex> xfbs;            // EFB copies to the XFB, by address
  uint64_t map_src[8];                               // per map: texture id, or 1 << 32 | EFB copy address
  uint32_t last_xfb = 0;
-@@ -295,7 +325,14 @@ void main() {
+@@ -231,6 +266,16 @@ void ensure_tex(Tex& t, int w, int h, int levels) {
+     t.w = w; t.h = h; t.levels = levels;
+ }
+ 
++Tex& copy_tex(uint32_t addr, int w, int h) {
++    Tex& t = copy_pool[(uint64_t)addr | (uint64_t)w << 32 | (uint64_t)h << 48];
++    if (!t.name) {
++        ensure_tex(t, w, h, 1);
++        glCreateFramebuffers(1, &t.fbo);
++        glNamedFramebufferTexture(t.fbo, GL_COLOR_ATTACHMENT0, t.name, 0);
++    }
++    return t;
++}
++
+ void APIENTRY gl_debug(GLenum, GLenum type, GLuint, GLenum severity, GLsizei, const GLchar* msg, const void*) {
+     if (severity == GL_DEBUG_SEVERITY_NOTIFICATION) return;
+     rt_log("gl: %s%s", type == GL_DEBUG_TYPE_ERROR ? "error: " : "", msg);
+@@ -295,7 +340,14 @@ void main() {
  )";
  
  // ---- register side effects ----------------------------------------------------------------------
@@ -2335,7 +2361,7 @@ index 5726093..a9d1233 100644
      bool has_alpha = (bp[0x43] & 7) == 1;
      bool cu = bp[0x41] >> 3 & 1, au = bp[0x41] >> 4 & 1, zu = bp[0x40] >> 4 & 1;
      if (!cu && !au && !zu) return;
-@@ -325,7 +362,10 @@ void efb_dump(const char* tag) {
+@@ -325,7 +377,10 @@ void efb_dump(const char* tag) {
      write_png(name, EFB_W * S, EFB_H * S, px.data());
  }
  
@@ -2346,7 +2372,33 @@ index 5726093..a9d1233 100644
      int x = (int)(bp[0x49] & 0x3FF), y = (int)(bp[0x49] >> 10 & 0x3FF);
      int w = (int)(bp[0x4A] & 0x3FF) + 1, h = (int)(bp[0x4A] >> 10 & 0x3FF) + 1;
      uint32_t dest = (bp[0x4B] & 0xFFFFFF) << 5;
-@@ -366,8 +406,8 @@ void efb_copy(uint32_t v) {
+@@ -336,10 +391,8 @@ void efb_copy(uint32_t v) {
+         efb_dump(tag);
+     }
+     if (v >> 14 & 1) {                                           // to the XFB
+-        Tex& t = xfbs[dest];
+-        ensure_tex(t, w * S, h * S, 1);
+-        glNamedFramebufferTexture(copy_fbo, GL_COLOR_ATTACHMENT0, t.name, 0);
+-        glBlitNamedFramebuffer(efb_fbo, copy_fbo, x * S, y * S, (x + w) * S, (y + h) * S, 0, 0, w * S, h * S,
++        const Tex& t = xfbs[dest] = copy_tex(dest | 2, w * S, h * S);
++        glBlitNamedFramebuffer(efb_fbo, t.fbo, x * S, y * S, (x + w) * S, (y + h) * S, 0, 0, w * S, h * S,
+                                GL_COLOR_BUFFER_BIT, GL_NEAREST);
+         last_xfb = dest;
+         ++cnt.frames;
+@@ -347,10 +400,8 @@ void efb_copy(uint32_t v) {
+         bool half = v >> 9 & 1;
+         int tw = half ? (w + 1) / 2 : w, th = half ? (h + 1) / 2 : h;
+         uint32_t tpf = v >> 3 & 15, fmt = tpf / 2 + (tpf & 1) * 8;
+-        Tex& t = efb_copies[dest];
+-        ensure_tex(t, tw * S, th * S, 1);
+-        glNamedFramebufferTexture(copy_fbo, GL_COLOR_ATTACHMENT0, t.name, 0);
+-        glBindFramebuffer(GL_FRAMEBUFFER, copy_fbo);
++        const Tex& t = efb_copies[dest] = copy_tex(dest, tw * S, th * S);
++        glBindFramebuffer(GL_FRAMEBUFFER, t.fbo);
+         glViewport(0, 0, tw * S, th * S);
+         glDisable(GL_BLEND);
+         glDisable(GL_COLOR_LOGIC_OP);
+@@ -366,8 +417,8 @@ void efb_copy(uint32_t v) {
          glBindSampler(0, 0);
          glBindSampler(1, 0);
          glBindVertexArray(empty_vao);
@@ -2356,7 +2408,7 @@ index 5726093..a9d1233 100644
      }
      if (v >> 11 & 1) efb_clear(x, y, w, h);
  }
-@@ -475,7 +515,10 @@ void bind_textures() {
+@@ -475,7 +526,10 @@ void bind_textures() {
      for (int m = 0; m < 8; ++m) {
          if (!(used >> m & 1)) continue;
          GLuint name = 0;
@@ -2368,7 +2420,7 @@ index 5726093..a9d1233 100644
              auto it = efb_copies.find((uint32_t)map_src[m]);
              if (it != efb_copies.end()) name = it->second.name;
          } else {
-@@ -502,74 +545,86 @@ void bind_textures() {
+@@ -502,74 +556,86 @@ void bind_textures() {
      }
  }
  
@@ -2517,7 +2569,7 @@ index 5726093..a9d1233 100644
  
      if (xf_lo < xf_hi) {
          glNamedBufferSubData(xf_ubo, xf_lo * 4, (xf_hi - xf_lo) * 4, &xf[xf_lo]);
-@@ -578,10 +633,61 @@ void draw(uint8_t prim, uint8_t vflags, const uint8_t* pieces, uint32_t npieces)
+@@ -578,10 +644,61 @@ void draw(uint8_t prim, uint8_t vflags, const uint8_t* pieces, uint32_t npieces)
      }
      set_ps_uniforms();
      bind_textures();
@@ -2580,7 +2632,7 @@ index 5726093..a9d1233 100644
          uint32_t pm = v0.mtx[0] * 4u;
          float pos[3];
          for (int r = 0; r < 3; ++r)
-@@ -599,61 +705,48 @@ void draw(uint8_t prim, uint8_t vflags, const uint8_t* pieces, uint32_t npieces)
+@@ -599,61 +716,48 @@ void draw(uint8_t prim, uint8_t vflags, const uint8_t* pieces, uint32_t npieces)
                       v0.mtx[0], v0.pos[0], v0.pos[1], v0.pos[2], pos[0], pos[1], pos[2], c[0] / c[3], c[1] / c[3], c[3],
                       (bp[0x00] >> 10 & 15) + 1, xf[0x1009] & 3);
      }
@@ -2664,7 +2716,7 @@ index 5726093..a9d1233 100644
  }
  
  // ---- the record -----------------------------------------------------------------------------------
-@@ -662,6 +755,7 @@ template <class T> T rd(const uint8_t*& p) { T v; std::memcpy(&v, p, sizeof v);
+@@ -662,6 +766,7 @@ template <class T> T rd(const uint8_t*& p) { T v; std::memcpy(&v, p, sizeof v);
  // The EFB at its native size: the pixel at each native position's top-left
  // sample of the scaled EFB (rows from the top, as the EFB copies read it).
  void efb_readback() {
@@ -2672,7 +2724,7 @@ index 5726093..a9d1233 100644
      int W = EFB_W * S, H = EFB_H * S;
      std::vector<uint8_t> px((size_t)W * H * 4);
      std::vector<float> dz((size_t)W * H);
-@@ -703,6 +797,7 @@ void copy_readback(uint32_t addr) {
+@@ -703,6 +808,7 @@ void copy_readback(uint32_t addr) {
  }
  
  void exec(const std::vector<uint8_t>& data) {
@@ -2680,7 +2732,7 @@ index 5726093..a9d1233 100644
      const uint8_t* p = data.data();
      const uint8_t* end = p + data.size();
      while (p < end) {
-@@ -720,12 +815,26 @@ void exec(const std::vector<uint8_t>& data) {
+@@ -720,12 +826,26 @@ void exec(const std::vector<uint8_t>& data) {
              uint8_t prim = rd<uint8_t>(p), fl = rd<uint8_t>(p);
              uint32_t pieces = rd<uint32_t>(p);
              draw(prim, fl, p, pieces);
@@ -2708,7 +2760,7 @@ index 5726093..a9d1233 100644
          case VC_TEXUP: {
              uint8_t m = rd<uint8_t>(p);
              uint32_t id = rd<uint32_t>(p);
-@@ -742,6 +851,33 @@ void exec(const std::vector<uint8_t>& data) {
+@@ -742,6 +862,30 @@ void exec(const std::vector<uint8_t>& data) {
          }
          case VC_TEXBIND: { uint8_t m = rd<uint8_t>(p); map_src[m] = rd<uint32_t>(p); break; }
          case VC_TEXEFB: { uint8_t m = rd<uint8_t>(p); map_src[m] = 1ull << 32 | rd<uint32_t>(p); break; }
@@ -2722,18 +2774,15 @@ index 5726093..a9d1233 100644
 +                int row = rd<uint16_t>(p);
 +                if (i == 0) {
 +                    first = addr;
-+                    joined = &efb_joined[addr];
-+                    ensure_tex(*joined, w * S, h * S, 1);
++                    // (its own pool entry: the address with a bit no copy's has)
++                    joined = &(efb_joined[addr] = copy_tex(addr | 1, w * S, h * S));
 +                    gl_state_stale = true;
-+                    if (!join_fbo) glCreateFramebuffers(1, &join_fbo);
-+                    glNamedFramebufferTexture(join_fbo, GL_COLOR_ATTACHMENT0, joined->name, 0);
 +                }
 +                auto it = efb_copies.find(addr);
 +                if (it == efb_copies.end()) continue;
 +                const Tex& src = it->second;
-+                glNamedFramebufferTexture(copy_fbo, GL_COLOR_ATTACHMENT0, src.name, 0);
 +                glDisable(GL_SCISSOR_TEST);
-+                glBlitNamedFramebuffer(copy_fbo, join_fbo, 0, 0, src.w, src.h, 0, row * S, src.w, row * S + src.h,
++                glBlitNamedFramebuffer(src.fbo, joined->fbo, 0, 0, src.w, src.h, 0, row * S, src.w, row * S + src.h,
 +                                       GL_COLOR_BUFFER_BIT, GL_NEAREST);
 +            }
 +            map_src[m] = 2ull << 32 | first;
@@ -2742,7 +2791,7 @@ index 5726093..a9d1233 100644
          case VC_FRAME: break;
          case VC_DRAWDONE: gx_draw_done_reached(); break;
          default: rt_die("video: bad record byte %02X", p[-1]);
-@@ -1266,7 +1402,10 @@ void update_pad() {
+@@ -1266,7 +1410,10 @@ void update_pad() {
      for (int i = 0; i < 4; ++i) classic[i] = c[i];
  }
  
@@ -2753,7 +2802,7 @@ index 5726093..a9d1233 100644
      ++cnt.presents;
      int ww = 0, wh = 0;
      SDL_GetWindowSizeInPixels(win, &ww, &wh);
-@@ -1275,7 +1414,7 @@ void present() {
+@@ -1275,17 +1422,17 @@ void present() {
      glColorMask(1, 1, 1, 1);
      glClearColor(0, 0, 0, 1);
      glClear(GL_COLOR_BUFFER_BIT);
@@ -2762,15 +2811,19 @@ index 5726093..a9d1233 100644
      if (it == xfbs.end()) it = xfbs.find(last_xfb);
      if (it != xfbs.end() && ww > 0 && wh > 0) {
          const Tex& t = it->second;
-@@ -1286,6 +1425,7 @@ void present() {
-         glBlitNamedFramebuffer(copy_fbo, 0, 0, 0, t.w, t.h, dx, dy + dh, dx + dw, dy,   // top row first
+         Rect r = picture_rect((float)ww, (float)wh);
+         int dx = (int)std::lround(r.x), dy = (int)std::lround(r.y);
+         int dw = (int)std::lround(r.w), dh = (int)std::lround(r.h);
+-        glNamedFramebufferTexture(copy_fbo, GL_COLOR_ATTACHMENT0, t.name, 0);
+-        glBlitNamedFramebuffer(copy_fbo, 0, 0, 0, t.w, t.h, dx, dy + dh, dx + dw, dy,   // top row first
++        glBlitNamedFramebuffer(t.fbo, 0, 0, 0, t.w, t.h, dx, dy + dh, dx + dw, dy,   // top row first
                                 GL_COLOR_BUFFER_BIT, GL_LINEAR);
      }
 +    if (overlay_cb.draw) overlay_cb.draw();
      if (opt.dump_dir && cnt.presents % (uint64_t)opt.dump_every == 0 && ww > 0 && wh > 0) {
          std::vector<uint8_t> px((size_t)ww * wh * 4), flip(px.size());   // the window, as shown
          glReadPixels(0, 0, ww, wh, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
-@@ -1327,37 +1467,18 @@ void setup() {
+@@ -1327,37 +1474,18 @@ void setup() {
      const GLbitfield map = GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT;
      glNamedBufferStorage(vbo, VBO_CAP, nullptr, map);
      vbo_ptr = static_cast<uint8_t*>(glMapNamedBufferRange(vbo, 0, VBO_CAP, map));
@@ -2813,7 +2866,7 @@ index 5726093..a9d1233 100644
  
      glCreateBuffers(1, &xf_ubo);
      glNamedBufferStorage(xf_ubo, sizeof xf, nullptr, GL_DYNAMIC_STORAGE_BIT);
-@@ -1462,6 +1583,9 @@ std::atomic<bool> want_relative{false};
+@@ -1462,6 +1590,9 @@ std::atomic<bool> want_relative{false};
  std::mutex motion_mx;
  float motion_x = 0, motion_y = 0;
  void video_set_relative_mouse(bool on) { want_relative = on; }
@@ -2823,7 +2876,7 @@ index 5726093..a9d1233 100644
  void video_take_mouse_motion(float& dx, float& dy) {
      std::lock_guard<std::mutex> lk(motion_mx);
      dx = motion_x; dy = motion_y;
-@@ -1479,6 +1603,7 @@ ClassicState video_classic(int chan) {
+@@ -1479,6 +1610,7 @@ ClassicState video_classic(int chan) {
  void video_set_rumble(int chan, bool on) {
      if (chan >= 0 && chan < 4) rumble_want[chan] = on;
  }
@@ -2831,7 +2884,7 @@ index 5726093..a9d1233 100644
  void video_retrace() {
      retraces.fetch_add(1);
      if (wake) SDL_SignalSemaphore(wake);
-@@ -1506,6 +1631,7 @@ void video_run(const char* title) {
+@@ -1506,6 +1638,7 @@ void video_run(const char* title) {
      SDL_GL_MakeCurrent(win, ctx);
      SDL_GL_SetSwapInterval(0);                   // VI paces the presents
      if (!gl_load()) rt_die("video: OpenGL functions missing");
@@ -2839,7 +2892,7 @@ index 5726093..a9d1233 100644
      rt_log("video: %s, %s", (const char*)glGetString(GL_RENDERER), (const char*)glGetString(GL_VERSION));
      if (debug) {
          glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
-@@ -1529,11 +1655,15 @@ void video_run(const char* title) {
+@@ -1529,11 +1662,15 @@ void video_run(const char* title) {
      uint64_t frames_then = 0;
      uint32_t seen = retraces.load();
      std::string base_title = title;
@@ -2855,7 +2908,7 @@ index 5726093..a9d1233 100644
              if (e.type == SDL_EVENT_GAMEPAD_ADDED) pad_added(e.gdevice.which);
              if (e.type == SDL_EVENT_GAMEPAD_REMOVED) pad_removed(e.gdevice.which);
              // F11 or Alt+Enter: fullscreen and back
-@@ -1592,7 +1722,10 @@ void video_run(const char* title) {
+@@ -1592,7 +1729,10 @@ void video_run(const char* title) {
                  double vtx = ms(g_vperf.vtx), tex = ms(g_vperf.tex), wait = ms(g_vperf.wait), draw = ms(g_vperf.draw),
                         pres = ms(g_vperf.present);
                  rt_log("perf: %.1f fps; frame %.1f ms; game thread: vertices %.1f, textures %.1f, waiting for the renderer %.1f; "
@@ -2867,7 +2920,7 @@ index 5726093..a9d1233 100644
              }
              frames_then = cnt.frames;
              t_title = now;
-@@ -1608,6 +1741,8 @@ void video_run(const char* title) {
+@@ -1608,6 +1748,8 @@ void video_run(const char* title) {
              }
              if (c.readback) { if (c.copy) copy_readback(c.copy); else efb_readback(); busy = true; continue; }
              auto te = Clock::now();
@@ -2876,7 +2929,7 @@ index 5726093..a9d1233 100644
              exec(c.data);
              if (g_vperf_on) g_vperf.draw += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - te).count();
              {
-@@ -1621,6 +1756,17 @@ void video_run(const char* title) {
+@@ -1621,6 +1763,17 @@ void video_run(const char* title) {
              if (retraces.load() != seen) break;
          }
          uint32_t r = retraces.load();
