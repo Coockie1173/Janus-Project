@@ -1,11 +1,12 @@
 # Skip Cutscenes (port/cutscenes.cpp): the entrance each mission's opening ends at.
 # level hash, entrance. Found by playing each from its start with GE_TRACE=1: the first
 # checkpoint recorded after entrance 1 (Carrier: the last one of its opening).
-# Not in here, so they play their opening: Tank (01810145; entrance 10 breaks the level),
-# Nightclub (01810144) and Outpost (01810150; 10 is the wrong spawn) until theirs are found.
+# Not in here, so they play their opening: Tank (01810145; entrance 10 breaks the level)
+# and Outpost (01810150; 10, the only one it records, is the wrong spawn).
 0181013F 2      # Dam
 0181014A 2      # Facility
 0181013C 9      # Airfield
+01810144 2      # Nightclub
 01810147 2      # Carrier
 0181014F 2      # Bunker
 01810146 12     # Archives
