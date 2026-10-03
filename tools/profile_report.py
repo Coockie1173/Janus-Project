@@ -7,6 +7,8 @@
 Samples are program counters as offsets in build/out/wiiboot; recompiled
 functions (f_XXXXXXXX, orig_XXXXXXXX) are shown with their guest names.
 --last N keeps only the last N samples (the end of the run: the scene reached).
+--inclusive: the busiest thread's functions by the time spent in them and in what
+they call (from FILE.stacks, the call stack at each sample).
 """
 import argparse, bisect, collections, os, struct, subprocess
 
@@ -17,6 +19,7 @@ ap.add_argument("--offsets", nargs="+", metavar="HEX", help="name these offsets 
 ap.add_argument("--exe", default=os.path.join(ROOT, "build/out/wiiboot"))
 ap.add_argument("--last", type=int, default=0)
 ap.add_argument("--top", type=int, default=40)
+ap.add_argument("--inclusive", action="store_true")
 a = ap.parse_args()
 
 syms, base = [], None
@@ -66,4 +69,33 @@ for tid, n in threads.most_common(4):
     recomp = sum(v for k, v in hist.items() if k.startswith(("f_", "orig_")))
     print(f"\nthread {tid}: {100 * n / len(pairs):.1f}% of all samples; recompiled game code {100 * recomp / n:.1f}% of it")
     for name, k in hist.most_common(a.top):
+        print(f"{100 * k / n:6.2f}%  {name}")
+
+if a.inclusive:
+    DEPTH = 40
+    raw = open(a.samples + ".stacks", "rb").read()
+    st = struct.unpack("<%dQ" % (len(raw) // 8), raw)
+    stacks = [st[i:i + DEPTH] for i in range(0, len(st), DEPTH)]
+    if a.last:
+        stacks = stacks[-a.last:]
+    exe_lo = exe_hi = 0
+    for l in open(a.samples + ".maps"):
+        p = l.split()
+        if len(p) > 5 and os.path.realpath(p[5]) == os.path.realpath(a.exe):
+            lo, hi = (int(x, 16) for x in p[0].split("-"))
+            exe_lo, exe_hi = (min(exe_lo, lo) if exe_lo else lo), max(exe_hi, hi)
+    tid = threads.most_common(1)[0][0]
+    inc, n = collections.Counter(), 0
+    for (t, off), chain in zip(pairs, stacks):
+        if t != tid:
+            continue
+        n += 1
+        names = set()
+        for k, pc in enumerate(chain):
+            if exe_lo <= pc < exe_hi:
+                names.add(name_of(pc - exe_lo - (1 if k else 0)))   # a return address: the call before it
+        for x in names:
+            inc[x] += 1
+    print(f"\nthread {tid}, inclusive: a function and what it calls ({DEPTH} frames deep at most)")
+    for name, k in inc.most_common(a.top):
         print(f"{100 * k / n:6.2f}%  {name}")

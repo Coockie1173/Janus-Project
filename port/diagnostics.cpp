@@ -7,6 +7,7 @@
 #ifndef _WIN32
 #include <atomic>
 #include <csignal>
+#include <execinfo.h>
 #include <string>
 #include <sys/syscall.h>
 #include <sys/time.h>
@@ -45,11 +46,17 @@ void install_crash_handler() {
 }
 
 // GE_PROFILE: SIGPROF every millisecond of CPU time, on whichever thread is
-// running; the handler keeps the program counter as an offset in the executable.
+// running; the handler keeps the program counter as an offset in the
+// executable, and in FILE.stacks the host's call stack (kDepth return
+// addresses a sample, innermost first: recompiled functions are frames like
+// any other), for the time a function takes with what it calls. FILE.maps
+// says where the libraries are.
 extern "C" char __executable_start;
 std::atomic<uint32_t> g_nsamples{0};
 uint32_t* g_samples = nullptr;
 const uint32_t kMaxSamples = 4u << 20;
+const uint32_t kDepth = 40;
+uint64_t* g_stacks = nullptr;
 
 void on_prof(int, siginfo_t*, void* uc) {
     uintptr_t pc = (uintptr_t)((ucontext_t*)uc)->uc_mcontext.gregs[REG_RIP];
@@ -57,6 +64,13 @@ void on_prof(int, siginfo_t*, void* uc) {
     if (i + 1 < kMaxSamples) {                       // pairs: the thread, the offset (outside the executable: a huge one)
         g_samples[i] = (uint32_t)syscall(SYS_gettid);
         g_samples[i + 1] = (uint32_t)(pc - (uintptr_t)&__executable_start);
+        void* frames[kDepth + 3];
+        int n = backtrace(frames, kDepth + 3);       // the first ones are this handler and the signal's frame
+        uint64_t* st = g_stacks + (size_t)(i / 2) * kDepth;
+        int from = 0;
+        while (from < n && (uintptr_t)frames[from] != pc) ++from;
+        if (from == n) from = n > 2 ? 2 : 0;
+        for (uint32_t k = 0; k < kDepth; ++k) st[k] = from + (int)k < n ? (uint64_t)(uintptr_t)frames[from + k] : 0;
     }
 }
 
@@ -80,6 +94,9 @@ void install_profiler() {
     const char* path = std::getenv("GE_PROFILE");
     if (!path) return;
     g_samples = new uint32_t[kMaxSamples];
+    g_stacks = new uint64_t[(size_t)(kMaxSamples / 2) * kDepth]();
+    void* warm[4];
+    backtrace(warm, 4);                              // the unwinder loaded now, not in the handler
     struct sigaction sa = {};
     sa.sa_sigaction = on_prof;
     sa.sa_flags = SA_SIGINFO | SA_RESTART;
@@ -89,11 +106,21 @@ void install_profiler() {
     std::thread([path = std::string(path)] {
         for (;;) {
             std::this_thread::sleep_for(std::chrono::seconds(10));
+            uint32_t n = std::min(g_nsamples.load(), kMaxSamples);
             if (FILE* f = std::fopen(path.c_str(), "wb")) {
-                uint32_t n = std::min(g_nsamples.load(), kMaxSamples);
                 std::fwrite(g_samples, 4, n, f);
                 std::fclose(f);
             }
+            if (FILE* f = std::fopen((path + ".stacks").c_str(), "wb")) {
+                std::fwrite(g_stacks, 8 * kDepth, n / 2, f);
+                std::fclose(f);
+            }
+            FILE* in = std::fopen("/proc/self/maps", "r");
+            FILE* out = std::fopen((path + ".maps").c_str(), "w");
+            char buf[4096];
+            for (size_t k; in && out && (k = std::fread(buf, 1, sizeof buf, in)) > 0;) std::fwrite(buf, 1, k, out);
+            if (in) std::fclose(in);
+            if (out) std::fclose(out);
         }
     }).detach();
     rt_log("goldeneye: profiling to %s", path);
