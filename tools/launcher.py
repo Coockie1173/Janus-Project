@@ -367,15 +367,20 @@ def run_gui():
     cheats = load_cheats(CHEATS)
     already_on = {name for name, _, _ in load_cheats(CHEATS_ON)}
     cheat_vars = {}
+    # the port's own cheat (the F1 menu's Cheats page has it too), then the Gecko codes
+    always_mouse = tk.BooleanVar(value=settings["mouseeverywhere"] == "1")
+    ttk.Checkbutton(ch, text="Always Enable Mouse", variable=always_mouse).grid(row=0, column=0, sticky="w", **pad)
+    ttk.Label(ch, text="The mouse turns the view where the game locks it: cutscenes, melee, climbing, death.",
+              foreground="gray", wraplength=520, justify="left").grid(row=1, column=0, sticky="w", padx=(30, 8))
     ttk.Label(ch, text="Gecko codes from config/gecko/cheats.txt. They apply the next time the game starts.",
-              justify="left").grid(row=0, column=0, sticky="w", **pad)
+              justify="left").grid(row=2, column=0, sticky="w", **pad)
     for i, (name, code, notes) in enumerate(cheats):
         cheat_vars[name] = tk.BooleanVar(value=name in already_on)
-        ttk.Checkbutton(ch, text=name, variable=cheat_vars[name]).grid(row=1 + 2 * i, column=0, sticky="w", **pad)
+        ttk.Checkbutton(ch, text=name, variable=cheat_vars[name]).grid(row=3 + 2 * i, column=0, sticky="w", **pad)
         ttk.Label(ch, text="\n".join(notes) or "  ".join(code), foreground="gray", wraplength=520,
-                  justify="left").grid(row=2 + 2 * i, column=0, sticky="w", padx=(30, 8))
+                  justify="left").grid(row=4 + 2 * i, column=0, sticky="w", padx=(30, 8))
     if not cheats:
-        ttk.Label(ch, text="No cheats in there yet.").grid(row=1, column=0, sticky="w", **pad)
+        ttk.Label(ch, text="No cheats in there yet.").grid(row=3, column=0, sticky="w", **pad)
 
     # -- play
     result = {"play": False}
@@ -389,6 +394,7 @@ def run_gui():
         settings["faststart"] = "1" if faststart.get() else "0"
         settings["crashdump"] = "1" if crashdump.get() else "0"
         settings["crashmem"] = "1" if crashmem.get() else "0"
+        settings["mouseeverywhere"] = "1" if always_mouse.get() else "0"
         settings["mousemode"] = next((k for k, v in modes.items() if v == mousemode.get()), "auto")
         save_settings(settings)
         save_keys(lines, binds)
