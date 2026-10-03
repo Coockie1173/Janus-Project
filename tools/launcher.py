@@ -366,7 +366,7 @@ def run_gui():
     en = ttk.Frame(book)
     book.add(en, text="Enhancements")
     skip_cutscenes = tk.BooleanVar(value=settings["skipcutscenes"] == "1")
-    ttk.Checkbutton(en, text="Skip Cutscenes", variable=skip_cutscenes).grid(row=0, column=0, sticky="w", **pad)
+    ttk.Checkbutton(en, text="Skip Intro Cutscenes (Experimental)", variable=skip_cutscenes).grid(row=0, column=0, sticky="w", **pad)
     ttk.Label(en, text="A mission starts at the checkpoint after its opening cutscene.",
               foreground="gray", wraplength=520, justify="left").grid(row=1, column=0, sticky="w", padx=(30, 8))
     level_timer = tk.BooleanVar(value=settings["leveltimer"] == "1")

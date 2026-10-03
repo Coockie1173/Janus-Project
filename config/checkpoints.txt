@@ -1,4 +1,4 @@
-# Skip Cutscenes (port/cutscenes.cpp): the entrance each mission's opening ends at.
+# Skip Intro Cutscenes (port/cutscenes.cpp): the entrance each mission's opening ends at.
 # level hash, entrance. Found by playing each from its start with GE_TRACE=1: the first
 # checkpoint recorded after entrance 1 (Carrier: the last one of its opening).
 # Not in here, so they play their opening: Tank (01810145; entrance 10 breaks the level)

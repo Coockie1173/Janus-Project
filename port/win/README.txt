@@ -62,7 +62,7 @@ Settings
 The window Play.bat opens has them: frame rate, field of view, mouse
 sensitivity and mode, fullscreen, a quicker start; the Controls tab rebinds
 every action (Set, then press a key or a mouse button); the Enhancements tab has
-Skip Cutscenes and the Level Timer; the Cheats tab Always Enable Mouse, the
+Skip Intro Cutscenes and the Level Timer; the Cheats tab Always Enable Mouse, the
 Unused Extras Menu and any code in config\gecko\cheats.txt.
 
 From a command line, any option skips the window:
