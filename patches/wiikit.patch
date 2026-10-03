@@ -101,7 +101,7 @@ index 3d2da4e..682aca2 100644
      X(PFNGLVERTEXARRAYELEMENTBUFFERPROC, glVertexArrayElementBuffer)                                \
      X(PFNGLENABLEVERTEXARRAYATTRIBPROC, glEnableVertexArrayAttrib)                                  \
 diff --git a/runtime/gx.cpp b/runtime/gx.cpp
-index a6b37f2..9ab84b7 100644
+index a6b37f2..c90d4e3 100644
 --- a/runtime/gx.cpp
 +++ b/runtime/gx.cpp
 @@ -35,6 +35,14 @@
@@ -477,7 +477,7 @@ index a6b37f2..9ab84b7 100644
          pe_ctrl |= 8; ++st.done; os_raise();
          return;
      case 0x47: pe_token = (uint16_t)val; return;                      // token
-@@ -504,16 +681,225 @@ void xf_load(uint32_t addr, uint32_t n, const uint8_t* src) {
+@@ -504,16 +681,292 @@ void xf_load(uint32_t addr, uint32_t n, const uint8_t* src) {
  // parse one command at p (n bytes available); returns its length, 0 if incomplete
  size_t parse(const uint8_t* p, size_t n, bool in_dl);
  
@@ -521,13 +521,13 @@ index a6b37f2..9ab84b7 100644
 +// hashed whole: far less work than decoding). The commands between a list's
 +// draws are parsed as ever. A list that changes the vertex format itself, or
 +// whose inputs keep changing (skinned vertices), is parsed as before.
-+struct DlDraw { uint32_t off, len, count, at, bytes; uint8_t prim, flags; };
++struct DlDraw { uint32_t off, len, count, at, bytes, first; uint8_t prim, flags; };
 +struct DlArr { uint32_t addr, len; uint64_t hash; };
 +struct DlEntry {
 +    enum : uint8_t { NEW, KEPT, PLAIN } state = NEW;
 +    bool plain = false;                              // found while building: cannot be kept
 +    uint8_t fails = 0;
-+    uint32_t size = 0, wait = 0;
++    uint32_t size = 0, wait = 0, gen = 0;            // gen: the static buffer's round its vertices were put in
 +    uint64_t hash = 0, sig = 0;
 +    uint32_t lo[12], hi[12], elem[12], verts[12];    // per array: indices reached, bytes an element, vertices
 +    std::vector<DlArr> arrs;
@@ -573,7 +573,7 @@ index a6b37f2..9ab84b7 100644
 +void dl_note_draw(const VtxPlan& pl, const uint8_t* p, size_t len, uint32_t count, const uint8_t* out, size_t bytes) {
 +    DlEntry& e = *dl_building;
 +    const VtxFmt& f = pl.f;
-+    e.draws.push_back(DlDraw{(uint32_t)(p - dl_base), (uint32_t)len, count, (uint32_t)e.vtx.size(), (uint32_t)bytes,
++    e.draws.push_back(DlDraw{(uint32_t)(p - dl_base), (uint32_t)len, count, (uint32_t)e.vtx.size(), (uint32_t)bytes, 0,
 +                             (uint8_t)(p[0] & 0xF8), pl.flags});
 +    e.vtx.insert(e.vtx.end(), out, out + bytes);
 +    // the stream again, for the indices alone
@@ -610,6 +610,71 @@ index a6b37f2..9ab84b7 100644
 +    }
 +}
 +
++// A kept list's vertices do not go through the record every frame either:
++// they are put in the renderer's static vertex buffer once (VC_VTXUP), and a
++// draw of them is its place there (VC_DRAWS; draws in a row with nothing
++// between them are one command, as with VC_DRAW). The buffer's room is given
++// out here, front to back; when it is full it starts over, and each list
++// puts its vertices in again the next time it is used.
++const bool dl_static_on = !std::getenv("WIIKIT_NO_STATICVTX");
++uint32_t arena_at = 0, arena_gen = 1;
++// WIIKIT_STATIC_MB: less of the buffer used (a test of starting over)
++const uint32_t arena_cap = std::getenv("WIIKIT_STATIC_MB")
++    ? std::min<uint32_t>(VTX_STATIC_CAP, (uint32_t)std::atoi(std::getenv("WIIKIT_STATIC_MB")) << 20) : VTX_STATIC_CAP;
++size_t sdraw_hdr = 0, sdraw_end = SIZE_MAX;
++bool dl_upload(DlEntry& e) {
++    if (e.vtx.size() + 256 * e.draws.size() > arena_cap / 2) return false;
++    for (int round = 0; round < 2; ++round) {
++        uint32_t at = arena_at;
++        bool fits = true;
++        for (DlDraw& d : e.draws) {
++            uint32_t stride = vtx_layout(d.flags).stride;
++            at = (at + stride - 1) / stride * stride;
++            if ((uint64_t)at + d.bytes > arena_cap) { fits = false; break; }
++            d.first = at / stride;
++            at += d.bytes;
++        }
++        if (fits) break;
++        arena_at = 0;                                // full: from the front again
++        ++arena_gen;
++    }
++    for (const DlDraw& d : e.draws) {
++        uint32_t stride = vtx_layout(d.flags).stride;
++        put<uint8_t>(VC_VTXUP);
++        put<uint32_t>(d.first * stride);
++        put<uint32_t>(d.bytes);
++        std::memcpy(grow(d.bytes), e.vtx.data() + d.at, d.bytes);
++        arena_at = d.first * stride + d.bytes;
++    }
++    e.gen = arena_gen;
++    return true;
++}
++void static_draw(const DlDraw& d) {
++    if (g_vperf_on) {
++        uint64_t t0 = perf_ticks();
++        sync_textures();
++        perf_tex += perf_ticks() - t0;
++    } else {
++        sync_textures();
++    }
++    bool extend = rec.size() == sdraw_end && rec[sdraw_hdr + 1] == d.prim && rec[sdraw_hdr + 2] == d.flags;
++    if (!extend) {
++        sdraw_hdr = rec.size();
++        put<uint8_t>(VC_DRAWS);
++        put<uint8_t>(d.prim);
++        put<uint8_t>(d.flags);
++        put<uint32_t>(0);
++    }
++    put<uint32_t>(d.first);
++    put<uint32_t>(d.count);
++    uint32_t pieces;
++    std::memcpy(&pieces, &rec[sdraw_hdr + 3], 4);
++    ++pieces;
++    std::memcpy(&rec[sdraw_hdr + 3], &pieces, 4);
++    sdraw_end = rec.size();
++    flush(false);
++}
++
 +void dl_parse(const uint8_t* p, size_t from, size_t to) {
 +    while (from < to) {
 +        size_t k = parse(p + from, to - from, true);
@@ -626,7 +691,7 @@ index a6b37f2..9ab84b7 100644
 +        uint32_t stride = cp[0xB0 + a], addr = (cp[0xA0 + a] & 0x1FFFFFFF) + e.lo[a] * stride;
 +        uint64_t len = (uint64_t)(e.hi[a] - e.lo[a]) * stride + e.elem[a];
 +        if (!check) {
-+            if (len > 4ull * e.verts[a] * e.elem[a] + 256 || !mem_ok(addr, len)) return false;
++            if (len > 4ull * e.verts[a] * e.elem[a] + 4096 || !mem_ok(addr, len)) return false;
 +            e.arrs.push_back(DlArr{addr, (uint32_t)len, dl_hash(host(virt(addr)), len)});
 +            dl_stat.bytes += len;
 +        } else {
@@ -662,13 +727,15 @@ index a6b37f2..9ab84b7 100644
 +        if (e.size == size && e.sig == dl_signature() && e.hash == dl_hash(p, size) && dl_arrays(e, true)) {
 +            ++dl_stat.kept;
 +            e.fails = 0;
++            const bool stat = dl_static_on && (e.gen == arena_gen || dl_upload(e));
 +            size_t from = 0;
 +            for (const DlDraw& d : e.draws) {
 +                dl_parse(p, from, d.off);
 +                ++st.cmds;
 +                ++st.draws;
 +                st.verts += d.count;
-+                if (d.count) {
++                if (stat) static_draw(d);
++                else if (d.count) {
 +                    std::memcpy(draw_begin(d.prim, d.flags, d.count, d.bytes), e.vtx.data() + d.at, d.bytes);
 +                    dl_stat.copied += d.bytes;
 +                    draw_done();
@@ -708,7 +775,7 @@ index a6b37f2..9ab84b7 100644
      }
  }
  
-@@ -525,6 +911,8 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
+@@ -525,6 +978,8 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
      case 0x08:
          if (n < 6) return 0;
          cp[p[1]] = be32(p + 2);
@@ -717,7 +784,7 @@ index a6b37f2..9ab84b7 100644
          TRACE("CP %02X %08X\n", p[1], cp[p[1]]);
          return 6;
      case 0x10: {
-@@ -556,8 +944,9 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
+@@ -556,8 +1011,9 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
      if (op >= 0x80 && op < 0xC0) {
          if (n < 3) return 0;
          uint32_t count = (uint32_t)p[1] << 8 | p[2];
@@ -729,7 +796,7 @@ index a6b37f2..9ab84b7 100644
          if (n < len) return 0;
          ++st.draws;
          st.verts += count;
-@@ -565,45 +954,18 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
+@@ -565,45 +1021,18 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
          if (video && count) {
              if (bp[0xF1] >> 21 & 7) warn_once("fog (not drawn), type", bp[0xF1] >> 21 & 7);
              if (bp[0xF4] >> 2 & 3) warn_once("Z texture (not drawn), op", bp[0xF4] >> 2 & 3);
@@ -740,7 +807,10 @@ index a6b37f2..9ab84b7 100644
 -                auto t0 = std::chrono::steady_clock::now();
 -                sync_textures();
 -                g_vperf.tex += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count();
--            } else {
++                uint64_t t0 = perf_ticks();
++                decode_vertices(f, fl, p + 3, count, out);
++                perf_vtx += perf_ticks() - t0;
+             } else {
 -                sync_textures();
 -            }
 -            // VC_DRAW, prim, vertex flags, pieces (u32), then each piece: n (u32), n vertices
@@ -760,10 +830,7 @@ index a6b37f2..9ab84b7 100644
 -                auto t0 = std::chrono::steady_clock::now();
 -                fl = decode_vertices(f, p + 3, count, out);
 -                g_vperf.vtx += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count();
-+                uint64_t t0 = perf_ticks();
-+                decode_vertices(f, fl, p + 3, count, out);
-+                perf_vtx += perf_ticks() - t0;
-             } else {
+-            } else {
 -                fl = decode_vertices(f, p + 3, count, out);
 -            }
 -            if (extend && rec[draw_hdr + 2] != fl) {      // other attributes: a draw of its own
@@ -784,7 +851,7 @@ index a6b37f2..9ab84b7 100644
          }
          return len;
      }
-@@ -614,8 +976,17 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
+@@ -614,8 +1043,17 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
  
  void feed(const uint8_t* b, int n) {
      if (desync) return;
@@ -803,7 +870,7 @@ index a6b37f2..9ab84b7 100644
      while (off < stream.size()) {
          size_t k = parse(stream.data() + off, stream.size() - off, false);
          if (!k) { --st.cmds; break; }
-@@ -729,6 +1100,7 @@ void gx_init() {
+@@ -729,6 +1167,7 @@ void gx_init() {
  // AI's, which start each audio frame's mix, above all. So does this wait.
  // A handler may switch guest threads, and another thread may hand the
  // record over in the meantime.
@@ -811,7 +878,16 @@ index a6b37f2..9ab84b7 100644
  void gx_draw_done_reached() {
      hw_run_locked([] { pe_ctrl |= 8; ++st.done; os_raise(); });
  }
-@@ -768,12 +1140,17 @@ static void gp_run() {
+@@ -738,7 +1177,7 @@ void gx_submit_pending() {
+     submit_pending = false;
+     while (!rec.empty()) {
+         int frames = rec_frames;
+-        if (video_submit(rec, frames, 1)) { rec_frames = 0; draw_end = SIZE_MAX; break; }
++        if (video_submit(rec, frames, 1)) { rec_frames = 0; draw_end = sdraw_end = SIZE_MAX; break; }
+         if (t_ppc && g_ppc_pending.load(std::memory_order_relaxed)) ppc_poll(*t_ppc);
+     }
+ }
+@@ -768,12 +1207,17 @@ static void gp_run() {
  
  void gx_pipe_burst(const uint8_t* b, int n) {
      uint32_t at = pi_wptr_addr();
@@ -835,16 +911,16 @@ index a6b37f2..9ab84b7 100644
      }
      if (!linked()) return;
      if (held.empty() && !(bp_enabled() && at == bp_addr())) { feed(b, n); return; }
-@@ -861,4 +1238,10 @@ void gx_report() {
+@@ -861,4 +1305,10 @@ void gx_report() {
             (unsigned long long)st.dls, (unsigned long long)st.copies, (unsigned long long)st.frames,
             (unsigned long long)st.done, (unsigned long long)st.uploads, (unsigned long long)st.peeks,
             (unsigned long long)st.readbacks);
 +    if (dl_stat.calls)
 +        rt_log("gx: display lists kept decoded: %llu of %llu calls used again, %llu decoded and kept, %llu parsed as before; "
-+               "%llu MB hashed to check them, %llu MB of vertices used again",
++               "%llu MB hashed to check them, %llu MB of vertices copied again; the static buffer started over %u times",
 +               (unsigned long long)dl_stat.kept, (unsigned long long)dl_stat.calls, (unsigned long long)dl_stat.built,
 +               (unsigned long long)dl_stat.plain, (unsigned long long)(dl_stat.bytes >> 20),
-+               (unsigned long long)(dl_stat.copied >> 20));
++               (unsigned long long)(dl_stat.copied >> 20), arena_gen - 1);
  }
 diff --git a/runtime/hw.cpp b/runtime/hw.cpp
 index c53d227..56d5486 100644
@@ -2029,10 +2105,10 @@ index 8a4e097..8b1b1a8 100644
  void ppc_mmio_write(uint32_t addr, uint32_t, int) { rt_die("mmio write %08X", addr); }
  uint64_t ppc_timebase() { return 0; }
 diff --git a/runtime/video.cpp b/runtime/video.cpp
-index 5726093..08d230d 100644
+index 5726093..a9d1233 100644
 --- a/runtime/video.cpp
 +++ b/runtime/video.cpp
-@@ -79,7 +79,34 @@ struct PSUniforms {                                // gxshader.cpp's uniform blo
+@@ -79,7 +79,35 @@ struct PSUniforms {                                // gxshader.cpp's uniform blo
  // ---- GL objects -------------------------------------------------------------------------------
  SDL_Window* win = nullptr;
  int S = 1;                                         // EFB scale
@@ -2041,13 +2117,14 @@ index 5726093..08d230d 100644
 +// A vertex array for each layout a draw's vertices come in (video.h), made
 +// when a draw first has it. An attribute a layout leaves out is not enabled:
 +// it reads the context's value for it, zero, and white for the colours.
-+GLuint layout_vao[128], bound_vao = 0;
-+GLuint vao_for(uint8_t flags) {
-+    GLuint& vao = layout_vao[flags & 127];
++// And one more of each for the static vertex buffer (VC_DRAWS).
++GLuint layout_vao[2][128], bound_vao = 0, static_vbo;
++GLuint vao_for(uint8_t flags, bool stat) {
++    GLuint& vao = layout_vao[stat][flags & 127];
 +    if (vao) return vao;
 +    const VtxLayout l = vtx_layout(flags);
 +    glCreateVertexArrays(1, &vao);
-+    glVertexArrayVertexBuffer(vao, 0, vbo, 0, l.stride);
++    glVertexArrayVertexBuffer(vao, 0, stat ? static_vbo : vbo, 0, l.stride);
 +    glVertexArrayElementBuffer(vao, quad_ibo);
 +    auto attr = [&](GLuint loc, int n, GLenum type, bool norm, bool integer, GLuint off) {
 +        glEnableVertexArrayAttrib(vao, loc);
@@ -2068,7 +2145,7 @@ index 5726093..08d230d 100644
  GLuint copy_prog;
  GLint copy_rect_loc, copy_mode_loc;
  constexpr size_t VBO_CAP = 64u << 20;
-@@ -100,6 +127,8 @@ bool sampler_set[8];
+@@ -100,6 +128,8 @@ bool sampler_set[8];
  struct Tex { GLuint name = 0; int w = 0, h = 0, levels = 0; };
  std::unordered_map<uint32_t, Tex> texs;            // decoded textures, by id
  std::unordered_map<uint32_t, Tex> efb_copies;      // EFB copies to texture, by address
@@ -2077,7 +2154,7 @@ index 5726093..08d230d 100644
  std::unordered_map<uint32_t, Tex> xfbs;            // EFB copies to the XFB, by address
  uint64_t map_src[8];                               // per map: texture id, or 1 << 32 | EFB copy address
  uint32_t last_xfb = 0;
-@@ -295,7 +324,14 @@ void main() {
+@@ -295,7 +325,14 @@ void main() {
  )";
  
  // ---- register side effects ----------------------------------------------------------------------
@@ -2092,7 +2169,7 @@ index 5726093..08d230d 100644
      bool has_alpha = (bp[0x43] & 7) == 1;
      bool cu = bp[0x41] >> 3 & 1, au = bp[0x41] >> 4 & 1, zu = bp[0x40] >> 4 & 1;
      if (!cu && !au && !zu) return;
-@@ -325,7 +361,10 @@ void efb_dump(const char* tag) {
+@@ -325,7 +362,10 @@ void efb_dump(const char* tag) {
      write_png(name, EFB_W * S, EFB_H * S, px.data());
  }
  
@@ -2103,7 +2180,7 @@ index 5726093..08d230d 100644
      int x = (int)(bp[0x49] & 0x3FF), y = (int)(bp[0x49] >> 10 & 0x3FF);
      int w = (int)(bp[0x4A] & 0x3FF) + 1, h = (int)(bp[0x4A] >> 10 & 0x3FF) + 1;
      uint32_t dest = (bp[0x4B] & 0xFFFFFF) << 5;
-@@ -366,8 +405,8 @@ void efb_copy(uint32_t v) {
+@@ -366,8 +406,8 @@ void efb_copy(uint32_t v) {
          glBindSampler(0, 0);
          glBindSampler(1, 0);
          glBindVertexArray(empty_vao);
@@ -2113,7 +2190,7 @@ index 5726093..08d230d 100644
      }
      if (v >> 11 & 1) efb_clear(x, y, w, h);
  }
-@@ -475,7 +514,10 @@ void bind_textures() {
+@@ -475,7 +515,10 @@ void bind_textures() {
      for (int m = 0; m < 8; ++m) {
          if (!(used >> m & 1)) continue;
          GLuint name = 0;
@@ -2125,28 +2202,33 @@ index 5726093..08d230d 100644
              auto it = efb_copies.find((uint32_t)map_src[m]);
              if (it != efb_copies.end()) name = it->second.name;
          } else {
-@@ -504,72 +546,90 @@ void bind_textures() {
- 
- // A VC_DRAW's pieces (each n, then n vertices), drawn with one call.
- void draw(uint8_t prim, uint8_t vflags, const uint8_t* pieces, uint32_t npieces) {
-+    const size_t stride = vtx_layout(vflags).stride;
-     uint32_t n = 0;
-     const uint8_t* vtx = pieces + 4;                           // the first vertex
-     for (uint32_t i = 0, k; i < npieces; ++i) {
--        std::memcpy(&k, pieces + (size_t)n * sizeof(GVtx) + 4 * i, 4);
-+        std::memcpy(&k, pieces + (size_t)n * stride + 4 * i, 4);
-         n += k;
+@@ -502,74 +545,86 @@ void bind_textures() {
      }
+ }
+ 
+-// A VC_DRAW's pieces (each n, then n vertices), drawn with one call.
+-void draw(uint8_t prim, uint8_t vflags, const uint8_t* pieces, uint32_t npieces) {
+-    uint32_t n = 0;
+-    const uint8_t* vtx = pieces + 4;                           // the first vertex
+-    for (uint32_t i = 0, k; i < npieces; ++i) {
+-        std::memcpy(&k, pieces + (size_t)n * sizeof(GVtx) + 4 * i, 4);
+-        n += k;
+-    }
++// What a draw needs set before its vertices: the program, the vertex array of
++// its layout, the fixed state, uniforms and textures. False: nothing to draw.
++bool draw_prepare(uint8_t prim, uint8_t vflags, bool stat) {
      uint32_t cull = bp[0x00] >> 14 & 3;
      bool tri = prim < 0xA8;
-     if (tri && cull == 3) return;
+-    if (tri && cull == 3) return;
 -    GLuint prog = program_for(vflags);
+-    if (!prog) return;
++    if (tri && cull == 3) return false;
 +    GLuint prog = program_for(vflags & VTX_ATTRS);
-+    if (GLuint vao = vao_for(vflags); vao != bound_vao) {
++    if (GLuint vao = vao_for(vflags, stat); vao != bound_vao) {
 +        glBindVertexArray(vao);
 +        bound_vao = vao;
 +    }
-     if (!prog) return;
++    if (!prog) return false;
      ++cnt.draws;
 -    glBindFramebuffer(GL_FRAMEBUFFER, efb_fbo);
 -    glUseProgram(prog);
@@ -2197,7 +2279,7 @@ index 5726093..08d230d 100644
 +        int sx0 = (int)(bp[0x20] >> 12 & 0x7FF) - offx, sy0 = (int)(bp[0x20] & 0x7FF) - offy;
 +        int sx1 = (int)(bp[0x21] >> 12 & 0x7FF) - offx + 1, sy1 = (int)(bp[0x21] & 0x7FF) - offy + 1;
 +        sx0 = std::max(sx0, 0); sy0 = std::max(sy0, 0); sx1 = std::min(sx1, EFB_W); sy1 = std::min(sy1, EFB_H);
-+        if (sx1 <= sx0 || sy1 <= sy0) return;
++        if (sx1 <= sx0 || sy1 <= sy0) return false;
 +        glEnable(GL_SCISSOR_TEST);
 +        glScissor(sx0 * S, sy0 * S, (sx1 - sx0) * S, (sy1 - sy0) * S);
 +
@@ -2269,7 +2351,60 @@ index 5726093..08d230d 100644
  
      if (xf_lo < xf_hi) {
          glNamedBufferSubData(xf_ubo, xf_lo * 4, (xf_hi - xf_lo) * 4, &xf[xf_lo]);
-@@ -581,7 +641,8 @@ void draw(uint8_t prim, uint8_t vflags, const uint8_t* pieces, uint32_t npieces)
+@@ -578,10 +633,61 @@ void draw(uint8_t prim, uint8_t vflags, const uint8_t* pieces, uint32_t npieces)
+     }
+     set_ps_uniforms();
+     bind_textures();
++    return true;
++}
++
++std::vector<GLint> firsts;
++std::vector<GLsizei> counts;
++std::vector<const void*> offsets;
++// the pieces in firsts and counts, with one call
++void draw_issue(uint8_t prim) {
++    const uint32_t npieces = (uint32_t)firsts.size();
++    const GLint base = firsts[0];
++    GLenum mode;
++    switch (prim) {
++    case 0x80: case 0x88:                                      // quads: a static index buffer of their triangles
++        for (GLsizei& k : counts) k = k / 4 * 6;
++        offsets.assign(npieces, nullptr);
++        if (npieces == 1) glDrawElementsBaseVertex(GL_TRIANGLES, counts[0], GL_UNSIGNED_INT, nullptr, base);
++        else glMultiDrawElementsBaseVertex(GL_TRIANGLES, counts.data(), GL_UNSIGNED_INT, offsets.data(),
++                                           (GLsizei)npieces, firsts.data());
++        mode = 0;
++        break;
++    case 0x90: mode = GL_TRIANGLES; break;
++    case 0x98: mode = GL_TRIANGLE_STRIP; break;
++    case 0xA0: mode = GL_TRIANGLE_FAN; break;
++    case 0xA8: mode = GL_LINES; break;
++    case 0xB0: mode = GL_LINE_STRIP; break;
++    default: mode = GL_POINTS; break;
++    }
++    if (mode && npieces == 1) glDrawArrays(mode, base, counts[0]);
++    else if (mode) glMultiDrawArrays(mode, firsts.data(), counts.data(), (GLsizei)npieces);
++    static const long dump_after = std::getenv("WIIKIT_EFBDUMP_AFTERCOPY") ? std::atol(std::getenv("WIIKIT_EFBDUMP_AFTERCOPY")) : -1;
++    if (efb_dump_every && efb_dumping() && efb_copies_this_frame > dump_after) {   // (AFTERCOPY=n: only past the frame's nth copy)
++        static long k = 0;
++        if (++k % efb_dump_every == 0) {
++            char tag[32];
++            std::snprintf(tag, sizeof tag, "draw%05ld", k);
++            efb_dump(tag);
++        }
++    }
++}
++
++// A VC_DRAW's pieces (each n, then n vertices), drawn with one call.
++void draw(uint8_t prim, uint8_t vflags, const uint8_t* pieces, uint32_t npieces) {
++    const size_t stride = vtx_layout(vflags).stride;
++    uint32_t n = 0;
++    const uint8_t* vtx = pieces + 4;                           // the first vertex
++    for (uint32_t i = 0, k; i < npieces; ++i) {
++        std::memcpy(&k, pieces + (size_t)n * stride + 4 * i, 4);
++        n += k;
++    }
++    if (!draw_prepare(prim, vflags, false)) return;
  
      if (efb_dumping() && std::getenv("WIIKIT_DRAWLOG")) {         // debugging: where each draw lands
          static FILE* lf = std::fopen("drawlog.txt", "w");
@@ -2279,7 +2414,7 @@ index 5726093..08d230d 100644
          uint32_t pm = v0.mtx[0] * 4u;
          float pos[3];
          for (int r = 0; r < 3; ++r)
-@@ -599,20 +660,21 @@ void draw(uint8_t prim, uint8_t vflags, const uint8_t* pieces, uint32_t npieces)
+@@ -599,61 +705,48 @@ void draw(uint8_t prim, uint8_t vflags, const uint8_t* pieces, uint32_t npieces)
                       v0.mtx[0], v0.pos[0], v0.pos[1], v0.pos[2], pos[0], pos[1], pos[2], c[0] / c[3], c[1] / c[3], c[3],
                       (bp[0x00] >> 10 & 15) + 1, xf[0x1009] & 3);
      }
@@ -2301,11 +2436,11 @@ index 5726093..08d230d 100644
          }
      }
 -    GLint base = (GLint)(vbo_off / sizeof(GVtx));
+-    static std::vector<GLint> firsts;
+-    static std::vector<GLsizei> counts;
+-    static std::vector<const void*> offsets;
 +    GLint base = (GLint)(vbo_off / stride);
-     static std::vector<GLint> firsts;
-     static std::vector<GLsizei> counts;
-     static std::vector<const void*> offsets;
-@@ -620,10 +682,10 @@ void draw(uint8_t prim, uint8_t vflags, const uint8_t* pieces, uint32_t npieces)
+     firsts.clear();
      counts.clear();
      for (uint32_t i = 0, at = 0, k; i < npieces; ++i) {       // the pieces' vertices, one after another
          std::memcpy(&k, pieces, 4);
@@ -2318,17 +2453,52 @@ index 5726093..08d230d 100644
          at += k;
      }
      vbo_off += bytes;
-@@ -646,7 +708,8 @@ void draw(uint8_t prim, uint8_t vflags, const uint8_t* pieces, uint32_t npieces)
-     }
-     if (mode && npieces == 1) glDrawArrays(mode, base, counts[0]);
-     else if (mode) glMultiDrawArrays(mode, firsts.data(), counts.data(), (GLsizei)npieces);
+-    GLenum mode;
+-    switch (prim) {
+-    case 0x80: case 0x88:                                      // quads: a static index buffer of their triangles
+-        for (GLsizei& k : counts) k = k / 4 * 6;
+-        offsets.assign(npieces, nullptr);
+-        if (npieces == 1) glDrawElementsBaseVertex(GL_TRIANGLES, counts[0], GL_UNSIGNED_INT, nullptr, base);
+-        else glMultiDrawElementsBaseVertex(GL_TRIANGLES, counts.data(), GL_UNSIGNED_INT, offsets.data(),
+-                                           (GLsizei)npieces, firsts.data());
+-        mode = 0;
+-        break;
+-    case 0x90: mode = GL_TRIANGLES; break;
+-    case 0x98: mode = GL_TRIANGLE_STRIP; break;
+-    case 0xA0: mode = GL_TRIANGLE_FAN; break;
+-    case 0xA8: mode = GL_LINES; break;
+-    case 0xB0: mode = GL_LINE_STRIP; break;
+-    default: mode = GL_POINTS; break;
+-    }
+-    if (mode && npieces == 1) glDrawArrays(mode, base, counts[0]);
+-    else if (mode) glMultiDrawArrays(mode, firsts.data(), counts.data(), (GLsizei)npieces);
 -    if (efb_dump_every && efb_dumping()) {
-+    static const long dump_after = std::getenv("WIIKIT_EFBDUMP_AFTERCOPY") ? std::atol(std::getenv("WIIKIT_EFBDUMP_AFTERCOPY")) : -1;
-+    if (efb_dump_every && efb_dumping() && efb_copies_this_frame > dump_after) {   // (AFTERCOPY=n: only past the frame's nth copy)
-         static long k = 0;
-         if (++k % efb_dump_every == 0) {
-             char tag[32];
-@@ -662,6 +725,7 @@ template <class T> T rd(const uint8_t*& p) { T v; std::memcpy(&v, p, sizeof v);
+-        static long k = 0;
+-        if (++k % efb_dump_every == 0) {
+-            char tag[32];
+-            std::snprintf(tag, sizeof tag, "draw%05ld", k);
+-            efb_dump(tag);
+-        }
++    draw_issue(prim);
++}
++
++// A VC_DRAWS's pieces: vertices already in the static buffer.
++void draw_static(uint8_t prim, uint8_t vflags, const uint8_t* pieces, uint32_t npieces) {
++    if (!draw_prepare(prim, vflags, true)) return;
++    firsts.clear();
++    counts.clear();
++    for (uint32_t i = 0; i < npieces; ++i) {
++        uint32_t first, count;
++        std::memcpy(&first, pieces + 8 * i, 4);
++        std::memcpy(&count, pieces + 8 * i + 4, 4);
++        firsts.push_back((GLint)first);
++        counts.push_back((GLsizei)count);
+     }
++    draw_issue(prim);
+ }
+ 
+ // ---- the record -----------------------------------------------------------------------------------
+@@ -662,6 +755,7 @@ template <class T> T rd(const uint8_t*& p) { T v; std::memcpy(&v, p, sizeof v);
  // The EFB at its native size: the pixel at each native position's top-left
  // sample of the scaled EFB (rows from the top, as the EFB copies read it).
  void efb_readback() {
@@ -2336,7 +2506,7 @@ index 5726093..08d230d 100644
      int W = EFB_W * S, H = EFB_H * S;
      std::vector<uint8_t> px((size_t)W * H * 4);
      std::vector<float> dz((size_t)W * H);
-@@ -703,6 +767,7 @@ void copy_readback(uint32_t addr) {
+@@ -703,6 +797,7 @@ void copy_readback(uint32_t addr) {
  }
  
  void exec(const std::vector<uint8_t>& data) {
@@ -2344,7 +2514,7 @@ index 5726093..08d230d 100644
      const uint8_t* p = data.data();
      const uint8_t* end = p + data.size();
      while (p < end) {
-@@ -720,9 +785,10 @@ void exec(const std::vector<uint8_t>& data) {
+@@ -720,12 +815,26 @@ void exec(const std::vector<uint8_t>& data) {
              uint8_t prim = rd<uint8_t>(p), fl = rd<uint8_t>(p);
              uint32_t pieces = rd<uint32_t>(p);
              draw(prim, fl, p, pieces);
@@ -2356,7 +2526,23 @@ index 5726093..08d230d 100644
              }
              break;
          }
-@@ -742,6 +808,33 @@ void exec(const std::vector<uint8_t>& data) {
++        case VC_VTXUP: {
++            uint32_t off = rd<uint32_t>(p), n = rd<uint32_t>(p);
++            glNamedBufferSubData(static_vbo, off, n, p);
++            p += n;
++            break;
++        }
++        case VC_DRAWS: {
++            uint8_t prim = rd<uint8_t>(p), fl = rd<uint8_t>(p);
++            uint32_t pieces = rd<uint32_t>(p);
++            draw_static(prim, fl, p, pieces);
++            p += 8u * pieces;
++            break;
++        }
+         case VC_TEXUP: {
+             uint8_t m = rd<uint8_t>(p);
+             uint32_t id = rd<uint32_t>(p);
+@@ -742,6 +851,33 @@ void exec(const std::vector<uint8_t>& data) {
          }
          case VC_TEXBIND: { uint8_t m = rd<uint8_t>(p); map_src[m] = rd<uint32_t>(p); break; }
          case VC_TEXEFB: { uint8_t m = rd<uint8_t>(p); map_src[m] = 1ull << 32 | rd<uint32_t>(p); break; }
@@ -2390,7 +2576,7 @@ index 5726093..08d230d 100644
          case VC_FRAME: break;
          case VC_DRAWDONE: gx_draw_done_reached(); break;
          default: rt_die("video: bad record byte %02X", p[-1]);
-@@ -1266,7 +1359,10 @@ void update_pad() {
+@@ -1266,7 +1402,10 @@ void update_pad() {
      for (int i = 0; i < 4; ++i) classic[i] = c[i];
  }
  
@@ -2401,7 +2587,7 @@ index 5726093..08d230d 100644
      ++cnt.presents;
      int ww = 0, wh = 0;
      SDL_GetWindowSizeInPixels(win, &ww, &wh);
-@@ -1275,7 +1371,7 @@ void present() {
+@@ -1275,7 +1414,7 @@ void present() {
      glColorMask(1, 1, 1, 1);
      glClearColor(0, 0, 0, 1);
      glClear(GL_COLOR_BUFFER_BIT);
@@ -2410,7 +2596,7 @@ index 5726093..08d230d 100644
      if (it == xfbs.end()) it = xfbs.find(last_xfb);
      if (it != xfbs.end() && ww > 0 && wh > 0) {
          const Tex& t = it->second;
-@@ -1286,6 +1382,7 @@ void present() {
+@@ -1286,6 +1425,7 @@ void present() {
          glBlitNamedFramebuffer(copy_fbo, 0, 0, 0, t.w, t.h, dx, dy + dh, dx + dw, dy,   // top row first
                                 GL_COLOR_BUFFER_BIT, GL_LINEAR);
      }
@@ -2418,7 +2604,15 @@ index 5726093..08d230d 100644
      if (opt.dump_dir && cnt.presents % (uint64_t)opt.dump_every == 0 && ww > 0 && wh > 0) {
          std::vector<uint8_t> px((size_t)ww * wh * 4), flip(px.size());   // the window, as shown
          glReadPixels(0, 0, ww, wh, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
-@@ -1333,31 +1430,10 @@ void setup() {
+@@ -1327,37 +1467,18 @@ void setup() {
+     const GLbitfield map = GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT;
+     glNamedBufferStorage(vbo, VBO_CAP, nullptr, map);
+     vbo_ptr = static_cast<uint8_t*>(glMapNamedBufferRange(vbo, 0, VBO_CAP, map));
++    glCreateBuffers(1, &static_vbo);
++    glNamedBufferStorage(static_vbo, VTX_STATIC_CAP, nullptr, GL_DYNAMIC_STORAGE_BIT);
+     if (!vbo_ptr) rt_die("video: the vertex buffer cannot be mapped");
+     std::vector<uint32_t> qi;
+     for (uint32_t k = 0; k < 0x10000 / 4; ++k)
          for (uint32_t d : {0u, 1u, 2u, 0u, 2u, 3u}) qi.push_back(4 * k + d);
      glCreateBuffers(1, &quad_ibo);
      glNamedBufferStorage(quad_ibo, qi.size() * 4, qi.data(), 0);
@@ -2453,7 +2647,7 @@ index 5726093..08d230d 100644
  
      glCreateBuffers(1, &xf_ubo);
      glNamedBufferStorage(xf_ubo, sizeof xf, nullptr, GL_DYNAMIC_STORAGE_BIT);
-@@ -1462,6 +1538,9 @@ std::atomic<bool> want_relative{false};
+@@ -1462,6 +1583,9 @@ std::atomic<bool> want_relative{false};
  std::mutex motion_mx;
  float motion_x = 0, motion_y = 0;
  void video_set_relative_mouse(bool on) { want_relative = on; }
@@ -2463,7 +2657,7 @@ index 5726093..08d230d 100644
  void video_take_mouse_motion(float& dx, float& dy) {
      std::lock_guard<std::mutex> lk(motion_mx);
      dx = motion_x; dy = motion_y;
-@@ -1479,6 +1558,7 @@ ClassicState video_classic(int chan) {
+@@ -1479,6 +1603,7 @@ ClassicState video_classic(int chan) {
  void video_set_rumble(int chan, bool on) {
      if (chan >= 0 && chan < 4) rumble_want[chan] = on;
  }
@@ -2471,7 +2665,7 @@ index 5726093..08d230d 100644
  void video_retrace() {
      retraces.fetch_add(1);
      if (wake) SDL_SignalSemaphore(wake);
-@@ -1506,6 +1586,7 @@ void video_run(const char* title) {
+@@ -1506,6 +1631,7 @@ void video_run(const char* title) {
      SDL_GL_MakeCurrent(win, ctx);
      SDL_GL_SetSwapInterval(0);                   // VI paces the presents
      if (!gl_load()) rt_die("video: OpenGL functions missing");
@@ -2479,7 +2673,7 @@ index 5726093..08d230d 100644
      rt_log("video: %s, %s", (const char*)glGetString(GL_RENDERER), (const char*)glGetString(GL_VERSION));
      if (debug) {
          glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
-@@ -1529,11 +1610,15 @@ void video_run(const char* title) {
+@@ -1529,11 +1655,15 @@ void video_run(const char* title) {
      uint64_t frames_then = 0;
      uint32_t seen = retraces.load();
      std::string base_title = title;
@@ -2495,7 +2689,7 @@ index 5726093..08d230d 100644
              if (e.type == SDL_EVENT_GAMEPAD_ADDED) pad_added(e.gdevice.which);
              if (e.type == SDL_EVENT_GAMEPAD_REMOVED) pad_removed(e.gdevice.which);
              // F11 or Alt+Enter: fullscreen and back
-@@ -1592,7 +1677,10 @@ void video_run(const char* title) {
+@@ -1592,7 +1722,10 @@ void video_run(const char* title) {
                  double vtx = ms(g_vperf.vtx), tex = ms(g_vperf.tex), wait = ms(g_vperf.wait), draw = ms(g_vperf.draw),
                         pres = ms(g_vperf.present);
                  rt_log("perf: %.1f fps; frame %.1f ms; game thread: vertices %.1f, textures %.1f, waiting for the renderer %.1f; "
@@ -2507,7 +2701,7 @@ index 5726093..08d230d 100644
              }
              frames_then = cnt.frames;
              t_title = now;
-@@ -1608,6 +1696,8 @@ void video_run(const char* title) {
+@@ -1608,6 +1741,8 @@ void video_run(const char* title) {
              }
              if (c.readback) { if (c.copy) copy_readback(c.copy); else efb_readback(); busy = true; continue; }
              auto te = Clock::now();
@@ -2516,7 +2710,7 @@ index 5726093..08d230d 100644
              exec(c.data);
              if (g_vperf_on) g_vperf.draw += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - te).count();
              {
-@@ -1621,6 +1711,17 @@ void video_run(const char* title) {
+@@ -1621,6 +1756,17 @@ void video_run(const char* title) {
              if (retraces.load() != seen) break;
          }
          uint32_t r = retraces.load();
@@ -2535,7 +2729,7 @@ index 5726093..08d230d 100644
              seen = r;
              auto tp = Clock::now();
 diff --git a/runtime/video.h b/runtime/video.h
-index ecfb499..7171c63 100644
+index ecfb499..5b40dc8 100644
 --- a/runtime/video.h
 +++ b/runtime/video.h
 @@ -3,7 +3,7 @@
@@ -2547,17 +2741,21 @@ index ecfb499..7171c63 100644
  // loaded from indexed arrays, textures are decoded to RGBA through TMEM's
  // palettes. What it records reads no guest memory any more: the renderer can
  // run behind the game on its own thread, and the game may reuse its buffers
-@@ -12,7 +12,8 @@
+@@ -12,7 +12,12 @@
  // The record is a byte stream of commands:
  //   BP      u32 (reg << 24 | value): a BP register after its mask
  //   XF      u16 addr, u16 n, n x u32
 -//   DRAW    u8 primitive (0x80..0xB8), u8 flags (VTX_*), u32 count, count x GVtx
 +//   DRAW    u8 primitive (0x80..0xB8), u8 flags (VTX_*), u32 pieces, then each
 +//           piece: u32 count, count vertices in the flags' layout
++//   VTXUP   u32 offset, u32 n, n bytes: vertices that stay (a display list's, kept decoded)
++//           into the static vertex buffer
++//   DRAWS   u8 primitive, u8 flags, u32 pieces, then each piece: u32 first vertex, u32 count,
++//           in the static vertex buffer (first counts vertices of the flags' layout)
  //   TEXUP   u8 map, u32 id, u16 w, u16 h, u8 levels, RGBA8 pixels of every level
  //   TEXBIND u8 map, u32 id
  //   TEXEFB  u8 map, u32 address: the EFB copy made to that address
-@@ -25,17 +26,37 @@
+@@ -25,17 +30,38 @@
  #include <string>
  #include <vector>
  
@@ -2586,7 +2784,8 @@ index ecfb499..7171c63 100644
 +enum : uint8_t { VC_BP = 1, VC_XF, VC_DRAW, VC_TEXUP, VC_TEXBIND, VC_TEXEFB, VC_FRAME, VC_DRAWDONE,
 +                 // a texture made of several EFB copies, one after the other in memory: map (u8),
 +                 // width, height (u16), pieces (u8), then each piece's address (u32) and first row (u16)
-+                 VC_TEXEFBN };
++                 VC_TEXEFBN, VC_VTXUP, VC_DRAWS };
++constexpr uint32_t VTX_STATIC_CAP = 192u << 20;      // the static vertex buffer: gx.cpp gives its room out
 +enum : uint8_t { VTX_COL0 = 1, VTX_COL1 = 2, VTX_NRM = 4, VTX_NBT = 8,
 +                 VTX_ATTRS = 0x0F,                   // what the shaders are made from
 +                 VTX_TC_SHIFT = 4 };                 // bits 4-6: how many pairs of texture coordinate sets (0-4)
@@ -2604,7 +2803,7 @@ index ecfb499..7171c63 100644
  
  // video.cpp
  bool video_enabled();                       // false with --no-video: the stream is parsed only
-@@ -98,6 +119,20 @@ void video_set_rumble(int chan, bool on);
+@@ -98,6 +124,20 @@ void video_set_rumble(int chan, bool on);
  void video_set_relative_mouse(bool on);
  void video_take_mouse_motion(float& dx, float& dy);
  
