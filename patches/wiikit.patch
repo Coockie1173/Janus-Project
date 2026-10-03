@@ -89,10 +89,25 @@ index d0baebf..5d41849 100644
          st8(ea + i, (uint8_t)(c.r[(rs + i / 4) & 31] >> (24 - 8 * (i % 4))));
  }
 diff --git a/runtime/gx.cpp b/runtime/gx.cpp
-index a6b37f2..58d310e 100644
+index a6b37f2..363a916 100644
 --- a/runtime/gx.cpp
 +++ b/runtime/gx.cpp
-@@ -152,6 +152,21 @@ uint64_t hash_mem(const uint8_t* p, size_t n) {
+@@ -35,6 +35,14 @@
+ #include <unordered_map>
+ #include <vector>
+ 
++#if defined(__x86_64__) || defined(_M_X64)
++#ifdef _MSC_VER
++#include <intrin.h>
++#else
++#include <x86intrin.h>
++#endif
++#endif
++
+ namespace {
+ 
+ uint32_t pi_base, pi_end, pi_wptr;                 // PI CPU FIFO (physical addresses)
+@@ -152,6 +160,21 @@ uint64_t hash_mem(const uint8_t* p, size_t n) {
      return h;
  }
  
@@ -114,7 +129,7 @@ index a6b37f2..58d310e 100644
  // ---- textures --------------------------------------------------------------------------------
  // Decoded textures are cached by what names them (address, format, size,
  // levels, palette) and re-uploaded when their bytes change. Bytes are hashed
-@@ -169,13 +184,14 @@ struct TexKeyHash {
+@@ -169,13 +192,14 @@ struct TexKeyHash {
          return (size_t)(k.addr * 0x9E3779B1u ^ k.shape * 0x85EBCA77u ^ k.levels ^ k.tlut);
      }
  };
@@ -131,7 +146,28 @@ index a6b37f2..58d310e 100644
  std::unordered_map<uint32_t, CopyRec> copies;      // EFB copies to texture, by address
  
  // texture format an EFB copy format produces in RAM (for its size)
-@@ -204,8 +220,42 @@ void bind_map(int m) {
+@@ -184,7 +208,11 @@ uint32_t copy_tex_fmt(uint32_t cf) {
+     return f[cf & 15];
+ }
+ 
++bool used_stale = true;                            // GEN_MODE, the indirect maps or a TEV order written
+ uint32_t used_maps() {
++    static uint32_t cached = 0;
++    if (!used_stale) return cached;
++    used_stale = false;
+     uint32_t gen = bp[0x00], used = 0;
+     int ntev = (int)(gen >> 10 & 15) + 1, nind = (int)(gen >> 16 & 7);
+     for (int s = 0; s < ntev; ++s) {
+@@ -192,7 +220,7 @@ uint32_t used_maps() {
+         if (t & 0x40) used |= 1u << (t & 7);
+     }
+     for (int i = 0; i < nind && i < 4; ++i) used |= 1u << (bp[0x27] >> (6 * i) & 7);
+-    return used;
++    return cached = used;
+ }
+ 
+ void bind_map(int m) {
+@@ -204,8 +232,42 @@ void bind_map(int m) {
      if (img1 >> 21 & 1) warn_once("texture preloaded in TMEM (not modelled), map", m);
  
      auto c = copies.find(addr);
@@ -176,7 +212,7 @@ index a6b37f2..58d310e 100644
          uint64_t tag = 1ull << 32 | addr;
          if (map_bound[m] != tag) {
              put<uint8_t>(VC_TEXEFB);
-@@ -246,9 +296,17 @@ void bind_map(int m) {
+@@ -246,9 +308,17 @@ void bind_map(int m) {
      TexEntry& e = it->second;
      bool upload = false;
      if (fresh || e.gen != tex_gen) {
@@ -197,7 +233,58 @@ index a6b37f2..58d310e 100644
          e.gen = tex_gen;
      }
      if (upload) {
-@@ -387,43 +445,82 @@ const uint8_t* fetch(uint32_t mode, int arr, int size, const uint8_t*& p, uint32
+@@ -283,6 +353,7 @@ void bind_map(int m) {
+ }
+ 
+ void sync_textures() {
++    if (!tex_dirty) return;
+     uint32_t todo = used_maps() & tex_dirty;
+     for (int m = 0; m < 8; ++m)
+         if (todo >> m & 1) bind_map(m);
+@@ -351,11 +422,14 @@ VtxFmt vtx_fmt(int v) {
+         f.tc_fmt[i] = t[i][1];
+         f.tc_sc[i] = 1.0f / (float)(1u << t[i][2]);
+     }
++    return f;
++}
++
++void vtx_mtx_default(VtxFmt& f) {
+     uint32_t ma = cp[0x30], mb = cp[0x40];
+     f.mtx_default[0] = ma & 63;
+     for (int i = 0; i < 4; ++i) f.mtx_default[1 + i] = (uint8_t)(ma >> (6 + 6 * i) & 63);
+     for (int i = 0; i < 4; ++i) f.mtx_default[5 + i] = (uint8_t)(mb >> (6 * i) & 63);
+-    return f;
+ }
+ 
+ // bytes per vertex for vertex format `v`
+@@ -378,6 +452,26 @@ int vertex_size(const VtxFmt& f) {
+     return n;
+ }
+ 
++// Thousands of draws a frame, a handful of vertices each: a format is worked
++// out when a draw first uses it after one of its registers (the VCD, its
++// VAT) was written, not for every draw. The current matrix indices are not
++// part of it.
++struct VtxPlan { bool valid = false; int size = 0; VtxFmt f; } vtx_plans[8];
++VtxPlan& vtx_plan(int v) {
++    VtxPlan& pl = vtx_plans[v];
++    if (!pl.valid) {
++        pl.f = vtx_fmt(v);
++        pl.size = vertex_size(pl.f);
++        pl.valid = true;
++    }
++    vtx_mtx_default(pl.f);
++    return pl;
++}
++void vtx_plan_written(uint32_t reg) {
++    if (reg == 0x50 || reg == 0x60) for (VtxPlan& pl : vtx_plans) pl.valid = false;
++    else if (reg >= 0x70 && reg < 0xA0) vtx_plans[reg & 7].valid = false;
++}
++
+ // an attribute's data: in the stream (direct) or in its array (indexed)
+ const uint8_t* fetch(uint32_t mode, int arr, int size, const uint8_t*& p, uint32_t sub = 0) {
+     if (mode == 1) { const uint8_t* q = p; p += size; return q; }
+@@ -387,52 +481,116 @@ const uint8_t* fetch(uint32_t mode, int arr, int size, const uint8_t*& p, uint32
      return host(virt(cp[0xA0 + arr] + idx * cp[0xB0 + arr] + sub));
  }
  
@@ -303,7 +390,48 @@ index a6b37f2..58d310e 100644
          }
      }
      return flags;
-@@ -460,7 +557,8 @@ void bp_write(uint32_t v) {
+ }
+ 
+ // ---- BP ----------------------------------------------------------------------------------------
++// WIIKIT_PERF's timers around each draw's textures and vertices: thousands of
++// draws a frame, so the time-stamp counter where there is one (reading the
++// clock four times a draw was a tenth of the thread), converted once a frame.
++#if defined(__x86_64__) || defined(_M_X64)
++inline uint64_t perf_ticks() { return __rdtsc(); }
++#else
++inline uint64_t perf_ticks() { return (uint64_t)std::chrono::steady_clock::now().time_since_epoch().count(); }
++#endif
++uint64_t perf_vtx = 0, perf_tex = 0;
++void perf_frame() {
++    static uint64_t ticks_then = perf_ticks();
++    static auto clock_then = std::chrono::steady_clock::now();
++    uint64_t ticks = perf_ticks();
++    auto clock = std::chrono::steady_clock::now();
++    if (ticks > ticks_then) {
++        double ns = (double)std::chrono::duration_cast<std::chrono::nanoseconds>(clock - clock_then).count() / (double)(ticks - ticks_then);
++        g_vperf.vtx += (uint64_t)((double)perf_vtx * ns);
++        g_vperf.tex += (uint64_t)((double)perf_tex * ns);
++    }
++    perf_vtx = perf_tex = 0;
++    ticks_then = ticks;
++    clock_then = clock;
++}
++
+ void efb_copy(uint32_t v) {
+     if (v >> 14 & 1) {                                 // to the XFB: the frame is done
+         ++st.frames;
++        if (g_vperf_on) perf_frame();
+         if (video) {
+             put<uint8_t>(VC_FRAME);
+             ++rec_frames;
+@@ -454,13 +612,15 @@ void bp_write(uint32_t v) {
+     if (reg == 0xFE) { bp_mask = val; return; }
+     bp[reg] = (bp[reg] & ~bp_mask) | (val & bp_mask);
+     bp_mask = 0xFFFFFF;
++    if (reg == 0x00 || (reg >= 0x27 && reg <= 0x2F)) used_stale = true;
+     TRACE("BP %02X %06X\n", reg, bp[reg]);
+     switch (reg) {
+     case 0x45:                                                        // PE_DONE: draw done
          // when the renderer gets there, as the GP would: the game waits
          // for it asleep (GXWaitDrawDone), and its other threads (the
          // disc, the sound stream) run meanwhile
@@ -313,7 +441,70 @@ index a6b37f2..58d310e 100644
          pe_ctrl |= 8; ++st.done; os_raise();
          return;
      case 0x47: pe_token = (uint16_t)val; return;                      // token
-@@ -729,6 +827,7 @@ void gx_init() {
+@@ -525,6 +685,7 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
+     case 0x08:
+         if (n < 6) return 0;
+         cp[p[1]] = be32(p + 2);
++        vtx_plan_written(p[1]);
+         TRACE("CP %02X %08X\n", p[1], cp[p[1]]);
+         return 6;
+     case 0x10: {
+@@ -556,8 +717,9 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
+     if (op >= 0x80 && op < 0xC0) {
+         if (n < 3) return 0;
+         uint32_t count = (uint32_t)p[1] << 8 | p[2];
+-        VtxFmt f = vtx_fmt(op & 7);
+-        size_t len = 3 + (size_t)count * vertex_size(f);
++        const VtxPlan& pl = vtx_plan(op & 7);
++        const VtxFmt& f = pl.f;
++        size_t len = 3 + (size_t)count * (size_t)pl.size;
+         if (n < len) return 0;
+         ++st.draws;
+         st.verts += count;
+@@ -566,9 +728,9 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
+             if (bp[0xF1] >> 21 & 7) warn_once("fog (not drawn), type", bp[0xF1] >> 21 & 7);
+             if (bp[0xF4] >> 2 & 3) warn_once("Z texture (not drawn), op", bp[0xF4] >> 2 & 3);
+             if (g_vperf_on) {
+-                auto t0 = std::chrono::steady_clock::now();
++                uint64_t t0 = perf_ticks();
+                 sync_textures();
+-                g_vperf.tex += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count();
++                perf_tex += perf_ticks() - t0;
+             } else {
+                 sync_textures();
+             }
+@@ -586,9 +748,9 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
+             GVtx* out = reinterpret_cast<GVtx*>(grow(count * sizeof(GVtx)));
+             uint8_t fl;
+             if (g_vperf_on) {
+-                auto t0 = std::chrono::steady_clock::now();
++                uint64_t t0 = perf_ticks();
+                 fl = decode_vertices(f, p + 3, count, out);
+-                g_vperf.vtx += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count();
++                perf_vtx += perf_ticks() - t0;
+             } else {
+                 fl = decode_vertices(f, p + 3, count, out);
+             }
+@@ -614,8 +776,17 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
+ 
+ void feed(const uint8_t* b, int n) {
+     if (desync) return;
+-    stream.insert(stream.end(), b, b + n);
+     size_t off = 0;
++    if (stream.empty()) {                              // nothing left over: the burst is parsed where it is
++        while (off < (size_t)n) {
++            size_t k = parse(b + off, (size_t)n - off, false);
++            if (!k) { --st.cmds; break; }
++            off += k;
++        }
++        if (off < (size_t)n) stream.assign(b + off, b + n);
++        return;
++    }
++    stream.insert(stream.end(), b, b + n);
+     while (off < stream.size()) {
+         size_t k = parse(stream.data() + off, stream.size() - off, false);
+         if (!k) { --st.cmds; break; }
+@@ -729,6 +900,7 @@ void gx_init() {
  // AI's, which start each audio frame's mix, above all. So does this wait.
  // A handler may switch guest threads, and another thread may hand the
  // record over in the meantime.
@@ -1241,7 +1432,7 @@ index aa1274e..6b4f575 100644
      rt_die("%s at %s", what, rt_name(addr).c_str());
  }
 diff --git a/runtime/ppc.h b/runtime/ppc.h
-index 99351d5..3b86eb6 100644
+index 99351d5..adcfa44 100644
 --- a/runtime/ppc.h
 +++ b/runtime/ppc.h
 @@ -23,11 +23,13 @@
@@ -1326,10 +1517,16 @@ index 99351d5..3b86eb6 100644
      if (v & 0x8000u) PPC_POLL(c);
  }
  
-@@ -102,37 +121,54 @@ static inline void ppc_mtmsr(PPCContext& c, uint32_t v) {
+@@ -100,39 +119,58 @@ static inline void ppc_mtmsr(PPCContext& c, uint32_t v) {
+ // Below 0xC0000000 the guest address indexes host memory directly (MEM1 at
+ // 0x80000000, MEM2 at 0x90000000). Above it, ppc_io_*: the uncached mirrors
  // (0xC0000000, 0xD0000000), the hardware (0xCC000000-0xCDFFFFFF: GX FIFO
- // pipe, PI, VI, DSP, the Hollywood registers...) and the locked cache.
- #define PPC_IS_IO(a) ((a) >= 0xC0000000u)
+-// pipe, PI, VI, DSP, the Hollywood registers...) and the locked cache.
+-#define PPC_IS_IO(a) ((a) >= 0xC0000000u)
++// pipe, PI, VI, DSP, the Hollywood registers...). The locked cache at
++// 0xE0000000 is memory again: games skin and build vertices in it, too often
++// for a call an access.
++#define PPC_IS_IO(a) ((uint32_t)((a) - 0xC0000000u) < 0x20000000u)
 +// Where a guest address is in the host. On 64-bit Linux the guest's memory is
 +// mapped at its own addresses (mem.cpp), g_mem is null and an access needs no
 +// base: one instruction, nothing to reload after a store.
@@ -1387,7 +1584,7 @@ index 99351d5..3b86eb6 100644
  static inline void ppc_dcbz(uint32_t ea) {
      ea &= ~31u;
      for (int i = 0; i < 32; i += 4) st32(ea + i, 0);
-@@ -278,12 +314,24 @@ static inline void ps_quant(uint32_t type, int scale, uint32_t ea, double v, int
+@@ -278,12 +316,24 @@ static inline void ps_quant(uint32_t type, int scale, uint32_t ea, double v, int
  }
  static inline int gqr_scale(uint32_t s6) { return (int)(s6 & 0x20 ? s6 | ~0x3Fu : s6); }
  static inline void psq_load(PPCContext& c, int d, uint32_t ea, int w, int i) {
