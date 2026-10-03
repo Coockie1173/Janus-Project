@@ -15,6 +15,8 @@
 #                                      else hosts; direct never does)
 #     ./launch.sh --always-mouse       the cheat "Always Enable Mouse": mouse look in every player state
 #                                      (cutscenes, melee, climbing...), also in the F1 menu's Cheats
+#     ./launch.sh --skip-cutscenes     a mission starts at the checkpoint after its opening cutscene (also in
+#                                      the F1 menu's Enhancements)
 #     ./launch.sh --trace              log the mouse's player, its angles and the look state (for a report)
 #     ./launch.sh --extract GAME.rvz   take the game's files out of a disc image (.rvz .iso .wbfs) into ./game
 #                                      and stop; the window's "Extract disc..." does the same
@@ -43,7 +45,7 @@ fi
 
 # the saved settings, then the command line over them
 LAUNCH_FPS=auto; LAUNCH_FOV=49; LAUNCH_MOUSE=1.0; LAUNCH_ONLINE=1; LAUNCH_FULLSCREEN=0; LAUNCH_FASTSTART=0; LAUNCH_MOUSEMODE=auto
-LAUNCH_CRASHDUMP=1; LAUNCH_CRASHMEM=0; LAUNCH_MOUSEINVERT=0; LAUNCH_MOUSEEVERYWHERE=0
+LAUNCH_CRASHDUMP=1; LAUNCH_CRASHMEM=0; LAUNCH_MOUSEINVERT=0; LAUNCH_MOUSEEVERYWHERE=0; LAUNCH_SKIPCUTSCENES=0
 [ -f build/settings.env ] && . ./build/settings.env
 ARGS=
 while [ $# -gt 0 ]; do
@@ -54,6 +56,7 @@ while [ $# -gt 0 ]; do
         --mouse) LAUNCH_MOUSE=$2; shift 2 ;;
         --mouse-mode) LAUNCH_MOUSEMODE=$2; shift 2 ;;
         --always-mouse) LAUNCH_MOUSEEVERYWHERE=1; shift ;;
+        --skip-cutscenes) LAUNCH_SKIPCUTSCENES=1; shift ;;
         --offline) LAUNCH_ONLINE=0; shift ;;
         --fullscreen) LAUNCH_FULLSCREEN=1; shift ;;
         --fast-start) LAUNCH_FASTSTART=1; shift ;;
@@ -69,8 +72,8 @@ done
 case $LAUNCH_FPS in auto) ;; *) [ "$LAUNCH_FPS" -gt 275 ] 2>/dev/null && LAUNCH_FPS=275 ;; esac
 GE_FPS=${GE_FPS:-$LAUNCH_FPS}; GE_FOV=${GE_FOV:-$LAUNCH_FOV}; GE_MOUSE=${GE_MOUSE:-$LAUNCH_MOUSE}
 GE_MOUSE_MODE=${GE_MOUSE_MODE:-$LAUNCH_MOUSEMODE}; GE_MOUSE_INVERT=${GE_MOUSE_INVERT:-$LAUNCH_MOUSEINVERT}
-GE_MOUSE_EVERYWHERE=${GE_MOUSE_EVERYWHERE:-$LAUNCH_MOUSEEVERYWHERE}
-export GE_FPS GE_FOV GE_MOUSE GE_MOUSE_MODE GE_MOUSE_INVERT GE_MOUSE_EVERYWHERE
+GE_MOUSE_EVERYWHERE=${GE_MOUSE_EVERYWHERE:-$LAUNCH_MOUSEEVERYWHERE}; GE_SKIP_CUTSCENES=${GE_SKIP_CUTSCENES:-$LAUNCH_SKIPCUTSCENES}
+export GE_FPS GE_FOV GE_MOUSE GE_MOUSE_MODE GE_MOUSE_INVERT GE_MOUSE_EVERYWHERE GE_SKIP_CUTSCENES
 # through X11 when there is one: a present on Wayland costs the renderer 2 ms, 0.3 there
 # (SDL_VIDEODRIVER in the environment overrides)
 if [ -z "$SDL_VIDEODRIVER" ] && [ -n "$DISPLAY" ]; then SDL_VIDEODRIVER=x11,wayland; export SDL_VIDEODRIVER; fi

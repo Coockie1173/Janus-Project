@@ -1,8 +1,8 @@
 // GoldenEye 007 — the settings menu (F1), drawn the way the game draws its own
 // menus: the cream lines, the blue bars, the white bar under the cursor.
 //
-// Four pages: the screen (the field of view and the frame rate, sliders), the controls (the mouse, the
-// gamepad), the key bindings and the cheats. What is changed counts at once. The field
+// Five pages: the screen (the field of view and the frame rate, sliders), the controls (the mouse, the
+// gamepad), the key bindings, the enhancements and the cheats. What is changed counts at once. The field
 // of view and the mouse are kept in the launcher's settings file, the rest in
 // the runtime's key file ([Classic Controller]: only the lines changed here
 // are rewritten), so the launcher's window and this menu show the same.
@@ -82,7 +82,8 @@ void save_launch_settings() {
     std::vector<std::pair<std::string, std::string>> values = {
         {"LAUNCH_FOV", fov_text}, {"LAUNCH_MOUSE", mouse_text},
         {"LAUNCH_MOUSEMODE", modes[mouse_mode()]}, {"LAUNCH_MOUSEINVERT", mouse_invert() ? "1" : "0"},
-        {"LAUNCH_MOUSEEVERYWHERE", mouse_everywhere() ? "1" : "0"}};
+        {"LAUNCH_MOUSEEVERYWHERE", mouse_everywhere() ? "1" : "0"},
+        {"LAUNCH_SKIPCUTSCENES", skip_cutscenes() ? "1" : "0"}};
     if (g_fps_changed) values.push_back({"LAUNCH_FPS", std::to_string(fps_limit())});   // "auto" kept until it is changed
     auto lines = read_lines(GE_SETTINGS_FILE);
     if (lines.empty()) lines.push_back("# written by the launcher, read when the game is started");
@@ -177,7 +178,7 @@ struct Row {
 };
 struct Page { std::string title; std::vector<Row> rows; };
 
-enum { kRoot, kScreen, kControls, kBindings, kCheats, kPageCount };
+enum { kRoot, kScreen, kControls, kBindings, kEnhancements, kCheats, kPageCount };
 std::vector<Page> g_pages;
 int g_page = kRoot, g_row = 0, g_scroll = 0;
 int g_root_row = 0;                                  // where the cursor was on the first page
@@ -239,6 +240,7 @@ void build_pages() {
     root.rows.push_back({"Screen Settings", "Adjust the field of view.", {}, {}, [] { go(kScreen); }});
     root.rows.push_back({"Control Settings", "Adjust the mouse and the gamepad.", {}, {}, [] { go(kControls); }});
     root.rows.push_back({"Key Bindings", "Choose the keys and mouse buttons for each action.", {}, {}, [] { go(kBindings); }});
+    root.rows.push_back({"Enhancements", "Things the port adds to the game.", {}, {}, [] { go(kEnhancements); }});
     root.rows.push_back({"Cheats", "Things the game itself would not let you do.", {}, {}, [] { go(kCheats); }});
 
     Page& screen = g_pages[kScreen];
@@ -328,6 +330,12 @@ void build_pages() {
         bindings.rows.push_back(r);
     }
     bindings.rows.push_back({"Restore Defaults", "Back to the port's own keys for every action.", {}, {}, restore_bindings});
+
+    Page& enhancements = g_pages[kEnhancements];
+    enhancements.title = "Enhancements";
+    enhancements.rows.push_back({"Skip Cutscenes", "On: a mission starts at the checkpoint after its opening cutscene.",
+        [] { return std::string(skip_cutscenes() ? "On" : "Off"); },
+        [](int) { set_skip_cutscenes(!skip_cutscenes()); g_dirty = true; }});
 
     Page& cheats = g_pages[kCheats];
     cheats.title = "Cheats";

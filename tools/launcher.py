@@ -50,7 +50,7 @@ ACTIONS = [
     ("Move left", "Left Stick Left"), ("Move right", "Left Stick Right"),
 ]
 DEFAULTS = {"fps": "auto", "fov": "49", "mouse": "1.0", "online": "1", "fullscreen": "0", "faststart": "0", "mousemode": "auto",
-            "mouseinvert": "0", "mouseeverywhere": "0", "crashdump": "1", "crashmem": "0"}
+            "mouseinvert": "0", "mouseeverywhere": "0", "skipcutscenes": "0", "crashdump": "1", "crashmem": "0"}
 
 # Tk's key names -> SDL's (the key file's)
 TK_TO_SDL = {
@@ -360,6 +360,15 @@ def run_gui():
     ttk.Button(bottom, text="Defaults", command=reset_keys).pack(side="left")
     ttk.Label(bottom, textvariable=status).pack(side="left", padx=10)
 
+    # -- enhancements
+    #the F1 menu's Enhancements page has the same ones
+    en = ttk.Frame(book)
+    book.add(en, text="Enhancements")
+    skip_cutscenes = tk.BooleanVar(value=settings["skipcutscenes"] == "1")
+    ttk.Checkbutton(en, text="Skip Cutscenes", variable=skip_cutscenes).grid(row=0, column=0, sticky="w", **pad)
+    ttk.Label(en, text="A mission starts at the checkpoint after its opening cutscene.",
+              foreground="gray", wraplength=520, justify="left").grid(row=1, column=0, sticky="w", padx=(30, 8))
+
     # -- cheats
     #the tab just lists whatever is in config/gecko/cheats.txt, so adding a cheat is adding it to that file
     ch = ttk.Frame(book)
@@ -395,6 +404,7 @@ def run_gui():
         settings["crashdump"] = "1" if crashdump.get() else "0"
         settings["crashmem"] = "1" if crashmem.get() else "0"
         settings["mouseeverywhere"] = "1" if always_mouse.get() else "0"
+        settings["skipcutscenes"] = "1" if skip_cutscenes.get() else "0"
         settings["mousemode"] = next((k for k, v in modes.items() if v == mousemode.get()), "auto")
         save_settings(settings)
         save_keys(lines, binds)
@@ -513,6 +523,8 @@ def run_game(args):
             s["fullscreen"] = "1"
         elif a == "--always-mouse":
             s["mouseeverywhere"] = "1"
+        elif a == "--skip-cutscenes":
+            s["skipcutscenes"] = "1"
         elif a == "--fast-start":
             s["faststart"] = "1"
         elif a == "--cheats":
@@ -529,7 +541,8 @@ def run_game(args):
     if s["fps"] != "auto" and s["fps"].isdigit() and int(s["fps"]) > FPS_MAX:
         s["fps"] = str(FPS_MAX)
     for var, key in (("GE_FPS", "fps"), ("GE_FOV", "fov"), ("GE_MOUSE", "mouse"), ("GE_MOUSE_MODE", "mousemode"),
-                     ("GE_MOUSE_INVERT", "mouseinvert"), ("GE_MOUSE_EVERYWHERE", "mouseeverywhere")):
+                     ("GE_MOUSE_INVERT", "mouseinvert"), ("GE_MOUSE_EVERYWHERE", "mouseeverywhere"),
+                     ("GE_SKIP_CUTSCENES", "skipcutscenes")):
         env.setdefault(var, s[key])
     if s["faststart"] == "1":
         extra.append("config/gecko/faststart.txt")

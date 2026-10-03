@@ -5,6 +5,7 @@
 //   input.cpp        mouse look, the wheel, mouse buttons in menus (GE_MOUSE, GE_MOUSE_MODE)
 //   fov.cpp          the field of view (GE_FOV)
 //   gecko.cpp        Gecko codes run each frame (GE_GECKO, GE_GECKO_EXTRA)
+//   cutscenes.cpp    skip cutscenes: a mission starts past its opening (GE_SKIP_CUTSCENES)
 //   native.cpp       the engine's hot math routines written for the host (GE_NATIVE)
 //   net.cpp          the hosts file for the game's servers (GE_HOSTS, GE_NETLOG)
 //   overlay.cpp      the debug overlay (F3): memory watches from a .dmw file (dmw.cpp)
@@ -65,6 +66,9 @@ const float kGameFov = 49.0f, kFovMin = 20.0f, kFovMax = 120.0f;
 float fov();                                         // degrees
 void set_fov(float degrees);
 void install_native();                               // native.cpp
+void install_cutscenes();                            // cutscenes.cpp
+bool skip_cutscenes();                               // a mission starts at the checkpoint after its opening
+void set_skip_cutscenes(bool on);
 void install_overlay();                              // overlay.cpp
 bool overlay_open();                                 // the watches or the settings menu: the mouse is free
 bool settings_open();                                // settings.cpp

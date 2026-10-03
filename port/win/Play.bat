@@ -4,6 +4,7 @@ rem     Play.bat --no-gui               straight to the game, with the saved set
 rem     Play.bat --extract GAME.rvz     take the game's files out of a disc image (.rvz .iso .wbfs) into "game"
 rem     Play.bat --fps 120 --fov 70 --mouse 1.5 --fullscreen --fast-start --cheats
 rem     Play.bat --always-mouse         the cheat "Always Enable Mouse": mouse look in every player state
+rem     Play.bat --skip-cutscenes       a mission starts at the checkpoint after its opening cutscene
 rem Any option skips the window; what the launcher does not know goes to the game (--window 1920x1080...).
 setlocal
 cd /d "%~dp0"
