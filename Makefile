@@ -5,6 +5,7 @@
 #   make smoke      boot headless for SMOKE_SECS seconds, log to build/run.log
 #   make names      mix the symbol sources into build/names.tsv
 #   make deps       build SDL3 into build/deps if the system has no SDL3 dev files
+#   make win        the Windows build, cross-compiled and zipped: build/GoldenEye007-win64.zip
 #   make clean      remove generated code and objects (keeps build/deps)
 #
 # The disc's contents are expected in ./game (sys/main.dol, files/, ...).
@@ -89,6 +90,20 @@ build: wiikit-patch recomp deps
 	    -DCMAKE_PREFIX_PATH=$(SDL3_DIR) -DCMAKE_BUILD_RPATH=$(SDL3_DIR)/lib \
 	    -DWIIKIT_EXTRA=$(abspath port/goldeneye.cmake) > $(BUILD)/cmake.log 2>&1 || { tail -20 $(BUILD)/cmake.log; exit 1; }
 	ninja -C $(OUT) wiiboot
+
+# Windows, 64-bit: cross-compiled with llvm-mingw (fetched into build/deps), run from its own
+# folder (GE_PORTABLE), packaged by tools/package_win.sh without anything of the disc
+.PHONY: win
+WIN_OUT   := $(BUILD)/out-win
+win: wiikit-patch recomp deps
+	@sh tools/get_mingw.sh $(BUILD)/deps
+	@[ -f $(BUILD)/deps/sdl3-win/bin/SDL3.dll ] || sh tools/build_sdl3.sh $(BUILD)/deps win
+	cmake -S $(RECOMP) -B $(WIN_OUT) -G Ninja -DCMAKE_TOOLCHAIN_FILE=$(abspath tools/mingw.cmake) \
+	    -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS_RELEASE="$(OPT_BASE)" -DCMAKE_EXE_LINKER_FLAGS=-static \
+	    -DCMAKE_PREFIX_PATH=$(abspath $(BUILD)/deps/sdl3-win) -DGE_PORTABLE=ON \
+	    -DWIIKIT_EXTRA=$(abspath port/goldeneye.cmake) > $(BUILD)/cmake-win.log 2>&1 || { tail -20 $(BUILD)/cmake-win.log; exit 1; }
+	ninja -C $(WIN_OUT) wiiboot
+	sh tools/package_win.sh $(FONTS)
 
 # the key file: the port's defaults, copied once; build/keys.txt is the player's to edit
 $(BUILD)/keys.txt: | config/keys.txt

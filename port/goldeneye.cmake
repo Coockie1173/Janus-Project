@@ -2,15 +2,23 @@
 # -DWIIKIT_EXTRA=<this file>: the game's own layer linked into wiiboot.
 set(GE_PORT ${CMAKE_CURRENT_LIST_DIR})
 get_filename_component(GE_ROOT ${GE_PORT}/.. ABSOLUTE)
+# where the game looks for its files: this checkout, or (GE_PORTABLE, the Windows package)
+# the folder it is started in, laid out by tools/package_win.sh
+set(GE_HOME ${GE_ROOT})
+set(GE_GECKO_FILE ${GE_ROOT}/build/patched/gecko.txt)
+if(GE_PORTABLE)
+  set(GE_HOME .)
+  set(GE_GECKO_FILE config/gecko-codes.txt)
+endif()
 target_sources(wiiboot PRIVATE
     ${GE_PORT}/goldeneye.cpp ${GE_PORT}/framerate.cpp ${GE_PORT}/input.cpp ${GE_PORT}/fov.cpp
     ${GE_PORT}/gecko.cpp ${GE_PORT}/net.cpp ${GE_PORT}/overlay.cpp ${GE_PORT}/dmw.cpp
     ${GE_PORT}/diagnostics.cpp ${GE_PORT}/debug.cpp ${GE_PORT}/native.cpp ${GE_PORT}/crashdump.cpp)
 # files found wherever the game is started from
 target_compile_definitions(wiiboot PRIVATE
-    GE_ROOT="${GE_ROOT}"
-    GE_HOSTS_DEFAULT="${GE_ROOT}/config/hosts.txt"
-    GE_GECKO_DEFAULT="${GE_ROOT}/build/patched/gecko.txt")
+    GE_ROOT="${GE_HOME}"
+    GE_HOSTS_DEFAULT="${GE_HOME}/config/hosts.txt"
+    GE_GECKO_DEFAULT="${GE_GECKO_FILE}")
 # the debug overlay: Dear ImGui's sources (tools/get_imgui.sh), compiled in when they are there
 set(GE_IMGUI ${GE_ROOT}/build/deps/imgui)
 if(EXISTS ${GE_IMGUI}/imgui.cpp)

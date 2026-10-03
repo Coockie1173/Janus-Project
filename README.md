@@ -34,6 +34,15 @@ make            # mix the symbols, recompile main.dol, build build/out/wiiboot
 make smoke      # 30 s headless boot, log in build/run.log
 ```
 
+### Windows
+
+`make win` cross-compiles a 64-bit Windows build on Linux (llvm-mingw and
+SDL3 are fetched into `build/deps`) and packs it as
+`build/GoldenEye007-win64.zip`: the executable, `Play.bat` with the settings
+at its top, and `README.txt` (`port/win/`). The disc's files are not in it;
+the player extracts their own into its `game` folder. No online play there
+yet: the runtime's network devices are POSIX only.
+
 The boot ROM fonts and the DSP's resampling table (`font_western.bin`,
 `font_japanese.bin`, `dsp_coef.bin`) are taken from Dolphin's free
 replacements in `Sys/GC` when Dolphin is installed (`FONTS=dir` otherwise).

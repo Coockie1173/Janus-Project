@@ -1,0 +1,30 @@
+#!/bin/sh
+# The Windows package: the cross-built game (make win), what it needs beside it, the
+# instructions, zipped. Nothing of the disc goes in: game/ is left for the player to fill.
+#     sh tools/package_win.sh [FONTS_DIR]      -> build/GoldenEye007-win64.zip
+set -e
+cd "$(dirname "$0")/.."
+FONTS=${1:-/usr/share/dolphin-emu/Sys/GC}
+NAME=GoldenEye007-win64
+S=build/win/$NAME
+rm -rf "$S" build/$NAME.zip
+mkdir -p "$S/config/gecko" "$S/fonts" "$S/game" "$S/licenses"
+cp build/out-win/wiiboot.exe "$S/GoldenEye.exe"
+build/deps/llvm-mingw/bin/x86_64-w64-mingw32-strip "$S/GoldenEye.exe"
+cp build/deps/sdl3-win/bin/SDL3.dll "$S/"
+cp config/keys.txt "$S/keys.txt"
+cp config/keys.txt config/hosts.txt build/recomp/symbols.tsv "$S/config/"
+cp build/patched/gecko.txt "$S/config/gecko-codes.txt"
+cp config/gecko/*.txt "$S/config/gecko/"
+for f in font_western.bin font_japanese.bin dsp_coef.bin; do
+    [ -f "$FONTS/$f" ] && cp "$FONTS/$f" "$S/fonts/" || echo "no $f in $FONTS: the package goes without it"
+done
+[ -f "$FONTS/font-licenses.txt" ] && cp "$FONTS/font-licenses.txt" "$S/licenses/fonts.txt"
+cp build/deps/sdl3-win/share/licenses/SDL3/LICENSE.txt "$S/licenses/SDL3.txt"
+cp wiikit/LICENSE "$S/licenses/wiikit.txt" 2>/dev/null || true
+cp build/deps/llvm-mingw/LICENSE.TXT "$S/licenses/llvm-mingw-runtime.txt"
+# Windows line ends for what Notepad and cmd read
+for f in Play.bat README.txt; do sed 's/$/\r/' "port/win/$f" > "$S/$f"; done
+printf 'Extract your GoldenEye 007 (SJBE52) disc here, so that this folder holds sys\\main.dol and files\\.\r\nSee README.txt.\r\n' > "$S/game/PUT YOUR DISC HERE.txt"
+(cd build/win && zip -q -r -9 "../$NAME.zip" "$NAME")
+echo "build/$NAME.zip: $(du -h build/$NAME.zip | cut -f1)"
