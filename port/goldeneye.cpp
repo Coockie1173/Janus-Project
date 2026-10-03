@@ -17,6 +17,7 @@
 //     GE_FOV=D     the field of view in play, degrees (the game's is 49)
 //     GE_FPS=N     the frame rate the engine may reach (default: its own 30); auto: 60
 //     GE_NATIVE=0  the engine's math routines as recompiled, not the host versions (check: compare them)
+//     GE_CRASH_MEM=1  crash dumps (build/crashes, see crashdump.cpp) with the guest's memory in them
 //     GE_DMW=F     the memory watch list the debug overlay shows (F3); default: the .dmw in the
 //                  project's folder
 #include "debug.h"
@@ -26,6 +27,7 @@
 namespace ge {
 
 void each_frame(uint32_t frame) {
+    crash_test();
     gecko_apply();
     fov_apply();
     mouse_frame(frame);

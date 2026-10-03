@@ -59,10 +59,18 @@ index db1b158..622e9e7 100644
          f.write("extern const PPCHook g_ppc_hooks[] = {\n")
          for a, name in sorted(hooks.items()):
 diff --git a/runtime/core.cpp b/runtime/core.cpp
-index d0baebf..5d41849 100644
+index d0baebf..33f1d09 100644
 --- a/runtime/core.cpp
 +++ b/runtime/core.cpp
-@@ -62,7 +62,7 @@ void count_icall(ICalls& ic, uint32_t addr) {
+@@ -11,6 +11,7 @@
+ #include <mutex>
+ #include <sstream>
+ #include <unordered_map>
++#include <atomic>
+ #include <vector>
+ 
+ extern const PPCFuncEntry g_ppc_funcs[];
+@@ -62,7 +63,7 @@ void count_icall(ICalls& ic, uint32_t addr) {
  }
  }  // namespace
  
@@ -71,7 +79,7 @@ index d0baebf..5d41849 100644
      if (ICalls* ic = icalls()) count_icall(*ic, addr);
      PPCFunc f = ppc_lookup(addr);
      if (!f) {
-@@ -159,14 +159,14 @@ uint32_t ppc_lc_dma(uint32_t dma_u, uint32_t dma_l) {
+@@ -159,14 +160,14 @@ uint32_t ppc_lc_dma(uint32_t dma_u, uint32_t dma_l) {
      return dma_l & ~2u;
  }
  
@@ -88,6 +96,55 @@ index d0baebf..5d41849 100644
      for (uint32_t i = 0; i < n; ++i)
          st8(ea + i, (uint8_t)(c.r[(rs + i / 4) & 31] >> (24 - 8 * (i % 4))));
  }
+@@ -223,13 +224,28 @@ std::string rt_name(uint32_t a) {
+     return buf;
+ }
+ 
++// The last lines, kept for a crash report: a ring of fixed lines, written
++// without a lock (two threads logging at once may garble one line of it).
++namespace {
++constexpr int kTailLines = 256, kTailLen = 240;
++char g_tail[kTailLines][kTailLen];
++std::atomic<unsigned> g_tail_n{0};
++}
+ void rt_log(const char* fmt, ...) {
+-    va_list ap;
++    va_list ap, keep;
+     va_start(ap, fmt);
++    va_copy(keep, ap);
+     std::vfprintf(stderr, fmt, ap);
+     va_end(ap);
+     std::fputc('\n', stderr);
++    std::vsnprintf(g_tail[g_tail_n.fetch_add(1) % kTailLines], kTailLen, fmt, keep);
++    va_end(keep);
+ }
++void rt_log_tail(FILE* out) {
++    unsigned n = g_tail_n.load();
++    for (unsigned i = n > kTailLines ? n - kTailLines : 0; i < n; ++i) std::fprintf(out, "%s\n", g_tail[i % kTailLines]);
++}
++void (*g_rt_on_die)(const char* message) = nullptr;
+ 
+ void rt_backtrace(const PPCContext& c, FILE* out, int max) {
+     std::fprintf(out, "  lr  %08X  %s\n", c.lr, rt_name(c.lr).c_str());
+@@ -244,13 +260,15 @@ void rt_backtrace(const PPCContext& c, FILE* out, int max) {
+ }
+ 
+ [[noreturn]] void rt_die(const char* fmt, ...) {
++    char msg[512];
+     va_list ap;
+     va_start(ap, fmt);
+-    std::fprintf(stderr, "wiikit: ");
+-    std::vfprintf(stderr, fmt, ap);
++    std::vsnprintf(msg, sizeof msg, fmt, ap);
+     va_end(ap);
+-    std::fputc('\n', stderr);
++    std::fprintf(stderr, "wiikit: %s\n", msg);
+     if (t_ppc) rt_backtrace(*t_ppc, stderr);
++    static std::atomic<bool> dying{false};
++    if (g_rt_on_die && !dying.exchange(true)) g_rt_on_die(msg);
+     std::fflush(stderr);
+     std::fflush(stdout);
+     std::_Exit(1);
 diff --git a/runtime/gl.h b/runtime/gl.h
 index 3d2da4e..682aca2 100644
 --- a/runtime/gl.h
@@ -1880,7 +1937,7 @@ index c164101..2e622c6 100644
      void* base = mmap(nullptr, span, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
      if (base == MAP_FAILED) return false;
 diff --git a/runtime/os.cpp b/runtime/os.cpp
-index aa1274e..6b4f575 100644
+index aa1274e..b25eda2 100644
 --- a/runtime/os.cpp
 +++ b/runtime/os.cpp
 @@ -435,7 +435,7 @@ void os_raise() {
@@ -1917,6 +1974,35 @@ index aa1274e..6b4f575 100644
      t_ppc = &c;
      rt_die("%s at %s", what, rt_name(addr).c_str());
  }
+@@ -495,6 +495,28 @@ void os_report_running(int depth) {
+     rt_backtrace(c, stderr, depth);
+ }
+ 
++void os_report_threads(FILE* out, int depth) {
++    std::unique_lock<std::mutex> lk(g_mx, std::try_to_lock);   // held by the thread that crashed, perhaps: go on without it
++    HostThread* h = g_running;
++    if (h) {
++        const PPCContext& c = *h->cur;
++        std::fprintf(out, "running thread %08X, msr %08X, pending %u, %zu interrupt(s) deep\n",
++                     h->ctx, c.msr, g_ppc_pending.load(), h->delivering.size());
++        for (int i = 0; i < 32; i += 4)
++            std::fprintf(out, "  r%-2d %08X  r%-2d %08X  r%-2d %08X  r%-2d %08X\n", i, c.r[i], i + 1, c.r[i + 1],
++                         i + 2, c.r[i + 2], i + 3, c.r[i + 3]);
++        std::fprintf(out, "  lr  %08X  ctr %08X  cr %08X  xer %08X\n", c.lr, c.ctr, mfcr(c), mfxer(c));
++        rt_backtrace(c, out, depth);
++    } else {
++        std::fprintf(out, "no guest thread running\n");
++    }
++    for (auto& [ctx, t] : g_by_ctx) {
++        if (t == h || t->zombie) continue;
++        std::fprintf(out, "thread %08X:\n", ctx);
++        rt_backtrace(*t->cur, out, depth);
++    }
++}
++
+ // --watch: every few seconds, where the running guest thread is
+ void watch_main(int seconds) {
+     for (;;) {
 diff --git a/runtime/ppc.h b/runtime/ppc.h
 index 99351d5..adcfa44 100644
 --- a/runtime/ppc.h
@@ -2098,10 +2184,30 @@ index 99351d5..adcfa44 100644
      if (!w) ps_quant(type, scale, ea + sz, c.ps1[s], &sz);
  }
 diff --git a/runtime/rt.h b/runtime/rt.h
-index 75fec5e..6925c10 100644
+index 75fec5e..6a57975 100644
 --- a/runtime/rt.h
 +++ b/runtime/rt.h
-@@ -74,6 +74,14 @@ void gx_submit_pending();                         // after a burst, outside g_hw
+@@ -17,6 +17,9 @@ void rt_load_symbols(const char* tsv);
+ std::string rt_name(uint32_t addr);               // "func+0x12", or the hex address
+ [[noreturn]] void rt_die(const char* fmt, ...);
+ void rt_log(const char* fmt, ...);                 // stderr, one line
++void rt_log_tail(FILE* out);                       // the last lines rt_log wrote (it keeps 256), oldest first
++// Called by rt_die with its message before the process ends: a port's crash report.
++extern void (*g_rt_on_die)(const char* message);
+ // The guest call chain from a context: LR, then the saved LRs up the back chain.
+ void rt_backtrace(const PPCContext& c, FILE* out, int max = 24);
+ 
+@@ -58,6 +61,9 @@ static inline uint64_t tb_hz() { return (uint64_t)g_bus_mhz * 250000; }
+ 
+ // ---- the OS layer (os.cpp) --------------------------------------------------------------
+ void os_report_running(int depth);                // stderr: where the running guest thread is
++// Every guest thread's call chain, the running one first with its registers.
++// For a crash report: it does not wait for the OS layer's lock.
++void os_report_threads(FILE* out, int depth);
+ void os_install();                                // hooks, time
+ void os_start_main(uint32_t entry);               // run __start on a guest host thread, and return
+ void os_raise();                                  // a device changed its interrupt line
+@@ -74,6 +80,14 @@ void gx_submit_pending();                         // after a burst, outside g_hw
  // game that reads the copy on the CPU (the renderer otherwise keeps copies
  // on the host GPU only). False if no copy was made to addr (physical).
  bool gx_copy_to_ram(uint32_t addr);
@@ -2116,7 +2222,7 @@ index 75fec5e..6925c10 100644
  void gx_draw_done_reached();                      // the renderer: the game's draw-done point is drawn
  void hw_run_locked(const std::function<void()>& fn);   // run fn holding the hardware lock
  
-@@ -123,6 +131,10 @@ extern bool g_sysconf_eurgb60;                     // IPL.E60, after sysconf_pre
+@@ -123,6 +137,10 @@ extern bool g_sysconf_eurgb60;                     // IPL.E60, after sysconf_pre
  
  // ---- IOS (ios.cpp) ------------------------------------------------------------------
  void ios_init(const char* disc_root, const char* nand_root);

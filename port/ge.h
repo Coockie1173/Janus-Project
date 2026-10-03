@@ -8,7 +8,8 @@
 //   native.cpp       the engine's hot math routines written for the host (GE_NATIVE)
 //   net.cpp          the hosts file for the game's servers (GE_HOSTS, GE_NETLOG)
 //   overlay.cpp      the debug overlay (F3): memory watches from a .dmw file (dmw.cpp)
-//   diagnostics.cpp  the crash report and the sampling profiler (GE_PROFILE)
+//   crashdump.cpp    crash, die and stall dumps into build/crashes (GE_CRASH_MEM, GE_NO_CRASHDUMP)
+//   diagnostics.cpp  the sampling profiler (GE_PROFILE)
 //   debug.cpp        aids for finding things in the running game (scans, probes, scripted input)
 #pragma once
 #include "rt.h"
@@ -34,8 +35,9 @@ inline bool in_play() { return guest_ptr(ld32(kPlayerPtr)) && ld8(kPaused) == 0;
 void each_frame(uint32_t frame);                     // goldeneye.cpp: called by the limiter's hook, once a game frame
 
 void install_fps();                                  // framerate.cpp
-void install_crash_handler();                        // diagnostics.cpp
-void install_profiler();
+void install_crash_handler();                        // crashdump.cpp
+void crash_test();
+void install_profiler();                             // diagnostics.cpp
 void install_mouse();                                // input.cpp
 void mouse_frame(uint32_t frame);
 void mouse_capture(bool on);

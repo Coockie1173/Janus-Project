@@ -18,7 +18,8 @@
 # the wheel changes weapon, R reloads, Ctrl crouches, Shift sprints, E acts, G grenade, V melee;
 # in menus the left button selects and the right one goes back. Esc frees the mouse.
 # The window goes through X11 (XWayland) when DISPLAY is set: SDL_VIDEODRIVER=wayland for Wayland's own.
-# The log of the run is kept in build/run.log (send it along with a report).
+# The log of the run is kept in build/run.log. A crash, the runtime giving up or a 20 s stall leaves
+# a dump in build/crashes/<date>-<time>-<kind>/ (send that folder along with a report).
 cd "$(dirname "$0")" || exit 1
 mkdir -p build
 [ -f build/keys.txt ] || cp config/keys.txt build/keys.txt
@@ -64,4 +65,12 @@ if grep -q '^\$' build/cheats.txt 2>/dev/null; then GE_GECKO_EXTRA="$PWD/build/c
 
 make build || exit 1
 echo "keys: build/keys.txt   log: build/run.log"
+BEFORE=$(ls build/crashes 2>/dev/null | wc -l)
 make -s run RUN_ARGS="--watch 10$ARGS" 2>&1 | tee build/run.log
+# a run that left a crash dump: finish it (names, disassembly) and say where it is
+if [ "$(ls build/crashes 2>/dev/null | wc -l)" -gt "$BEFORE" ]; then
+    DUMP=build/crashes/$(ls build/crashes | tail -1)
+    python3 tools/crash_report.py "$DUMP" > /dev/null 2>&1
+    echo
+    echo "the game left a crash dump: $DUMP (report.txt, analysis.txt)"
+fi
