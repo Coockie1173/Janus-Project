@@ -1,8 +1,8 @@
 // GoldenEye 007 — the settings menu (F1), drawn the way the game draws its own
 // menus: the cream lines, the blue bars, the white bar under the cursor.
 //
-// Three pages: the screen (the field of view and the frame rate, sliders), the controls (the mouse, the
-// gamepad) and the key bindings. What is changed counts at once. The field
+// Four pages: the screen (the field of view and the frame rate, sliders), the controls (the mouse, the
+// gamepad), the key bindings and the cheats. What is changed counts at once. The field
 // of view and the mouse are kept in the launcher's settings file, the rest in
 // the runtime's key file ([Classic Controller]: only the lines changed here
 // are rewritten), so the launcher's window and this menu show the same.
@@ -81,7 +81,8 @@ void save_launch_settings() {
     static const char* modes[] = {"auto", "direct", "stick"};
     std::vector<std::pair<std::string, std::string>> values = {
         {"LAUNCH_FOV", fov_text}, {"LAUNCH_MOUSE", mouse_text},
-        {"LAUNCH_MOUSEMODE", modes[mouse_mode()]}, {"LAUNCH_MOUSEINVERT", mouse_invert() ? "1" : "0"}};
+        {"LAUNCH_MOUSEMODE", modes[mouse_mode()]}, {"LAUNCH_MOUSEINVERT", mouse_invert() ? "1" : "0"},
+        {"LAUNCH_MOUSEEVERYWHERE", mouse_everywhere() ? "1" : "0"}};
     if (g_fps_changed) values.push_back({"LAUNCH_FPS", std::to_string(fps_limit())});   // "auto" kept until it is changed
     auto lines = read_lines(GE_SETTINGS_FILE);
     if (lines.empty()) lines.push_back("# written by the launcher, read when the game is started");
@@ -176,7 +177,7 @@ struct Row {
 };
 struct Page { std::string title; std::vector<Row> rows; };
 
-enum { kRoot, kScreen, kControls, kBindings };
+enum { kRoot, kScreen, kControls, kBindings, kCheats, kPageCount };
 std::vector<Page> g_pages;
 int g_page = kRoot, g_row = 0, g_scroll = 0;
 int g_root_row = 0;                                  // where the cursor was on the first page
@@ -232,12 +233,13 @@ void go(int page, int row = 0) {
 }
 
 void build_pages() {
-    g_pages.resize(4);
+    g_pages.resize(kPageCount);
     Page& root = g_pages[kRoot];
     root.title = "Settings";
     root.rows.push_back({"Screen Settings", "Adjust the field of view.", {}, {}, [] { go(kScreen); }});
     root.rows.push_back({"Control Settings", "Adjust the mouse and the gamepad.", {}, {}, [] { go(kControls); }});
     root.rows.push_back({"Key Bindings", "Choose the keys and mouse buttons for each action.", {}, {}, [] { go(kBindings); }});
+    root.rows.push_back({"Cheats", "Things the game itself would not let you do.", {}, {}, [] { go(kCheats); }});
 
     Page& screen = g_pages[kScreen];
     screen.title = "Screen Settings";
@@ -326,6 +328,12 @@ void build_pages() {
         bindings.rows.push_back(r);
     }
     bindings.rows.push_back({"Restore Defaults", "Back to the port's own keys for every action.", {}, {}, restore_bindings});
+
+    Page& cheats = g_pages[kCheats];
+    cheats.title = "Cheats";
+    cheats.rows.push_back({"Mouse Look In Every State", "On: the mouse turns the view where the game locks it: cutscenes, melee, climbing, death.",
+        [] { return std::string(mouse_everywhere() ? "On" : "Off"); },
+        [](int) { set_mouse_everywhere(!mouse_everywhere()); g_dirty = true; }});
 }
 
 // The key or mouse button pressed for the action that is listening: on that

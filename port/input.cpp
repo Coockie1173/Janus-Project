@@ -78,17 +78,38 @@ float g_look_yaw = 0;
 // (the game's ExPlayer) keeps the player's state in the word at +0x704: 0
 // standing, 2 moving, 3 sprinting and 4 in the air (set as a fall begins, by
 // fn_801212A0; landing leaves it) are the ones the view is free in; in the
-// others (5 death, 8 a climb or vault, 9 melee, 0x22 a
-// first-person cutscene, 0x23-0x25 a slide...) the game has the view and the
-// mouse is locked out, its motion dropped.
+// others (5 death, 8 a climb or vault, 9 melee, 0x23-0x25 a slide...) the
+// game has the view and the mouse is locked out, its motion dropped.
+//
+// State 0x22 is the player as an actor of a cutscene (set by fn_801222A0 when
+// the cutscene's script takes the player, left through fn_80122460), and its
+// update, fn_801227A0, has three ways to go:
+//   - the word at +0x1024 is not 0 (a script command, 8001B268, sets it): the
+//     game reads the look stick itself (fn_8010C880, ge_look_apply) and keeps
+//     the yaw within the script's limits around +0x1124. The view is the
+//     player's: the mouse turns it as in play.
+//   - +0x1024 is 0 and the byte at +0xBD9 is set (the blend at +0x674 has run
+//     out): the view stays the cutscene's and the stick moves the aim inside
+//     it (fn_80124130), two angles at +0xEDC (up and down) and +0xEE0
+//     (across), radians, kept within limits in degrees. The mouse moves those.
+//   - neither: nothing is the player's, and the mouse is locked.
+// fn_8014BCD0, the game's "may aim" in a cutscene, is that same test.
+//
 // This goes by the controller this console plays, found once a frame by the
 // game's own test (controller_update). That is so alone, and hosting. In a
 // game someone else hosts the mouse is on the stick (mouse_stick), which has
 // no controller at hand: it is locked by the same state when the test has
 // found this console's controller in the last frames, and left free when it
 // has not, so that joining a game never loses the mouse.
-const uint32_t kPlayerState = 0x704;
+const uint32_t kPlayerState = 0x704, kStateFlags = 0x708, kStateCutscene = 0x22;
+const uint32_t kInCutscene = 0x5E4;                  // a byte: set with state 0x22, cleared as the cutscene lets go
+const uint32_t kCutsceneLook = 0x1024, kCutsceneAim = 0xBD9;
+const uint32_t kAimOn = 0xED4, kAimPitch = 0xEDC, kAimYaw = 0xEE0;
+const uint32_t kAimLimits = 0x1014;                  // four floats, degrees: pitch from and to, yaw from and to
+const uint32_t kAimLimitsPlay = 0x806E95F8, kAimLimitsNarrow = 0x806E9608;   // the same four, out of a cutscene; with flag 0x80
+const float kRadPerDegree = 0.01745329f;
 uint32_t g_local_frame = ~0u, g_local_ctrl = 0;      // the controller this console plays, as of that frame
+std::atomic<bool> g_mouse_everywhere{false};         // the cheat: the mouse turns the view in every state
 
 // For the overlay: the state of the player this console plays, false with none (menus, loading).
 bool local_player_state(uint32_t& state) {
@@ -98,12 +119,45 @@ bool local_player_state(uint32_t& state) {
     return true;
 }
 
-bool look_allowed(uint32_t ctrl) {
+enum Look { kLookLocked, kLookView, kLookAim, kLookForced };
+Look look_mode(uint32_t ctrl) {
     uint32_t st = ld32(ctrl + kPlayerState);
-    return st == 0 || st == 2 || st == 3 || st == 4;
+    if (st == 0 || st == 2 || st == 3 || st == 4) return kLookView;
+    if (st == kStateCutscene) {
+        if (ld32(ctrl + kCutsceneLook) != 0) return kLookView;
+        if (ld8(ctrl + kCutsceneAim) != 0 && ld8(ctrl + kAimOn) != 0) return kLookAim;
+    }
+    return g_mouse_everywhere ? kLookForced : kLookLocked;
+}
+const char* look_name(Look l) {
+    static const char* names[] = {"is locked", "turns the view", "moves the aim", "turns the view (cheat)"};
+    return names[l];
+}
+const char* local_look_name() {
+    static const char* names[] = {"locked", "view", "aim", "cheat"};
+    return names[look_mode(g_local_ctrl)];
 }
 bool stick_look_allowed() {
-    return ld32(kFrameCount) - g_local_frame >= 4 || !guest_ptr(g_local_ctrl) || look_allowed(g_local_ctrl);
+    return ld32(kFrameCount) - g_local_frame >= 4 || !guest_ptr(g_local_ctrl) || look_mode(g_local_ctrl) != kLookLocked;
+}
+
+// The aim inside a cutscene's view: the mouse's motion on the two angles,
+// within the limits fn_80124130 itself picks.
+void mouse_aim(uint32_t ctrl) {
+    float dx = 0, dy = 0;
+    video_take_mouse_motion(dx, dy);
+    debug_mouse(dx, dy);
+    if (g_mouse_invert) dy = -dy;
+    if (dx == 0 && dy == 0) return;
+    float lim[4];
+    bool narrow = (ld32(ctrl + kStateFlags) & 0x80) != 0, cutscene = ld8(ctrl + kInCutscene) != 0;
+    for (int i = 0; i < 4; ++i)
+        lim[i] = kRadPerDegree * (narrow ? ldf(kAimLimitsNarrow + 4 * i) : cutscene ? ldf(ctrl + kAimLimits + 4 * i) : ldf(kAimLimitsPlay + 4 * i));
+    float pitch = ldf(ctrl + kAimPitch) + dy * kRadPerPixel * g_mouse_sens;
+    float yaw = ldf(ctrl + kAimYaw) + dx * kRadPerPixel * g_mouse_sens;
+    if (!std::isfinite(pitch) || !std::isfinite(yaw) || !(lim[0] <= lim[1]) || !(lim[2] <= lim[3])) return;
+    stf(ctrl + kAimPitch, std::clamp(pitch, lim[0], lim[1]));
+    stf(ctrl + kAimYaw, std::clamp(yaw, lim[2], lim[3]));
 }
 
 void mouse_look(uint32_t ctrl, uint32_t player) {
@@ -143,6 +197,7 @@ void look_apply(PPCContext& c) {
 void controller_update(PPCContext& c) {
     uint32_t ctrl = c.r[3], frame = ld32(kFrameCount);
     uint32_t player = guest_ptr(ctrl) ? ld32(ctrl + 4) : 0;
+    bool forced = false;
     if (g_mouse_sens > 0 && frame != g_local_frame && guest_ptr(player)) {
         PPCContext saved = c;                        // the game's own test, its registers kept
         controller_not_local(c);
@@ -152,18 +207,27 @@ void controller_update(PPCContext& c) {
             g_local_frame = frame;
             g_local_ctrl = ctrl;
             static uint32_t said = ~0u;
-            uint32_t st = ld32(ctrl + kPlayerState);
-            if (st != said && std::getenv("GE_TRACE")) {
-                said = st;
-                rt_log("goldeneye: player state %X: the mouse %s", st, look_allowed(ctrl) ? "turns the view" : "is locked");
+            uint32_t st = ld32(ctrl + kPlayerState), now = st << 8 | look_mode(ctrl);
+            if (now != said && std::getenv("GE_TRACE")) {
+                said = now;
+                rt_log("goldeneye: player state %X: the mouse %s", st, look_name(look_mode(ctrl)));
             }
-            if (!ld8(kPaused) && !overlay_open() && look_allowed(ctrl) && !mouse_on_stick()) {
+            Look look = look_mode(ctrl);
+            if (!ld8(kPaused) && !overlay_open() && look != kLookLocked && !mouse_on_stick()) {
                 g_look_frame = frame;
-                mouse_look(ctrl, player);
+                if (look == kLookAim) mouse_aim(ctrl);
+                else mouse_look(ctrl, player);
+                forced = look == kLookForced;
             }
         }
     }
     orig_controller_update(c);
+    // the cheat, in a state whose update never came to ge_look_apply: the turn goes on the player's yaw itself
+    if (forced && ctrl == g_look_ctrl && g_look_yaw != 0) {
+        float yaw = ldf(player + 0xDC);
+        if (std::isfinite(yaw)) stf(player + 0xDC, yaw + g_look_yaw);
+        g_look_yaw = 0;
+    }
     if (g_stick_took) g_look_ctrl = ctrl;            // (for the angle trace)
     static const bool angles = std::getenv("GE_TRACE") != nullptr;
     if (angles && ctrl == g_look_ctrl && guest_ptr(player)) {     // the turned player's angles, twice a second
@@ -172,7 +236,8 @@ void controller_update(PPCContext& c) {
         if (now - last >= std::chrono::milliseconds(500)) {
             last = now;
             uint32_t v = ld32(player + 0x16C);
-            rt_log("goldeneye: yaw %.4f pitch %.4f", ldf(player + 0xDC), guest_ptr(v) ? ldf(v + 0x768) : 0.0f);
+            rt_log("goldeneye: yaw %.4f pitch %.4f; aim %.4f across, %.4f up and down", ldf(player + 0xDC),
+                   guest_ptr(v) ? ldf(v + 0x768) : 0.0f, ldf(ctrl + kAimYaw), ldf(ctrl + kAimPitch));
         }
     }
     static const bool trace = std::getenv("GE_TRACELOOK") != nullptr;
@@ -306,6 +371,7 @@ void classic_filter(int chan, ClassicState& s) {
 void install_mouse() {
     if (const char* m = std::getenv("GE_MOUSE")) g_mouse_sens = (float)std::atof(m);
     if (const char* m = std::getenv("GE_MOUSE_INVERT")) g_mouse_invert = std::atoi(m) != 0;
+    if (const char* m = std::getenv("GE_MOUSE_EVERYWHERE")) g_mouse_everywhere = std::atoi(m) != 0;
     if (const char* m = std::getenv("GE_MOUSE_MODE")) g_mouse_mode = !std::strcmp(m, "direct") ? 1 : !std::strcmp(m, "stick") ? 2 : 0;
     wpad_set_classic_filter(classic_filter);
     // hooked whatever the sensitivity: the settings menu turns mouse look on and off in play
@@ -325,6 +391,8 @@ int mouse_mode() { return g_mouse_mode; }
 void set_mouse_mode(int m) { g_mouse_mode = m; }
 bool mouse_invert() { return g_mouse_invert; }
 void set_mouse_invert(bool on) { g_mouse_invert = on; }
+bool mouse_everywhere() { return g_mouse_everywhere; }
+void set_mouse_everywhere(bool on) { g_mouse_everywhere = on; }
 
 // Once a game frame: with nobody to turn (a menu, a pause) the mouse's motion is dropped.
 void mouse_frame(uint32_t f) {

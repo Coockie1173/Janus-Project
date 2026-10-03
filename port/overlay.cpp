@@ -72,7 +72,7 @@ const char* state_name(uint32_t st) {                // the Ghidra project's Pla
 void player_state() {
     char text[64];
     uint32_t st;
-    if (local_player_state(st)) std::snprintf(text, sizeof text, "%s (0x%02X)", state_name(st), st);
+    if (local_player_state(st)) std::snprintf(text, sizeof text, "%s (0x%02X), mouse: %s", state_name(st), st, local_look_name());
     else std::snprintf(text, sizeof text, "no player");
     ImFont* font = ImGui::GetFont();
     float size = font->FontSize * 1.5f, pad = 6;

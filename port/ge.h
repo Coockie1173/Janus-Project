@@ -8,7 +8,7 @@
 //   native.cpp       the engine's hot math routines written for the host (GE_NATIVE)
 //   net.cpp          the hosts file for the game's servers (GE_HOSTS, GE_NETLOG)
 //   overlay.cpp      the debug overlay (F3): memory watches from a .dmw file (dmw.cpp)
-//   settings.cpp     the settings menu (F1): field of view, mouse, gamepad, key bindings
+//   settings.cpp     the settings menu (F1): field of view, mouse, gamepad, key bindings, cheats
 //   crashdump.cpp    crash, die and stall dumps into build/crashes (GE_CRASH_MEM, GE_NO_CRASHDUMP)
 //   diagnostics.cpp  the sampling profiler (GE_PROFILE)
 //   debug.cpp        aids for finding things in the running game (scans, probes, scripted input)
@@ -53,6 +53,9 @@ void set_mouse_mode(int m);
 bool local_player_state(uint32_t& state);           // the controller's +0x704, of the player this console plays
 bool mouse_invert();
 void set_mouse_invert(bool on);
+const char* local_look_name();                       // what the mouse does in that state: "view", "aim", "locked", "cheat"
+bool mouse_everywhere();                             // the cheat: mouse look in every player state
+void set_mouse_everywhere(bool on);
 void install_hosts();                                // net.cpp
 void install_gecko();                                // gecko.cpp
 void gecko_apply();
