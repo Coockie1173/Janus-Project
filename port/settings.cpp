@@ -158,7 +158,7 @@ void save_keys() {
 // what the game does with each Classic Controller button (its default layout), and the key file's name for it
 struct Action { const char* label; const char* name; };
 const Action kActions[] = {
-    {"Fire", "ZR"}, {"Aim", "ZL"}, {"Melee Attack", "L"}, {"Throw Grenade", "R"}, {"Reload", "Y"},
+    {"Fire", "ZR"}, {"Aim", "ZL"}, {"Melee Attack", "L"}, {"Throw Grenade (doubles as R button)", "R"}, {"Reload", "Y"},
     {"Crouch", "A"}, {"Action / Sprint", "B"}, {"Cycle Grenades", "X"}, {"Next Weapon", "Right"},
     {"Previous Weapon", "Left"}, {"Firing Mode", "Up"}, {"Smartphone", "Down"}, {"Night Vision / Scores", "Minus"},
     {"Pause", "Plus"}, {"Move Forward", "Left Stick Up"}, {"Move Back", "Left Stick Down"},
@@ -205,7 +205,15 @@ void set_fps_stop(int i) {
 }
 const char* const kInputNames[] = {"Auto", "Pad", "Keyboard"};
 const char* const kFaceNames[] = {"Position", "Label"};
-float dead_zone() { return std::clamp((float)std::atof(g_keys.get("Dead Zone", "0.15").c_str()), 0.0f, 0.9f); }
+const float kDeadZoneMax = 0.9f;
+float dead_zone() { return std::clamp((float)std::atof(g_keys.get("Dead Zone", "0.15").c_str()), 0.0f, kDeadZoneMax); }
+void set_dead_zone(float z) {                        // in hundredths; the file written only when it changes
+    char b[16];
+    std::snprintf(b, sizeof b, "%.2f", std::clamp(z, 0.0f, kDeadZoneMax));
+    if (g_keys.get("Dead Zone") == b) return;
+    g_keys.set("Dead Zone", b);
+    save_keys();
+}
 
 void restore_bindings() {
     KeyFile defaults;
@@ -257,7 +265,9 @@ void build_pages() {
             std::snprintf(b, sizeof b, "%.2f", mouse_sens());
             return mouse_sens() > 0 ? std::string(b) : std::string("Off");
         },
-        [](int d) { set_mouse_sens(std::round((mouse_sens() + 0.05f * (float)d) * 20) / 20); g_dirty = true; }});
+        [](int d) { set_mouse_sens(std::round((mouse_sens() + 0.05f * (float)d) * 20) / 20); g_dirty = true; }, {}, {}, false,
+        [] { return mouse_sens() / kMouseSensMax; },
+        [](float f) { set_mouse_sens(std::round(f * kMouseSensMax * 20) / 20); g_dirty = true; }});
     controls.rows.push_back({"Invert Mouse", "On: pushing the mouse forward looks down.",
         [] { return std::string(mouse_invert() ? "On" : "Off"); },
         [](int) { set_mouse_invert(!mouse_invert()); g_dirty = true; }});
@@ -283,12 +293,9 @@ void build_pages() {
         }});
     controls.rows.push_back({"Stick Dead Zone", "How far a gamepad's sticks move before they count.",
         [] { return std::to_string((int)std::lround(dead_zone() * 100)) + "%"; },
-        [](int d) {
-            char b[16];
-            std::snprintf(b, sizeof b, "%.2f", std::clamp(dead_zone() + 0.01f * (float)d, 0.0f, 0.9f));
-            g_keys.set("Dead Zone", b);
-            save_keys();
-        }});
+        [](int d) { set_dead_zone(dead_zone() + 0.01f * (float)d); }, {}, {}, false,
+        [] { return dead_zone() / kDeadZoneMax; },
+        [](float f) { set_dead_zone(f * kDeadZoneMax); }});
     controls.rows.push_back({"Restore Defaults", "Back to the mouse and gamepad settings the port starts with.", {}, {}, [] {
         set_mouse_sens(1.0f);
         set_mouse_invert(false);
