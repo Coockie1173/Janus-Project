@@ -20,7 +20,7 @@ Disc, or `dolphin-tool extract`), or let the port do it from an image
 
 ## Status
 
-Work in progress — see [docs/STATUS.md](docs/STATUS.md).
+Work in progress.
 
 ## Building
 
