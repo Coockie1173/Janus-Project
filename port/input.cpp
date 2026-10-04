@@ -435,12 +435,12 @@ void mouse_stick(ClassicState& s) {
         if (dt <= 0.25f) {
             float blend = 0, aim = local_aim_blend(blend) ? 1.0f + (g_ads_sens - 1.0f) * blend : 1.0f;
             float k = kRadPerPixel * g_mouse_sens * aim / dt / (kStickRate * kStickSens);
-            float vx = ax * k, vy = ay * k / g_pitch_rate_scale, m = std::sqrt(vx * vx + vy * vy);
-            if (m > 1e-7f) {
-                float d = std::min(1.0f, kStickDead + (1 - kStickDead) * m) / m;
-                defl_x = vx * d;
-                defl_y = vy * d;
-            }
+            //the game takes the dead zone off each axis by itself, so each gets past it by itself
+            auto past_dead = [](float v) {
+                return std::fabs(v) > 1e-7f ? std::copysign(std::min(1.0f, kStickDead + (1 - kStickDead) * std::fabs(v)), v) : 0.0f;
+            };
+            defl_x = past_dead(ax * k);
+            defl_y = past_dead(ay * k / g_pitch_rate_scale);
         }
         ax = ay = 0;
         last = now;
