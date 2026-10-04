@@ -22,6 +22,7 @@
 //GE_AUTO_START=1 a loaded mission starts without its "Continue" being pressed
 //GE_SKIP_MOVIES=1 movies are skipped
 //GE_NO_TUTORIALS=1 no tutorial boxes
+//GE_AUTOSAVE=0 a checkpoint doesn't save the game
 //GE_EXTRAS_MENU=1 cheat, the menu's unused extras page
 //GE_UNLOCK_ALL=1 cheat, every mission and difficulty unlocked
 //GE_NOCLIP=1 cheat, start flying through walls
@@ -65,6 +66,7 @@ void install() {
     install_files();
     install_tank();
     install_noclip();
+    install_autosave();
     if (std::getenv("GE_TRACE")) {
         orig_main = ppc_hook("main", [](PPCContext& c) {
             rt_log("goldeneye: main() reached");

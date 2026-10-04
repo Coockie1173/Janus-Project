@@ -74,7 +74,6 @@ enum class Skip { Idle, Waiting, Running };
 std::atomic<bool> g_skip_cutscenes{false};
 std::atomic<bool> g_running{false};
 PPCFunc orig_menu_pending = nullptr;
-PPCFunc orig_record_restart = nullptr;
 PPCFunc orig_level_change = nullptr;
 PPCFunc orig_frame_draw = nullptr;
 bool g_restarting = false; //the menu's restart action is running
@@ -240,12 +239,6 @@ void FrameDraw(PPCContext& c)
 	orig_frame_draw(c);
 }
 
-void RecordRestart(PPCContext& c)
-{
-	rt_log("goldeneye: checkpoint: level %08X entrance %d", ld32(kCurrentLevel), (int32_t)c.r[4]);
-	orig_record_restart(c);
-}
-
 } //namespace
 
 bool skip_cutscenes() { return g_skip_cutscenes; }
@@ -303,7 +296,6 @@ void install_cutscenes()
 	orig_level_change = ppc_hook("StartLevelChange", LevelChange);
 	orig_frame_draw = ppc_hook("ge_frame_draw", FrameDraw);
 	if (!orig_menu_pending || !orig_level_change || !orig_frame_draw) rt_die("goldeneye: the menu's pending action is not hooked in this build");
-	if (g_trace) orig_record_restart = ppc_hook("ge_record_restart", RecordRestart);
 }
 
 } //namespace ge

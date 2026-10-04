@@ -8,6 +8,7 @@
 //qte.cpp quick time events that press their own buttons
 //movies.cpp skip movies
 //files.cpp a finished file read is counted once
+//autosave.cpp a checkpoint saves the game
 //tweaks.cpp the level timer, the unused extras menu, auto start, no tutorials
 //tank.cpp the tank: the mouse on its aim, its buttons, driving at higher frame rates
 //noclip.cpp fly through the level
@@ -122,6 +123,11 @@ bool auto_start(); //a loaded mission starts without its "Continue" being presse
 void set_auto_start(bool on);
 bool no_tutorials(); //the tutorial boxes aren't shown
 void set_no_tutorials(bool on);
+void install_autosave(); //autosave.cpp
+void autosave_frame(PPCContext& c); //once a frame, on the game's thread
+bool autosave(); //a checkpoint saves the game
+void set_autosave(bool on);
+bool joined_game(); //input.cpp
 void install_noclip(); //noclip.cpp
 bool noclip(); //cheat, the player flies through walls and doesn't fall
 void set_noclip(bool on);
