@@ -208,6 +208,49 @@ void look_apply(PPCContext& c) {
     stf(ctrl + 0x97C, ldf(ctrl + 0x97C) - add);
 }
 
+//the tank (the mission of that name) is another class of controller, XItemHandler_PlayerTank
+//with the vtable at 80574AB8. it's in state 2 all along and never gets to ge_look_apply
+//its own update (ge_tank_update, 80142E60) turns the look stick into the same two rates,
+//+0x97C the yaw's and +0x978 the pitch's in radians a second (negative looks up), and
+//ge_tank_look (80140600) turns the rates times the time step into the aim: the pitch at
+//+0x99C, which it keeps within the game's limits, and the yaw at +0x9A0. the view follows
+//the aim, and the left stick drives towards where it points in the view
+//for that one call the mouse's motion is added to the rates and taken out again after,
+//like ge_look_apply on foot
+const uint32_t kTankVtable = 0x80574AB8, kLookPitchRate = 0x978, kLookYawRate = 0x97C;
+const uint32_t kTankHeading = 0x52C; //where the view looks, radians, as the frame's input has it
+const uint32_t kTankAimPitch = 0x99C, kTankAimYaw = 0x9A0;
+const uint32_t kTimeStep = 0x578;
+bool is_tank(uint32_t ctrl) { return ld32(ctrl) == kTankVtable; }
+PPCFunc orig_tank_look = nullptr;
+void tank_look(PPCContext& c) {
+    uint32_t ctrl = c.r[3];
+    bool ours = guest_ptr(ctrl) && ctrl == g_local_ctrl && ld32(kFrameCount) - g_local_frame < 4 && ld32(ctrl + kPlayerState) == 2;
+    if (!ours || !(g_mouse_sens > 0) || ld8(kPaused) || overlay_open() || mouse_on_stick()) { orig_tank_look(c); return; }
+    static const bool trace = std::getenv("GE_TRACE") != nullptr;
+    if (trace) { //the aim, twice a second
+        static auto last = std::chrono::steady_clock::now();
+        auto now = std::chrono::steady_clock::now();
+        if (now - last >= std::chrono::milliseconds(500)) {
+            last = now;
+            rt_log("goldeneye: tank %08X, heading %.4f; aim %.4f across, %.4f up and down", ctrl, ldf(ctrl + kTankHeading),
+                   ldf(ctrl + kTankAimYaw), ldf(ctrl + kTankAimPitch));
+        }
+    }
+    g_look_frame = ld32(kFrameCount);
+    float dx = 0, dy = 0, dt = ldf(ctrl + kTimeStep);
+    video_take_mouse_motion(dx, dy);
+    debug_mouse(dx, dy);
+    if (g_mouse_invert) dy = -dy;
+    if ((dx == 0 && dy == 0) || !(dt > 0.0005f && dt < 0.2f)) { orig_tank_look(c); return; }
+    float k = kRadPerPixel * g_mouse_sens / dt, yaw = dx * k, pitch = dy * k;
+    stf(ctrl + kLookYawRate, ldf(ctrl + kLookYawRate) + yaw);
+    stf(ctrl + kLookPitchRate, ldf(ctrl + kLookPitchRate) + pitch);
+    orig_tank_look(c);
+    stf(ctrl + kLookYawRate, ldf(ctrl + kLookYawRate) - yaw);
+    stf(ctrl + kLookPitchRate, ldf(ctrl + kLookPitchRate) - pitch);
+}
+
 const uint32_t kClA = 0x0010, kClB = 0x0040, kClZR = 0x0004, kClZL = 0x0080; //KPAD's classic bits
 
 //sprint on a key of its own. the game has action and sprint on one button (the classic's b)
@@ -300,7 +343,7 @@ void controller_update(PPCContext& c) {
                 rt_log("goldeneye: player state %X: the mouse %s", st, look_name(look_mode(ctrl)));
             }
             Look look = look_mode(ctrl);
-            if (g_mouse_sens > 0 && !ld8(kPaused) && !overlay_open() && look != kLookLocked && !mouse_on_stick()) {
+            if (g_mouse_sens > 0 && !ld8(kPaused) && !overlay_open() && look != kLookLocked && !mouse_on_stick() && !is_tank(ctrl)) {
                 g_look_frame = frame;
                 if (look == kLookAim) mouse_aim(ctrl);
                 else mouse_look(ctrl, player);
@@ -309,7 +352,7 @@ void controller_update(PPCContext& c) {
         }
     }
     orig_controller_update(c);
-    if (ctrl == g_local_ctrl && frame == g_local_frame) ads_fov_apply(ctrl);
+    if (ctrl == g_local_ctrl && frame == g_local_frame && !is_tank(ctrl)) ads_fov_apply(ctrl); //a tank has other things where the aim's blend is
     //the cheat, in a state whose update never got to ge_look_apply: turn the player's yaw directly
     if (forced && ctrl == g_look_ctrl && g_look_yaw != 0) {
         float yaw = ldf(player + 0xDC);
@@ -479,6 +522,8 @@ void install_mouse() {
     orig_controller_update = ppc_hook("ge_controller_update", controller_update);
     orig_look_apply = ppc_hook("ge_look_apply", look_apply);
     if (!orig_controller_update || !controller_not_local || !orig_look_apply) rt_die("goldeneye: the controller update is not hooked in this build");
+    orig_tank_look = ppc_hook("ge_tank_look", tank_look);
+    if (!orig_tank_look) rt_die("goldeneye: the tank's look is not hooked in this build");
     orig_look_sens[0] = ppc_hook("ge_look_sens", look_sens<0>);
     orig_look_sens[1] = ppc_hook("ge_look_sens_ads", look_sens<1>);
     if (!orig_look_sens[0] || !orig_look_sens[1]) rt_die("goldeneye: the sensitivity readers are not hooked in this build");

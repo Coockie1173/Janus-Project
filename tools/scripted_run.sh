@@ -10,7 +10,8 @@
 # profile: the title's button at 8, down twice to Mission Select, then A every 2 s. The level
 # is drawn from about 27 s, its opening runs past 70.
 # REPLAY=name plays build/rec/name.rec first (tools/record_run.sh) on a copy of the save it was
-# recorded from; GE_STICK, GE_BUTTONS, GE_MOUSEMOVE and the other aids then count from its end.
+# recorded from and with the settings it was played with (build/rec/name.env: the frame rate, the
+# skips, auto start... the menus only replay at the pace they were recorded at); GE_STICK, GE_BUTTONS, GE_MOUSEMOVE and the other aids then count from its end.
 # "training" as the script goes New Game, Operative; with REPLAY the recording then takes over
 # where the level starts (GE_REPLAY_FROM=1), its own menu part is left out.
 cd "$(dirname "$0")/.." || exit 1
@@ -24,6 +25,16 @@ if [ -n "$REPLAY" ]; then
     [ -f "build/rec/$REPLAY.rec" ] || { echo "no recording build/rec/$REPLAY.rec"; exit 1; }
     rm -rf build/rec/run.nand; cp -a "build/rec/$REPLAY.nand" build/rec/run.nand
     NAND=build/rec/run.nand; GE_REPLAY=build/rec/$REPLAY.rec; export GE_REPLAY
+    if [ -f "build/rec/$REPLAY.env" ]; then #what launch.sh makes of the settings, the environment still overrides
+        . "./build/rec/$REPLAY.env"
+        GE_FPS=${GE_FPS:-$LAUNCH_FPS}; GE_FOV=${GE_FOV:-$LAUNCH_FOV}; GE_MOUSE=${GE_MOUSE:-$LAUNCH_MOUSE}
+        GE_MOUSE_EVERYWHERE=${GE_MOUSE_EVERYWHERE:-$LAUNCH_MOUSEEVERYWHERE}; GE_SKIP_CUTSCENES=${GE_SKIP_CUTSCENES:-0}
+        GE_EXTRAS_MENU=${GE_EXTRAS_MENU:-$LAUNCH_EXTRASMENU}; GE_AUTO_QTE=${GE_AUTO_QTE:-$LAUNCH_AUTOQTE}
+        GE_AUTO_START=${GE_AUTO_START:-$LAUNCH_AUTOSTART}; GE_SKIP_MOVIES=${GE_SKIP_MOVIES:-$LAUNCH_SKIPMOVIES}
+        GE_ADS_FOV=${GE_ADS_FOV:-$LAUNCH_ADSFOV}; GE_ADS_SENS=${GE_ADS_SENS:-$LAUNCH_ADSSENS}
+        export GE_FPS GE_FOV GE_MOUSE GE_MOUSE_EVERYWHERE GE_SKIP_CUTSCENES GE_EXTRAS_MENU GE_AUTO_QTE GE_AUTO_START GE_SKIP_MOVIES GE_ADS_FOV GE_ADS_SENS
+        [ "$LAUNCH_FASTSTART" = 1 ] || INTRO=1
+    fi
 fi
 [ -n "$INTRO" ] || { GE_GECKO_EXTRA="$PWD/config/gecko/faststart.txt${GE_GECKO_EXTRA:+:$GE_GECKO_EXTRA}"; export GE_GECKO_EXTRA; }
 FONTS=/usr/share/dolphin-emu/Sys/GC
@@ -32,6 +43,6 @@ WIIKIT_PAD="$SCRIPT" timeout $((SECS + 40)) ${GE_BIN:-build/out/wiiboot} game --
     --watch 10 --dump build/frames --dump-every "$EVERY" --quit-after "$SECS" "$@" > build/run-script.log 2>&1
 echo "exit $?" >> build/run-script.log
 if command -v montage >/dev/null; then
-    montage build/frames/frame_*.png -tile 6x -geometry 426x240+2+2 -label '%f' build/sheet.png 2>/dev/null
+    montage build/frames/frame_*.png -alpha off -tile 6x -geometry 426x240+2+2 -label '%f' build/sheet.png 2>/dev/null
 fi
 tail -25 build/run-script.log

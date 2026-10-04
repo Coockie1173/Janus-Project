@@ -80,6 +80,7 @@ PPCFunc orig_frame_draw = nullptr;
 bool g_restarting = false; //the menu's restart action is running
 bool g_trace = false;
 int g_forced_entrance = -1; //GE_ENTRANCE
+uint32_t g_forced_level = 0; //GE_LEVEL, a level's hash: whichever mission the menu starts, this one loads
 Skip g_state = Skip::Idle;
 uint32_t g_frames = 0; //frames in this state
 uint32_t g_drawn = 0; //frames since one was drawn
@@ -190,6 +191,11 @@ void MenuPending(PPCContext& c)
 	g_restarting = acts && ld32(menu + kPendingAction) == kActionRestartLevel;
 	if (acts && ld32(menu + kPendingAction) == kActionLoadLevel)
 	{
+		if (g_forced_level && StartsCampaignLevel(menu))
+		{
+			rt_log("goldeneye: level %08X loads in place of %08X (GE_LEVEL)", g_forced_level, ld32(menu + kPendingLevel));
+			st32(menu + kPendingLevel, g_forced_level);
+		}
 		//a level loaded at a checkpoint or for split screen has no opening to wait for
 		if (StartsCampaignLevel(menu) && ld32(menu + kPendingEntrance) == kMissionStart)
 		{
@@ -290,6 +296,7 @@ void install_cutscenes()
 {
 	if (const char* e = std::getenv("GE_SKIP_CUTSCENES")) g_skip_cutscenes = std::atoi(e) != 0;
 	if (const char* e = std::getenv("GE_ENTRANCE")) g_forced_entrance = std::atoi(e);
+	if (const char* e = std::getenv("GE_LEVEL")) g_forced_level = (uint32_t)std::strtoul(e, nullptr, 16);
 	g_trace = std::getenv("GE_TRACE") != nullptr;
 	LoadOpenings(std::string(GE_ROOT) + "/config/openings.txt");
 	orig_menu_pending = ppc_hook("ge_menu_pending", MenuPending);
