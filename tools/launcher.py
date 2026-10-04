@@ -10,11 +10,12 @@ listed here are rewritten, the rest of the file is kept as it is).
 
 "Extract disc..." fills the game folder from an .rvz/.iso/.wbfs image (extract_disc.py).
 
-In the Windows package (Play.bat) this file sits in launcher/ beside GoldenEye.exe and does
-launch.sh's part as well: the same window, then it starts the game with what was chosen.
-There the settings are settings.env and keys.txt in the package's folder, and the options
-are launch.sh's: --no-gui, --fps N, --fov N, --mouse N, --mouse-mode M, --fullscreen,
---fast-start, --cheats, --extract IMAGE; anything else goes to the game.
+In a package (Windows: Play.bat, Linux: Play.sh) this file sits in launcher/ beside the game's
+executable and does launch.sh's part as well: the same window, then it starts the game with
+what was chosen. There the settings are settings.env and keys.txt in the package's folder, and
+the options are launch.sh's: --no-gui, --fps N, --fov N, --mouse N, --mouse-mode M, --fullscreen,
+--fast-start, --cheats, --extract IMAGE (Linux also --offline, --no-crash-dumps, --crash-mem);
+anything else goes to the game.
 """
 import os
 import shutil
@@ -24,8 +25,11 @@ import sys
 import extract_disc
 
 ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-GAME_EXE = os.path.join(ROOT, "GoldenEye.exe")
-PORTABLE = os.path.exists(GAME_EXE) #the Windows package: no build folder, no launch.sh
+WINDOWS = os.name == "nt"
+GAME_EXE = os.path.join(ROOT, "GoldenEye.exe" if WINDOWS else "GoldenEye")
+PORTABLE = os.path.isfile(GAME_EXE) #a package: no build folder, no launch.sh
+PLAY = "Play.bat" if WINDOWS else "./Play.sh"
+CRASHES = "crashes" if PORTABLE else "build/crashes"
 STATE = ROOT if PORTABLE else os.path.join(ROOT, "build")
 KEYS = os.path.join(STATE, "keys.txt")
 KEYS_DEFAULT = os.path.join(ROOT, "config", "keys.txt")
@@ -258,7 +262,7 @@ def run_gui():
 
     online = tk.BooleanVar(value=settings["online"] == "1")
     fullscreen = tk.BooleanVar(value=settings["fullscreen"] == "1")
-    if not PORTABLE: #the Windows build has no network and no crash dumps yet
+    if not WINDOWS: #the Windows build has no network and no crash dumps yet
         ttk.Checkbutton(st, text="Online: use the community server (config/hosts.txt)", variable=online).grid(
             row=3, column=0, columnspan=2, sticky="w", **pad)
     ttk.Checkbutton(st, text="Fullscreen  (F11 or Alt+Enter switches in the game)", variable=fullscreen).grid(
@@ -269,8 +273,8 @@ def run_gui():
     #crash dumps are on unless someone unticks them, the memory is big so that one's opt in
     crashdump = tk.BooleanVar(value=settings["crashdump"] == "1")
     crashmem = tk.BooleanVar(value=settings["crashmem"] == "1")
-    if not PORTABLE:
-        ttk.Checkbutton(st, text="Crash dumps: write a report into build/crashes when the game dies or stalls",
+    if not WINDOWS:
+        ttk.Checkbutton(st, text=f"Crash dumps: write a report into {CRASHES} when the game dies or stalls",
                         variable=crashdump).grid(row=7, column=0, columnspan=2, sticky="w", **pad)
         ttk.Checkbutton(st, text="...with the game's memory in each dump (88 MB)",
                         variable=crashmem).grid(row=8, column=0, columnspan=2, sticky="w", padx=(30, 8))
@@ -517,9 +521,9 @@ def run_gui():
     return result["play"]
 
 
-#---- the Windows package: what launch.sh does ------------------------------------------------------
+#---- a package: what launch.sh does ----------------------------------------------------------------
 def run_game(args):
-    """Start GoldenEye.exe with the saved settings and the command line over them; its exit code."""
+    """Start the game's executable with the saved settings and the command line over them; its exit code."""
     s = load_settings()
     env = dict(os.environ)
     extra, rest = [], []
@@ -544,14 +548,22 @@ def run_game(args):
             s["faststart"] = "1"
         elif a == "--cheats":
             shutil.copy(CHEATS, CHEATS_ON)
+        elif a == "--offline":
+            s["online"] = "0"
+        elif a == "--crash-dumps":
+            s["crashdump"] = "1"
+        elif a == "--no-crash-dumps":
+            s["crashdump"] = "0"
+        elif a == "--crash-mem":
+            s["crashdump"] = s["crashmem"] = "1"
         elif a == "--trace":
             env["GE_TRACE"] = env["GE_TRACELOOK"] = "1"
         elif a != "--no-gui":
             rest.append(a)
         i += 1
     if not extract_disc.have_game(GAME):
-        print("The game's files are missing (game\\sys\\main.dol). Start Play.bat and use Extract disc...,\n"
-              "or: Play.bat --extract C:\\path\\to\\GoldenEye.rvz")
+        print(f"The game's files are missing ({os.path.join('game', 'sys', 'main.dol')}). "
+              f"Start {PLAY} and use Extract disc...,\nor: {PLAY} --extract GoldenEye.rvz")
         return 1
     if s["fps"] != "auto" and s["fps"].isdigit() and int(s["fps"]) > FPS_MAX:
         s["fps"] = str(FPS_MAX)
@@ -560,6 +572,16 @@ def run_game(args):
                      ("GE_SKIP_CUTSCENES", "skipcutscenes"), ("GE_LEVEL_TIMER", "leveltimer"),
                      ("GE_EXTRAS_MENU", "extrasmenu")):
         env.setdefault(var, s[key])
+    if not WINDOWS: #what the Windows build does not have: the servers, the crash dumps
+        if s["online"] == "0":
+            env["GE_HOSTS"] = ""
+        if s["crashdump"] == "0":
+            env["GE_NO_CRASHDUMP"] = "1"
+        else:
+            env.pop("GE_NO_CRASHDUMP", None)
+            env.setdefault("GE_CRASH_DIR", CRASHES)
+        if s["crashmem"] == "1":
+            env["GE_CRASH_MEM"] = "1"
     if s["faststart"] == "1":
         extra.append("config/gecko/faststart.txt")
     if load_cheats(CHEATS_ON):
@@ -574,8 +596,11 @@ def run_game(args):
     if s["fullscreen"] == "1":
         cmd.append("--fullscreen")
     print("GoldenEye 007 is running.  keys: keys.txt   log: run.log")
+    dumps = os.listdir(os.path.join(ROOT, CRASHES)) if os.path.isdir(os.path.join(ROOT, CRASHES)) else []
     with open(RUN_LOG, "w") as log:
         code = subprocess.run(cmd + rest, cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT).returncode
+    if not WINDOWS and os.path.isdir(os.path.join(ROOT, CRASHES)) and os.listdir(os.path.join(ROOT, CRASHES)) != dumps:
+        print(f"the game left a crash dump: {CRASHES}/{sorted(os.listdir(os.path.join(ROOT, CRASHES)))[-1]}")
     if code != 0:
         print(f"\nThe game stopped with an error ({code}). The end of run.log:\n")
         with open(RUN_LOG, errors="replace") as log:

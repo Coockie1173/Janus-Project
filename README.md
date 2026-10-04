@@ -45,6 +45,14 @@ and `README.txt` (`port/win/`). The disc's files are not in it; the player
 takes them out of their own image with the window's "Extract disc...". No online play there
 yet: the runtime's network devices are POSIX only.
 
+### Linux package
+
+`make linux` builds the same portable layout for Linux and packs it as
+`build/GoldenEye007-linux64.zip`: the executable (the C++ runtime linked in,
+SDL3 beside it in `lib/`), `Play.sh` that opens the settings window with the
+system's Python, and `README.txt` (`port/linux/`). It needs glibc 2.38,
+OpenSSL 3 and OpenGL 4.5 where it runs; online and crash dumps work there.
+
 The boot ROM fonts and the DSP's resampling table (`font_western.bin`,
 `font_japanese.bin`, `dsp_coef.bin`) are taken from Dolphin's free
 replacements in `Sys/GC` when Dolphin is installed (`FONTS=dir` otherwise).

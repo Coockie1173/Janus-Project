@@ -6,6 +6,7 @@
 #   make names      mix the symbol sources into build/names.tsv
 #   make deps       build SDL3 into build/deps if the system has no SDL3 dev files
 #   make win        the Windows build, cross-compiled and zipped: build/GoldenEye007-win64.zip
+#   make linux      the Linux build to hand out, zipped: build/GoldenEye007-linux64.zip
 #   make clean      remove generated code and objects (keeps build/deps)
 #
 # The disc's contents are expected in ./game (sys/main.dol, files/, ...).
@@ -105,6 +106,20 @@ win: wiikit-patch recomp deps
 	    -DWIIKIT_EXTRA=$(abspath port/goldeneye.cmake) > $(BUILD)/cmake-win.log 2>&1 || { tail -20 $(BUILD)/cmake-win.log; exit 1; }
 	ninja -C $(WIN_OUT) wiiboot
 	sh tools/package_win.sh $(FONTS)
+
+# Linux, to hand out: the same portable layout as the Windows package (GE_PORTABLE), SDL3 beside
+# the game in lib/, the C++ runtime linked in, packaged by tools/package_linux.sh
+.PHONY: linux
+LINUX_OUT := $(BUILD)/out-linux
+linux: wiikit-patch recomp deps
+	@[ -d $(SDL3_DIR)/lib*/cmake/SDL3 ] || sh tools/build_sdl3.sh $(BUILD)/deps
+	cmake -S $(RECOMP) -B $(LINUX_OUT) -G Ninja -DCMAKE_CXX_COMPILER=$(RECOMP_CXX) \
+	    -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS_RELEASE="$(OPT)" \
+	    -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc -Wl,-rpath,'\$$ORIGIN/lib'" \
+	    -DCMAKE_PREFIX_PATH=$(SDL3_DIR) -DCMAKE_SKIP_RPATH=ON -DGE_PORTABLE=ON \
+	    -DWIIKIT_EXTRA=$(abspath port/goldeneye.cmake) > $(BUILD)/cmake-linux.log 2>&1 || { tail -20 $(BUILD)/cmake-linux.log; exit 1; }
+	ninja -C $(LINUX_OUT) wiiboot
+	sh tools/package_linux.sh $(FONTS)
 
 # the key file: the port's defaults, copied once; build/keys.txt is the player's to edit
 $(BUILD)/keys.txt: | config/keys.txt
