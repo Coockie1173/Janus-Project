@@ -8,7 +8,7 @@
 //qte.cpp quick time events that press their own buttons
 //movies.cpp skip movies
 //tweaks.cpp the level timer, the unused extras menu, auto start
-//tank.cpp the tank's driving at higher frame rates
+//tank.cpp the tank: the mouse on its aim, its buttons, driving at higher frame rates
 //native.cpp the engine's hot math routines written for the host
 //net.cpp the hosts file for the game's servers
 //overlay.cpp the debug overlay (F3), memory watches from a .dmw file (dmw.cpp)
@@ -55,6 +55,9 @@ void crash_thread_stack(); //the calling thread's stack for the crash handler
 void install_profiler(); //diagnostics.cpp
 void install_mouse(); //input.cpp
 void mouse_frame(uint32_t frame);
+void mouse_applied(uint32_t frame); //the mouse turned something this frame, its motion was taken
+bool mouse_on_stick(); //the mouse goes on the right stick (a joined network game)
+const float kRadPerPixel = 0.0022f; //what a pixel of mouse turns at sensitivity 1
 void mouse_capture(bool on);
 const float kMouseSensMax = 5.0f;
 float mouse_sens(); //1 is the default, 0 no mouse look
@@ -102,6 +105,8 @@ bool skip_movies(); //a movie that plays once is over before it starts
 void set_skip_movies(bool on);
 void install_tweaks(); //tweaks.cpp
 void install_tank(); //tank.cpp
+bool is_tank(uint32_t ctrl); //the controller is the Tank mission's
+void tank_buttons(ClassicState& s); //the tank's own button layout, in the classic's filter
 void tweaks_apply();
 bool level_timer(); //the hud shows the level's time
 void set_level_timer(bool on);

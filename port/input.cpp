@@ -30,7 +30,7 @@ const uint32_t kControllerNotLocal = 0x80108D70; //(controller) -> 0 if this con
 const float kPi = 3.14159265f;
 std::atomic<float> g_mouse_sens{1.0f}; //1 is 0.0022 radians a pixel
 std::atomic<bool> g_mouse_invert{false}; //pushing the mouse forward looks down
-const float kRadPerPixel = 0.0022f, kPitchLimit = 1.35f;
+const float kPitchLimit = 1.35f;
 
 
 //in a network game someone else hosts, the host turns the players from what each console
@@ -208,51 +208,6 @@ void look_apply(PPCContext& c) {
     stf(ctrl + 0x97C, ldf(ctrl + 0x97C) - add);
 }
 
-//the tank (the mission of that name) is another class of controller, XItemHandler_PlayerTank
-//with the vtable at 80574AB8. it's in state 2 all along and never gets to ge_look_apply
-//its own update (ge_tank_update, 80142E60) turns the look stick into the same two rates,
-//+0x97C the yaw's and +0x978 the pitch's in radians a second (negative looks up), and
-//ge_tank_look (80140600) turns the rates times the time step into the aim: the pitch at
-//+0x99C, which it keeps within the game's limits, and the yaw at +0x9A0. the view follows
-//the aim, and the left stick drives towards where it points in the view
-//for that one call the mouse's motion is added to the rates and taken out again after,
-//like ge_look_apply on foot
-const uint32_t kTankVtable = 0x80574AB8, kLookPitchRate = 0x978, kLookYawRate = 0x97C;
-const uint32_t kTankHeading = 0x52C; //where the view looks, radians, as the frame's input has it
-const uint32_t kTankAimPitch = 0x99C, kTankAimYaw = 0x9A0;
-const uint32_t kTimeStep = 0x578;
-bool is_tank(uint32_t ctrl) { return ld32(ctrl) == kTankVtable; }
-PPCFunc orig_tank_look = nullptr;
-void tank_look(PPCContext& c) {
-    uint32_t ctrl = c.r[3];
-    bool ours = guest_ptr(ctrl) && ctrl == g_local_ctrl && ld32(kFrameCount) - g_local_frame < 4 && ld32(ctrl + kPlayerState) == 2;
-    if (!ours || !(g_mouse_sens > 0) || ld8(kPaused) || overlay_open() || mouse_on_stick()) { orig_tank_look(c); return; }
-    static const bool trace = std::getenv("GE_TRACE") != nullptr;
-    if (trace) { //the aim, twice a second
-        static auto last = std::chrono::steady_clock::now();
-        auto now = std::chrono::steady_clock::now();
-        if (now - last >= std::chrono::milliseconds(500)) {
-            last = now;
-            uint32_t tank = ld32(ctrl + 4);
-            rt_log("goldeneye: tank %08X, heading %.4f; aim %.4f across, %.4f up and down; hull %.4f at %.2f %.2f %.2f", ctrl, ldf(ctrl + kTankHeading),
-                   ldf(ctrl + kTankAimYaw), ldf(ctrl + kTankAimPitch), std::atan2(ldf(tank + 0xB8), ldf(tank + 0xC0)),
-                   ldf(tank + 0xF8), ldf(tank + 0xFC), ldf(tank + 0x100));
-        }
-    }
-    g_look_frame = ld32(kFrameCount);
-    float dx = 0, dy = 0, dt = ldf(ctrl + kTimeStep);
-    video_take_mouse_motion(dx, dy);
-    debug_mouse(dx, dy);
-    if (g_mouse_invert) dy = -dy;
-    if ((dx == 0 && dy == 0) || !(dt > 0.0005f && dt < 0.2f)) { orig_tank_look(c); return; }
-    float k = kRadPerPixel * g_mouse_sens / dt, yaw = dx * k, pitch = dy * k;
-    stf(ctrl + kLookYawRate, ldf(ctrl + kLookYawRate) + yaw);
-    stf(ctrl + kLookPitchRate, ldf(ctrl + kLookPitchRate) + pitch);
-    orig_tank_look(c);
-    stf(ctrl + kLookYawRate, ldf(ctrl + kLookYawRate) - yaw);
-    stf(ctrl + kLookPitchRate, ldf(ctrl + kLookPitchRate) - pitch);
-}
-
 const uint32_t kClA = 0x0010, kClB = 0x0040, kClZR = 0x0004, kClZL = 0x0080; //KPAD's classic bits
 
 //sprint on a key of its own. the game has action and sprint on one button (the classic's b)
@@ -409,20 +364,6 @@ void wheel_buttons(ClassicState& s) {
     s.buttons |= held;
 }
 
-//the tank's buttons go round by one: the left mouse button (ZR) does what the classic's r
-//did, the right one (ZL) what the left did and r what the right did
-//only in the tank and in play, a menu keeps the triggers as select and back
-const uint32_t kClR = 0x0200;
-void tank_buttons(ClassicState& s) {
-    uint32_t ctrl = local_controller();
-    if (!ctrl || !is_tank(ctrl) || !in_play()) return;
-    uint32_t b = s.buttons & ~(kClZR | kClZL | kClR);
-    if (s.buttons & kClZR) b |= kClR;
-    if (s.buttons & kClZL) b |= kClZR;
-    if (s.buttons & kClR) b |= kClZL;
-    s.buttons = b;
-}
-
 //in play the triggers fire (ZR) and aim (ZL), in a menu they do nothing
 //so there they count as a (select) and b (back) and the mouse buttons work the menus
 //"in play" is a player and no pause (the byte at 806EB69C, found by pausing under a word scan)
@@ -539,8 +480,6 @@ void install_mouse() {
     orig_controller_update = ppc_hook("ge_controller_update", controller_update);
     orig_look_apply = ppc_hook("ge_look_apply", look_apply);
     if (!orig_controller_update || !controller_not_local || !orig_look_apply) rt_die("goldeneye: the controller update is not hooked in this build");
-    orig_tank_look = ppc_hook("ge_tank_look", tank_look);
-    if (!orig_tank_look) rt_die("goldeneye: the tank's look is not hooked in this build");
     orig_look_sens[0] = ppc_hook("ge_look_sens", look_sens<0>);
     orig_look_sens[1] = ppc_hook("ge_look_sens_ads", look_sens<1>);
     if (!orig_look_sens[0] || !orig_look_sens[1]) rt_die("goldeneye: the sensitivity readers are not hooked in this build");
@@ -566,6 +505,7 @@ bool mouse_everywhere() { return g_mouse_everywhere; }
 void set_mouse_everywhere(bool on) { g_mouse_everywhere = on; }
 
 //once a game frame, with nobody to turn (a menu, a pause) the mouse's motion is dropped
+void mouse_applied(uint32_t frame) { g_look_frame = frame; }
 void mouse_frame(uint32_t f) {
     if (!g_stick_took && g_look_frame != f - 1 && g_look_frame != f) {
         float dx, dy;

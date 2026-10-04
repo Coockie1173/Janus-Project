@@ -1,5 +1,21 @@
-//the tank's driving at frame rates above the game's 30
+//the tank (the mission of that name): the mouse on its aim, its buttons and its driving at
+//frame rates above the game's 30
 //
+//the player there is another class of controller, XItemHandler_PlayerTank with the vtable at
+//80574AB8. it's in state 2 all along and never gets to ge_look_apply
+//its own update (ge_tank_update, 80142E60) turns the look stick into the same two rates,
+//+0x97C the yaw's and +0x978 the pitch's in radians a second (negative looks up), and
+//ge_tank_look (80140600) turns the rates times the time step into the aim: the pitch at
+//+0x99C, which it keeps within the game's limits, and the yaw at +0x9A0. the view follows
+//the aim, and the left stick drives towards where it points in the view
+//for that one call the mouse's motion is added to the rates and taken out again after,
+//like ge_look_apply on foot
+//
+//the buttons go round by one: the left mouse button (ZR) does what the classic's r did, the
+//right one (ZL) what the left did and r what the right did. only in the tank and in play,
+//a menu keeps the triggers as select and back
+//
+//the driving:
 //three things in a vehicle's physics happen once a call with no time step in them, so at 144
 //they happen five times as often and the tank hardly moves (4 s of full stick: 39 units at
 //30, 13 at 60, 5 at 144). each one is scaled to the time step for the call and put back after
@@ -17,12 +33,23 @@
 //towards the stick's (+0xA5C) by a fixed step a call, 806E96E8 with the byte at 806E96D8 set
 //and 806E96F8 without. the wheels' drive comes from it
 #include "ge.h"
+#include "debug.h"
+#include <chrono>
 #include <cmath>
+#include <cstdlib>
 
 namespace ge
 {
 namespace
 {
+
+const uint32_t kTankVtable = 0x80574AB8;
+const uint32_t kPlayerState = 0x704, kStateMoving = 2;
+const uint32_t kLookPitchRate = 0x978, kLookYawRate = 0x97C;
+const uint32_t kTankHeading = 0x52C; //where the view looks, radians, as the frame's input has it
+const uint32_t kTankAimPitch = 0x99C, kTankAimYaw = 0x9A0;
+const uint32_t kClZR = 0x0004, kClZL = 0x0080, kClR = 0x0200; //KPAD's classic bits
+PPCFunc orig_tank_look = nullptr;
 
 const uint32_t kVehicleWheels = 0x1FC, kVehicleWheelCount = 0x200, kWheelSize = 0x90, kWheelDrag = 0x84;
 const uint32_t kMaxWheels = 32; //the tank has 18
@@ -31,6 +58,48 @@ const uint32_t kTankThrottleStep[2] = {0x806E96E8, 0x806E96F8};
 const uint32_t kCtrlTimeStep = 0x578;
 PPCFunc orig_vehicle_step = nullptr;
 PPCFunc orig_tank_drive = nullptr;
+
+//the aim and where the tank is, twice a second
+void TraceAim(uint32_t ctrl)
+{
+	static auto last = std::chrono::steady_clock::now();
+	auto now = std::chrono::steady_clock::now();
+	if (now - last < std::chrono::milliseconds(500)) return;
+	last = now;
+	uint32_t tank = ld32(ctrl + 4);
+	rt_log("goldeneye: tank %08X, heading %.4f; aim %.4f across, %.4f up and down; hull %.4f at %.2f %.2f %.2f", ctrl, ldf(ctrl + kTankHeading),
+		ldf(ctrl + kTankAimYaw), ldf(ctrl + kTankAimPitch), std::atan2(ldf(tank + 0xB8), ldf(tank + 0xC0)),
+		ldf(tank + 0xF8), ldf(tank + 0xFC), ldf(tank + 0x100));
+}
+
+void TankLook(PPCContext& c)
+{
+	uint32_t ctrl = c.r[3];
+	bool ours = guest_ptr(ctrl) && ctrl == local_controller() && ld32(ctrl + kPlayerState) == kStateMoving;
+	if (!ours || !(mouse_sens() > 0) || ld8(kPaused) || overlay_open() || mouse_on_stick())
+	{
+		orig_tank_look(c);
+		return;
+	}
+	static const bool trace = std::getenv("GE_TRACE") != nullptr;
+	if (trace) TraceAim(ctrl);
+	mouse_applied(ld32(kFrameCount));
+	float dx = 0, dy = 0, dt = ldf(ctrl + kCtrlTimeStep);
+	video_take_mouse_motion(dx, dy);
+	debug_mouse(dx, dy);
+	if (mouse_invert()) dy = -dy;
+	if ((dx == 0 && dy == 0) || !(dt > 0.0005f && dt < 0.2f))
+	{
+		orig_tank_look(c);
+		return;
+	}
+	float k = kRadPerPixel * mouse_sens() / dt, yaw = dx * k, pitch = dy * k;
+	stf(ctrl + kLookYawRate, ldf(ctrl + kLookYawRate) + yaw);
+	stf(ctrl + kLookPitchRate, ldf(ctrl + kLookPitchRate) + pitch);
+	orig_tank_look(c);
+	stf(ctrl + kLookYawRate, ldf(ctrl + kLookYawRate) - yaw);
+	stf(ctrl + kLookPitchRate, ldf(ctrl + kLookPitchRate) - pitch);
+}
 
 //how many of the game's own frames a time step is. only a shorter one gets scaled
 bool ShortStep(float seconds, float& frames)
@@ -92,8 +161,23 @@ void TankDrive(PPCContext& c)
 
 } //namespace
 
+bool is_tank(uint32_t ctrl) { return ld32(ctrl) == kTankVtable; }
+
+void tank_buttons(ClassicState& s)
+{
+	uint32_t ctrl = local_controller();
+	if (!ctrl || !is_tank(ctrl) || !in_play()) return;
+	uint32_t b = s.buttons & ~(kClZR | kClZL | kClR);
+	if (s.buttons & kClZR) b |= kClR;
+	if (s.buttons & kClZL) b |= kClZR;
+	if (s.buttons & kClR) b |= kClZL;
+	s.buttons = b;
+}
+
 void install_tank()
 {
+	orig_tank_look = ppc_hook("ge_tank_look", TankLook);
+	if (!orig_tank_look) rt_die("goldeneye: the tank's look is not hooked in this build");
 	orig_vehicle_step = ppc_hook("ge_vehicle_step", VehicleStep);
 	if (!orig_vehicle_step) rt_die("goldeneye: the vehicles' step is not hooked in this build");
 	orig_tank_drive = ppc_hook("ge_tank_drive", TankDrive);
