@@ -6,7 +6,7 @@
 //gecko.cpp gecko codes run each frame
 //cutscenes.cpp skip cutscenes
 //qte.cpp quick time events that press their own buttons
-//tweaks.cpp the level timer and the unused extras menu
+//tweaks.cpp the level timer, the unused extras menu, auto start
 //native.cpp the engine's hot math routines written for the host
 //net.cpp the hosts file for the game's servers
 //overlay.cpp the debug overlay (F3), memory watches from a .dmw file (dmw.cpp)
@@ -101,6 +101,8 @@ bool level_timer(); //the hud shows the level's time
 void set_level_timer(bool on);
 bool extras_menu(); //cheat, the menu's unused extras page
 void set_extras_menu(bool on);
+bool auto_start(); //a loaded mission starts without its "Continue" being pressed
+void set_auto_start(bool on);
 void install_overlay(); //overlay.cpp
 bool overlay_open(); //the watches or the settings menu are up, so the mouse is free
 bool settings_open(); //settings.cpp

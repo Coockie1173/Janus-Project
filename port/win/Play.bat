@@ -7,6 +7,7 @@ rem     Play.bat --always-mouse         the cheat "Always Enable Mouse": mouse l
 rem     Play.bat --skip-cutscenes       a mission's opening cutscene is skipped
 rem     Play.bat --no-level-timer       the hud without the level's time (it is on by default)
 rem     Play.bat --auto-qte             quick time events press their own buttons
+rem     Play.bat --auto-start           a loaded mission starts without "Continue" being pressed
 rem     Play.bat --extras-menu          the cheat "Unused Extras Menu"
 rem Any option skips the window; what the launcher does not know goes to the game (--window 1920x1080...).
 setlocal

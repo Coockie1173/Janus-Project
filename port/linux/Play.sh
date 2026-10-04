@@ -8,6 +8,7 @@
 #     ./Play.sh --skip-cutscenes       a mission's opening cutscene is skipped
 #     ./Play.sh --no-level-timer       the hud without the level's time (it is on by default)
 #     ./Play.sh --auto-qte             quick time events press their own buttons
+#     ./Play.sh --auto-start           a loaded mission starts without "Continue" being pressed
 #     ./Play.sh --extras-menu          the cheat "Unused Extras Menu"
 #     ./Play.sh --no-crash-dumps       no dump in crashes/ when the game dies or stalls (--crash-mem adds
 #                                      the game's memory to each dump, 88 MB)
