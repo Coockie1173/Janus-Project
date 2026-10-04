@@ -22,7 +22,11 @@
 //the host code offset (tools/profile_report.py --offsets names it) and the guest call chain
 //GE_TRACEW="80776B10" log that word whenever it changes (checked 200 times a second)
 //GE_PEEK="80ABCDEF,80ABCDF0" log those floats every half second
+//GE_RECORD=F writes the classic controller's state and the mouse's motion as played into F
+//GE_REPLAY=F plays F back in their place, then hands the controls back. with it every time
+//above counts from the replay's end (tools/record_run.sh, and REPLAY=name for scripted_run.sh)
 #include "debug.h"
+#include "ge.h"
 #include "mem.h"
 #include "rt.h"
 #include "video.h"
@@ -33,10 +37,12 @@
 #include <unistd.h>
 #endif
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <utility>
@@ -47,8 +53,14 @@ namespace {
 using Clock = std::chrono::steady_clock;
 const Clock::time_point t0 = Clock::now();
 double now_s() { return std::chrono::duration<double>(Clock::now() - t0).count(); }
+
+//a replay (GE_REPLAY) gets the game somewhere first, the scripted times count from its end
+std::atomic<bool> replaying{false};
+std::atomic<double> script_base{0};
+double script_s() { return replaying ? -1.0 : now_s() - script_base; }
 void sleep_until_s(double t) {
-    double d = t - now_s();
+    while (replaying) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    double d = t - script_s();
     if (d > 0) std::this_thread::sleep_for(std::chrono::duration<double>(d));
 }
 
@@ -287,10 +299,109 @@ void peek_main(std::vector<uint32_t> addrs) {
     }
 }
 
+//recorded input. the file is lines of text:
+//"sens S I" the mouse's sensitivity and invert it was played with
+//"c T buttons lx ly rx ry lt rt" the classic controller from T on, written when it changes
+//"m T dx dy" mouse motion in pixels
+//"a" the local player appeared or went (a level loaded or was left), the times after it count from there
+//loads never take the same time twice, so the replay waits for each "a" to happen
+struct RecPad { double t; uint32_t buttons; float lx, ly, rx, ry, lt, rt; };
+struct RecMove { double t; float dx, dy; };
+struct RecPart { std::vector<RecPad> pads; std::vector<RecMove> moves; };
+std::mutex rec_lock;
+FILE* rec_out = nullptr;
+std::vector<RecPart> rec_parts;
+size_t rec_part = 0, rec_pad = 0, rec_move = 0;
+double rec_start = 0; //when the current part began
+bool rec_player = false;
+float rec_sens = 1.0f;
+bool rec_invert = false;
+RecPad rec_now{};
+
+bool same_pad(const RecPad& a, const ClassicState& s) {
+    return a.buttons == s.buttons && a.lx == s.lx && a.ly == s.ly && a.rx == s.rx && a.ry == s.ry && a.lt == s.lt && a.rt == s.rt;
+}
+
+bool load_recording(const char* path) {
+    FILE* f = std::fopen(path, "r");
+    if (!f) return false;
+    rec_parts.emplace_back();
+    char line[160];
+    while (std::fgets(line, sizeof line, f)) {
+        RecPad p{};
+        RecMove m{};
+        int inv = 0;
+        if (line[0] == 'a') rec_parts.emplace_back();
+        else if (std::sscanf(line, "c %lf %x %f %f %f %f %f %f", &p.t, &p.buttons, &p.lx, &p.ly, &p.rx, &p.ry, &p.lt, &p.rt) == 8)
+            rec_parts.back().pads.push_back(p);
+        else if (std::sscanf(line, "m %lf %f %f", &m.t, &m.dx, &m.dy) == 3) rec_parts.back().moves.push_back(m);
+        else if (std::sscanf(line, "sens %f %d", &rec_sens, &inv) == 2) rec_invert = inv != 0;
+    }
+    std::fclose(f);
+    return true;
+}
+
+void replay_done() {
+    script_base = now_s();
+    replaying = false;
+    rt_log("replay: done at %.1f s, the controls are free", now_s());
+}
+
+//a level loading or ending starts the next part, on both sides
+void record_part() {
+    uint32_t state;
+    bool player = ge::local_player_state(state);
+    if (player == rec_player) return;
+    rec_player = player;
+    rec_start = now_s();
+    if (rec_out) { std::fprintf(rec_out, "a\n"); rec_now.buttons = ~0u; }
+    else if (rec_part + 1 < rec_parts.size()) { ++rec_part; rec_pad = rec_move = 0; }
+}
+
+void record_classic(ClassicState& s) {
+    std::lock_guard<std::mutex> lk(rec_lock);
+    record_part();
+    double t = now_s() - rec_start;
+    if (rec_out) {
+        static bool head = false; //written here, the mouse's settings aren't read yet at install
+        if (!head) { head = true; std::fprintf(rec_out, "sens %g %d\n", ge::mouse_sens(), (int)ge::mouse_invert()); }
+        if (same_pad(rec_now, s)) return;
+        rec_now = {t, s.buttons, s.lx, s.ly, s.rx, s.ry, s.lt, s.rt};
+        std::fprintf(rec_out, "c %.3f %04X %g %g %g %g %g %g\n", t, s.buttons, s.lx, s.ly, s.rx, s.ry, s.lt, s.rt);
+        std::fflush(rec_out);
+        return;
+    }
+    if (!replaying) return;
+    const RecPart& part = rec_parts[rec_part];
+    while (rec_pad < part.pads.size() && part.pads[rec_pad].t <= t) rec_now = part.pads[rec_pad++];
+    s.buttons = rec_now.buttons;
+    s.lx = rec_now.lx; s.ly = rec_now.ly; s.rx = rec_now.rx; s.ry = rec_now.ry; s.lt = rec_now.lt; s.rt = rec_now.rt;
+    if (rec_part + 1 == rec_parts.size() && rec_pad == part.pads.size() && rec_move == part.moves.size()) replay_done();
+}
+
+void record_mouse(float& dx, float& dy) {
+    std::lock_guard<std::mutex> lk(rec_lock);
+    double t = now_s() - rec_start;
+    if (rec_out) {
+        if (dx != 0 || dy != 0) std::fprintf(rec_out, "m %.3f %g %g\n", t, dx, dy);
+        return;
+    }
+    if (!replaying) return;
+    //the same turn whatever the sensitivity is now
+    float k = ge::mouse_sens() > 0 ? rec_sens / ge::mouse_sens() : 0;
+    const RecPart& part = rec_parts[rec_part];
+    dx = dy = 0; //only what was recorded, not the real mouse
+    for (; rec_move < part.moves.size() && part.moves[rec_move].t <= t; ++rec_move) {
+        dx += part.moves[rec_move].dx * k;
+        dy += part.moves[rec_move].dy * (rec_invert != ge::mouse_invert() ? -k : k);
+    }
+}
+
 } //namespace
 
 void debug_classic(ClassicState& s) {
-    double t = now_s();
+    if (rec_out || replaying) record_classic(s);
+    double t = script_s();
     for (auto& p : presses)
         if (t >= p.a && t < p.b) {
             s.buttons |= p.bits;
@@ -305,9 +416,10 @@ void debug_classic(ClassicState& s) {
 }
 
 void debug_mouse(float& dx, float& dy) {
+    if (rec_out || replaying) record_mouse(dx, dy);
     static double last = now_s();
-    double t = now_s(), dt = t - last;
-    last = t;
+    double now = now_s(), dt = now - last, t = script_s();
+    last = now;
     for (auto& h : moves)
         if (t >= h.a && t < h.b) { dx += h.x * (float)dt; dy += h.y * (float)dt; }
 }
@@ -332,6 +444,15 @@ void look_trace(PPCContext& c) {
 }
 
 void debug_install() {
+    if (const char* e = std::getenv("GE_REPLAY")) {
+        if (!load_recording(e)) rt_die("debug: no recording %s", e);
+        replaying = true;
+        rt_log("debug: replaying %s, %zu parts", e, rec_parts.size());
+    } else if (const char* e = std::getenv("GE_RECORD")) {
+        rec_out = std::fopen(e, "w");
+        if (!rec_out) rt_die("debug: cannot write %s", e);
+        rt_log("debug: recording input into %s", e);
+    }
     if (std::getenv("GE_TRACELOOK")) orig_look_trace = ppc_hook("ge_look_input", look_trace);
     if (const char* e = std::getenv("GE_BUTTONS")) {
         for (const char* q = e; *q;) {

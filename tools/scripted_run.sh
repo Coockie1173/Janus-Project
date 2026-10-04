@@ -9,13 +9,21 @@
 # 6 s in); INTRO=1 plays them. "dam" as the script is the way into Dam from a save with a
 # profile: the title's button at 8, down twice to Mission Select, then A every 2 s. The level
 # is drawn from about 27 s, its opening runs past 70.
+# REPLAY=name plays build/rec/name.rec first (tools/record_run.sh) on a copy of the save it was
+# recorded from; GE_STICK, GE_BUTTONS, GE_MOUSEMOVE and the other aids then count from its end.
 cd "$(dirname "$0")/.." || exit 1
 DAM="8:A 11:D 12:D $(seq 14 2 600 | sed 's/$/:A/' | tr '\n' ' ')"
 SCRIPT=$1; [ "$SCRIPT" = dam ] && SCRIPT=$DAM; SECS=${2:-60}; EVERY=${3:-300}; shift 3 2>/dev/null
 rm -rf build/frames; mkdir -p build/frames
+NAND=build/nand
+if [ -n "$REPLAY" ]; then
+    [ -f "build/rec/$REPLAY.rec" ] || { echo "no recording build/rec/$REPLAY.rec"; exit 1; }
+    rm -rf build/rec/run.nand; cp -a "build/rec/$REPLAY.nand" build/rec/run.nand
+    NAND=build/rec/run.nand; GE_REPLAY=build/rec/$REPLAY.rec; export GE_REPLAY
+fi
 [ -n "$INTRO" ] || { GE_GECKO_EXTRA="$PWD/config/gecko/faststart.txt${GE_GECKO_EXTRA:+:$GE_GECKO_EXTRA}"; export GE_GECKO_EXTRA; }
 FONTS=/usr/share/dolphin-emu/Sys/GC
-WIIKIT_PAD="$SCRIPT" timeout $((SECS + 40)) ${GE_BIN:-build/out/wiiboot} game --nand build/nand --keys build/keys.txt \
+WIIKIT_PAD="$SCRIPT" timeout $((SECS + 40)) ${GE_BIN:-build/out/wiiboot} game --nand $NAND --keys build/keys.txt \
     --symbols build/recomp/symbols.tsv $( [ -d $FONTS ] && echo --fonts $FONTS ) $( [ -n "$AUDIO" ] || echo --no-audio ) --input keyboard \
     --watch 10 --dump build/frames --dump-every "$EVERY" --quit-after "$SECS" "$@" > build/run-script.log 2>&1
 echo "exit $?" >> build/run-script.log
