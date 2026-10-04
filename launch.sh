@@ -23,6 +23,7 @@
 #     ./launch.sh --no-tutorials       the tutorial boxes in the missions aren't shown (the F1 menu's Enhancements)
 #     ./launch.sh --auto-start         a loaded mission starts without "Continue" being pressed (the F1 menu's Enhancements)
 #     ./launch.sh --extras-menu        the cheat "Unused Extras Menu" (also in the F1 menu's Cheats)
+#     ./launch.sh --unlock-all         the cheat "Unlock Everything": every mission and difficulty
 #     ./launch.sh --trace              log the mouse's player, its angles and the look state (for a report)
 #     ./launch.sh --extract GAME.rvz   take the game's files out of a disc image (.rvz .iso .wbfs) into ./game
 #                                      and stop; the window's "Extract disc..." does the same
@@ -52,7 +53,7 @@ fi
 # the saved settings, then the command line over them
 LAUNCH_FPS=auto; LAUNCH_FOV=49; LAUNCH_MOUSE=1.0; LAUNCH_ONLINE=1; LAUNCH_FULLSCREEN=0; LAUNCH_FASTSTART=0; LAUNCH_MOUSEMODE=auto
 LAUNCH_CRASHDUMP=1; LAUNCH_CRASHMEM=0; LAUNCH_MOUSEINVERT=0; LAUNCH_MOUSEEVERYWHERE=0; LAUNCH_SKIPCUTSCENES=0
-LAUNCH_LEVELTIMER=1; LAUNCH_AUTOQTE=0; LAUNCH_AUTOSTART=0; LAUNCH_SKIPMOVIES=0; LAUNCH_NOTUTORIALS=0; LAUNCH_EXTRASMENU=0; LAUNCH_ADSFOV=22.5; LAUNCH_ADSSENS=0.5; LAUNCH_AIMLOCK=0
+LAUNCH_LEVELTIMER=1; LAUNCH_AUTOQTE=0; LAUNCH_AUTOSTART=0; LAUNCH_SKIPMOVIES=0; LAUNCH_NOTUTORIALS=0; LAUNCH_EXTRASMENU=0; LAUNCH_UNLOCKALL=0; LAUNCH_ADSFOV=22.5; LAUNCH_ADSSENS=0.5; LAUNCH_AIMLOCK=0
 [ -f build/settings.env ] && . ./build/settings.env
 ARGS=
 while [ $# -gt 0 ]; do
@@ -70,6 +71,7 @@ while [ $# -gt 0 ]; do
         --skip-movies) LAUNCH_SKIPMOVIES=1; shift ;;
         --no-tutorials) LAUNCH_NOTUTORIALS=1; shift ;;
         --extras-menu) LAUNCH_EXTRASMENU=1; shift ;;
+        --unlock-all) LAUNCH_UNLOCKALL=1; shift ;;
         --offline) LAUNCH_ONLINE=0; shift ;;
         --fullscreen) LAUNCH_FULLSCREEN=1; shift ;;
         --fast-start) LAUNCH_FASTSTART=1; shift ;;
@@ -86,13 +88,13 @@ case $LAUNCH_FPS in auto) ;; *) [ "$LAUNCH_FPS" -gt 275 ] 2>/dev/null && LAUNCH_
 GE_FPS=${GE_FPS:-$LAUNCH_FPS}; GE_FOV=${GE_FOV:-$LAUNCH_FOV}; GE_MOUSE=${GE_MOUSE:-$LAUNCH_MOUSE}
 GE_MOUSE_MODE=${GE_MOUSE_MODE:-$LAUNCH_MOUSEMODE}; GE_MOUSE_INVERT=${GE_MOUSE_INVERT:-$LAUNCH_MOUSEINVERT}
 GE_MOUSE_EVERYWHERE=${GE_MOUSE_EVERYWHERE:-$LAUNCH_MOUSEEVERYWHERE}; GE_SKIP_CUTSCENES=${GE_SKIP_CUTSCENES:-$LAUNCH_SKIPCUTSCENES}
-GE_LEVEL_TIMER=${GE_LEVEL_TIMER:-$LAUNCH_LEVELTIMER}; GE_EXTRAS_MENU=${GE_EXTRAS_MENU:-$LAUNCH_EXTRASMENU}
+GE_LEVEL_TIMER=${GE_LEVEL_TIMER:-$LAUNCH_LEVELTIMER}; GE_EXTRAS_MENU=${GE_EXTRAS_MENU:-$LAUNCH_EXTRASMENU}; GE_UNLOCK_ALL=${GE_UNLOCK_ALL:-$LAUNCH_UNLOCKALL}
 GE_ADS_FOV=${GE_ADS_FOV:-$LAUNCH_ADSFOV}; GE_ADS_SENS=${GE_ADS_SENS:-$LAUNCH_ADSSENS}; GE_AIM_LOCK=${GE_AIM_LOCK:-$LAUNCH_AIMLOCK}
 GE_AUTO_QTE=${GE_AUTO_QTE:-$LAUNCH_AUTOQTE}; GE_AUTO_START=${GE_AUTO_START:-$LAUNCH_AUTOSTART}
 GE_SKIP_MOVIES=${GE_SKIP_MOVIES:-$LAUNCH_SKIPMOVIES}
 GE_NO_TUTORIALS=${GE_NO_TUTORIALS:-$LAUNCH_NOTUTORIALS}
 export GE_ADS_FOV GE_ADS_SENS GE_AIM_LOCK GE_AUTO_QTE GE_AUTO_START GE_SKIP_MOVIES GE_NO_TUTORIALS
-export GE_FPS GE_FOV GE_MOUSE GE_MOUSE_MODE GE_MOUSE_INVERT GE_MOUSE_EVERYWHERE GE_SKIP_CUTSCENES GE_LEVEL_TIMER GE_EXTRAS_MENU
+export GE_FPS GE_FOV GE_MOUSE GE_MOUSE_MODE GE_MOUSE_INVERT GE_MOUSE_EVERYWHERE GE_SKIP_CUTSCENES GE_LEVEL_TIMER GE_EXTRAS_MENU GE_UNLOCK_ALL
 # through X11 when there is one: a present on Wayland costs the renderer 2 ms, 0.3 there
 # (SDL_VIDEODRIVER in the environment overrides)
 if [ -z "$SDL_VIDEODRIVER" ] && [ -n "$DISPLAY" ]; then SDL_VIDEODRIVER=x11,wayland; export SDL_VIDEODRIVER; fi

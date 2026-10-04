@@ -1,5 +1,5 @@
-//small options: the level timer, the unused extras menu (both were gecko codes), auto start
-//and no tutorials
+//small options: the level timer, the unused extras menu, unlock everything (all three were
+//gecko codes), auto start and no tutorials
 //
 //level timer (on by default): the hud only shows a clock in a time challenge, counting down
 //the code [Mars] patches four instructions of the hud's update to always show the level's time
@@ -8,6 +8,11 @@
 //
 //unused extras menu (a cheat, off by default): Extras also lists Mission Select, Character
 //Viewer, Movies and the Calibration Menu. two writes into the menu's data, kept up each frame
+//
+//unlock everything (a cheat, off by default): every mission and every difficulty can be picked
+//the two codes patch a menu callback (8024BB80) and the progress getter (80230154) to store
+//-1 into the progress before it is read: the missions' mask (+0x38) and the four masks of
+//missions done per difficulty (+0x40). the same five words are kept at -1 each frame here
 //
 //auto start (off by default): a loaded mission shows its name over "Continue" and waits for
 //a button. that is the last step of the level's load (0x1A), asking ge_pad_confirmed each
@@ -21,6 +26,7 @@
 //GE_LEVEL_TIMER=0 no level timer
 //GE_AUTO_START=1 a loaded mission starts by itself
 //GE_EXTRAS_MENU=1 the unused extras menu
+//GE_UNLOCK_ALL=1 every mission and difficulty unlocked
 //GE_NO_TUTORIALS=1 no tutorial boxes
 //GE_TRACE=1 log every tutorial that is asked for
 #include "ge.h"
@@ -40,14 +46,24 @@ const uint32_t kLevelTimer = 0x805C963C; //a float, seconds played in the level
 struct MenuWrite { uint32_t addr, size, value, game; };
 MenuWrite g_extras_writes[] = {{0x80774704, 4, 0x80580990, 0}, {0x8077470B, 1, 0x19, 0}};
 
+//the codes "Unlock all difficulties" (C224BB80) and "Unlock all missions" (C2230154)
+const uint32_t kProgress = 0x805DE6A0; //the profile's progress
+const uint32_t kAll = 0xFFFFFFFF;
+MenuWrite g_unlock_writes[] = {
+	{kProgress + 0x38, 4, kAll, 0}, //a bit a mission, it can be picked
+	{kProgress + 0x40, 4, kAll, 0}, {kProgress + 0x44, 4, kAll, 0}, //a mask a difficulty, a bit a mission done on it
+	{kProgress + 0x48, 4, kAll, 0}, {kProgress + 0x4C, 4, kAll, 0}};
+
 std::atomic<bool> g_level_timer{true};
 std::atomic<bool> g_extras_menu{false};
+std::atomic<bool> g_unlock_all{false};
 std::atomic<bool> g_auto_start{false};
 std::atomic<bool> g_no_tutorials{false};
 bool g_trace = false;
 const uint32_t kAppPtr = 0x806EB694, kLoadStep = 0x354; //the step the level's load is at
 const uint32_t kStepContinue = 0x1A; //waiting for a button under the mission's name
 bool g_extras_written = false; //the menu's data holds the code's values
+bool g_unlock_written = false; //the progress does
 PPCFunc orig_hud_update = nullptr;
 PPCFunc orig_pad_confirmed = nullptr;
 PPCFunc orig_show_tutorial = nullptr;
@@ -57,6 +73,29 @@ void Store(const MenuWrite& w, uint32_t v)
 {
 	if (w.size == 1) st8(w.addr, (uint8_t)v);
 	else st32(w.addr, v);
+}
+
+//keeps a code's values in memory while it is on, the game's own come back when it is turned off
+template <size_t N>
+void Keep(MenuWrite (&writes)[N], bool on, bool& written)
+{
+	if (on)
+	{
+		for (auto& w : writes)
+		{
+			uint32_t have = Load(w);
+			if (have == w.value) continue;
+			w.game = have; //remember what the game had there for when it gets turned off
+			Store(w, w.value);
+		}
+		written = true;
+	}
+	else if (written)
+	{
+		for (auto& w : writes)
+			if (Load(w) == w.value) Store(w, w.game);
+		written = false;
+	}
 }
 
 void HudUpdate(PPCContext& c)
@@ -102,6 +141,8 @@ bool level_timer() { return g_level_timer; }
 void set_level_timer(bool on) { g_level_timer = on; }
 bool extras_menu() { return g_extras_menu; }
 void set_extras_menu(bool on) { g_extras_menu = on; }
+bool unlock_all() { return g_unlock_all; }
+void set_unlock_all(bool on) { g_unlock_all = on; }
 bool auto_start() { return g_auto_start; }
 void set_auto_start(bool on) { g_auto_start = on; }
 bool no_tutorials() { return g_no_tutorials; }
@@ -109,29 +150,15 @@ void set_no_tutorials(bool on) { g_no_tutorials = on; }
 
 void tweaks_apply()
 {
-	if (g_extras_menu)
-	{
-		for (auto& w : g_extras_writes)
-		{
-			uint32_t have = Load(w);
-			if (have == w.value) continue;
-			w.game = have; //remember what the game had there for when it gets turned off
-			Store(w, w.value);
-		}
-		g_extras_written = true;
-	}
-	else if (g_extras_written)
-	{
-		for (auto& w : g_extras_writes)
-			if (Load(w) == w.value) Store(w, w.game);
-		g_extras_written = false;
-	}
+	Keep(g_extras_writes, g_extras_menu, g_extras_written);
+	Keep(g_unlock_writes, g_unlock_all, g_unlock_written);
 }
 
 void install_tweaks()
 {
 	if (const char* e = std::getenv("GE_LEVEL_TIMER")) g_level_timer = std::atoi(e) != 0;
 	if (const char* e = std::getenv("GE_EXTRAS_MENU")) g_extras_menu = std::atoi(e) != 0;
+	if (const char* e = std::getenv("GE_UNLOCK_ALL")) g_unlock_all = std::atoi(e) != 0;
 	if (const char* e = std::getenv("GE_AUTO_START")) g_auto_start = std::atoi(e) != 0;
 	if (const char* e = std::getenv("GE_NO_TUTORIALS")) g_no_tutorials = std::atoi(e) != 0;
 	g_trace = std::getenv("GE_TRACE") != nullptr;

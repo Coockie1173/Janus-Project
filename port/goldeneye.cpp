@@ -23,6 +23,7 @@
 //GE_SKIP_MOVIES=1 movies are skipped
 //GE_NO_TUTORIALS=1 no tutorial boxes
 //GE_EXTRAS_MENU=1 cheat, the menu's unused extras page
+//GE_UNLOCK_ALL=1 cheat, every mission and difficulty unlocked
 //GE_SETTINGS=N start with the settings menu (F1) open on page N
 //GE_FPS=N frame rate the engine may reach (30 by default, auto is 60)
 //GE_NATIVE=0 run the recompiled math routines instead of the host ones
