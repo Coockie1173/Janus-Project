@@ -14,7 +14,7 @@ In a package (Windows: Play.bat, Linux: Play.sh) this file sits in launcher/ bes
 executable and does launch.sh's part as well: the same window, then it starts the game with
 what was chosen. There the settings are settings.env and keys.txt in the package's folder, and
 the options are launch.sh's: --no-gui, --fps N, --fov N, --mouse N, --mouse-mode M, --fullscreen,
---fast-start, --cheats, --extract IMAGE (Linux also --offline, --no-crash-dumps, --crash-mem);
+--fast-start, --cheats, --offline, --extract IMAGE (Linux also --no-crash-dumps, --crash-mem);
 anything else goes to the game.
 """
 import os
@@ -262,9 +262,8 @@ def run_gui():
 
     online = tk.BooleanVar(value=settings["online"] == "1")
     fullscreen = tk.BooleanVar(value=settings["fullscreen"] == "1")
-    if not WINDOWS: #the Windows build has no network and no crash dumps yet
-        ttk.Checkbutton(st, text="Online: use the community server (config/hosts.txt)", variable=online).grid(
-            row=3, column=0, columnspan=2, sticky="w", **pad)
+    ttk.Checkbutton(st, text="Online: use the community server (config/hosts.txt)", variable=online).grid(
+        row=3, column=0, columnspan=2, sticky="w", **pad)
     ttk.Checkbutton(st, text="Fullscreen  (F11 or Alt+Enter switches in the game)", variable=fullscreen).grid(
         row=4, column=0, columnspan=2, sticky="w", **pad)
     faststart = tk.BooleanVar(value=settings["faststart"] == "1")
@@ -572,9 +571,9 @@ def run_game(args):
                      ("GE_SKIP_CUTSCENES", "skipcutscenes"), ("GE_LEVEL_TIMER", "leveltimer"),
                      ("GE_EXTRAS_MENU", "extrasmenu")):
         env.setdefault(var, s[key])
-    if not WINDOWS: #what the Windows build does not have: the servers, the crash dumps
-        if s["online"] == "0":
-            env["GE_HOSTS"] = ""
+    if s["online"] == "0":
+        env["GE_HOSTS"] = ""
+    if not WINDOWS: #what the Windows build does not have: the crash dumps
         if s["crashdump"] == "0":
             env["GE_NO_CRASHDUMP"] = "1"
         else:

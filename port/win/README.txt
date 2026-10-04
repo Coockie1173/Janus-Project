@@ -96,13 +96,13 @@ If something goes wrong
 - "Illegal instruction", or it never opens a window on an old PC: the processor
   has no AVX2. This build cannot run there.
 - Windows SmartScreen says the program is unknown: More info -> Run anyway.
+- Online does not connect: allow GoldenEye.exe through the Windows firewall
+  when it asks, and leave "Online" ticked in the Play.bat window.
 - Anything else: run.log ends with what happened. Send it along with a report.
 
 
 Not in this build
 -----------------
-- Online play: the network part is not ported to Windows yet. Everything
-  offline (campaign, split-screen) is there.
 - The crash-dump folders of the Linux version.
 
 

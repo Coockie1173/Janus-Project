@@ -23,6 +23,7 @@ done
 cp build/deps/sdl3-win/share/licenses/SDL3/LICENSE.txt "$S/licenses/SDL3.txt"
 cp wiikit/LICENSE "$S/licenses/wiikit.txt" 2>/dev/null || true
 cp build/deps/llvm-mingw/LICENSE.TXT "$S/licenses/llvm-mingw-runtime.txt"
+cp build/deps/openssl-src/LICENSE.txt "$S/licenses/OpenSSL.txt"
 # the window before the game and the disc extraction: the launcher, wiikit's disc readers, a Python to run them
 mkdir -p "$S/launcher/wiikit"
 cp tools/launcher.py tools/extract_disc.py "$S/launcher/"

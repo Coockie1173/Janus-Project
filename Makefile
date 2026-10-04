@@ -100,9 +100,11 @@ win: wiikit-patch recomp deps
 	@sh tools/get_mingw.sh $(BUILD)/deps
 	@sh tools/get_winpy.sh $(BUILD)/deps
 	@[ -f $(BUILD)/deps/sdl3-win/bin/SDL3.dll ] || sh tools/build_sdl3.sh $(BUILD)/deps win
+	@[ -f $(BUILD)/deps/openssl-win/lib/libssl.a ] || sh tools/build_openssl.sh $(BUILD)/deps
 	cmake -S $(RECOMP) -B $(WIN_OUT) -G Ninja -DCMAKE_TOOLCHAIN_FILE=$(abspath tools/mingw.cmake) \
 	    -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS_RELEASE="$(OPT_BASE)" -DCMAKE_EXE_LINKER_FLAGS=-static \
 	    -DCMAKE_PREFIX_PATH=$(abspath $(BUILD)/deps/sdl3-win) -DGE_PORTABLE=ON \
+	    -DOPENSSL_ROOT_DIR=$(abspath $(BUILD)/deps/openssl-win) -DOPENSSL_USE_STATIC_LIBS=ON \
 	    -DWIIKIT_EXTRA=$(abspath port/goldeneye.cmake) > $(BUILD)/cmake-win.log 2>&1 || { tail -20 $(BUILD)/cmake-win.log; exit 1; }
 	ninja -C $(WIN_OUT) wiiboot
 	sh tools/package_win.sh $(FONTS)
