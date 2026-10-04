@@ -138,7 +138,7 @@ void noclip_apply(uint32_t controller); //after the local controller's update
 void install_collision(); //collision.cpp
 bool collision_view(); //cheat, the level's collision is drawn in place of the world
 void set_collision_view(bool on);
-void collision_frame(PPCContext& c); //once a frame, on the game's thread
+void collision_tick(); //every tick of the game's loop
 void install_weapons(); //weapons.cpp
 void weapon_buttons(ClassicState& s); //a slot's key, in the classic's filter
 bool sprint_key(); //input.cpp, the sprint key is down this frame

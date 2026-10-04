@@ -29,8 +29,15 @@
 //the picture: the triangles go to the runtime (gx_debug_mesh), with the game's own matrix from
 //the world to the screen, and the runtime leaves out what the game draws in 3D
 //ge_camera_apply (80293E30) leaves that matrix at 806421E0 for whichever camera it was called
-//for, the game's own code uses it for others all through a frame, so it's taken as the
-//frame's view gets applied
+//for, and the game's own code calls it for others all through a frame. the call that returns
+//to 80007694 is the level's camera, but that one is made before the frame's update (fn_800074A0
+//is the update), so a hit's kick or the camera after a death isn't in it yet
+//what gets drawn is what the globals hold while the world is drawn: ge_world_draw (8032D380,
+//from fn_8032BCE0) has the camera it draws for at 806EC2C8, so the matrix is taken as it
+//returns. it's called once for every view of the level; the one for the level's camera
+//counts, any other only as long as that one hasn't been seen
+//everything else is done there too, not once a game frame: the frame count (806EBED0) is the
+//game's own and the picture goes on being drawn where that stands still
 //they are gathered again a few frames after a part of the level got loaded or dropped
 //
 //doors and the other things that move are blue. the world's +0xA4 has the list of what a body
@@ -69,6 +76,8 @@ namespace
 const uint32_t kWorld = 0x805F4CCC, kMapCount = 0x1C, kMaps = 0x20;
 const uint32_t kClipMatrix = 0x806421E0; //16 floats, a row vector times it is the clip position
 const uint32_t kLevelViewCall = 0x80007694; //where ge_camera_apply returns to when it was the level's view
+const uint32_t kDrawCamera = 0x806EC2C8; //the camera the world is being drawn for
+const uint32_t kCameraInOwner = 0x19C; //ge_camera_apply gets the camera inside its owner
 const uint32_t kMapFile = 0x1C, kMapHash = 0x20, kPlacementCount = 0x138, kPlacements = 0x13C;
 const uint32_t kFileHeader = 0x24, kGeom = 0x47454F4D;
 const uint32_t kEntities = 0x48, kPlaced = 0x50, kMapList = 0x70; //the header's lists: two shorts, an offset
@@ -105,7 +114,9 @@ int g_settle = 0;
 std::vector<Vertex> g_mesh; //what's being gathered
 std::vector<Vertex> g_level, g_moving, g_sent;
 uint32_t g_unknown = 0; //entities that were none of the three
-float g_clip[16]{}; //the level's view as last applied
+float g_clip[16]{}; //the level's view as last drawn
+uint32_t g_level_camera = 0; //what ge_camera_apply was last called with for the level's view
+bool g_camera_seen = false; //the world was drawn for that camera since the viewer came on
 
 //an offset is from where it's stored, 0 for nothing
 uint32_t Rel(uint32_t at)
@@ -534,20 +545,8 @@ void Send()
 	level = g_level.size();
 	moving = g_moving.size();
 }
-} //namespace
-
-bool collision_view() { return g_view; }
-void set_collision_view(bool on) { g_view = on; }
-
-void collision_frame(PPCContext& c)
+void Update(PPCContext& c)
 {
-	static const float none[16]{};
-	if (!g_view || !guest_ptr(ld32(kPlayerPtr)))
-	{
-		if (g_shown) gx_debug_view(false, none);
-		g_shown = false;
-		return;
-	}
 	uint32_t signature = Signature();
 	if (!g_shown || signature != g_signature)
 	{
@@ -555,22 +554,51 @@ void collision_frame(PPCContext& c)
 		g_settle = g_shown ? kSettle : 1;
 	}
 	//a part may fill in after its pointer was there, so the level is looked at again now and then
-	static int frames = 0;
-	if ((g_settle && --g_settle == 0) || ++frames % kRegather == 0) Gather();
+	static int draws = 0;
+	if ((g_settle && --g_settle == 0) || ++draws % kRegather == 0) Gather();
 	GatherMoving(c);
 	Send();
 	gx_debug_view(true, g_clip);
 	g_shown = true;
 }
 
-//the level's view is the camera fn_800074A0 applies second, the first is the menus'
 PPCFunc orig_camera_apply = nullptr;
 void CameraApply(PPCContext& c)
 {
-	bool level = c.lr == kLevelViewCall;
+	if (c.lr == kLevelViewCall) g_level_camera = c.r[3];
 	orig_camera_apply(c);
-	if (!level || !g_view) return;
+}
+
+PPCFunc orig_world_draw = nullptr;
+void WorldDraw(PPCContext& c)
+{
+	orig_world_draw(c);
+	if (!g_view || !guest_ptr(ld32(kPlayerPtr))) return;
+	uint32_t camera = ld32(kDrawCamera);
+	bool level = g_level_camera && (camera == g_level_camera || camera + kCameraInOwner == g_level_camera);
+	if (g_trace)
+	{
+		static uint32_t traced = 0;
+		if (traced != camera) rt_log("goldeneye: collision view, the world is drawn for camera %08X, the level's is %08X", camera, g_level_camera);
+		traced = camera;
+	}
+	if (level) g_camera_seen = true;
+	else if (g_camera_seen) return;
 	for (int i = 0; i < 16; ++i) g_clip[i] = ldf(kClipMatrix + i * 4);
+	Update(c);
+}
+} //namespace
+
+bool collision_view() { return g_view; }
+void set_collision_view(bool on) { g_view = on; }
+
+//every tick of the game's loop: the viewer goes off with the option or the level
+void collision_tick()
+{
+	static const float none[16]{};
+	if (g_view && guest_ptr(ld32(kPlayerPtr))) return;
+	if (g_shown) gx_debug_view(false, none);
+	g_shown = g_camera_seen = false;
 }
 
 void install_collision()
@@ -578,7 +606,8 @@ void install_collision()
 	g_world_matrix = ppc_lookup(kWorldMatrixFn);
 	if (!g_world_matrix) rt_die("goldeneye: fn_80301960 is not in this build");
 	orig_camera_apply = ppc_hook("ge_camera_apply", CameraApply);
-	if (!orig_camera_apply) rt_die("goldeneye: the camera is not hooked in this build");
+	orig_world_draw = ppc_hook("ge_world_draw", WorldDraw);
+	if (!orig_camera_apply || !orig_world_draw) rt_die("goldeneye: the camera is not hooked in this build");
 	if (const char* e = std::getenv("GE_COLLISION")) g_view = std::atoi(e) != 0;
 	g_trace = std::getenv("GE_TRACE") != nullptr;
 }

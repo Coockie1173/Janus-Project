@@ -84,8 +84,8 @@ void frame_tick(PPCContext& c) {
         frame = f;
         each_frame(f);
         autosave_frame(c);
-        collision_frame(c);
     }
+    collision_tick();
     //skipping a cutscene: long steps (g_skip_rate frames a second of the game's time) that
     //nothing waits for, the guest's clock jumps to where the next frame is due, so sound, timers
     //and the disc see the same time go by as the game does
