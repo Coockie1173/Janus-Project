@@ -3,7 +3,10 @@
 //the game has no way past a cutscene, and starting at the checkpoint after it (what this did
 //before) isn't the same level: scripts that ran in the opening never run. so the opening plays,
 //only very fast: the runtime's clock runs many times as quick (rt_set_speed), so frames, sound,
-//timers and the disc all stay in step, most frames aren't drawn and the sound is off
+//timers and the disc all stay in step, and the sound is off. the engine runs at its lowest
+//rate meanwhile (17 frames a second: the longest step it takes by itself), and most frames
+//aren't drawn: ge_frame_draw (802BBE70) leaves the scene out when its r3 is 1, as the game
+//does it under a loading screen, and the runtime drops what is still sent
 //
 //a mission picked in the menu loads at entrance 1 (ge_menu_pending), Restart Mission puts the
 //same in the app's object and calls StartLevelChange. after either the fast forward waits for
@@ -11,7 +14,7 @@
 //runs until the player gets anything back: the view, the aim, a button to press
 //
 //GE_SKIP_CUTSCENES=1 on
-//GE_SKIP_SPEED=N the highest speed (16)
+//GE_SKIP_SPEED=N the highest speed (32)
 //GE_TRACE=1 log every checkpoint
 #include "ge.h"
 #include <algorithm>
@@ -52,15 +55,17 @@ std::atomic<bool> g_running{false};
 PPCFunc orig_menu_pending = nullptr;
 PPCFunc orig_record_restart = nullptr;
 PPCFunc orig_level_change = nullptr;
+PPCFunc orig_frame_draw = nullptr;
 bool g_restarting = false; //the menu's restart action is running
 bool g_trace = false;
-double g_top_speed = 16.0;
+double g_top_speed = 32.0;
 Skip g_state = Skip::Idle;
 uint32_t g_frames = 0; //frames in this state
 uint32_t g_free_frames = 0; //frames in a row the player wasn't locked
 uint32_t g_drawn = 0; //frames since one was drawn
 double g_speed = 1.0;
 Clock::time_point g_started, g_started_guest, g_measured;
+uint32_t g_measured_frames = 0, g_late_frames = 0;
 
 bool StartsCampaignLevel(uint32_t menu)
 {
@@ -107,7 +112,7 @@ void Arm(uint32_t level)
 void Start()
 {
 	g_state = Skip::Running;
-	g_frames = g_free_frames = g_drawn = 0;
+	g_frames = g_free_frames = g_drawn = g_measured_frames = g_late_frames = 0;
 	g_started = g_measured = Clock::now();
 	g_started_guest = rt_now();
 	g_running = true;
@@ -118,16 +123,20 @@ void Start()
 }
 
 //the clock may only run as fast as the game makes its frames: faster and the sound and the
-//timers get ahead of the picture. the engine says so itself, its rate goes down one for
-//every late frame. ten times a second, a step up while it holds its highest rate and a
-//step down when it doesn't
+//timers get ahead of the picture. a frame is late when the next one is due as it ends
+//ten times a second, a step up if most frames came on time and a step down if not
 void Pace()
 {
+	++g_measured_frames;
+	if (frame_late()) ++g_late_frames;
 	auto now = Clock::now();
 	if (now - g_measured < std::chrono::milliseconds(100)) return;
+	bool late = g_late_frames * 2 > g_measured_frames;
+	if (g_trace) rt_log("goldeneye: skip cutscenes: speed %.1f, %u frames, %u late", g_speed, g_measured_frames, g_late_frames);
 	g_measured = now;
-	if (engine_rate_held()) SetSpeed(std::min(g_top_speed, g_speed * 1.1));
-	else SetSpeed(std::max(1.0, g_speed * 0.85));
+	g_measured_frames = g_late_frames = 0;
+	if (late) SetSpeed(std::max(1.0, g_speed * 0.85));
+	else SetSpeed(std::min(g_top_speed, g_speed * 1.1));
 }
 
 void Run()
@@ -183,6 +192,13 @@ void LevelChange(PPCContext& c)
 	orig_level_change(c);
 }
 
+//(skip the scene, ...) a frame the fast forward doesn't show isn't drawn by the game either
+void FrameDraw(PPCContext& c)
+{
+	if (g_gx_skip_frames) c.r[3] = 1;
+	orig_frame_draw(c);
+}
+
 void RecordRestart(PPCContext& c)
 {
 	rt_log("goldeneye: checkpoint: level %08X entrance %d", ld32(kCurrentLevel), (int32_t)c.r[4]);
@@ -212,7 +228,8 @@ void install_cutscenes()
 	g_trace = std::getenv("GE_TRACE") != nullptr;
 	orig_menu_pending = ppc_hook("ge_menu_pending", MenuPending);
 	orig_level_change = ppc_hook("StartLevelChange", LevelChange);
-	if (!orig_menu_pending || !orig_level_change) rt_die("goldeneye: the menu's pending action is not hooked in this build");
+	orig_frame_draw = ppc_hook("ge_frame_draw", FrameDraw);
+	if (!orig_menu_pending || !orig_level_change || !orig_frame_draw) rt_die("goldeneye: the menu's pending action is not hooked in this build");
 	if (g_trace) orig_record_restart = ppc_hook("ge_record_restart", RecordRestart);
 }
 

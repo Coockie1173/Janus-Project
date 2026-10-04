@@ -39,7 +39,7 @@ void each_frame(uint32_t frame); //goldeneye.cpp, called by the limiter's hook o
 
 void install_fps();
 void set_fast_forward(bool on); //the frame rate's set-up for a clock that runs fast
-bool engine_rate_held(); //the engine runs at its highest rate: its frames come on time //framerate.cpp
+bool frame_late(); //the next frame is already due: the last one took longer than its time //framerate.cpp
 const uint32_t kGameFps = 30;
 uint32_t fps_limit(); //the most frames a second the engine may run
 void set_fps_limit(uint32_t fps);

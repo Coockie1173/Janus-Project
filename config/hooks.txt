@@ -26,8 +26,9 @@ ge_vec4_sub
 ge_segment_closest
 ge_matrix_flush
 ge_box_in_rect
-ge_menu_pending        # the menu's pending action: a level starts past its opening (skip cutscenes)
+ge_menu_pending        # the menu's pending action: a mission starts, its opening is fast-forwarded (skip cutscenes)
 ge_cutscene_input      # a cutscene's input, once a frame: auto qte presses what it waits for
-ge_record_restart      # a checkpoint is recorded: the first after a mission's start is where its opening ends
-StartLevelChange       # a level is loaded: Restart Mission goes past the opening too (skip cutscenes)
+ge_record_restart      # a checkpoint is recorded (GE_TRACE logs it)
+StartLevelChange       # a level is loaded: Restart Mission's opening is fast-forwarded too (skip cutscenes)
+ge_frame_draw          # a frame's draw: the scene is left out of the frames a fast forward doesn't show
 ge_hud_update          # the hud's update: the level timer is shown outside time challenges too

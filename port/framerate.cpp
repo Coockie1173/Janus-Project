@@ -82,6 +82,12 @@ void frame_tick(PPCContext& c) {
         frame = f;
         each_frame(f);
     }
+    //a fast forward runs at the engine's lowest rate (17 in play): the longest step the game
+    //takes by itself, so the fewest frames for the same time
+    if (fast) {
+        uint32_t low = ld32(kFpsMax - 4);
+        if (low >= 10 && low <= kGameFps) stf(kFpsNow, (float)low);
+    }
     static const char* hitch = std::getenv("GE_HITCH"); //"t,t,...", a 60 ms stall at those times to test with
     if (hitch && f != 0) {
         static auto t0 = std::chrono::steady_clock::now();
@@ -98,8 +104,9 @@ void frame_tick(PPCContext& c) {
     //by 1 a frame, so 144 turns into 17 for a hundred frames
     //so put the rate back to where it was minus 1, and let a climbing rate climb 4 a frame
     //a machine that really can't hold the rate still comes down 1 per late frame
-    if (fps) {
-        static float before = 0;
+    static float before = 0;
+    if (fast) before = 0;
+    else if (fps) {
         static const bool keep = !std::getenv("GE_NO_RATE_FIX");
         float rate = ldf(kFpsNow), top = (float)ld32(kFpsMax);
         if (keep && before > 0 && rate >= 1 && rate <= 1000) {
@@ -157,7 +164,7 @@ void install_fps() {
 }
 
 void set_fast_forward(bool on) { g_fast = on; }
-bool engine_rate_held() { return ldf(kFpsNow) >= (float)ld32(kFpsMax) - 2.0f; }
+bool frame_late() { return os_tb_now() >= ((uint64_t)ld32(kNextFrame) << 32 | ld32(kNextFrame + 4)); }
 uint32_t fps_limit() { return g_fps ? g_fps.load() : kGameFps; }
 void set_fps_limit(uint32_t fps) { g_fps = fps <= kGameFps ? 0 : std::min(fps, 1000u); }
 
