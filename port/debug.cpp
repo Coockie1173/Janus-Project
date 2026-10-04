@@ -25,6 +25,7 @@
 //becomes the second, to find which copy of a constant matters by halving the range
 //GE_WATCH="64:807807AC" who writes that guest word: the page goes read-only and a write logs
 //the host code offset (tools/profile_report.py --offsets names it) and the guest call chain
+//"64:*806EB698+FC" watches the word that far into what the pointer holds at that time
 //GE_TRACEW="80776B10" log that word whenever it changes (checked 200 times a second)
 //GE_PEEK="80ABCDEF,80ABCDF0" log those floats every half second
 //GE_RECORD=F writes the classic controller's state and the mouse's motion as played into F
@@ -109,7 +110,7 @@ float fl(const std::vector<uint8_t>& snap, size_t off) {
     return f;
 }
 
-void watch_main(double t, uint32_t addr);
+void watch_main(double t, uint32_t addr, uint32_t offset = 0, bool pointer = false);
 void scan_main(std::vector<double> times) {
     std::vector<std::vector<uint8_t>> snaps;
     for (double t : times) {
@@ -334,8 +335,9 @@ void watch_trap(int, siginfo_t*, void* uc_) {
     uc->uc_mcontext.gregs[REG_EFL] &= ~0x100;
     if (watch_page) mprotect(watch_page, 4096, PROT_READ);
 }
-void watch_main(double t, uint32_t addr) {
+void watch_main(double t, uint32_t addr, uint32_t offset, bool pointer) {
     sleep_until_s(t);
+    if (pointer) addr = ld32(addr) + offset; //what the pointer holds at that time
     watch_addr = host(addr);
     struct sigaction sa = {};
     sa.sa_flags = SA_SIGINFO;
@@ -648,7 +650,10 @@ void debug_install() {
     if (const char* e = std::getenv("GE_WATCH")) {
         char* end;
         double t = std::strtod(e, &end);
-        std::thread(watch_main, t, (uint32_t)std::strtoul(end + 1, &end, 16)).detach();
+        bool pointer = end[1] == '*';
+        uint32_t addr = (uint32_t)std::strtoul(end + (pointer ? 2 : 1), &end, 16);
+        uint32_t offset = *end == '+' ? (uint32_t)std::strtoul(end + 1, &end, 16) : 0;
+        std::thread(watch_main, t, addr, offset, pointer).detach();
     }
 #endif
     if (const char* e = std::getenv("GE_TRACEW"))

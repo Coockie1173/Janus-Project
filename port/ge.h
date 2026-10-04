@@ -9,6 +9,7 @@
 //movies.cpp skip movies
 //tweaks.cpp the level timer, the unused extras menu, auto start, no tutorials
 //tank.cpp the tank: the mouse on its aim, its buttons, driving at higher frame rates
+//noclip.cpp fly through the level
 //native.cpp the engine's hot math routines written for the host
 //net.cpp the hosts file for the game's servers
 //overlay.cpp the debug overlay (F3), memory watches from a .dmw file (dmw.cpp)
@@ -119,6 +120,12 @@ bool auto_start(); //a loaded mission starts without its "Continue" being presse
 void set_auto_start(bool on);
 bool no_tutorials(); //the tutorial boxes aren't shown
 void set_no_tutorials(bool on);
+void install_noclip(); //noclip.cpp
+bool noclip(); //cheat, the player flies through walls and doesn't fall
+void set_noclip(bool on);
+void noclip_look(uint32_t controller); //before ge_look_apply, the game's own step is taken out
+void noclip_apply(uint32_t controller); //after the local controller's update
+bool sprint_key(); //input.cpp, the sprint key is down this frame
 void install_overlay(); //overlay.cpp
 bool overlay_open(); //the watches or the settings menu are up, so the mouse is free
 bool settings_open(); //settings.cpp

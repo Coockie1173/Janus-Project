@@ -365,6 +365,7 @@ void BuildSettings()
 	AddToggle(kCheats, "mouse_everywhere", "Always Enable Mouse", "On: the mouse turns the view where the game locks it: cutscenes, melee, climbing, death.", mouse_everywhere, set_mouse_everywhere);
 	AddToggle(kCheats, "extras_menu", "Unused Extras Menu", "On: Extras also lists Mission Select, Character Viewer, Movies and the Calibration Menu.", extras_menu, set_extras_menu);
 	AddToggle(kCheats, "unlock_all", "Unlock Everything", "On: every mission and every difficulty can be picked. A save made with it on may keep them.", unlock_all, set_unlock_all);
+	AddToggle(kCheats, "noclip", "Noclip", "On: you fly where you look, through walls, and don't fall. The sprint key flies faster.", noclip, set_noclip);
 }
 
 Row SettingRow(int i)

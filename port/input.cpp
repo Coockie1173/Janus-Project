@@ -200,6 +200,7 @@ void mouse_look(uint32_t ctrl, uint32_t player) {
 void look_apply(PPCContext& c) {
     uint32_t ctrl = c.r[3];
     float dt = guest_ptr(ctrl) ? ldf(ctrl + 0x578) : 0;
+    if (guest_ptr(ctrl)) noclip_look(ctrl);
     if (ctrl != g_look_ctrl || g_look_yaw == 0 || !(dt > 0.0005f && dt < 0.2f)) { orig_look_apply(c); return; }
     float rate = ldf(ctrl + 0x97C), add = g_look_yaw / dt;
     g_look_yaw = 0;
@@ -309,7 +310,10 @@ void controller_update(PPCContext& c) {
         }
     }
     orig_controller_update(c);
-    if (ctrl == g_local_ctrl && frame == g_local_frame && !is_tank(ctrl)) ads_fov_apply(ctrl); //a tank has other things where the aim's blend is
+    if (ctrl == g_local_ctrl && frame == g_local_frame && !is_tank(ctrl)) { //a tank has other things where the aim's blend is
+        ads_fov_apply(ctrl);
+        noclip_apply(ctrl);
+    }
     //the cheat, in a state whose update never got to ge_look_apply: turn the player's yaw directly
     if (forced && ctrl == g_look_ctrl && g_look_yaw != 0) {
         float yaw = ldf(player + 0xDC);
@@ -501,6 +505,7 @@ float ads_sens() { return g_ads_sens; }
 void set_ads_sens(float s) { g_ads_sens = std::clamp(s, kAdsSensMin, kAdsSensMax); }
 bool aim_lock() { return g_aim_lock; }
 void set_aim_lock(bool on) { g_aim_lock = on; }
+bool sprint_key() { return g_sprint_held; }
 bool mouse_everywhere() { return g_mouse_everywhere; }
 void set_mouse_everywhere(bool on) { g_mouse_everywhere = on; }
 
