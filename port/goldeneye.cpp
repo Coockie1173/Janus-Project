@@ -21,6 +21,7 @@
 //GE_LEVEL_TIMER=0 no level timer in the hud
 //GE_AUTO_START=1 a loaded mission starts without its "Continue" being pressed
 //GE_SKIP_MOVIES=1 movies are skipped
+//GE_NO_TUTORIALS=1 no tutorial boxes
 //GE_EXTRAS_MENU=1 cheat, the menu's unused extras page
 //GE_SETTINGS=N start with the settings menu (F1) open on page N
 //GE_FPS=N frame rate the engine may reach (30 by default, auto is 60)

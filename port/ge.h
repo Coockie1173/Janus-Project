@@ -7,7 +7,7 @@
 //cutscenes.cpp skip cutscenes
 //qte.cpp quick time events that press their own buttons
 //movies.cpp skip movies
-//tweaks.cpp the level timer, the unused extras menu, auto start
+//tweaks.cpp the level timer, the unused extras menu, auto start, no tutorials
 //tank.cpp the tank: the mouse on its aim, its buttons, driving at higher frame rates
 //native.cpp the engine's hot math routines written for the host
 //net.cpp the hosts file for the game's servers
@@ -114,6 +114,8 @@ bool extras_menu(); //cheat, the menu's unused extras page
 void set_extras_menu(bool on);
 bool auto_start(); //a loaded mission starts without its "Continue" being pressed
 void set_auto_start(bool on);
+bool no_tutorials(); //the tutorial boxes aren't shown
+void set_no_tutorials(bool on);
 void install_overlay(); //overlay.cpp
 bool overlay_open(); //the watches or the settings menu are up, so the mouse is free
 bool settings_open(); //settings.cpp
