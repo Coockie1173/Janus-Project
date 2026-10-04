@@ -94,6 +94,25 @@ const float kRadPerDegree = 0.01745329f;
 uint32_t g_local_frame = ~0u, g_local_ctrl = 0; //the local controller as of that frame
 std::atomic<bool> g_mouse_everywhere{false}; //cheat, the mouse turns the view in every state
 
+//aiming down the sight: the controller's +0xD10 goes from 0 to 1 in about eight frames as the
+//gun comes up and back as it goes down (+0xF48 is its opposite, the byte at +0xD00 is set
+//while aim is held). found with a scan over two holds of aim in the training level
+//the mouse turns slower by that much of the way to the aim sensitivity, so a zoomed view
+//doesn't swing as far for the same motion
+const uint32_t kAimBlend = 0xD10;
+std::atomic<float> g_ads_sens{0.5f}; //the mouse's sensitivity fully aimed, times the normal one
+float aim_blend(uint32_t ctrl) {
+    float b = ldf(ctrl + kAimBlend);
+    return std::isfinite(b) ? std::clamp(b, 0.0f, 1.0f) : 0.0f;
+}
+bool local_aim_blend(float& blend) {
+    uint32_t state;
+    if (!local_player_state(state)) return false;
+    blend = aim_blend(g_local_ctrl);
+    return true;
+}
+float aim_sens_scale(uint32_t ctrl) { return 1.0f + (g_ads_sens - 1.0f) * aim_blend(ctrl); }
+
 //for the overlay: the local player's state, false if there's none (menus, loading)
 bool local_player_state(uint32_t& state) {
     uint32_t ctrl = g_local_ctrl;
@@ -156,12 +175,13 @@ void mouse_look(uint32_t ctrl, uint32_t player) {
     }
     seen = player;
     g_look_ctrl = ctrl;
-    g_look_yaw += dx * kRadPerPixel * g_mouse_sens;
+    float sens = g_mouse_sens * aim_sens_scale(ctrl);
+    g_look_yaw += dx * kRadPerPixel * sens;
     uint32_t view = ld32(player + 0x16C);
     if (guest_ptr(view)) {
         float pitch = ldf(view + 0x768);
         if (std::isfinite(pitch) && std::fabs(pitch) < 2.0f)
-            stf(view + 0x768, std::clamp(pitch + dy * kRadPerPixel * g_mouse_sens, -kPitchLimit, kPitchLimit));
+            stf(view + 0x768, std::clamp(pitch + dy * kRadPerPixel * sens, -kPitchLimit, kPitchLimit));
     }
 }
 
@@ -204,6 +224,7 @@ void controller_update(PPCContext& c) {
         }
     }
     orig_controller_update(c);
+    if (ctrl == g_local_ctrl && frame == g_local_frame) ads_fov_apply(ctrl);
     //the cheat, in a state whose update never got to ge_look_apply: turn the player's yaw directly
     if (forced && ctrl == g_look_ctrl && g_look_yaw != 0) {
         float yaw = ldf(player + 0xDC);
@@ -266,6 +287,21 @@ void wheel_buttons(ClassicState& s) {
 const uint32_t kClA = 0x0010, kClB = 0x0040, kClZR = 0x0004, kClZL = 0x0080;
 
 
+//aim lock: a press of aim stays aimed until the next one, to the game it's held all along
+//a menu, a pause or a state the game has the view in (death, a cutscene) lets go of it
+std::atomic<bool> g_aim_lock{false};
+void aim_lock_buttons(ClassicState& s) {
+    static bool locked = false, was_down = false;
+    bool down = (s.buttons & kClZL) != 0, pressed = down && !was_down;
+    was_down = down;
+    uint32_t state = 0;
+    bool free = local_player_state(state) && (state == 0 || state == 2 || state == 3 || state == 4);
+    if (!g_aim_lock || !in_play() || !free) { locked = false; return; }
+    if (pressed) locked = !locked;
+    if (locked) s.buttons |= kClZL;
+    else s.buttons &= ~kClZL;
+}
+
 void menu_buttons(ClassicState& s) {
     static uint32_t held_from_menu = 0;
     uint32_t triggers = s.buttons & (kClZR | kClZL);
@@ -309,7 +345,8 @@ void mouse_stick(ClassicState& s) {
     if (dt >= 0.004f) {
         defl_x = defl_y = 0;
         if (dt <= 0.25f) {
-            float k = kRadPerPixel * g_mouse_sens / dt / (kStickRate * kStickSens);
+            float blend = 0, aim = local_aim_blend(blend) ? 1.0f + (g_ads_sens - 1.0f) * blend : 1.0f;
+            float k = kRadPerPixel * g_mouse_sens * aim / dt / (kStickRate * kStickSens);
             float vx = ax * k, vy = ay * k / g_pitch_rate_scale, m = std::sqrt(vx * vx + vy * vy);
             if (m > 1e-7f) {
                 float d = std::min(1.0f, kStickDead + (1 - kStickDead) * m) / m;
@@ -340,6 +377,7 @@ void classic_filter(int chan, ClassicState& s) {
     mouse_stick(s);
     wheel_buttons(s);
     debug_classic(s);
+    aim_lock_buttons(s);
     menu_buttons(s);
 }
 
@@ -347,6 +385,8 @@ void install_mouse() {
     if (const char* m = std::getenv("GE_MOUSE")) g_mouse_sens = (float)std::atof(m);
     if (const char* m = std::getenv("GE_MOUSE_INVERT")) g_mouse_invert = std::atoi(m) != 0;
     if (const char* m = std::getenv("GE_MOUSE_EVERYWHERE")) g_mouse_everywhere = std::atoi(m) != 0;
+    if (const char* m = std::getenv("GE_ADS_SENS")) set_ads_sens((float)std::atof(m));
+    if (const char* m = std::getenv("GE_AIM_LOCK")) g_aim_lock = std::atoi(m) != 0;
     if (const char* m = std::getenv("GE_MOUSE_MODE")) g_mouse_mode = !std::strcmp(m, "direct") ? 1 : !std::strcmp(m, "stick") ? 2 : 0;
     wpad_set_classic_filter(classic_filter);
     //hooked whatever the sensitivity is, the settings menu can turn mouse look on and off in play
@@ -366,6 +406,10 @@ int mouse_mode() { return g_mouse_mode; }
 void set_mouse_mode(int m) { g_mouse_mode = m; }
 bool mouse_invert() { return g_mouse_invert; }
 void set_mouse_invert(bool on) { g_mouse_invert = on; }
+float ads_sens() { return g_ads_sens; }
+void set_ads_sens(float s) { g_ads_sens = std::clamp(s, kAdsSensMin, kAdsSensMax); }
+bool aim_lock() { return g_aim_lock; }
+void set_aim_lock(bool on) { g_aim_lock = on; }
 bool mouse_everywhere() { return g_mouse_everywhere; }
 void set_mouse_everywhere(bool on) { g_mouse_everywhere = on; }
 

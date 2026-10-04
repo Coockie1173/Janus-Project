@@ -11,9 +11,13 @@
 # is drawn from about 27 s, its opening runs past 70.
 # REPLAY=name plays build/rec/name.rec first (tools/record_run.sh) on a copy of the save it was
 # recorded from; GE_STICK, GE_BUTTONS, GE_MOUSEMOVE and the other aids then count from its end.
+# "training" as the script goes New Game, Operative; with REPLAY the recording then takes over
+# where the level starts (GE_REPLAY_FROM=1), its own menu part is left out.
 cd "$(dirname "$0")/.." || exit 1
 DAM="8:A 11:D 12:D $(seq 14 2 600 | sed 's/$/:A/' | tr '\n' ' ')"
-SCRIPT=$1; [ "$SCRIPT" = dam ] && SCRIPT=$DAM; SECS=${2:-60}; EVERY=${3:-300}; shift 3 2>/dev/null
+SCRIPT=$1; [ "$SCRIPT" = dam ] && SCRIPT=$DAM
+[ "$SCRIPT" = training ] && { SCRIPT="8:A 12:U 13:A 16:A"; [ -n "$REPLAY" ] && { GE_REPLAY_FROM=1; export GE_REPLAY_FROM; }; }
+SECS=${2:-60}; EVERY=${3:-300}; shift 3 2>/dev/null
 rm -rf build/frames; mkdir -p build/frames
 NAND=build/nand
 if [ -n "$REPLAY" ]; then

@@ -25,6 +25,9 @@
 //GE_RECORD=F writes the classic controller's state and the mouse's motion as played into F
 //GE_REPLAY=F plays F back in their place, then hands the controls back. with it every time
 //above counts from the replay's end (tools/record_run.sh, and REPLAY=name for scripted_run.sh)
+//GE_REPLAY_FROM=N leaves out the recording's first N parts (a part ends where a level loads or
+//is left), the controls are free until then. the menus before a level run at another pace
+//with other settings, so they're better driven by WIIKIT_PAD and the level by the recording
 #include "debug.h"
 #include "ge.h"
 #include "mem.h"
@@ -311,7 +314,7 @@ struct RecPart { std::vector<RecPad> pads; std::vector<RecMove> moves; };
 std::mutex rec_lock;
 FILE* rec_out = nullptr;
 std::vector<RecPart> rec_parts;
-size_t rec_part = 0, rec_pad = 0, rec_move = 0;
+size_t rec_part = 0, rec_pad = 0, rec_move = 0, rec_from = 0;
 double rec_start = 0; //when the current part began
 bool rec_player = false;
 float rec_sens = 1.0f;
@@ -371,7 +374,7 @@ void record_classic(ClassicState& s) {
         std::fflush(rec_out);
         return;
     }
-    if (!replaying) return;
+    if (!replaying || rec_part < rec_from) return;
     const RecPart& part = rec_parts[rec_part];
     while (rec_pad < part.pads.size() && part.pads[rec_pad].t <= t) rec_now = part.pads[rec_pad++];
     s.buttons = rec_now.buttons;
@@ -386,7 +389,7 @@ void record_mouse(float& dx, float& dy) {
         if (dx != 0 || dy != 0) std::fprintf(rec_out, "m %.3f %g %g\n", t, dx, dy);
         return;
     }
-    if (!replaying) return;
+    if (!replaying || rec_part < rec_from) return;
     //the same turn whatever the sensitivity is now
     float k = ge::mouse_sens() > 0 ? rec_sens / ge::mouse_sens() : 0;
     const RecPart& part = rec_parts[rec_part];
@@ -447,6 +450,7 @@ void debug_install() {
     if (const char* e = std::getenv("GE_REPLAY")) {
         if (!load_recording(e)) rt_die("debug: no recording %s", e);
         replaying = true;
+        if (const char* f = std::getenv("GE_REPLAY_FROM")) rec_from = (size_t)std::atoi(f);
         rt_log("debug: replaying %s, %zu parts", e, rec_parts.size());
     } else if (const char* e = std::getenv("GE_RECORD")) {
         rec_out = std::fopen(e, "w");

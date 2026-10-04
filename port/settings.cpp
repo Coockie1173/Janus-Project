@@ -75,13 +75,16 @@ bool g_fps_changed = false; //the frame rate was changed in the menu
 
 //the launcher's file, LAUNCH_NAME="value" lines. other lines are kept
 void save_launch_settings() {
-    char fov_text[16], mouse_text[16];
+    char fov_text[16], mouse_text[16], ads_fov_text[16], ads_sens_text[16];
     std::snprintf(fov_text, sizeof fov_text, "%.0f", fov());
     std::snprintf(mouse_text, sizeof mouse_text, "%.2f", mouse_sens());
+    std::snprintf(ads_fov_text, sizeof ads_fov_text, "%g", ads_fov());
+    std::snprintf(ads_sens_text, sizeof ads_sens_text, "%.2f", ads_sens());
     static const char* modes[] = {"auto", "direct", "stick"};
     std::vector<std::pair<std::string, std::string>> values = {
         {"LAUNCH_FOV", fov_text}, {"LAUNCH_MOUSE", mouse_text},
         {"LAUNCH_MOUSEMODE", modes[mouse_mode()]}, {"LAUNCH_MOUSEINVERT", mouse_invert() ? "1" : "0"},
+        {"LAUNCH_ADSFOV", ads_fov_text}, {"LAUNCH_ADSSENS", ads_sens_text}, {"LAUNCH_AIMLOCK", aim_lock() ? "1" : "0"},
         {"LAUNCH_MOUSEEVERYWHERE", mouse_everywhere() ? "1" : "0"},
         {"LAUNCH_SKIPCUTSCENES", skip_cutscenes() ? "1" : "0"},
         {"LAUNCH_LEVELTIMER", level_timer() ? "1" : "0"}, {"LAUNCH_EXTRASMENU", extras_menu() ? "1" : "0"}};
@@ -250,13 +253,29 @@ void build_pages() {
         [](int d) { set_fov(std::clamp(fov() + (float)d, kFovMin, kFovMax)); g_dirty = true; }, {}, {}, false,
         [] { return (fov() - kFovMin) / (kFovMax - kFovMin); },
         [](float f) { set_fov(std::round(kFovMin + f * (kFovMax - kFovMin))); g_dirty = true; }});
+    //whole degrees, and the game's 22.5 on the way past
+    screen.rows.push_back({"Aim Field of View", "How wide the view is aiming down the sight. The game's own is 22.5 with the pistol.",
+        [] {
+            char b[16];
+            std::snprintf(b, sizeof b, "%g", ads_fov());
+            return std::string(b);
+        },
+        [](int d) {
+            float f = ads_fov(), next = d > 0 ? std::floor(f) + 1 : std::ceil(f) - 1;
+            if ((f < kGameAdsFov) != (next < kGameAdsFov)) next = kGameAdsFov;
+            set_ads_fov(std::clamp(next, kAdsFovMin, kFovMax));
+            g_dirty = true;
+        }, {}, {}, false,
+        [] { return (ads_fov() - kAdsFovMin) / (kFovMax - kAdsFovMin); },
+        [](float f) { set_ads_fov(std::round(kAdsFovMin + f * (kFovMax - kAdsFovMin))); g_dirty = true; }});
     screen.rows.push_back({"Max Frame Rate", "The most frames a second the game runs at. 30 is the console's; heavy levels may not hold the highest.",
         [] { return std::to_string(fps_limit()); },
         [](int d) { set_fps_stop(fps_stop() + d); }, {}, {}, false,
         [] { return (float)fps_stop() / (float)(kFpsStopCount - 1); },
         [](float f) { set_fps_stop((int)std::lround(f * (float)(kFpsStopCount - 1))); }});
-    screen.rows.push_back({"Restore Defaults", "Back to the game's own field of view, and 60 frames a second.", {}, {}, [] {
+    screen.rows.push_back({"Restore Defaults", "Back to the game's own fields of view, and 60 frames a second.", {}, {}, [] {
         set_fov(kGameFov);
+        set_ads_fov(kGameAdsFov);
         set_fps_limit(60);
         g_fps_changed = g_dirty = true;
     }});
@@ -272,6 +291,18 @@ void build_pages() {
         [](int d) { set_mouse_sens(std::round((mouse_sens() + 0.05f * (float)d) * 20) / 20); g_dirty = true; }, {}, {}, false,
         [] { return mouse_sens() / kMouseSensMax; },
         [](float f) { set_mouse_sens(std::round(f * kMouseSensMax * 20) / 20); g_dirty = true; }});
+    controls.rows.push_back({"Aim Sensitivity", "The mouse's sensitivity aiming down the sight, times the one above. 1.00 turns as far as without aiming.",
+        [] {
+            char b[16];
+            std::snprintf(b, sizeof b, "%.2f", ads_sens());
+            return std::string(b);
+        },
+        [](int d) { set_ads_sens(std::round((ads_sens() + 0.05f * (float)d) * 20) / 20); g_dirty = true; }, {}, {}, false,
+        [] { return (ads_sens() - kAdsSensMin) / (kAdsSensMax - kAdsSensMin); },
+        [](float f) { set_ads_sens(std::round((kAdsSensMin + f * (kAdsSensMax - kAdsSensMin)) * 20) / 20); g_dirty = true; }});
+    controls.rows.push_back({"Lock Aim", "On: a press of Aim stays aimed down the sight until the next press.",
+        [] { return std::string(aim_lock() ? "On" : "Off"); },
+        [](int) { set_aim_lock(!aim_lock()); g_dirty = true; }});
     controls.rows.push_back({"Invert Mouse", "On: pushing the mouse forward looks down.",
         [] { return std::string(mouse_invert() ? "On" : "Off"); },
         [](int) { set_mouse_invert(!mouse_invert()); g_dirty = true; }});
@@ -302,6 +333,8 @@ void build_pages() {
         [](float f) { set_dead_zone(f * kDeadZoneMax); }});
     controls.rows.push_back({"Restore Defaults", "Back to the mouse and gamepad settings the port starts with.", {}, {}, [] {
         set_mouse_sens(1.0f);
+        set_ads_sens(0.5f);
+        set_aim_lock(false);
         set_mouse_invert(false);
         set_mouse_mode(0);
         g_keys.set("Input", "Auto");

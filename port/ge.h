@@ -55,6 +55,12 @@ void set_mouse_mode(int m);
 bool local_player_state(uint32_t& state); //the controller's +0x704 for the local player
 bool mouse_invert();
 void set_mouse_invert(bool on);
+const float kAdsSensMin = 0.05f, kAdsSensMax = 2.0f;
+float ads_sens(); //the mouse's sensitivity aiming down the sight, times the normal one
+void set_ads_sens(float s);
+bool local_aim_blend(float& blend); //how far the local player is aimed, 0 to 1
+bool aim_lock(); //a press of aim stays aimed until the next
+void set_aim_lock(bool on);
 const char* local_look_name(); //what the mouse does in that state, "view", "aim", "locked" or "cheat"
 bool mouse_everywhere(); //cheat, mouse look in every player state
 void set_mouse_everywhere(bool on);
@@ -66,6 +72,10 @@ void fov_apply();
 const float kGameFov = 49.0f, kFovMin = 20.0f, kFovMax = 120.0f;
 float fov(); //degrees
 void set_fov(float degrees);
+const float kGameAdsFov = 22.5f, kAdsFovMin = 10.0f; //the pistol's, aimed down the sight
+float ads_fov(); //degrees for a weapon the game aims at 22.5, the others in proportion
+void set_ads_fov(float degrees);
+void ads_fov_apply(uint32_t controller); //after the local controller's update
 void install_native(); //native.cpp
 void install_cutscenes(); //cutscenes.cpp
 bool skip_cutscenes(); //missions start at the checkpoint after their opening

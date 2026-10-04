@@ -7,12 +7,15 @@
 //GE_MOUSE=S mouse look sensitivity (1 by default, 0 leaves the mouse free)
 //GE_MOUSE_MODE=auto|direct|stick how the mouse turns the view
 //GE_MOUSE_INVERT=1 pushing the mouse forward looks down
+//GE_ADS_SENS=S the mouse's sensitivity aiming down the sight, times the normal one (0.5 by default)
+//GE_AIM_LOCK=1 a press of aim stays aimed until the next
 //GE_MOUSE_EVERYWHERE=1 cheat, mouse look in every player state
 //GE_HOSTS=F hosts file for the game's servers (config/hosts.txt by default)
 //GE_NETLOG=1 log sockets, lookups and TLS sessions
 //GE_GECKO=F gecko codes to run each frame (build/patched/gecko.txt by default, empty for none)
 //GE_GECKO_EXTRA=F[:F...] more gecko files
 //GE_FOV=D field of view in degrees (the game's is 49)
+//GE_ADS_FOV=D field of view aiming down the sight (the game's is 22.5 with the pistol)
 //GE_SKIP_CUTSCENES=1 missions start at the checkpoint after the opening cutscene
 //GE_LEVEL_TIMER=0 no level timer in the hud
 //GE_EXTRAS_MENU=1 cheat, the menu's unused extras page
