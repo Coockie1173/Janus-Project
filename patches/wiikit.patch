@@ -1960,7 +1960,7 @@ index c53d227..75f4ff4 100644
      }
      return ai_dma_next;
 diff --git a/runtime/ios.cpp b/runtime/ios.cpp
-index 23d837a..e673c0e 100644
+index 23d837a..080f875 100644
 --- a/runtime/ios.cpp
 +++ b/runtime/ios.cpp
 @@ -25,18 +25,41 @@
@@ -2006,7 +2006,19 @@ index 23d837a..e673c0e 100644
  namespace fs = std::filesystem;
  
  namespace {
-@@ -173,6 +196,7 @@ struct NandFile : Device {
+@@ -133,6 +156,11 @@ struct DI : Device {
+             uint32_t len = rd32(in + 4);
+             uint64_t off = (uint64_t)rd32(in + 8) << 2;
+             if (len > out_len) len = out_len;
++            static const char* dbg = std::getenv("WIIKIT_DIDBG");   // =bt: with the guest's call chain
++            if (dbg) {
++                rt_log("di: read %llX +%X -> %08X", (unsigned long long)off, len, out);
++                if (!std::strcmp(dbg, "bt") && t_ppc) rt_backtrace(*t_ppc, stderr, 16);
++            }
+             disc_read(off, host(out), len);
+             return 1;
+         }
+@@ -173,6 +201,7 @@ struct NandFile : Device {
      }
      void close() override { if (f) std::fclose(f); f = nullptr; }
      int32_t read(uint32_t buf, uint32_t len) override {
@@ -2014,7 +2026,7 @@ index 23d837a..e673c0e 100644
          return (int32_t)std::fread(host(buf), 1, len, f);
      }
      int32_t write(uint32_t buf, uint32_t len) override {
-@@ -374,8 +398,16 @@ struct USBHID : Device {
+@@ -374,8 +403,16 @@ struct USBHID : Device {
      }
  };
  
@@ -2031,7 +2043,7 @@ index 23d837a..e673c0e 100644
      if (path == "/dev/di") d = std::make_unique<DI>();
      else if (path == "/dev/fs") d = std::make_unique<FS>();
      else if (path == "/dev/es") d = std::make_unique<ES>();
-@@ -395,7 +427,7 @@ void reply(uint32_t addr, int32_t result) {
+@@ -395,7 +432,7 @@ void reply(uint32_t addr, int32_t result) {
      wr32(addr, 8);
      wr32(addr + 4, (uint32_t)result);
      wr32(addr + 8, cmd);
@@ -2040,7 +2052,7 @@ index 23d837a..e673c0e 100644
  }
  
  int32_t execute(uint32_t addr) {
-@@ -464,7 +496,7 @@ void update() {
+@@ -464,7 +501,7 @@ void update() {
          if (r != PENDING) reply(addr, r);
          return;
      }
@@ -2049,7 +2061,7 @@ index 23d837a..e673c0e 100644
          arm_msg = replies.front().addr & 0x7FFFFFFFu; // physical
          replies.pop_front();
          ctrl.y1 = true;
-@@ -516,14 +548,23 @@ uint32_t ios_ipc_read(uint32_t reg) {
+@@ -516,14 +553,23 @@ uint32_t ios_ipc_read(uint32_t reg) {
  }
  
  void ios_idle() {

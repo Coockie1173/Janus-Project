@@ -7,6 +7,7 @@
 //cutscenes.cpp skip cutscenes
 //qte.cpp quick time events that press their own buttons
 //movies.cpp skip movies
+//files.cpp a finished file read is counted once
 //tweaks.cpp the level timer, the unused extras menu, auto start, no tutorials
 //tank.cpp the tank: the mouse on its aim, its buttons, driving at higher frame rates
 //noclip.cpp fly through the level
@@ -103,6 +104,7 @@ void install_qte(); //qte.cpp
 bool auto_qte(); //quick time events press their own buttons
 void set_auto_qte(bool on);
 void install_movies(); //movies.cpp
+void install_files(); //files.cpp
 bool skip_movies(); //a movie that plays once is over before it starts
 void set_skip_movies(bool on);
 void install_tweaks(); //tweaks.cpp

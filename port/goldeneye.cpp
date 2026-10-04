@@ -62,6 +62,7 @@ void install() {
     install_qte();
     install_tweaks();
     install_movies();
+    install_files();
     install_tank();
     install_noclip();
     if (std::getenv("GE_TRACE")) {
