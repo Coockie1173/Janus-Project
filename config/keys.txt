@@ -33,6 +33,7 @@ Dead Zone    = 0.15
 # reloads, x cycles grenades, D-pad left and right cycle weapons (the mouse wheel does too), up is the
 # firing mode, down the smartphone, - night vision and the scoreboard, + pauses (Esc does too).
 # Sprint is on a key of its own here, Extra 1 (a pad's left stick pressed in); on the Wii it's b as well.
+# Extra 3, 4 and 5 take out the weapon in slot 1, 2 and 3, when there is one.
 # In menus (and the pause menu) a selects and b goes back; there the port also takes ZR as a and ZL as
 # b, so the left mouse button selects and the right one goes back.
 A     = Left Ctrl, Return
@@ -48,8 +49,8 @@ Minus = Tab
 Home  = H
 Up    = Up, B
 Down  = Down, F
-Left  = Left, 1
-Right = Right, 2
+Left  = Left
+Right = Right
 Left Stick Up    = W
 Left Stick Down  = S
 Left Stick Left  = A
@@ -59,3 +60,6 @@ Right Stick Down  =
 Right Stick Left  =
 Right Stick Right =
 Extra 1 = Left Shift
+Extra 3 = 1
+Extra 4 = 2
+Extra 5 = 3

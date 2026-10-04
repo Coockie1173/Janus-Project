@@ -171,7 +171,8 @@ struct Action { const char* label; const char* name; };
 const Action kActions[] = {
     {"Fire", "ZR"}, {"Aim", "ZL"}, {"Melee Attack", "L"}, {"Throw Grenade (doubles as R button)", "R"}, {"Reload", "Y"},
     {"Crouch", "A"}, {"Action", "B"}, {"Sprint", "Extra 1"}, {"Cycle Grenades", "X"}, {"Next Weapon", "Right"},
-    {"Previous Weapon", "Left"}, {"Firing Mode", "Up"}, {"Smartphone", "Down"}, {"Night Vision / Scores", "Minus"},
+    {"Previous Weapon", "Left"}, {"Weapon 1", "Extra 3"}, {"Weapon 2", "Extra 4"}, {"Weapon 3", "Extra 5"},
+    {"Firing Mode", "Up"}, {"Smartphone", "Down"}, {"Night Vision / Scores", "Minus"},
     {"Pause", "Plus"}, {"Move Forward", "Left Stick Up"}, {"Move Back", "Left Stick Down"},
     {"Move Left", "Left Stick Left"}, {"Move Right", "Left Stick Right"}};
 
@@ -624,6 +625,36 @@ void add_sprint_binding() {
     rt_log("goldeneye: sprint is on Left Shift now, on its own (Extra 1 in %s)", video_keys_path().c_str());
 }
 
+//a key file from before the weapon slots had keys: 1, 2 and 3 go to them (Extra 3 to 5)
+//1 and 2 were the previous and the next weapon, a number that's on anything else stays there
+void AddWeaponBindings()
+{
+	static bool done = false;
+	if (done || video_keys_path().empty()) return;
+	done = true;
+	if (g_keys.lines.empty() || g_keys.find("Extra 3") >= 0) return;
+	const char* const was[] = {"Left", "Right", ""};
+	for (int n = 0; n < 3; ++n)
+	{
+		const std::string key(1, (char)('1' + n)), slot = "Extra " + std::to_string(n + 3);
+		auto is = [&](const std::string& k) { return !SDL_strcasecmp(k.c_str(), key.c_str()); };
+		bool taken = false;
+		for (auto& a : kActions)
+		{
+			auto keys = g_keys.keys(a.name);
+			if (std::string(a.name) != was[n] && std::any_of(keys.begin(), keys.end(), is)) taken = true;
+		}
+		if (*was[n])
+		{
+			auto keys = g_keys.keys(was[n]);
+			if (!taken && std::erase_if(keys, is)) g_keys.set_keys(was[n], keys);
+		}
+		g_keys.set(slot, taken ? "" : key);
+	}
+	save_keys();
+	rt_log("goldeneye: the weapon slots are on 1, 2 and 3 now (Extra 3 to 5 in %s)", video_keys_path().c_str());
+}
+
 //opening, closing, moving
 void open(bool on) {
     if (on == g_open) return;
@@ -975,6 +1006,7 @@ void settings_init() {
 //(fullscreen, the GX trace), the mouse and the pads' buttons
 bool settings_event(const SDL_Event* e) {
     add_sprint_binding();
+    AddWeaponBindings();
     if (e->type == SDL_EVENT_KEY_UP && e->key.scancode == SDL_SCANCODE_ESCAPE) g_escape = false;
     if (!g_open && e->type == SDL_EVENT_KEY_DOWN && e->key.scancode == SDL_SCANCODE_ESCAPE) {
         g_escape = true;

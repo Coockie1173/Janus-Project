@@ -12,6 +12,7 @@
 //tweaks.cpp the level timer, the unused extras menu, auto start, no tutorials
 //tank.cpp the tank: the mouse on its aim, its buttons, driving at higher frame rates
 //noclip.cpp fly through the level
+//weapons.cpp a key for each weapon slot
 //native.cpp the engine's hot math routines written for the host
 //net.cpp the hosts file for the game's servers
 //overlay.cpp the debug overlay (F3), memory watches from a .dmw file (dmw.cpp)
@@ -133,6 +134,8 @@ bool noclip(); //cheat, the player flies through walls and doesn't fall
 void set_noclip(bool on);
 void noclip_look(uint32_t controller); //before ge_look_apply, the game's own step is taken out
 void noclip_apply(uint32_t controller); //after the local controller's update
+void install_weapons(); //weapons.cpp
+void weapon_buttons(ClassicState& s); //a slot's key, in the classic's filter
 bool sprint_key(); //input.cpp, the sprint key is down this frame
 void install_overlay(); //overlay.cpp
 bool overlay_open(); //the watches or the settings menu are up, so the mouse is free

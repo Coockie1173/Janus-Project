@@ -466,6 +466,7 @@ void classic_filter(int chan, ClassicState& s) {
     wheel_buttons(s);
     debug_classic(s);
     sprint_buttons(s);
+    weapon_buttons(s);
     aim_lock_buttons(s);
     menu_buttons(s);
     tank_buttons(s);

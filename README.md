@@ -69,8 +69,9 @@ any option does too (`--fps 60`, `--fov 70`, `--mouse 1.5`, `--offline`,
 `--fullscreen`).
 
 Keyboard and mouse by default: W A S D move, the mouse looks, the left
-button fires, the right aims, the wheel changes weapon, R reloads, Ctrl
-crouches, Shift sprints, E acts, G throws a grenade, V is the melee attack;
+button fires, the right aims, the wheel changes weapon, 1 2 3 take out the
+weapon in that slot, R reloads, Ctrl crouches, Shift sprints, E acts, G
+throws a grenade, V is the melee attack;
 in menus the left button selects and the right one goes back. A gamepad is
 a Classic Controller.
 

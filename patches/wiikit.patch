@@ -3586,7 +3586,7 @@ index 8a4e097..8b1b1a8 100644
  void ppc_mmio_write(uint32_t addr, uint32_t, int) { rt_die("mmio write %08X", addr); }
  uint64_t ppc_timebase() { return 0; }
 diff --git a/runtime/video.cpp b/runtime/video.cpp
-index 5726093..4e7da94 100644
+index 5726093..0d4e71b 100644
 --- a/runtime/video.cpp
 +++ b/runtime/video.cpp
 @@ -67,7 +67,8 @@ ClassicState classic[4];
@@ -4390,7 +4390,7 @@ index 5726093..4e7da94 100644
                    CL_Y = 0x0020, CL_B = 0x0040, CL_ZL = 0x0080, CL_R = 0x0200, CL_PLUS = 0x0400,
                    CL_HOME = 0x0800, CL_MINUS = 0x1000, CL_L = 0x2000, CL_DOWN = 0x4000, CL_RIGHT = 0x8000 };
  constexpr uint32_t kStick = 1u << 16;               // L up, down, left, right, then R's: kStick << 0..7
-+constexpr uint32_t kExtra = 1u << 24;               // the Classic section's Extra 1..4: kExtra << 0..3
++constexpr uint32_t kExtra = 1u << 24;               // the Classic section's Extra 1..8: kExtra << 0..7
  std::vector<Binding> bindings;
  int keys_input = INPUT_MODE_AUTO;                        // the key file's Input
  bool face_by_label = false;                         // the key file's Face Buttons = Label
@@ -4403,7 +4403,7 @@ index 5726093..4e7da94 100644
      "# takes the keys, the mouse and the first pad at once (Input = Pad or Keyboard: only one of them;\n"
      "# wiiboot --input says the same).\n"
      "# The pad: its triggers are ZL and ZR, its shoulders L and R, Start +, Back -, its guide button Home.\n"
-+    "# Extra 1 to Extra 4: buttons the Classic does not have, for what a port adds (a pad's left and right\n"
++    "# Extra 1 to Extra 8: buttons the Classic does not have, for what a port adds (a pad's left and right\n"
 +    "# stick pressed in are Extra 1 and 2).\n"
      "# Face Buttons = Position: the right one is A, the bottom one B, the top one X, the left one Y (the\n"
      "# Classic's own layout); Label: the button labelled A (Cross) is A, B (Circle) B, X (Square) X, Y (Triangle) Y.\n"
@@ -4419,18 +4419,20 @@ index 5726093..4e7da94 100644
  
  std::string trim(const std::string& t) {
      size_t a = t.find_first_not_of(" \t\r"), b = t.find_last_not_of(" \t\r");
-@@ -923,7 +1258,9 @@ bool parse_keys(const std::string& text, const std::string& path, bool remote, b
+@@ -923,7 +1258,11 @@ bool parse_keys(const std::string& text, const std::string& path, bool remote, b
                                       {"Left Stick Up", kStick << 0}, {"Left Stick Down", kStick << 1},
                                       {"Left Stick Left", kStick << 2}, {"Left Stick Right", kStick << 3},
                                       {"Right Stick Up", kStick << 4}, {"Right Stick Down", kStick << 5},
 -                                     {"Right Stick Left", kStick << 6}, {"Right Stick Right", kStick << 7}};
 +                                     {"Right Stick Left", kStick << 6}, {"Right Stick Right", kStick << 7},
 +                                     {"Extra 1", kExtra << 0}, {"Extra 2", kExtra << 1},
-+                                     {"Extra 3", kExtra << 2}, {"Extra 4", kExtra << 3}};
++                                     {"Extra 3", kExtra << 2}, {"Extra 4", kExtra << 3},
++                                     {"Extra 5", kExtra << 4}, {"Extra 6", kExtra << 5},
++                                     {"Extra 7", kExtra << 6}, {"Extra 8", kExtra << 7}};
      static const Btn mice[] = {{"Mouse Left", SDL_BUTTON_LMASK}, {"Mouse Right", SDL_BUTTON_RMASK},
                                 {"Mouse Middle", SDL_BUTTON_MMASK}, {"Mouse X1", SDL_BUTTON_X1MASK},
                                 {"Mouse X2", SDL_BUTTON_X2MASK}};
-@@ -980,7 +1317,7 @@ bool parse_keys(const std::string& text, const std::string& path, bool remote, b
+@@ -980,7 +1319,7 @@ bool parse_keys(const std::string& text, const std::string& path, bool remote, b
          }
          if (!b) {
              if (in_classic) rt_log("video: %s:%d: not a Classic Controller button (A B X Y L R ZL ZR Plus Minus Home Up Down Left Right, "
@@ -4439,7 +4441,7 @@ index 5726093..4e7da94 100644
              else rt_log("video: %s:%d: not a Remote button (A B Up Down Left Right Plus Minus 1 2 Shake Raise; the Nunchuk's "
                          "C Z Stick Up/Down/Left/Right Walk)", path.c_str(), line);
              continue;
-@@ -1006,7 +1343,9 @@ bool parse_keys(const std::string& text, const std::string& path, bool remote, b
+@@ -1006,7 +1345,9 @@ bool parse_keys(const std::string& text, const std::string& path, bool remote, b
      return has_classic;
  }
  
@@ -4449,7 +4451,7 @@ index 5726093..4e7da94 100644
      std::string text;
      if (FILE* f = std::fopen(path.c_str(), "rb")) {
          char buf[4096];
-@@ -1079,6 +1418,8 @@ ClassicState classic_from_pad(SDL_Gamepad* g) {
+@@ -1079,6 +1420,8 @@ ClassicState classic_from_pad(SDL_Gamepad* g) {
          {SDL_GAMEPAD_BUTTON_START, CL_PLUS}, {SDL_GAMEPAD_BUTTON_BACK, CL_MINUS}, {SDL_GAMEPAD_BUTTON_GUIDE, CL_HOME}};
      for (auto& f : fixed)
          if (SDL_GetGamepadButton(g, f.b)) s.buttons |= f.bit;
@@ -4458,7 +4460,7 @@ index 5726093..4e7da94 100644
      // the face buttons: by position, the Classic's own layout (A right, B
      // bottom, X top, Y left), or by the pad's labels
      static const struct { SDL_GamepadButton b; uint32_t pos; } face[] = {
-@@ -1112,6 +1453,7 @@ ClassicState classic_from_pad(SDL_Gamepad* g) {
+@@ -1112,6 +1455,7 @@ ClassicState classic_from_pad(SDL_Gamepad* g) {
  void merge(ClassicState& a, const ClassicState& b) {
      a.connected |= b.connected;
      a.buttons |= b.buttons;
@@ -4466,7 +4468,7 @@ index 5726093..4e7da94 100644
      if (std::hypot(b.lx, b.ly) > std::hypot(a.lx, a.ly)) { a.lx = b.lx; a.ly = b.ly; }
      if (std::hypot(b.rx, b.ry) > std::hypot(a.rx, a.ry)) { a.rx = b.rx; a.ry = b.ry; }
      a.lt = std::max(a.lt, b.lt);
-@@ -1186,7 +1528,7 @@ void update_pad() {
+@@ -1186,7 +1530,7 @@ void update_pad() {
      p.buttons &= ~(kRaisePlus | kRaiseMinus | kWalk | (kStick * 0xF));
      int ww = 0, wh = 0;
      SDL_GetWindowSize(win, &ww, &wh);                        // mouse coordinates are in window units
@@ -4475,15 +4477,15 @@ index 5726093..4e7da94 100644
          // -1..1 spans the picture as present() shows it, so that the game's
          // cursor lands under the mouse
          Rect r = picture_rect((float)ww, (float)wh);
-@@ -1248,6 +1590,7 @@ void update_pad() {
+@@ -1248,6 +1592,7 @@ void update_pad() {
          ClassicState& k = c[0];
          k.connected = true;
          k.buttons = cl & 0xFFFF;
-+        k.extra = cl / kExtra & 0xF;
++        k.extra = cl / kExtra & 0xFF;
          auto dir = [&](int i) { return cl & (kStick << i) ? 1.0f : 0.0f; };
          k.lx = dir(3) - dir(2);
          k.ly = dir(0) - dir(1);
-@@ -1261,12 +1604,19 @@ void update_pad() {
+@@ -1261,12 +1606,19 @@ void update_pad() {
      for (int i = 0; i < 4; ++i)
          if (chan_pad[i] && !(i == 0 && mode == INPUT_MODE_KEYBOARD)) merge(c[i], classic_from_pad(chan_pad[i]));
      update_rumble();
@@ -4503,7 +4505,7 @@ index 5726093..4e7da94 100644
      ++cnt.presents;
      int ww = 0, wh = 0;
      SDL_GetWindowSizeInPixels(win, &ww, &wh);
-@@ -1275,17 +1625,17 @@ void present() {
+@@ -1275,17 +1627,17 @@ void present() {
      glColorMask(1, 1, 1, 1);
      glClearColor(0, 0, 0, 1);
      glClear(GL_COLOR_BUFFER_BIT);
@@ -4524,7 +4526,7 @@ index 5726093..4e7da94 100644
      if (opt.dump_dir && cnt.presents % (uint64_t)opt.dump_every == 0 && ww > 0 && wh > 0) {
          std::vector<uint8_t> px((size_t)ww * wh * 4), flip(px.size());   // the window, as shown
          glReadPixels(0, 0, ww, wh, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
-@@ -1317,7 +1667,6 @@ void setup() {
+@@ -1317,7 +1669,6 @@ void setup() {
      glNamedFramebufferTexture(efb_fbo, GL_DEPTH_ATTACHMENT, efb_dep, 0);
      if (glCheckNamedFramebufferStatus(efb_fbo, GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
          rt_die("video: the EFB framebuffer is incomplete");
@@ -4532,7 +4534,7 @@ index 5726093..4e7da94 100644
      glBindFramebuffer(GL_FRAMEBUFFER, efb_fbo);
      glClearColor(0, 0, 0, 1);
      glClearDepth(1.0);
-@@ -1327,45 +1676,25 @@ void setup() {
+@@ -1327,45 +1678,25 @@ void setup() {
      const GLbitfield map = GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT;
      glNamedBufferStorage(vbo, VBO_CAP, nullptr, map);
      vbo_ptr = static_cast<uint8_t*>(glMapNamedBufferRange(vbo, 0, VBO_CAP, map));
@@ -4595,7 +4597,7 @@ index 5726093..4e7da94 100644
  
      copy_prog = link(FULLSCREEN_VS, COPY_FS);
      if (!copy_prog) rt_die("video: the EFB copy program does not build");
-@@ -1462,6 +1791,13 @@ std::atomic<bool> want_relative{false};
+@@ -1462,6 +1793,13 @@ std::atomic<bool> want_relative{false};
  std::mutex motion_mx;
  float motion_x = 0, motion_y = 0;
  void video_set_relative_mouse(bool on) { want_relative = on; }
@@ -4609,7 +4611,7 @@ index 5726093..4e7da94 100644
  void video_take_mouse_motion(float& dx, float& dy) {
      std::lock_guard<std::mutex> lk(motion_mx);
      dx = motion_x; dy = motion_y;
-@@ -1479,6 +1815,7 @@ ClassicState video_classic(int chan) {
+@@ -1479,6 +1817,7 @@ ClassicState video_classic(int chan) {
  void video_set_rumble(int chan, bool on) {
      if (chan >= 0 && chan < 4) rumble_want[chan] = on;
  }
@@ -4617,7 +4619,7 @@ index 5726093..4e7da94 100644
  void video_retrace() {
      retraces.fetch_add(1);
      if (wake) SDL_SignalSemaphore(wake);
-@@ -1506,6 +1843,7 @@ void video_run(const char* title) {
+@@ -1506,6 +1845,7 @@ void video_run(const char* title) {
      SDL_GL_MakeCurrent(win, ctx);
      SDL_GL_SetSwapInterval(0);                   // VI paces the presents
      if (!gl_load()) rt_die("video: OpenGL functions missing");
@@ -4625,7 +4627,7 @@ index 5726093..4e7da94 100644
      rt_log("video: %s, %s", (const char*)glGetString(GL_RENDERER), (const char*)glGetString(GL_VERSION));
      if (debug) {
          glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
-@@ -1529,11 +1867,15 @@ void video_run(const char* title) {
+@@ -1529,11 +1869,15 @@ void video_run(const char* title) {
      uint64_t frames_then = 0;
      uint32_t seen = retraces.load();
      std::string base_title = title;
@@ -4641,7 +4643,7 @@ index 5726093..4e7da94 100644
              if (e.type == SDL_EVENT_GAMEPAD_ADDED) pad_added(e.gdevice.which);
              if (e.type == SDL_EVENT_GAMEPAD_REMOVED) pad_removed(e.gdevice.which);
              // F11 or Alt+Enter: fullscreen and back
-@@ -1592,7 +1934,14 @@ void video_run(const char* title) {
+@@ -1592,7 +1936,14 @@ void video_run(const char* title) {
                  double vtx = ms(g_vperf.vtx), tex = ms(g_vperf.tex), wait = ms(g_vperf.wait), draw = ms(g_vperf.draw),
                         pres = ms(g_vperf.present);
                  rt_log("perf: %.1f fps; frame %.1f ms; game thread: vertices %.1f, textures %.1f, waiting for the renderer %.1f; "
@@ -4657,7 +4659,7 @@ index 5726093..4e7da94 100644
              }
              frames_then = cnt.frames;
              t_title = now;
-@@ -1608,6 +1957,8 @@ void video_run(const char* title) {
+@@ -1608,6 +1959,8 @@ void video_run(const char* title) {
              }
              if (c.readback) { if (c.copy) copy_readback(c.copy); else efb_readback(); busy = true; continue; }
              auto te = Clock::now();
@@ -4666,7 +4668,7 @@ index 5726093..4e7da94 100644
              exec(c.data);
              if (g_vperf_on) g_vperf.draw += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - te).count();
              {
-@@ -1621,6 +1972,17 @@ void video_run(const char* title) {
+@@ -1621,6 +1974,17 @@ void video_run(const char* title) {
              if (retraces.load() != seen) break;
          }
          uint32_t r = retraces.load();
@@ -4685,7 +4687,7 @@ index 5726093..4e7da94 100644
              seen = r;
              auto tp = Clock::now();
 diff --git a/runtime/video.h b/runtime/video.h
-index ecfb499..0dbef7e 100644
+index ecfb499..5698fab 100644
 --- a/runtime/video.h
 +++ b/runtime/video.h
 @@ -3,7 +3,7 @@
@@ -4767,8 +4769,8 @@ index ecfb499..0dbef7e 100644
  // pad: buttons OR'd, each stick from whichever source is deflected more.
  // Buttons are KPAD's Classic bits; sticks -1..1, y up; triggers 0..1.
 -struct ClassicState { bool connected = false; uint32_t buttons = 0; float lx = 0, ly = 0, rx = 0, ry = 0, lt = 0, rt = 0; };
-+// extra: four buttons the Classic does not have, for a port to give a
-+// meaning in its filter (the key file's Extra 1..4, bits 0..3; a pad's left
++// extra: eight buttons the Classic does not have, for a port to give a
++// meaning in its filter (the key file's Extra 1..8, bits 0..7; a pad's left
 +// and right stick pressed in are Extra 1 and 2). The game never sees them.
 +struct ClassicState { bool connected = false; uint32_t buttons = 0; float lx = 0, ly = 0, rx = 0, ry = 0, lt = 0, rt = 0; uint32_t extra = 0; };
  ClassicState video_classic(int chan);

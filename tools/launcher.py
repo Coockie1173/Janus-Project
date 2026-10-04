@@ -48,6 +48,7 @@ ACTIONS = [
     ("Fire", "ZR"), ("Aim down the sight", "ZL"), ("Melee attack", "L"), ("Throw grenade  (doubles as R button)", "R"),
     ("Reload", "Y"), ("Crouch  (menus: select)", "A"), ("Action  (menus: back)", "B"), ("Sprint", "Extra 1"),
     ("Cycle grenades", "X"), ("Next weapon", "Right"), ("Previous weapon", "Left"),
+    ("Weapon 1", "Extra 3"), ("Weapon 2", "Extra 4"), ("Weapon 3", "Extra 5"),
     ("Firing mode", "Up"), ("Smartphone", "Down"), ("Night vision / scoreboard", "Minus"),
     ("Pause", "Plus"), ("Home menu", "Home"),
     ("Move forward", "Left Stick Up"), ("Move back", "Left Stick Down"),

@@ -67,6 +67,7 @@ void install() {
     install_tank();
     install_noclip();
     install_autosave();
+    install_weapons();
     if (std::getenv("GE_TRACE")) {
         orig_main = ppc_hook("main", [](PPCContext& c) {
             rt_log("goldeneye: main() reached");

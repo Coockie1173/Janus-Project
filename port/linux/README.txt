@@ -46,6 +46,7 @@ Keyboard and mouse:
     G                grenade              V                melee attack
     T                cycle grenades       B                firing mode
     F                smartphone           Tab              night vision / scoreboard
+    1, 2, 3          the weapon in that slot
     Esc, P           pause                E                action
     F11, Alt+Enter   fullscreen           F1               settings menu
 In menus the left mouse button selects and the right one goes back
