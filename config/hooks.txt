@@ -33,3 +33,4 @@ StartLevelChange       # a level is loaded: Restart Mission's opening gets skipp
 ge_frame_draw          # a frame's draw: the scene is left out of the frames a skip doesn't show
 ge_hud_update          # the hud's update: the level timer is shown outside time challenges too
 ge_pad_confirmed       # a pad pressed select: the loading screen's "Continue" presses itself (auto start)
+ge_movie_start         # a movie is opened: one that plays once is over at once instead (skip movies)

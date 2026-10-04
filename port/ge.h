@@ -6,6 +6,7 @@
 //gecko.cpp gecko codes run each frame
 //cutscenes.cpp skip cutscenes
 //qte.cpp quick time events that press their own buttons
+//movies.cpp skip movies
 //tweaks.cpp the level timer, the unused extras menu, auto start
 //native.cpp the engine's hot math routines written for the host
 //net.cpp the hosts file for the game's servers
@@ -95,6 +96,9 @@ bool cutscene_input_waiting(); //qte.cpp, a cutscene asked for a button in the l
 void install_qte(); //qte.cpp
 bool auto_qte(); //quick time events press their own buttons
 void set_auto_qte(bool on);
+void install_movies(); //movies.cpp
+bool skip_movies(); //a movie that plays once is over before it starts
+void set_skip_movies(bool on);
 void install_tweaks(); //tweaks.cpp
 void tweaks_apply();
 bool level_timer(); //the hud shows the level's time

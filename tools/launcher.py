@@ -54,7 +54,7 @@ ACTIONS = [
     ("Move left", "Left Stick Left"), ("Move right", "Left Stick Right"),
 ]
 DEFAULTS = {"fps": "auto", "fov": "49", "mouse": "1.0", "online": "1", "fullscreen": "0", "faststart": "0", "mousemode": "auto",
-            "mouseinvert": "0", "adsfov": "22.5", "adssens": "0.5", "aimlock": "0", "mouseeverywhere": "0", "skipcutscenes": "0", "leveltimer": "1", "autoqte": "0", "autostart": "0", "extrasmenu": "0",
+            "mouseinvert": "0", "adsfov": "22.5", "adssens": "0.5", "aimlock": "0", "mouseeverywhere": "0", "skipcutscenes": "0", "skipmovies": "0", "leveltimer": "1", "autoqte": "0", "autostart": "0", "extrasmenu": "0",
             "crashdump": "1", "crashmem": "0"}
 
 #Tk's key names -> SDL's (the key file's)
@@ -384,6 +384,10 @@ def run_gui():
     ttk.Checkbutton(en, text="Auto Start Mission", variable=auto_start).grid(row=6, column=0, sticky="w", **pad)
     ttk.Label(en, text="A loaded mission starts by itself, without Continue being pressed.",
               foreground="gray", wraplength=520, justify="left").grid(row=7, column=0, sticky="w", padx=(30, 8))
+    skip_movies = tk.BooleanVar(value=settings["skipmovies"] == "1")
+    ttk.Checkbutton(en, text="Skip Movies", variable=skip_movies).grid(row=8, column=0, sticky="w", **pad)
+    ttk.Label(en, text="Briefings, the movies between missions and the logos are skipped.",
+              foreground="gray", wraplength=520, justify="left").grid(row=9, column=0, sticky="w", padx=(30, 8))
 
     #cheats
     #the tab just lists whatever is in config/gecko/cheats.txt, so adding a cheat is adding it to that file
@@ -428,6 +432,7 @@ def run_gui():
         settings["leveltimer"] = "1" if level_timer.get() else "0"
         settings["autoqte"] = "1" if auto_qte.get() else "0"
         settings["autostart"] = "1" if auto_start.get() else "0"
+        settings["skipmovies"] = "1" if skip_movies.get() else "0"
         settings["extrasmenu"] = "1" if extras_menu.get() else "0"
         settings["mousemode"] = next((k for k, v in modes.items() if v == mousemode.get()), "auto")
         save_settings(settings)
@@ -555,6 +560,8 @@ def run_game(args):
             s["autoqte"] = "1"
         elif a == "--auto-start":
             s["autostart"] = "1"
+        elif a == "--skip-movies":
+            s["skipmovies"] = "1"
         elif a == "--extras-menu":
             s["extrasmenu"] = "1"
         elif a == "--fast-start":
@@ -583,7 +590,7 @@ def run_game(args):
     for var, key in (("GE_FPS", "fps"), ("GE_FOV", "fov"), ("GE_MOUSE", "mouse"), ("GE_MOUSE_MODE", "mousemode"),
                      ("GE_MOUSE_INVERT", "mouseinvert"), ("GE_ADS_FOV", "adsfov"),
                      ("GE_ADS_SENS", "adssens"), ("GE_AIM_LOCK", "aimlock"), ("GE_MOUSE_EVERYWHERE", "mouseeverywhere"),
-                     ("GE_SKIP_CUTSCENES", "skipcutscenes"), ("GE_LEVEL_TIMER", "leveltimer"), ("GE_AUTO_QTE", "autoqte"), ("GE_AUTO_START", "autostart"),
+                     ("GE_SKIP_CUTSCENES", "skipcutscenes"), ("GE_LEVEL_TIMER", "leveltimer"), ("GE_AUTO_QTE", "autoqte"), ("GE_AUTO_START", "autostart"), ("GE_SKIP_MOVIES", "skipmovies"),
                      ("GE_EXTRAS_MENU", "extrasmenu")):
         env.setdefault(var, s[key])
     if s["online"] == "0":

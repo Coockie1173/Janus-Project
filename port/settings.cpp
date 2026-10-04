@@ -88,7 +88,7 @@ void save_launch_settings() {
         {"LAUNCH_MOUSEMODE", modes[mouse_mode()]}, {"LAUNCH_MOUSEINVERT", mouse_invert() ? "1" : "0"},
         {"LAUNCH_ADSFOV", ads_fov_text}, {"LAUNCH_ADSSENS", ads_sens_text}, {"LAUNCH_AIMLOCK", aim_lock() ? "1" : "0"},
         {"LAUNCH_MOUSEEVERYWHERE", mouse_everywhere() ? "1" : "0"},
-        {"LAUNCH_SKIPCUTSCENES", skip_cutscenes() ? "1" : "0"},
+        {"LAUNCH_SKIPCUTSCENES", skip_cutscenes() ? "1" : "0"}, {"LAUNCH_SKIPMOVIES", skip_movies() ? "1" : "0"},
         {"LAUNCH_LEVELTIMER", level_timer() ? "1" : "0"}, {"LAUNCH_AUTOQTE", auto_qte() ? "1" : "0"}, {"LAUNCH_AUTOSTART", auto_start() ? "1" : "0"}, {"LAUNCH_EXTRASMENU", extras_menu() ? "1" : "0"}};
     if (g_fps_changed) values.push_back({"LAUNCH_FPS", std::to_string(fps_limit())}); //"auto" stays until it's changed
     auto lines = read_lines(GE_SETTINGS_FILE);
@@ -371,6 +371,9 @@ void build_pages() {
     enhancements.rows.push_back({"Skip Intro Cutscenes (Experimental)", "On: a mission's opening cutscene is skipped.",
         [] { return std::string(skip_cutscenes() ? "On" : "Off"); },
         [](int) { set_skip_cutscenes(!skip_cutscenes()); g_dirty = true; }});
+    enhancements.rows.push_back({"Skip Movies", "On: briefings, the movies between missions and the logos are skipped.",
+        [] { return std::string(skip_movies() ? "On" : "Off"); },
+        [](int) { set_skip_movies(!skip_movies()); g_dirty = true; }});
     enhancements.rows.push_back({"Level Timer", "On: the hud shows the time played in the level.",
         [] { return std::string(level_timer() ? "On" : "Off"); },
         [](int) { set_level_timer(!level_timer()); g_dirty = true; }});

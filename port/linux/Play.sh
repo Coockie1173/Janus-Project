@@ -6,6 +6,7 @@
 #     ./Play.sh --offline              no hosts file: the game does not find its servers
 #     ./Play.sh --always-mouse         the cheat "Always Enable Mouse": mouse look in every player state
 #     ./Play.sh --skip-cutscenes       a mission's opening cutscene is skipped
+#     ./Play.sh --skip-movies          briefings, the movies between missions and the logos are skipped
 #     ./Play.sh --no-level-timer       the hud without the level's time (it is on by default)
 #     ./Play.sh --auto-qte             quick time events press their own buttons
 #     ./Play.sh --auto-start           a loaded mission starts without "Continue" being pressed

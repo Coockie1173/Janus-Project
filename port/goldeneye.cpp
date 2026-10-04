@@ -20,6 +20,7 @@
 //GE_AUTO_QTE=1 quick time events press their own buttons
 //GE_LEVEL_TIMER=0 no level timer in the hud
 //GE_AUTO_START=1 a loaded mission starts without its "Continue" being pressed
+//GE_SKIP_MOVIES=1 movies are skipped
 //GE_EXTRAS_MENU=1 cheat, the menu's unused extras page
 //GE_SETTINGS=N start with the settings menu (F1) open on page N
 //GE_FPS=N frame rate the engine may reach (30 by default, auto is 60)
@@ -57,6 +58,7 @@ void install() {
     install_cutscenes();
     install_qte();
     install_tweaks();
+    install_movies();
     if (std::getenv("GE_TRACE")) {
         orig_main = ppc_hook("main", [](PPCContext& c) {
             rt_log("goldeneye: main() reached");
