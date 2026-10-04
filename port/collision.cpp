@@ -32,10 +32,16 @@
 //for, and the game's own code calls it for others all through a frame. the call that returns
 //to 80007694 is the level's camera, but that one is made before the frame's update (fn_800074A0
 //is the update), so a hit's kick or the camera after a death isn't in it yet
-//what gets drawn is what the globals hold while the world is drawn: ge_world_draw (8032D380,
-//from fn_8032BCE0) has the camera it draws for at 806EC2C8, so the matrix is taken as it
-//returns. it's called once for every view of the level; the one for the level's camera
-//counts, any other only as long as that one hasn't been seen
+//the player's view is drawn by fn_801703C0 (the viewport's vtable 805791A8 +0x50): it applies
+//its camera (returning to 8017051C) and then has the world drawn for it (fn_80009CB0 >
+//fn_80379D20 > fn_8032BCE0 > ge_world_draw, 8032D380). at that first call the camera only has
+//its pitch, where it is and the rest come in between, so the call just marks whose draw comes
+//next and the matrix is taken as ge_world_draw begins
+//the world is drawn for other views too (fn_8018A3D0, the picture in picture, through the
+//same fn_80009CB0), with cameras that are nowhere near the player, those are passed over
+//the gathering isn't done in there: with more than one map loaded fn_80009CB0 leaves only the
+//second in the world's list while it draws, and the level's other maps would never be seen.
+//it's done at the camera call before it, where the list is whole
 //everything else is done there too, not once a game frame: the frame count (806EBED0) is the
 //game's own and the picture goes on being drawn where that stands still
 //they are gathered again a few frames after a part of the level got loaded or dropped
@@ -49,6 +55,11 @@
 //- 803144D0 an entity (the file at +0x1C, the hash at +0x20, its entry in the file's placed
 //  list kept at +0x28), then the objects from +0x10
 //- 80308C20 something skinned, not drawn here
+//an entity that is animated (a level's moving set pieces) doesn't collide with the vertices in
+//its mesh: the object's +0x114 is handed to the entity's scoop, 0x1C bytes for each part
+//(a part's index is the short at its +0x52), with the top bit of the first word set and a
+//buffer of animated vertices at +8 (fn_8029E070, the mesh's fn_8029DE10 makes it). those
+//are used when they are there
 //the matrix at +0x98 is only as new as the last time the game asked for it, so it's asked
 //for here as the scoops do: fn_80301960 (object, the parent's matrix, a word of flags) gives
 //the object's matrix in the world. called for the item first, with the identity
@@ -75,15 +86,14 @@ namespace
 {
 const uint32_t kWorld = 0x805F4CCC, kMapCount = 0x1C, kMaps = 0x20;
 const uint32_t kClipMatrix = 0x806421E0; //16 floats, a row vector times it is the clip position
-const uint32_t kLevelViewCall = 0x80007694; //where ge_camera_apply returns to when it was the level's view
-const uint32_t kDrawCamera = 0x806EC2C8; //the camera the world is being drawn for
-const uint32_t kCameraInOwner = 0x19C; //ge_camera_apply gets the camera inside its owner
+const uint32_t kPlayerViewCall = 0x8017051C; //where ge_camera_apply returns to when the player's view is about to be drawn
 const uint32_t kMapFile = 0x1C, kMapHash = 0x20, kPlacementCount = 0x138, kPlacements = 0x13C;
 const uint32_t kFileHeader = 0x24, kGeom = 0x47454F4D;
 const uint32_t kEntities = 0x48, kPlaced = 0x50, kMapList = 0x70; //the header's lists: two shorts, an offset
 const uint32_t kZoneCount = 0x84, kZones = 0x88, kZoneSize = 0x8C;
 const uint32_t kPlacementSize = 0x9C, kPlacementHash = 0x80;
 const uint32_t kFlags = 0x4, kCollides = 0x100, kEntityFile = 0x4C;
+const uint32_t kEntryLoaded = 0x80000000;
 const uint32_t kSplitVt = 0x80591008, kListVt = 0x80590FB8, kMeshVt = 0x8058B9D8;
 const uint32_t kParts = 0x54, kPartOffsets = 0x5C, kListHashes = 0x58, kListStep = 0x14;
 const uint32_t kStrips = 0x58, kVertices = 0x5C, kTriFlags = 0x68, kStripCount = 0xA4;
@@ -93,6 +103,7 @@ const uint32_t kItems = 0xA4, kItemList = 0x8, kItemBody = 0x158, kBodyFlags = 0
 const uint32_t kObjectNext = 0x4, kObjectList = 0x10, kObjectVt = 0x18, kObjectFile = 0x1C, kObjectHash = 0x20, kObjectEntry = 0x28;
 const uint32_t kObjectMatrix = 0x98, kObjectChildren = 0x130, kScoop = 0x50;
 const uint32_t kGroupScoop = 0x8031D920, kEntityScoop = 0x803144D0;
+const uint32_t kObjectAnim = 0x114, kAnimSize = 0x1C, kAnimVertices = 0x8, kPartIndex = 0x52, kItemPos = 0xF8;
 const uint32_t kAllItems = 0x0, kItemMatrix = 0x98, kBodyVtShape = 0x24, kShapeGetter = 0x800F24E0, kBodyShape = 0x18C;
 const uint32_t kWorldMatrixFn = 0x80301960;
 const int kRegather = 30; //frames between two looks at the level, whatever the signature says
@@ -114,9 +125,9 @@ int g_settle = 0;
 std::vector<Vertex> g_mesh; //what's being gathered
 std::vector<Vertex> g_level, g_moving, g_sent;
 uint32_t g_unknown = 0; //entities that were none of the three
-float g_clip[16]{}; //the level's view as last drawn
-uint32_t g_level_camera = 0; //what ge_camera_apply was last called with for the level's view
-bool g_camera_seen = false; //the world was drawn for that camera since the viewer came on
+struct { uint32_t updates, gathers, sends, maps, zones, zonesIn, placements, placementsIn, items, people; } g_count{}; //for GE_TRACE
+float g_clip[16]{}; //the player's view as last drawn
+bool g_view_applied = false; //the player's view had its camera applied, the next world drawn is its
 
 //an offset is from where it's stored, 0 for nothing
 uint32_t Rel(uint32_t at)
@@ -127,14 +138,22 @@ uint32_t Rel(uint32_t at)
 
 bool Readable(uint32_t at, uint32_t bytes) { return guest_ptr(at) && guest_ptr(at + bytes); }
 
+//an entry's entity, 0 while its part of the level isn't in memory: the top bit of the entry's
+//second word says it is, the pointer alone may be left over from a part that was dropped
+uint32_t Loaded(uint32_t entry)
+{
+	if (!(ld32(entry + 4) & kEntryLoaded)) return 0;
+	uint32_t entity = ld32(entry + 0xC);
+	return guest_ptr(entity) ? entity : 0;
+}
+
 //the game's lookup (fn_802E2A00) for the hashes that are an index, the only kind seen in a level
 uint32_t Find(uint32_t list, uint32_t step, uint32_t hash)
 {
 	uint32_t entries = Rel(list + 4), index = hash & 0xFFFFFF;
 	if (!guest_ptr(entries) || !((hash >> 24) == 0 || (hash & 0x80000000))) return 0;
 	if (index >= ld16(list)) return 0;
-	uint32_t entity = ld32(entries + index * step + 0xC);
-	return guest_ptr(entity) ? entity : 0;
+	return Loaded(entries + index * step);
 }
 
 uint32_t Header(uint32_t file)
@@ -189,10 +208,11 @@ void Emit(const float p[3][3], Kind kind)
 	}
 }
 
-void Mesh(uint32_t mesh, const float* matrix, Kind kind)
+void Mesh(uint32_t mesh, const float* matrix, Kind kind, uint32_t anim)
 {
 	uint32_t strip = Rel(mesh + kStrips), vertices = Rel(mesh + kVertices), triFlags = Rel(mesh + kTriFlags);
 	uint32_t strips = ld32(mesh + kStripCount);
+	if (Readable(anim, kAnimSize) && (ld32(anim) & 0x80000000) && guest_ptr(ld32(anim + kAnimVertices))) vertices = ld32(anim + kAnimVertices);
 	if (!guest_ptr(vertices) || !guest_ptr(strip) || strips > 0x4000) return;
 	uint32_t triangle = 0; //counted over the strips that collide only
 	for (uint32_t s = 0; s < strips && Readable(strip, 0x20) && g_mesh.size() < kMaxVertices; ++s)
@@ -223,30 +243,30 @@ void Mesh(uint32_t mesh, const float* matrix, Kind kind)
 	}
 }
 
-void Entity(uint32_t entity, const float* matrix, Kind kind, int depth)
+void Entity(uint32_t entity, const float* matrix, Kind kind, int depth, uint32_t anim = 0)
 {
 	if (!Readable(entity, 0xB0) || depth > 6) return;
 	uint32_t vtable = ld32(entity);
-	if (vtable == kMeshVt) Mesh(entity, matrix, kind);
+	if (vtable == kMeshVt) Mesh(entity, matrix, kind, anim);
 	else if (vtable == kSplitVt)
 	{
 		uint32_t parts = ld32(entity + kParts);
 		if (parts > 0x1000 || !Readable(entity, kPartOffsets + parts * 4)) return;
 		for (uint32_t i = 0; i < parts; ++i)
-			if (uint32_t part = Rel(entity + kPartOffsets + i * 4)) Entity(part, matrix, kind, depth + 1);
+			if (uint32_t part = Rel(entity + kPartOffsets + i * 4)) Entity(part, matrix, kind, depth + 1, anim ? anim + ld16(part + kPartIndex) * kAnimSize : 0);
 	}
 	else if (vtable == kListVt)
 	{
 		uint32_t header = Header(ld32(entity + kEntityFile));
 		if (!header) return;
 		for (uint32_t i = 0; i < ld8(entity + kParts); ++i)
-			if (uint32_t other = Find(header + kEntities, 0x10, ld32(entity + kListHashes + i * kListStep))) Entity(other, matrix, kind, depth + 1);
+			if (uint32_t other = Find(header + kEntities, 0x10, ld32(entity + kListHashes + i * kListStep))) Entity(other, matrix, kind, depth + 1, anim ? anim + ld16(other + kPartIndex) * kAnimSize : 0);
 	}
 	else ++g_unknown;
 }
 
 //only what the game itself collides with, and the variant a body collides with when there is one
-void Collider(uint32_t entity, const float* matrix, Kind kind)
+void Collider(uint32_t entity, const float* matrix, Kind kind, uint32_t anim = 0)
 {
 	if (!Readable(entity, 0xB0) || !(ld32(entity + kFlags) & kCollides)) return;
 	uint32_t variants = ld32(entity + kVariants);
@@ -256,7 +276,7 @@ void Collider(uint32_t entity, const float* matrix, Kind kind)
 		if (!Readable(first, 4)) return;
 		entity = first + ((int32_t)ld32(first) >> 8);
 	}
-	Entity(entity, matrix, kind, 0);
+	Entity(entity, matrix, kind, 0, anim);
 }
 
 bool Matrix(uint32_t at, float* matrix)
@@ -270,13 +290,13 @@ bool Matrix(uint32_t at, float* matrix)
 uint32_t ObjectEntity(uint32_t object)
 {
 	uint32_t hash = ld32(object + kObjectHash), entry = ld32(object + kObjectEntry);
-	if (Readable(entry, 0x14) && ld32(entry) == hash) return ld32(entry + 0xC);
+	if (Readable(entry, 0x14) && ld32(entry) == hash) return Loaded(entry);
 	uint32_t header = Header(ld32(object + kObjectFile));
 	if (!header) return 0;
 	uint32_t entries = Rel(header + kPlaced + 4), count = ld16(header + kPlaced);
 	if (!Readable(entries, count * 0x14)) return 0;
 	for (uint32_t i = 0; i < count; ++i)
-		if (ld32(entries + i * 0x14) == hash) return ld32(entries + i * 0x14 + 0xC);
+		if (ld32(entries + i * 0x14) == hash) return Loaded(entries + i * 0x14);
 	return 0;
 }
 
@@ -318,7 +338,7 @@ void Objects(PPCContext& c, uint32_t object, uint32_t parent, uint32_t parentFla
 		else
 		{
 			float matrix[16];
-			if (Matrix(world, matrix)) Collider(ObjectEntity(object), matrix, kMoving);
+			if (Matrix(world, matrix)) Collider(ObjectEntity(object), matrix, kMoving, ld32(object + kObjectAnim));
 		}
 		Objects(c, ld32(object + kObjectList), world, flags, depth + 1);
 	}
@@ -398,7 +418,7 @@ void FindEye()
 	}
 }
 
-void Person(uint32_t item, uint32_t body)
+void Person(uint32_t item, uint32_t body, uint32_t world)
 {
 	uint32_t vtable = ld32(body);
 	if (!Readable(vtable, 0x44) || ld32(vtable + kBodyVtShape) != kShapeGetter || !Readable(body, kBodyShape + 0x40)) return;
@@ -406,7 +426,13 @@ void Person(uint32_t item, uint32_t body)
 	for (int i = 0; i < 9; ++i)
 		if (!std::isfinite(shape[i] = ldf(body + kBodyShape + i * 4))) return;
 	uint32_t kind = ld32(body + kBodyShape + 0x3C);
-	if (kind > 1 || !Matrix(item + kItemMatrix, matrix)) return;
+	if (kind > 1 || !Matrix(world ? world : item + kItemMatrix, matrix)) return;
+	//where the item is right now, the matrix may be from when it was last drawn
+	for (int k = 0; k < 3; ++k)
+	{
+		float at = ldf(item + kItemPos + k * 4);
+		if (std::isfinite(at)) matrix[12 + k] = at;
+	}
 	float radius = kind ? shape[8] : shape[4];
 	if (!(radius > 0.01f) || radius > 50.0f) return;
 	float foot[3], axis[3] = {0, 0, 0};
@@ -454,16 +480,21 @@ void GatherMoving(PPCContext& c)
 	g_scratch = c.r[1] + 0x40;
 	uint32_t identity = g_scratch + 0x10;
 	for (int i = 0; i < 16; ++i) stf(identity + i * 4, i % 5 == 0 ? 1.0f : 0.0f);
+	g_count.items = g_count.people = 0;
 	EachItem(kItemList, [&](uint32_t item, uint32_t) {
 		uint32_t flags = 0;
+		++g_count.items;
 		if (uint32_t world = WorldMatrix(c, item, identity, flags, 0)) Objects(c, ld32(item + kItemObjects), world, flags, 0);
 	});
-	c = saved;
-
+	//a person's matrix is asked for the same way, the kept one stands still while they aren't drawn
 	FindEye();
 	EachItem(kAllItems, [&](uint32_t item, uint32_t body) {
-		if (body) Person(item, body);
+		uint32_t flags = 0;
+		if (!body) return;
+		++g_count.people;
+		Person(item, body, WorldMatrix(c, item, identity, flags, 0));
 	});
+	c = saved;
 	g_moving.swap(g_mesh);
 }
 
@@ -501,7 +532,11 @@ uint32_t Signature()
 		{
 			uint32_t entries = Rel(header + list + 4), count = ld16(header + list), step = list == kEntities ? 0x10 : 0x14;
 			if (!Readable(entries, count * step)) continue;
-			for (uint32_t i = 0; i < count; ++i) add(ld32(entries + i * step + 0xC));
+			for (uint32_t i = 0; i < count; ++i)
+			{
+				add(ld32(entries + i * step + 4));
+				add(ld32(entries + i * step + 0xC));
+			}
 		}
 	});
 	return hash;
@@ -512,12 +547,21 @@ void Gather()
 	static const float identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
 	g_mesh.clear();
 	g_unknown = 0;
+	++g_count.gathers;
+	g_count.maps = g_count.zones = g_count.zonesIn = g_count.placements = g_count.placementsIn = 0;
 	EachMap([](uint32_t map, uint32_t header) {
+		++g_count.maps;
 		if (uint32_t data = MapData(map, header))
 		{
 			uint32_t zones = ld32(data + kZoneCount);
 			if (zones <= 0x400 && Readable(data, kZones + zones * kZoneSize))
-				for (uint32_t z = 0; z < zones; ++z) Collider(Find(header + kEntities, 0x10, ld32(data + kZones + z * kZoneSize)), identity, kLevel);
+				for (uint32_t z = 0; z < zones; ++z)
+				{
+					uint32_t entity = Find(header + kEntities, 0x10, ld32(data + kZones + z * kZoneSize));
+					++g_count.zones;
+					if (entity) ++g_count.zonesIn;
+					Collider(entity, identity, kLevel);
+				}
 		}
 		uint32_t placements = ld32(map + kPlacements), count = ld32(map + kPlacementCount);
 		if (count > 0x4000 || !Readable(placements, count * kPlacementSize)) return;
@@ -525,7 +569,10 @@ void Gather()
 		{
 			uint32_t placement = placements + i * kPlacementSize;
 			float matrix[16];
-			if (Matrix(placement, matrix)) Collider(Find(header + kPlaced, 0x14, ld32(placement + kPlacementHash)), matrix, kProp);
+			uint32_t entity = Find(header + kPlaced, 0x14, ld32(placement + kPlacementHash));
+			++g_count.placements;
+			if (entity) ++g_count.placementsIn;
+			if (Matrix(placement, matrix)) Collider(entity, matrix, kProp);
 		}
 	});
 	g_level.swap(g_mesh);
@@ -539,11 +586,7 @@ void Send()
 	if (g_mesh.size() == g_sent.size() && (g_mesh.empty() || !std::memcmp(g_mesh.data(), g_sent.data(), g_mesh.size() * sizeof(Vertex)))) return;
 	g_sent.swap(g_mesh);
 	gx_debug_mesh(g_sent.data(), (uint32_t)g_sent.size());
-	static size_t level = SIZE_MAX, moving = SIZE_MAX;
-	if (g_trace && (level != g_level.size() || moving != g_moving.size()))
-		rt_log("goldeneye: collision view has %zu triangles of the level, %zu that move, %u entities it doesn't know", g_level.size() / 3, g_moving.size() / 3, g_unknown);
-	level = g_level.size();
-	moving = g_moving.size();
+	++g_count.sends;
 }
 void Update(PPCContext& c)
 {
@@ -558,34 +601,45 @@ void Update(PPCContext& c)
 	if ((g_settle && --g_settle == 0) || ++draws % kRegather == 0) Gather();
 	GatherMoving(c);
 	Send();
-	gx_debug_view(true, g_clip);
-	g_shown = true;
+	if (g_trace && ++g_count.updates % 300 == 0)
+		rt_log("goldeneye: collision view after %u updates: %u gathers, %u sends, %u maps, zones %u of %u in memory, placements %u of %u, %zu level triangles, %u items, %u people, %zu moving triangles, %u unknown entities",
+			   g_count.updates, g_count.gathers, g_count.sends, g_count.maps, g_count.zonesIn, g_count.zones, g_count.placementsIn, g_count.placements, g_level.size() / 3, g_count.items, g_count.people,
+			   g_moving.size() / 3, g_unknown);
+	if (g_trace && g_count.updates % 300 == 0)
+	{
+		uint32_t player = ld32(kPlayerPtr);
+		rt_log("goldeneye: collision view eye %.1f %.1f %.1f, player %.1f %.1f %.1f, game frame %u", g_eye[0], g_eye[1], g_eye[2], ldf(player + 0xF8), ldf(player + 0xFC), ldf(player + 0x100), ld32(kFrameCount));
+	}
 }
 
 PPCFunc orig_camera_apply = nullptr;
 void CameraApply(PPCContext& c)
 {
-	if (c.lr == kLevelViewCall) g_level_camera = c.r[3];
+	bool player = c.lr == kPlayerViewCall && g_view && guest_ptr(ld32(kPlayerPtr));
 	orig_camera_apply(c);
+	if (!player) return;
+	g_view_applied = true;
+	Update(c);
 }
 
 PPCFunc orig_world_draw = nullptr;
 void WorldDraw(PPCContext& c)
 {
-	orig_world_draw(c);
-	if (!g_view || !guest_ptr(ld32(kPlayerPtr))) return;
-	uint32_t camera = ld32(kDrawCamera);
-	bool level = g_level_camera && (camera == g_level_camera || camera + kCameraInOwner == g_level_camera);
-	if (g_trace)
+	bool player = g_view_applied;
+	g_view_applied = false;
+	if (player)
 	{
-		static uint32_t traced = 0;
-		if (traced != camera) rt_log("goldeneye: collision view, the world is drawn for camera %08X, the level's is %08X", camera, g_level_camera);
-		traced = camera;
+		for (int i = 0; i < 16; ++i) g_clip[i] = ldf(kClipMatrix + i * 4);
+		gx_debug_view(true, g_clip);
+		g_shown = true;
 	}
-	if (level) g_camera_seen = true;
-	else if (g_camera_seen) return;
-	for (int i = 0; i < 16; ++i) g_clip[i] = ldf(kClipMatrix + i * 4);
-	Update(c);
+	orig_world_draw(c);
+	if (g_trace && g_view)
+	{
+		static int views = 0, others = 0;
+		++(player ? views : others);
+		if ((views + others) % 600 == 0) rt_log("goldeneye: collision view, the world was drawn %d times for the player's view and %d for others", views, others);
+	}
 }
 } //namespace
 
@@ -598,7 +652,7 @@ void collision_tick()
 	static const float none[16]{};
 	if (g_view && guest_ptr(ld32(kPlayerPtr))) return;
 	if (g_shown) gx_debug_view(false, none);
-	g_shown = g_camera_seen = false;
+	g_shown = false;
 }
 
 void install_collision()
