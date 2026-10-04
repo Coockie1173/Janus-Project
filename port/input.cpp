@@ -233,8 +233,10 @@ void tank_look(PPCContext& c) {
         auto now = std::chrono::steady_clock::now();
         if (now - last >= std::chrono::milliseconds(500)) {
             last = now;
-            rt_log("goldeneye: tank %08X, heading %.4f; aim %.4f across, %.4f up and down", ctrl, ldf(ctrl + kTankHeading),
-                   ldf(ctrl + kTankAimYaw), ldf(ctrl + kTankAimPitch));
+            uint32_t tank = ld32(ctrl + 4);
+            rt_log("goldeneye: tank %08X, heading %.4f; aim %.4f across, %.4f up and down; hull %.4f at %.2f %.2f %.2f", ctrl, ldf(ctrl + kTankHeading),
+                   ldf(ctrl + kTankAimYaw), ldf(ctrl + kTankAimPitch), std::atan2(ldf(tank + 0xB8), ldf(tank + 0xC0)),
+                   ldf(tank + 0xF8), ldf(tank + 0xFC), ldf(tank + 0x100));
         }
     }
     g_look_frame = ld32(kFrameCount);
@@ -407,6 +409,20 @@ void wheel_buttons(ClassicState& s) {
     s.buttons |= held;
 }
 
+//the tank's buttons go round by one: the left mouse button (ZR) does what the reload key (y)
+//did, the right one (ZL) what the left did and the reload key what the right did
+//only in the tank and in play, a menu keeps the triggers as select and back
+const uint32_t kClY = 0x0020;
+void tank_buttons(ClassicState& s) {
+    uint32_t ctrl = local_controller();
+    if (!ctrl || !is_tank(ctrl) || !in_play()) return;
+    uint32_t b = s.buttons & ~(kClZR | kClZL | kClY);
+    if (s.buttons & kClZR) b |= kClY;
+    if (s.buttons & kClZL) b |= kClZR;
+    if (s.buttons & kClY) b |= kClZL;
+    s.buttons = b;
+}
+
 //in play the triggers fire (ZR) and aim (ZL), in a menu they do nothing
 //so there they count as a (select) and b (back) and the mouse buttons work the menus
 //"in play" is a player and no pause (the byte at 806EB69C, found by pausing under a word scan)
@@ -507,6 +523,7 @@ void classic_filter(int chan, ClassicState& s) {
     sprint_buttons(s);
     aim_lock_buttons(s);
     menu_buttons(s);
+    tank_buttons(s);
 }
 
 void install_mouse() {
