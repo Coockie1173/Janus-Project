@@ -8,6 +8,7 @@
 //qte.cpp quick time events that press their own buttons
 //movies.cpp skip movies
 //tweaks.cpp the level timer, the unused extras menu, auto start
+//tank.cpp the tank's driving at higher frame rates
 //native.cpp the engine's hot math routines written for the host
 //net.cpp the hosts file for the game's servers
 //overlay.cpp the debug overlay (F3), memory watches from a .dmw file (dmw.cpp)
@@ -100,6 +101,7 @@ void install_movies(); //movies.cpp
 bool skip_movies(); //a movie that plays once is over before it starts
 void set_skip_movies(bool on);
 void install_tweaks(); //tweaks.cpp
+void install_tank(); //tank.cpp
 void tweaks_apply();
 bool level_timer(); //the hud shows the level's time
 void set_level_timer(bool on);

@@ -156,74 +156,7 @@ void frame_tick(PPCContext& c) {
     }
 }
 
-//vehicles (the tank): ge_vehicle_step (8036B310, f1 the time step) slows every wheel's spin
-//(+0x54 of a wheel, 0x90 each at the vehicle's +0x1FC, the count at +0x200) by the wheel's
-//drag (+0x84) once a call, whatever the time step is: spin *= 1 - drag
-//that's made for 30 frames a second. at 144 the wheels get braked five times as often and
-//the tank hardly moves (4 s of full stick: 39 units at 30, 13 at 60, 5 at 144)
-//for the call the drag is what gives the same loss over a second at any rate
-const uint32_t kVehicleWheels = 0x1FC, kVehicleWheelCount = 0x200, kWheelSize = 0x90, kWheelDrag = 0x84;
-const uint32_t kMaxWheels = 32; //the tank has 18
-//the body itself (fn_8035D070, called from the step) loses speed the same way: its velocity
-//times +0x130 and its spin (+0x1B0) times the three at +0x1E0, once a call. the engine can
-//scale those by the time step, but only for a body with flag 0x100 at +0x58, which the tank
-//hasn't. without it the hull turns a third as fast at 144 as at 30
-const uint32_t kBodyFlags = 0x58, kBodyDampsByTime = 0x100, kBodyKeep = 0x130, kBodySpinKeep = 0x1E0;
-PPCFunc orig_vehicle_step = nullptr;
-void vehicle_step(PPCContext& c)
-{
-	uint32_t vehicle = c.r[3], wheels = guest_ptr(vehicle) ? ld32(vehicle + kVehicleWheels) : 0;
-	uint32_t count = wheels ? ld32(vehicle + kVehicleWheelCount) : 0;
-	float frames = (float)c.f[1] * kGameFps; //how many of the game's own frames this step is
-	if (!guest_ptr(wheels) || count > kMaxWheels || !(frames > 0.01f && frames < 0.999f)) { orig_vehicle_step(c); return; }
-	uint32_t was[kMaxWheels];
-	for (uint32_t i = 0; i < count; ++i)
-	{
-		uint32_t at = wheels + i * kWheelSize + kWheelDrag;
-		was[i] = ld32(at);
-		float keep = 1.0f - ldf(at);
-		if (keep > 0.0f && keep < 1.0f) stf(at, 1.0f - std::pow(keep, frames));
-	}
-	const uint32_t keeps[4] = {vehicle + kBodyKeep, vehicle + kBodySpinKeep, vehicle + kBodySpinKeep + 4, vehicle + kBodySpinKeep + 8};
-	uint32_t kept[4];
-	bool body = (ld32(vehicle + kBodyFlags) & kBodyDampsByTime) == 0;
-	for (int i = 0; body && i < 4; ++i)
-	{
-		kept[i] = ld32(keeps[i]);
-		float keep = ldf(keeps[i]);
-		if (keep > 0.0f && keep < 1.0f) stf(keeps[i], std::pow(keep, frames));
-	}
-	orig_vehicle_step(c);
-	for (uint32_t i = 0; i < count; ++i) st32(wheels + i * kWheelSize + kWheelDrag, was[i]);
-	for (int i = 0; body && i < 4; ++i) st32(keeps[i], kept[i]);
-}
-
-//the tank's throttle: ge_tank_drive (801478C0, the controller in r3) moves the throttle at
-//+0xA64 towards the stick's (+0xA5C) by a fixed step a call, 806E96E8 with the byte at
-//806E96D8 set and 806E96F8 without, and the wheels' drive comes from it
-//the steps are for 30 frames a second too: for the call they're scaled to the time step (+0x578)
-const uint32_t kTankThrottleStep[2] = {0x806E96E8, 0x806E96F8}, kCtrlTimeStep = 0x578;
-PPCFunc orig_tank_drive = nullptr;
-void tank_drive(PPCContext& c)
-{
-	uint32_t ctrl = c.r[3];
-	float frames = guest_ptr(ctrl) ? ldf(ctrl + kCtrlTimeStep) * kGameFps : 0.0f;
-	if (!(frames > 0.01f && frames < 0.999f)) { orig_tank_drive(c); return; }
-	uint32_t was[2];
-	for (int i = 0; i < 2; ++i)
-	{
-		was[i] = ld32(kTankThrottleStep[i]);
-		stf(kTankThrottleStep[i], ldf(kTankThrottleStep[i]) * frames);
-	}
-	orig_tank_drive(c);
-	for (int i = 0; i < 2; ++i) st32(kTankThrottleStep[i], was[i]);
-}
-
 void install_fps() {
-    orig_vehicle_step = ppc_hook("ge_vehicle_step", vehicle_step);
-    orig_tank_drive = ppc_hook("ge_tank_drive", tank_drive);
-    if (!orig_tank_drive) rt_die("goldeneye: the tank's drive is not hooked in this build");
-    if (!orig_vehicle_step) rt_die("goldeneye: the vehicles' step is not hooked in this build");
     orig_tick = ppc_hook("ge_frame_tick", frame_tick);
     if (!orig_tick) rt_die("goldeneye: ge_frame_tick is not hooked in this build");
     //"auto" (what launch.sh passes) is 60, or the screen's rate if that's lower

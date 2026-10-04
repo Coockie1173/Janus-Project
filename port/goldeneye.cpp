@@ -59,6 +59,7 @@ void install() {
     install_qte();
     install_tweaks();
     install_movies();
+    install_tank();
     if (std::getenv("GE_TRACE")) {
         orig_main = ppc_hook("main", [](PPCContext& c) {
             rt_log("goldeneye: main() reached");

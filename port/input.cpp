@@ -409,17 +409,17 @@ void wheel_buttons(ClassicState& s) {
     s.buttons |= held;
 }
 
-//the tank's buttons go round by one: the left mouse button (ZR) does what the reload key (y)
-//did, the right one (ZL) what the left did and the reload key what the right did
+//the tank's buttons go round by one: the left mouse button (ZR) does what the classic's r
+//did, the right one (ZL) what the left did and r what the right did
 //only in the tank and in play, a menu keeps the triggers as select and back
-const uint32_t kClY = 0x0020;
+const uint32_t kClR = 0x0200;
 void tank_buttons(ClassicState& s) {
     uint32_t ctrl = local_controller();
     if (!ctrl || !is_tank(ctrl) || !in_play()) return;
-    uint32_t b = s.buttons & ~(kClZR | kClZL | kClY);
-    if (s.buttons & kClZR) b |= kClY;
+    uint32_t b = s.buttons & ~(kClZR | kClZL | kClR);
+    if (s.buttons & kClZR) b |= kClR;
     if (s.buttons & kClZL) b |= kClZR;
-    if (s.buttons & kClY) b |= kClZL;
+    if (s.buttons & kClR) b |= kClZL;
     s.buttons = b;
 }
 
