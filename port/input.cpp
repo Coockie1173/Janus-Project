@@ -113,6 +113,11 @@ bool local_aim_blend(float& blend) {
 }
 float aim_sens_scale(uint32_t ctrl) { return 1.0f + (g_ads_sens - 1.0f) * aim_blend(ctrl); }
 
+uint32_t local_controller() {
+    uint32_t ctrl = g_local_ctrl;
+    return guest_ptr(ctrl) && guest_ptr(ld32(kPlayerPtr)) && ld32(kFrameCount) - g_local_frame < 4 ? ctrl : 0;
+}
+
 //for the overlay: the local player's state, false if there's none (menus, loading)
 bool local_player_state(uint32_t& state) {
     uint32_t ctrl = g_local_ctrl;

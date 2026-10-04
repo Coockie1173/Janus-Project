@@ -5,6 +5,7 @@
 //fov.cpp the field of view
 //gecko.cpp gecko codes run each frame
 //cutscenes.cpp skip cutscenes
+//qte.cpp quick time events that press their own buttons
 //tweaks.cpp the level timer and the unused extras menu
 //native.cpp the engine's hot math routines written for the host
 //net.cpp the hosts file for the game's servers
@@ -52,6 +53,7 @@ float mouse_sens(); //1 is the default, 0 no mouse look
 void set_mouse_sens(float s);
 int mouse_mode(); //0 auto, 1 direct, 2 stick
 void set_mouse_mode(int m);
+uint32_t local_controller(); //0 when there's none (menus, loading)
 bool local_player_state(uint32_t& state); //the controller's +0x704 for the local player
 bool mouse_invert();
 void set_mouse_invert(bool on);
@@ -80,6 +82,9 @@ void install_native(); //native.cpp
 void install_cutscenes(); //cutscenes.cpp
 bool skip_cutscenes(); //missions start at the checkpoint after their opening
 void set_skip_cutscenes(bool on);
+void install_qte(); //qte.cpp
+bool auto_qte(); //quick time events press their own buttons
+void set_auto_qte(bool on);
 void install_tweaks(); //tweaks.cpp
 void tweaks_apply();
 bool level_timer(); //the hud shows the level's time

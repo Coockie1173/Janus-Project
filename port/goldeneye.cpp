@@ -17,6 +17,7 @@
 //GE_FOV=D field of view in degrees (the game's is 49)
 //GE_ADS_FOV=D field of view aiming down the sight (the game's is 22.5 with the pistol)
 //GE_SKIP_CUTSCENES=1 missions start at the checkpoint after the opening cutscene
+//GE_AUTO_QTE=1 quick time events press their own buttons
 //GE_LEVEL_TIMER=0 no level timer in the hud
 //GE_EXTRAS_MENU=1 cheat, the menu's unused extras page
 //GE_SETTINGS=N start with the settings menu (F1) open on page N
@@ -52,6 +53,7 @@ void install() {
     install_fps();
     install_native();
     install_cutscenes();
+    install_qte();
     install_tweaks();
     if (std::getenv("GE_TRACE")) {
         orig_main = ppc_hook("main", [](PPCContext& c) {

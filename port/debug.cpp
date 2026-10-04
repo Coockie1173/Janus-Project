@@ -9,6 +9,8 @@
 //(build/scan.txt) that changed over every odd interval and stood still over every even one
 //turn the view with GE_STICK in the odd ones and the view's angles are in there
 //GE_SCANINT=1 does it with raw words instead
+//GE_SCANPAT="==+.-" gives the rule itself, a letter for each pair of snapshots: = the same word,
+//! another, + - a float gone up or down, u d a word gone up or down, anything else: no rule
 //GE_POKE="50:80ABCDEF=f1.5 52:80ABCDEF+=f0.2" store or add a float (f) or a hex word (x)
 //GE_PROBE="64:816F0270:build/cands.txt" for each address in the file add 0.35 to its float,
 //wait 80 ms, say if the watched float followed, then put it back
@@ -95,6 +97,38 @@ void scan_main(std::vector<double> times) {
     FILE* out = std::fopen("build/scan.txt", "w");
     if (!out) return;
     size_t n = snaps[0].size(), found = 0;
+    if (const char* pat = std::getenv("GE_SCANPAT")) { //its own rule a pair of snapshots
+        size_t pairs = std::min(std::strlen(pat), snaps.size() - 1);
+        for (size_t off = 0; off + 4 <= n; off += 4) {
+            bool ok = true;
+            for (size_t i = 0; ok && i < pairs; ++i) {
+                uint32_t wa, wb;
+                std::memcpy(&wa, &snaps[i][off], 4);
+                std::memcpy(&wb, &snaps[i + 1][off], 4);
+                float a = fl(snaps[i], off), b = fl(snaps[i + 1], off);
+                bool sane = std::isfinite(a) && std::isfinite(b) && std::fabs(a) < 1e6f && std::fabs(b) < 1e6f;
+                switch (pat[i]) {
+                case '=': ok = wa == wb; break;
+                case '!': ok = wa != wb; break;
+                case '+': ok = sane && b > a; break;
+                case '-': ok = sane && b < a; break;
+                case 'u': ok = __builtin_bswap32(wb) > __builtin_bswap32(wa); break;
+                case 'd': ok = __builtin_bswap32(wb) < __builtin_bswap32(wa); break;
+                default: break; //anything
+                }
+            }
+            if (!ok) continue;
+            uint32_t addr = off < 0x01800000u ? 0x80000000u + (uint32_t)off : 0x90000000u + (uint32_t)(off - 0x01800000u);
+            std::fprintf(out, "%08X", addr);
+            for (auto& sn : snaps) std::fprintf(out, " %02X%02X%02X%02X", sn[off], sn[off + 1], sn[off + 2], sn[off + 3]);
+            for (auto& sn : snaps) std::fprintf(out, " %g", fl(sn, off));
+            std::fprintf(out, "\n");
+            ++found;
+        }
+        std::fclose(out);
+        rt_log("scan: %zu words in build/scan.txt", found);
+        return;
+    }
     if (std::getenv("GE_SCANINT")) { //words instead (flags, counters), same rule on raw values
         for (size_t off = 0; off + 4 <= n; off += 4) {
             bool ok = true;
