@@ -15,6 +15,8 @@
 //
 //GE_SKIP_CUTSCENES=1 on
 //GE_SKIP_SPEED=N the highest speed (32)
+//GE_ENTRANCE=N start every mission at entrance N instead of 1, for trying out a level's
+//entrances (0 is one too). nothing is fast-forwarded then
 //GE_TRACE=1 log every checkpoint
 #include "ge.h"
 #include <algorithm>
@@ -58,6 +60,7 @@ PPCFunc orig_level_change = nullptr;
 PPCFunc orig_frame_draw = nullptr;
 bool g_restarting = false; //the menu's restart action is running
 bool g_trace = false;
+int g_forced_entrance = -1; //GE_ENTRANCE
 double g_top_speed = 32.0;
 Skip g_state = Skip::Idle;
 uint32_t g_frames = 0; //frames in this state
@@ -172,7 +175,15 @@ void MenuPending(PPCContext& c)
 	if (acts && ld32(menu + kPendingAction) == kActionLoadLevel)
 	{
 		//a level loaded at a checkpoint or for split screen has no opening to wait for
-		if (StartsCampaignLevel(menu) && ld32(menu + kPendingEntrance) == kMissionStart) Arm(ld32(menu + kPendingLevel));
+		if (StartsCampaignLevel(menu) && ld32(menu + kPendingEntrance) == kMissionStart)
+		{
+			if (g_forced_entrance >= 0)
+			{
+				st32(menu + kPendingEntrance, (uint32_t)g_forced_entrance);
+				rt_log("goldeneye: level %08X starts at entrance %d (GE_ENTRANCE)", ld32(menu + kPendingLevel), g_forced_entrance);
+			}
+			else Arm(ld32(menu + kPendingLevel));
+		}
 		else Stop("a level change");
 	}
 	orig_menu_pending(c);
@@ -185,7 +196,15 @@ void LevelChange(PPCContext& c)
 	uint32_t app = ld32(kAppPtr), level = c.r[4];
 	if (g_restarting)
 	{
-		if (guest_ptr(app) && ld32(app + kAppEntrance) <= kMissionStart) Arm(level);
+		if (guest_ptr(app) && ld32(app + kAppEntrance) <= kMissionStart)
+		{
+			if (g_forced_entrance >= 0)
+			{
+				st32(app + kAppEntrance, (uint32_t)g_forced_entrance);
+				rt_log("goldeneye: level %08X restarts at entrance %d (GE_ENTRANCE)", level, g_forced_entrance);
+			}
+			else Arm(level);
+		}
 		else Stop("a level change");
 	}
 	else if (g_state == Skip::Running) Stop("a level change");
@@ -224,6 +243,7 @@ void cutscenes_frame()
 void install_cutscenes()
 {
 	if (const char* e = std::getenv("GE_SKIP_CUTSCENES")) g_skip_cutscenes = std::atoi(e) != 0;
+	if (const char* e = std::getenv("GE_ENTRANCE")) g_forced_entrance = std::atoi(e);
 	if (const char* e = std::getenv("GE_SKIP_SPEED")) g_top_speed = std::clamp(std::atof(e), 1.0, 64.0);
 	g_trace = std::getenv("GE_TRACE") != nullptr;
 	orig_menu_pending = ppc_hook("ge_menu_pending", MenuPending);
