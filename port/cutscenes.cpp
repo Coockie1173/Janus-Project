@@ -246,8 +246,28 @@ bool skip_cutscenes() { return g_skip_cutscenes; }
 void set_skip_cutscenes(bool on) { g_skip_cutscenes = on; }
 bool skipping_cutscene() { return g_running; }
 
+//GE_TRACE: how long each frame took from the easing on to a while after the skip
+void TraceFrames()
+{
+	static Clock::time_point last = Clock::now();
+	static int after = -1;
+	static std::string line;
+	auto now = Clock::now();
+	double ms = std::chrono::duration<double, std::milli>(now - last).count();
+	last = now;
+	bool easing = g_state == Skip::Running && g_ends > 0 && g_ends - ldf(kLevelTimer) < kEaseSeconds;
+	if (easing) { after = 90; line += "e"; }
+	else if (after <= 0) return;
+	else --after;
+	char text[32];
+	std::snprintf(text, sizeof text, "%.0f(%.0f) ", ms, engine_rate());
+	line += text;
+	if (after == 0) { rt_log("goldeneye: skip cutscenes: frame times in ms (engine rate): %s", line.c_str()); line.clear(); }
+}
+
 void cutscenes_frame()
 {
+	if (g_trace) TraceFrames();
 	if (g_state == Skip::Running) { Run(); return; }
 	if (g_state != Skip::Waiting) return;
 	uint32_t state;

@@ -43,6 +43,7 @@ void install_fps();
 void set_fast_forward(bool on, float easeRate = 0.0f);
 float skip_rate(); //frames a second of game time in the long steps
 uint32_t engine_top_rate();
+float engine_rate(); //the rate the engine steps at right now
 const uint32_t kGameFps = 30;
 uint32_t fps_limit(); //the most frames a second the engine may run
 void set_fps_limit(uint32_t fps);

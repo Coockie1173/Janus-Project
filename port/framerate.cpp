@@ -89,7 +89,12 @@ void frame_tick(PPCContext& c) {
     //and the disc see the same time go by as the game does
     //easing out of it (g_ease_rate): the steps get shorter and each frame stays up for one
     //frame of our own rate, so the clock only jumps what a step is longer than that
-    if (fast) {
+    //each_frame may just have ended the skip: then the engine goes on at its highest rate,
+    //left at the long steps' it would take a second of very slow frames to climb back
+    static bool skipping = false;
+    if (skipping && !g_fast) stf(kFpsNow, (float)engine_top_rate());
+    skipping = g_fast;
+    if (skipping) {
         float ease = g_ease_rate;
         uint32_t top = engine_top_rate();
         stf(kFpsNow, ease > 0 ? std::min(ease, (float)top) : g_skip_rate.load());
@@ -117,7 +122,7 @@ void frame_tick(PPCContext& c) {
     //so put the rate back to where it was minus 1, and let a climbing rate climb 4 a frame
     //a machine that really can't hold the rate still comes down 1 per late frame
     static float before = 0;
-    if (fast) before = 0;
+    if (fast || skipping) before = 0;
     else if (fps) {
         static const bool keep = !std::getenv("GE_NO_RATE_FIX");
         float rate = ldf(kFpsNow), top = (float)ld32(kFpsMax);
@@ -183,6 +188,7 @@ void set_fast_forward(bool on, float easeRate)
 	g_ai_catch_up = on;
 }
 float skip_rate() { return g_skip_rate; }
+float engine_rate() { return ldf(kFpsNow); }
 //the highest rate the engine goes to right now (the game lowers it for some scenes)
 uint32_t engine_top_rate()
 {
