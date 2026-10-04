@@ -26,6 +26,7 @@
 //GE_EXTRAS_MENU=1 cheat, the menu's unused extras page
 //GE_UNLOCK_ALL=1 cheat, every mission and difficulty unlocked
 //GE_NOCLIP=1 cheat, start flying through walls
+//GE_COLLISION=1 cheat, the level's collision is drawn in place of the world
 //GE_SETTINGS=N start with the settings menu (F1) open on page N
 //GE_FPS=N frame rate the engine may reach (30 by default, auto is 60)
 //GE_NATIVE=0 run the recompiled math routines instead of the host ones
@@ -44,6 +45,7 @@ void each_frame(uint32_t frame) {
     fov_apply();
     cutscenes_frame();
     mouse_frame(frame);
+    collision_frame();
 }
 
 namespace {
@@ -66,6 +68,7 @@ void install() {
     install_files();
     install_tank();
     install_noclip();
+    install_collision();
     install_autosave();
     install_weapons();
     if (std::getenv("GE_TRACE")) {
