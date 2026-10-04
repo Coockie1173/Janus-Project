@@ -38,11 +38,11 @@ Keyboard and mouse:
     W A S D          move                 Mouse            look
     Left button      fire                 Right button     aim down the sight
     Mouse wheel      change weapon        R                reload
-    Left Ctrl        crouch               Left Shift / E   sprint / action
+    Left Ctrl        crouch               Left Shift       sprint
     G                grenade              V                melee attack
     T                cycle grenades       B                firing mode
     F                smartphone           Tab              night vision / scoreboard
-    P                pause                Esc              free the mouse
+    Esc, P           pause                E                action
     F11, Alt+Enter   fullscreen           F1               settings menu
 In menus the left mouse button selects and the right one goes back
 (Return and Backspace do too).

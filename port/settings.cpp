@@ -8,6 +8,7 @@
 //menu show the same thing
 //
 //while it's up the game gets no input, and a game in play gets paused first (a press of +)
+//Esc outside the menu is + as well (the game's own pause), it never gets to the runtime's pause box
 //keys: arrows or WASD, Return, Esc or Backspace to go back, Delete to clear a binding
 //the mouse and a gamepad's D-pad, A and B work too
 //
@@ -46,6 +47,7 @@ namespace {
 using Clock = std::chrono::steady_clock;
 std::atomic<bool> g_open{false};
 std::atomic<Clock::rep> g_pause_until{0}; //+ is held until then (settings_buttons)
+std::atomic<bool> g_escape{false}; //Esc is down, pressed with the menu closed
 const uint32_t kClPlus = 0x0400;
 
 #ifdef GE_IMGUI
@@ -165,7 +167,7 @@ void save_keys() {
 struct Action { const char* label; const char* name; };
 const Action kActions[] = {
     {"Fire", "ZR"}, {"Aim", "ZL"}, {"Melee Attack", "L"}, {"Throw Grenade (doubles as R button)", "R"}, {"Reload", "Y"},
-    {"Crouch", "A"}, {"Action / Sprint", "B"}, {"Cycle Grenades", "X"}, {"Next Weapon", "Right"},
+    {"Crouch", "A"}, {"Action", "B"}, {"Sprint", "Extra 1"}, {"Cycle Grenades", "X"}, {"Next Weapon", "Right"},
     {"Previous Weapon", "Left"}, {"Firing Mode", "Up"}, {"Smartphone", "Down"}, {"Night Vision / Scores", "Minus"},
     {"Pause", "Plus"}, {"Move Forward", "Left Stick Up"}, {"Move Back", "Left Stick Down"},
     {"Move Left", "Left Stick Left"}, {"Move Right", "Left Stick Right"}};
@@ -396,6 +398,22 @@ void bind(const std::string& key) {
     }
     save_keys();
     g_listening = -1;
+}
+
+//a key file from before sprint had a key of its own: Left Shift goes from the action to the sprint
+//once the runtime has read the file (the first event comes after)
+void add_sprint_binding() {
+    static bool done = false;
+    if (done || video_keys_path().empty()) return;
+    done = true;
+    load_keys();
+    if (g_keys.lines.empty() || g_keys.find("Extra 1") >= 0) return;
+    auto keys = g_keys.keys("B");
+    std::erase_if(keys, [](const std::string& k) { return !SDL_strcasecmp(k.c_str(), "Left Shift"); });
+    g_keys.set_keys("B", keys);
+    g_keys.set("Extra 1", "Left Shift");
+    save_keys();
+    rt_log("goldeneye: sprint is on Left Shift now, on its own (Extra 1 in %s)", video_keys_path().c_str());
 }
 
 //opening, closing, moving
@@ -690,7 +708,7 @@ void pad_down(int button) {
 bool settings_open() { return g_open; }
 
 uint32_t settings_buttons() {
-    return Clock::now().time_since_epoch().count() < g_pause_until ? kClPlus : 0;
+    return g_escape || Clock::now().time_since_epoch().count() < g_pause_until ? kClPlus : 0;
 }
 
 #ifdef GE_IMGUI
@@ -709,6 +727,12 @@ void settings_init() {
 //true for the events the menu takes: while it's up that's every key except the window's own
 //(fullscreen, the GX trace), the mouse and the pads' buttons
 bool settings_event(const SDL_Event* e) {
+    add_sprint_binding();
+    if (e->type == SDL_EVENT_KEY_UP && e->key.scancode == SDL_SCANCODE_ESCAPE) g_escape = false;
+    if (!g_open && e->type == SDL_EVENT_KEY_DOWN && e->key.scancode == SDL_SCANCODE_ESCAPE) {
+        g_escape = true;
+        return true;
+    }
     if (e->type == SDL_EVENT_KEY_DOWN && e->key.scancode == SDL_SCANCODE_F1) {
         if (!e->key.repeat) open(!g_open);
         return true;

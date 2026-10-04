@@ -46,7 +46,7 @@ IMAGE_TYPES = [("Wii disc images", "*.rvz *.iso *.wbfs *.wia"), ("All files", "*
 #what the game does with each Classic Controller button (its default layout), and the key file's name for it
 ACTIONS = [
     ("Fire", "ZR"), ("Aim down the sight", "ZL"), ("Melee attack", "L"), ("Throw grenade  (doubles as R button)", "R"),
-    ("Reload", "Y"), ("Crouch  (menus: select)", "A"), ("Action / sprint  (menus: back)", "B"),
+    ("Reload", "Y"), ("Crouch  (menus: select)", "A"), ("Action  (menus: back)", "B"), ("Sprint", "Extra 1"),
     ("Cycle grenades", "X"), ("Next weapon", "Right"), ("Previous weapon", "Left"),
     ("Firing mode", "Up"), ("Smartphone", "Down"), ("Night vision / scoreboard", "Minus"),
     ("Pause", "Plus"), ("Home menu", "Home"),

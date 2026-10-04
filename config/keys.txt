@@ -3,7 +3,7 @@
 # Space, Tab, Backspace, Left Shift, Up, Down, Left, Right, Keypad Enter, F1..F10...
 # Mouse buttons: Mouse Left, Mouse Right, Mouse Middle, Mouse X1, Mouse X2; Drag Left, Drag Right,
 # Drag Middle: the button held and the mouse moving fast (a swing: Shake = Drag Left).
-# Fixed: Esc (the pause box), F11 and Alt+Enter (fullscreen), F12 (trace a frame's GX commands). Delete the file for the defaults.
+# Fixed: Esc (pause; the pause box where a port has no menu of its own), F11 and Alt+Enter (fullscreen), F12 (trace a frame's GX commands). Delete the file for the defaults.
 A     = Return, Keypad Enter, Mouse Left
 B     = Backspace, Mouse Right
 Up    = W, Up
@@ -29,13 +29,14 @@ Input        = Auto
 Face Buttons = Position
 Dead Zone    = 0.15
 # GoldenEye's default Classic layout ("Goldfinger Pro"), as the game answers to it: ZR fires, ZL aims
-# down the sight, L is the melee attack, R throws a grenade, a crouches, b is action and sprint, y
+# down the sight, L is the melee attack, R throws a grenade, a crouches, b is the action, y
 # reloads, x cycles grenades, D-pad left and right cycle weapons (the mouse wheel does too), up is the
-# firing mode, down the smartphone, - night vision and the scoreboard, + pauses.
+# firing mode, down the smartphone, - night vision and the scoreboard, + pauses (Esc does too).
+# Sprint is on a key of its own here, Extra 1 (a pad's left stick pressed in); on the Wii it's b as well.
 # In menus (and the pause menu) a selects and b goes back; there the port also takes ZR as a and ZL as
 # b, so the left mouse button selects and the right one goes back.
 A     = Left Ctrl, Return
-B     = Left Shift, E, Space, Backspace
+B     = E, Space, Backspace
 X     = T
 Y     = R
 L     = V, Mouse X1
@@ -57,3 +58,4 @@ Right Stick Up    =
 Right Stick Down  =
 Right Stick Left  =
 Right Stick Right =
+Extra 1 = Left Shift

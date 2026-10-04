@@ -2,7 +2,7 @@
 //times are seconds from start
 //
 //GE_STICK="42-43:r1,0 45-46:l0,1" hold a stick (r or l, then x,y in -1..1 with y up)
-//GE_BUTTONS="66-66.3:0004 69-70:2000" hold classic buttons, KPAD's bits in hex
+//GE_BUTTONS="66-66.3:0004 69-70:2000" hold classic buttons, KPAD's bits in hex (10000 on: Extra 1...)
 //(ZR 0004, ZL 0080, R 0200, L 2000, a 0010, b 0040, x 0008, y 0020)
 //GE_MOUSEMOVE="66-67:300,0" fake mouse motion in pixels a second (x right, y down)
 //GE_SCAN="41,43.5,44.5,46.5,49" snapshots guest memory at those times, then lists the floats
@@ -407,7 +407,8 @@ void debug_classic(ClassicState& s) {
     double t = script_s();
     for (auto& p : presses)
         if (t >= p.a && t < p.b) {
-            s.buttons |= p.bits;
+            s.buttons |= p.bits & 0xFFFF;
+            s.extra |= p.bits >> 16; //10000 is Extra 1, the sprint
             if (p.bits & 0x2000) s.lt = 1.0f; //L and R are also analogue triggers
             if (p.bits & 0x0200) s.rt = 1.0f;
         }

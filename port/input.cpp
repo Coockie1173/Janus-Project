@@ -196,11 +196,50 @@ void look_apply(PPCContext& c) {
     stf(ctrl + 0x97C, ldf(ctrl + 0x97C) - add);
 }
 
+const uint32_t kClA = 0x0010, kClB = 0x0040, kClZR = 0x0004, kClZL = 0x0080; //KPAD's classic bits
+
+//sprint on a key of its own. the game has action and sprint on one button (the classic's b)
+//the frame's input is copied into the controller by fn_80108350: +0x534 the actions pressed
+//this frame, +0x538 the ones held, and bit 4 of both is action and sprint
+//the sprint reads it in three places: fn_8010D970 starts one on a press (and ends it),
+//fn_8010DAF0 ends one and PlayerSprint (8010DB10) refills it, both note at +0xE64 whether
+//the button is still down (a new sprint needs it let go first)
+//for those three calls bit 4 is the sprint key (the key file's Extra 1) and b is only the action
+//only for the local controller: split screen's other players keep b, and in a game someone
+//else hosts the host works out the sprint from b, so there the sprint key presses b
+const uint32_t kActPressed = 0x534, kActHeld = 0x538, kActSprint = 4;
+const uint32_t kExtraSprint = 1;
+std::atomic<bool> g_sprint_key{false}; //as the pad was last read
+bool g_sprint_held = false, g_sprint_pressed = false; //for this game frame
+PPCFunc orig_sprint[3];
+
+void sprint_buttons(ClassicState& s) {
+    g_sprint_key = (s.extra & kExtraSprint) != 0;
+    if (g_sprint_key && joined_game()) s.buttons |= kClB;
+}
+
+void sprint_frame() {
+    bool down = g_sprint_key;
+    g_sprint_pressed = down && !g_sprint_held;
+    g_sprint_held = down;
+}
+
+template <int I> void sprint_read(PPCContext& c) {
+    uint32_t ctrl = c.r[3];
+    if (ctrl != g_local_ctrl || ld32(kFrameCount) - g_local_frame >= 4 || joined_game()) { orig_sprint[I](c); return; }
+    uint32_t pressed = ld32(ctrl + kActPressed), held = ld32(ctrl + kActHeld);
+    st32(ctrl + kActPressed, (pressed & ~kActSprint) | (g_sprint_pressed ? kActSprint : 0));
+    st32(ctrl + kActHeld, (held & ~kActSprint) | (g_sprint_held ? kActSprint : 0));
+    orig_sprint[I](c);
+    st32(ctrl + kActPressed, (ld32(ctrl + kActPressed) & ~kActSprint) | (pressed & kActSprint));
+    st32(ctrl + kActHeld, (ld32(ctrl + kActHeld) & ~kActSprint) | (held & kActSprint));
+}
+
 void controller_update(PPCContext& c) {
     uint32_t ctrl = c.r[3], frame = ld32(kFrameCount);
     uint32_t player = guest_ptr(ctrl) ? ld32(ctrl + 4) : 0;
     bool forced = false;
-    if (g_mouse_sens > 0 && frame != g_local_frame && guest_ptr(player)) {
+    if (frame != g_local_frame && guest_ptr(player)) {
         PPCContext saved = c; //the game's own test, registers put back after
         controller_not_local(c);
         bool local = (int8_t)c.r[3] == 0;
@@ -208,6 +247,7 @@ void controller_update(PPCContext& c) {
         if (local) {
             g_local_frame = frame;
             g_local_ctrl = ctrl;
+            sprint_frame();
             static uint32_t said = ~0u;
             uint32_t st = ld32(ctrl + kPlayerState), now = st << 8 | look_mode(ctrl);
             if (now != said && std::getenv("GE_TRACE")) {
@@ -215,7 +255,7 @@ void controller_update(PPCContext& c) {
                 rt_log("goldeneye: player state %X: the mouse %s", st, look_name(look_mode(ctrl)));
             }
             Look look = look_mode(ctrl);
-            if (!ld8(kPaused) && !overlay_open() && look != kLookLocked && !mouse_on_stick()) {
+            if (g_mouse_sens > 0 && !ld8(kPaused) && !overlay_open() && look != kLookLocked && !mouse_on_stick()) {
                 g_look_frame = frame;
                 if (look == kLookAim) mouse_aim(ctrl);
                 else mouse_look(ctrl, player);
@@ -284,7 +324,6 @@ void wheel_buttons(ClassicState& s) {
 //"in play" is a player and no pause (the byte at 806EB69C, found by pausing under a word scan)
 //a trigger held when a menu closes stays out of play until it's let go, so selecting
 //"Continue" doesn't fire a shot
-const uint32_t kClA = 0x0010, kClB = 0x0040, kClZR = 0x0004, kClZL = 0x0080;
 
 
 //aim lock: a press of aim stays aimed until the next one, to the game it's held all along
@@ -377,6 +416,7 @@ void classic_filter(int chan, ClassicState& s) {
     mouse_stick(s);
     wheel_buttons(s);
     debug_classic(s);
+    sprint_buttons(s);
     aim_lock_buttons(s);
     menu_buttons(s);
 }
@@ -397,6 +437,10 @@ void install_mouse() {
     orig_look_sens[0] = ppc_hook("ge_look_sens", look_sens<0>);
     orig_look_sens[1] = ppc_hook("ge_look_sens_ads", look_sens<1>);
     if (!orig_look_sens[0] || !orig_look_sens[1]) rt_die("goldeneye: the sensitivity readers are not hooked in this build");
+    orig_sprint[0] = ppc_hook("ge_sprint_update", sprint_read<0>);
+    orig_sprint[1] = ppc_hook("ge_sprint_end", sprint_read<1>);
+    orig_sprint[2] = ppc_hook("PlayerSprint", sprint_read<2>);
+    if (!orig_sprint[0] || !orig_sprint[1] || !orig_sprint[2]) rt_die("goldeneye: the sprint is not hooked in this build");
     video_set_relative_mouse(g_mouse_sens > 0);
 }
 
