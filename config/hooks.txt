@@ -15,6 +15,7 @@ ge_look_sens_ads
 ge_sprint_update       # the sprint's three readers of the action button: the sprint key in its place
 ge_sprint_end
 PlayerSprint
+ge_action_update       # the vault and the climb are asked for at its end: the sprint key counts there too
 ge_box_clip_codes      # the engine's paired-single math, replaced by host code (port/native.cpp)
 ge_skin1
 ge_skin2

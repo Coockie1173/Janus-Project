@@ -210,6 +210,13 @@ const uint32_t kClA = 0x0010, kClB = 0x0040, kClZR = 0x0004, kClZL = 0x0080; //K
 //fn_8010DAF0 ends one and PlayerSprint (8010DB10) refills it, both note at +0xE64 whether
 //the button is still down (a new sprint needs it let go first)
 //for those three calls bit 4 is the sprint key (the key file's Extra 1) and b is only the action
+//a climb or a vault is the same button with the stick forward, in fn_8010A260 (the actions' update)
+//it goes through the actions on offer (four at 805D4020, 0x1C each: the id, 0x46500001 for none,
+//at +0x10 the button's bit, at +0x14 0 for a press, 1 for held and 2 for let go, at +0x15 set
+//when the stick has to be forward: "stick up + b, Climb") and with none taken its end sets the
+//bytes at +0xBAA and +0xF58 from bit 4 of +0x538 held while moving
+//for that call the sprint key is b too while an action with the stick forward is on offer,
+//and counts as held for the end unless an action on offer is "hold b". the other actions stay b's
 //only for the local controller: split screen's other players keep b, and in a game someone
 //else hosts the host works out the sprint from b, so there the sprint key presses b
 const uint32_t kActPressed = 0x534, kActHeld = 0x538, kActSprint = 4;
@@ -236,6 +243,32 @@ template <int I> void sprint_read(PPCContext& c) {
     st32(ctrl + kActPressed, (pressed & ~kActSprint) | (g_sprint_pressed ? kActSprint : 0));
     st32(ctrl + kActHeld, (held & ~kActSprint) | (g_sprint_held ? kActSprint : 0));
     orig_sprint[I](c);
+    st32(ctrl + kActPressed, (ld32(ctrl + kActPressed) & ~kActSprint) | (pressed & kActSprint));
+    st32(ctrl + kActHeld, (ld32(ctrl + kActHeld) & ~kActSprint) | (held & kActSprint));
+}
+
+const uint32_t kActions = 0x805D4020, kActionSize = 0x1C, kActionNone = 0x46500001;
+PPCFunc orig_action_update = nullptr;
+void action_update(PPCContext& c) {
+    uint32_t ctrl = c.r[3];
+    if (ctrl != g_local_ctrl || ld32(kFrameCount) - g_local_frame >= 4 || joined_game() || !g_sprint_held) { orig_action_update(c); return; }
+    bool forward = false, hold = false; //an action on b with the stick forward is on offer, or one that's "hold b"
+    for (uint32_t a = kActions; a < kActions + 4 * kActionSize; a += kActionSize) {
+        if (ld32(a) == kActionNone || ld32(a + 0x10) != kActSprint) continue;
+        if (ld8(a + 0x15) != 0) {
+            forward = true;
+            static uint32_t said = 0;
+            if (said != ld32(a) && std::getenv("GE_TRACE")) {
+                said = ld32(a);
+                rt_log("goldeneye: action %08X (kind %u) is on b with the stick forward, the sprint key does it too", said, ld8(a + 0x14));
+            }
+        } else if (ld8(a + 0x14) == 1) hold = true;
+    }
+    if (!forward && hold) { orig_action_update(c); return; }
+    uint32_t pressed = ld32(ctrl + kActPressed), held = ld32(ctrl + kActHeld);
+    if (forward && g_sprint_pressed) st32(ctrl + kActPressed, pressed | kActSprint);
+    st32(ctrl + kActHeld, held | kActSprint);
+    orig_action_update(c);
     st32(ctrl + kActPressed, (ld32(ctrl + kActPressed) & ~kActSprint) | (pressed & kActSprint));
     st32(ctrl + kActHeld, (ld32(ctrl + kActHeld) & ~kActSprint) | (held & kActSprint));
 }
@@ -445,7 +478,8 @@ void install_mouse() {
     orig_sprint[0] = ppc_hook("ge_sprint_update", sprint_read<0>);
     orig_sprint[1] = ppc_hook("ge_sprint_end", sprint_read<1>);
     orig_sprint[2] = ppc_hook("PlayerSprint", sprint_read<2>);
-    if (!orig_sprint[0] || !orig_sprint[1] || !orig_sprint[2]) rt_die("goldeneye: the sprint is not hooked in this build");
+    orig_action_update = ppc_hook("ge_action_update", action_update);
+    if (!orig_sprint[0] || !orig_sprint[1] || !orig_sprint[2] || !orig_action_update) rt_die("goldeneye: the sprint is not hooked in this build");
     video_set_relative_mouse(g_mouse_sens > 0);
 }
 

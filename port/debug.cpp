@@ -342,7 +342,7 @@ void peek_main(std::vector<uint32_t> addrs) {
 //"m T dx dy" mouse motion in pixels
 //"a" the local player appeared or went (a level loaded or was left), the times after it count from there
 //loads never take the same time twice, so the replay waits for each "a" to happen
-struct RecPad { double t; uint32_t buttons; float lx, ly, rx, ry, lt, rt; };
+struct RecPad { double t; uint32_t buttons; float lx, ly, rx, ry, lt, rt; uint32_t extra; }; //extra: the sprint key and its like, 0 in an old recording
 struct RecMove { double t; float dx, dy; };
 struct RecPart { std::vector<RecPad> pads; std::vector<RecMove> moves; };
 std::mutex rec_lock;
@@ -356,7 +356,7 @@ bool rec_invert = false;
 RecPad rec_now{};
 
 bool same_pad(const RecPad& a, const ClassicState& s) {
-    return a.buttons == s.buttons && a.lx == s.lx && a.ly == s.ly && a.rx == s.rx && a.ry == s.ry && a.lt == s.lt && a.rt == s.rt;
+    return a.buttons == s.buttons && a.lx == s.lx && a.ly == s.ly && a.rx == s.rx && a.ry == s.ry && a.lt == s.lt && a.rt == s.rt && a.extra == s.extra;
 }
 
 bool load_recording(const char* path) {
@@ -369,7 +369,7 @@ bool load_recording(const char* path) {
         RecMove m{};
         int inv = 0;
         if (line[0] == 'a') rec_parts.emplace_back();
-        else if (std::sscanf(line, "c %lf %x %f %f %f %f %f %f", &p.t, &p.buttons, &p.lx, &p.ly, &p.rx, &p.ry, &p.lt, &p.rt) == 8)
+        else if (std::sscanf(line, "c %lf %x %f %f %f %f %f %f %x", &p.t, &p.buttons, &p.lx, &p.ly, &p.rx, &p.ry, &p.lt, &p.rt, &p.extra) >= 8)
             rec_parts.back().pads.push_back(p);
         else if (std::sscanf(line, "m %lf %f %f", &m.t, &m.dx, &m.dy) == 3) rec_parts.back().moves.push_back(m);
         else if (std::sscanf(line, "sens %f %d", &rec_sens, &inv) == 2) rec_invert = inv != 0;
@@ -403,8 +403,8 @@ void record_classic(ClassicState& s) {
         static bool head = false; //written here, the mouse's settings aren't read yet at install
         if (!head) { head = true; std::fprintf(rec_out, "sens %g %d\n", ge::mouse_sens(), (int)ge::mouse_invert()); }
         if (same_pad(rec_now, s)) return;
-        rec_now = {t, s.buttons, s.lx, s.ly, s.rx, s.ry, s.lt, s.rt};
-        std::fprintf(rec_out, "c %.3f %04X %g %g %g %g %g %g\n", t, s.buttons, s.lx, s.ly, s.rx, s.ry, s.lt, s.rt);
+        rec_now = {t, s.buttons, s.lx, s.ly, s.rx, s.ry, s.lt, s.rt, s.extra};
+        std::fprintf(rec_out, "c %.3f %04X %g %g %g %g %g %g %X\n", t, s.buttons, s.lx, s.ly, s.rx, s.ry, s.lt, s.rt, s.extra);
         std::fflush(rec_out);
         return;
     }
@@ -412,6 +412,7 @@ void record_classic(ClassicState& s) {
     const RecPart& part = rec_parts[rec_part];
     while (rec_pad < part.pads.size() && part.pads[rec_pad].t <= t) rec_now = part.pads[rec_pad++];
     s.buttons = rec_now.buttons;
+    s.extra = rec_now.extra;
     s.lx = rec_now.lx; s.ly = rec_now.ly; s.rx = rec_now.rx; s.ry = rec_now.ry; s.lt = rec_now.lt; s.rt = rec_now.rt;
     if (rec_part + 1 == rec_parts.size() && rec_pad == part.pads.size() && rec_move == part.moves.size()) replay_done();
 }
