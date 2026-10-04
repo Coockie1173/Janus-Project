@@ -4,7 +4,7 @@ rem     Play.bat --no-gui               straight to the game, with the saved set
 rem     Play.bat --extract GAME.rvz     take the game's files out of a disc image (.rvz .iso .wbfs) into "game"
 rem     Play.bat --fps 120 --fov 70 --mouse 1.5 --fullscreen --fast-start --cheats
 rem     Play.bat --always-mouse         the cheat "Always Enable Mouse": mouse look in every player state
-rem     Play.bat --skip-cutscenes       a mission's opening cutscene is fast-forwarded
+rem     Play.bat --skip-cutscenes       a mission's opening cutscene is skipped
 rem     Play.bat --no-level-timer       the hud without the level's time (it is on by default)
 rem     Play.bat --auto-qte             quick time events press their own buttons
 rem     Play.bat --extras-menu          the cheat "Unused Extras Menu"

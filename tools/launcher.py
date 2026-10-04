@@ -370,7 +370,7 @@ def run_gui():
     book.add(en, text="Enhancements")
     skip_cutscenes = tk.BooleanVar(value=settings["skipcutscenes"] == "1")
     ttk.Checkbutton(en, text="Skip Intro Cutscenes (Experimental)", variable=skip_cutscenes).grid(row=0, column=0, sticky="w", **pad)
-    ttk.Label(en, text="A mission's opening cutscene is fast-forwarded.",
+    ttk.Label(en, text="A mission's opening cutscene is skipped.",
               foreground="gray", wraplength=520, justify="left").grid(row=1, column=0, sticky="w", padx=(30, 8))
     level_timer = tk.BooleanVar(value=settings["leveltimer"] == "1")
     ttk.Checkbutton(en, text="Level Timer", variable=level_timer).grid(row=2, column=0, sticky="w", **pad)

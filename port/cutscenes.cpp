@@ -1,28 +1,44 @@
-//skip cutscenes: a mission's opening cutscene is fast-forwarded
+//skip cutscenes: a mission's opening cutscene is played through in about a second
 //
 //the game has no way past a cutscene, and starting at the checkpoint after it (what this did
-//before) isn't the same level: scripts that ran in the opening never run. so the opening plays,
-//only very fast: the runtime's clock runs many times as quick (rt_set_speed), so frames, sound,
-//timers and the disc all stay in step, and the sound is off. the engine runs at its lowest
-//rate meanwhile (17 frames a second: the longest step it takes by itself), and most frames
-//aren't drawn: ge_frame_draw (802BBE70) leaves the scene out when its r3 is 1, as the game
-//does it under a loading screen, and the runtime drops what is still sent
+//first, and what Station's own debug switch does: entrance 666) isn't the same level, scripts
+//that ran in the opening never run. so the opening does play, in very long steps: the engine's
+//time step comes from its frame rate (ge_frame_tick), which is held at 3 frames a second, and
+//nothing waits for a frame: the runtime's clock jumps to where the next one is due
+//(rt_advance), so timers and the disc see the same time go by. the sound is off, and every
+//jump waits for the audio to mix what fell due, so no cutscene sound is left over after it
+//most frames aren't drawn: ge_frame_draw (802BBE70) leaves the scene out when its r3 is 1,
+//as the game does it under a loading screen, and the runtime drops what is still sent
 //
 //a mission picked in the menu loads at entrance 1 (ge_menu_pending), Restart Mission puts the
-//same in the app's object and calls StartLevelChange. after either the fast forward waits for
+//same in the app's object and calls StartLevelChange. after either this waits for the level's
+//time to count (it stands still until the loading screen's "Continue" is pressed), then for
 //the first cutscene that takes the player (state 0x22 with the view and the aim locked) and
 //runs until the player gets anything back: the view, the aim, a button to press
 //
+//the last second isn't skipped but eased into: config/openings.txt has the level time each
+//opening ends at, and from a second before it the steps shrink from a third of a second to a
+//frame of the engine's rate, each one shown, so it slows down to normal speed instead of
+//cutting to it. the sound fades back in after. a level that isn't in there just cuts
+//
 //GE_SKIP_CUTSCENES=1 on
-//GE_SKIP_SPEED=N the highest speed (32)
+//GE_SKIP_RATE=N the frames a second of game time while skipping (3)
 //GE_ENTRANCE=N start every mission at entrance N instead of 1, for trying out a level's
-//entrances (0 is one too). nothing is fast-forwarded then
+//entrances (0 is one too). nothing is skipped then
 //GE_TRACE=1 log every checkpoint
 #include "ge.h"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
+#include <fstream>
+#include <map>
+#include <string>
+
+#ifndef GE_ROOT
+#define GE_ROOT "."
+#endif
 
 namespace ge
 {
@@ -43,10 +59,13 @@ const uint32_t kMissionStart = 1; //the entrance a mission begins at
 const uint32_t kCurrentLevel = 0x805D1804; //the hash of the level that is loaded
 const uint32_t kAppPtr = 0x806EB694, kAppEntrance = 0x338; //the entrance StartLevelChange loads the level at
 
-const double kStartSpeed = 4.0;
 const uint32_t kWaitFrames = 150; //a level that gives the player the controls for this long has no opening
-const uint32_t kGapFrames = 6; //the lock may let go for a few frames between two shots
-const uint32_t kMaxFrames = 30 * 60 * 10; //ten minutes of cutscene, then something is wrong
+const uint32_t kCountingFrames = 3; //the level's time went up this many frames in a row: it runs
+const double kMaxSeconds = 600; //ten minutes of cutscene, then something is wrong
+const float kEaseSeconds = 1.0f; //of the opening's end, slowing down to normal speed
+const double kFadeSeconds = 1.0; //the sound coming back
+const uint32_t kShowEvery = 4; //one frame in this many is drawn, so it's seen to be moving
+const uint32_t kLevelTimer = 0x805C963C; //a float, seconds played in the level
 
 using Clock = std::chrono::steady_clock;
 
@@ -61,14 +80,26 @@ PPCFunc orig_frame_draw = nullptr;
 bool g_restarting = false; //the menu's restart action is running
 bool g_trace = false;
 int g_forced_entrance = -1; //GE_ENTRANCE
-double g_top_speed = 32.0;
 Skip g_state = Skip::Idle;
 uint32_t g_frames = 0; //frames in this state
-uint32_t g_free_frames = 0; //frames in a row the player wasn't locked
 uint32_t g_drawn = 0; //frames since one was drawn
-double g_speed = 1.0;
-Clock::time_point g_started, g_started_guest, g_measured;
-uint32_t g_measured_frames = 0, g_late_frames = 0;
+uint32_t g_counting = 0; //frames in a row the level's time went up
+float g_played = 0;
+float g_ends = 0; //the level time this opening ends at, 0 if we don't know it
+std::map<uint32_t, float> g_openings; //level hash -> the level time its opening ends at
+
+//lines of "level hash (hex), seconds"
+void LoadOpenings(const std::string& path)
+{
+	std::ifstream f(path);
+	for (std::string l; std::getline(f, l);)
+	{
+		unsigned level = 0;
+		float seconds = 0;
+		if (std::sscanf(l.c_str(), "%x %f", &level, &seconds) == 2) g_openings[level] = seconds;
+	}
+}
+Clock::time_point g_started, g_started_guest;
 
 bool StartsCampaignLevel(uint32_t menu)
 {
@@ -80,25 +111,20 @@ bool StartsCampaignLevel(uint32_t menu)
 	return item >= kItemOperative && item <= kItemClassic;
 }
 
-void SetSpeed(double speed)
-{
-	g_speed = speed;
-	rt_set_speed(speed);
-}
-
 void Stop(const char* why)
 {
 	if (g_state == Skip::Running)
 	{
-		SetSpeed(1.0);
 		g_gx_skip_frames = false;
-		audio_mute(false);
+		audio_mute(false, kFadeSeconds);
 		set_fast_forward(false);
 		g_running = false;
 		double took = std::chrono::duration<double>(Clock::now() - g_started).count();
 		double skipped = std::chrono::duration<double>(rt_now() - g_started_guest).count();
-		rt_log("goldeneye: skip cutscenes: %s, %.1f s of cutscene (%u frames) in %.1f s", why, skipped, g_frames, took);
+		rt_log("goldeneye: skip cutscenes: %s, %.1f s of cutscene (%u frames) in %.1f s, level %08X's opening ends at %.2f",
+			why, skipped, g_frames, took, ld32(kCurrentLevel), ldf(kLevelTimer));
 	}
+	else if (g_state == Skip::Waiting && g_trace) rt_log("goldeneye: skip cutscenes: not waiting any more, %s", why);
 	g_state = Skip::Idle;
 }
 
@@ -108,62 +134,52 @@ void Arm(uint32_t level)
 	Stop("a level change");
 	if (!g_skip_cutscenes) return;
 	g_state = Skip::Waiting;
-	g_frames = 0;
+	g_frames = g_counting = 0;
 	if (g_trace) rt_log("goldeneye: skip cutscenes: level %08X starts, waiting for its opening", level);
 }
 
 void Start()
 {
 	g_state = Skip::Running;
-	g_frames = g_free_frames = g_drawn = g_measured_frames = g_late_frames = 0;
-	g_started = g_measured = Clock::now();
+	g_frames = g_drawn = 0;
+	g_started = Clock::now();
 	g_started_guest = rt_now();
+	auto known = g_openings.find(ld32(kCurrentLevel));
+	g_ends = known != g_openings.end() ? known->second : 0.0f;
 	g_running = true;
 	set_fast_forward(true);
 	audio_mute(true);
-	SetSpeed(std::min(kStartSpeed, g_top_speed));
-	rt_log("goldeneye: skip cutscenes: fast-forwarding level %08X's opening", ld32(kCurrentLevel));
-}
-
-//the clock may only run as fast as the game makes its frames: faster and the sound and the
-//timers get ahead of the picture. a frame is late when the next one is due as it ends
-//ten times a second, a step up if most frames came on time and a step down if not
-void Pace()
-{
-	++g_measured_frames;
-	if (frame_late()) ++g_late_frames;
-	auto now = Clock::now();
-	if (now - g_measured < std::chrono::milliseconds(100)) return;
-	bool late = g_late_frames * 2 > g_measured_frames;
-	if (g_trace) rt_log("goldeneye: skip cutscenes: speed %.1f, %u frames, %u late", g_speed, g_measured_frames, g_late_frames);
-	g_measured = now;
-	g_measured_frames = g_late_frames = 0;
-	if (late) SetSpeed(std::max(1.0, g_speed * 0.85));
-	else SetSpeed(std::min(g_top_speed, g_speed * 1.1));
+	rt_log("goldeneye: skip cutscenes: skipping level %08X's opening", ld32(kCurrentLevel));
 }
 
 void Run()
 {
-	//the pause menu and ours stop the clock's hurry, not the skip
+	//the pause menu and ours run at their own pace
 	bool held = ld8(kPaused) != 0 || settings_open();
+	if (held) set_fast_forward(false);
 	if (held)
 	{
-		if (g_speed != 1.0) SetSpeed(1.0);
 		g_gx_skip_frames = false;
 		return;
 	}
 	++g_frames;
 	if (!g_skip_cutscenes) { Stop("turned off"); return; }
-	if (g_frames > kMaxFrames) { Stop("given up"); return; }
+	if (std::chrono::duration<double>(rt_now() - g_started_guest).count() > kMaxSeconds) { Stop("given up"); return; }
 	if (cutscene_input_waiting()) { Stop("a button is wanted"); return; }
 	uint32_t state;
 	if (!local_player_state(state)) { Stop("the player is gone"); return; }
-	g_free_frames = local_cutscene_locked() ? 0 : g_free_frames + 1;
-	if (g_free_frames > kGapFrames) { Stop("done"); return; }
-	Pace();
-	//about fifteen pictures a second get drawn, so it's seen to be moving
-	uint32_t every = (uint32_t)std::max(1.0, g_speed * 2.0);
-	g_gx_skip_frames = ++g_drawn < every;
+	if (!local_cutscene_locked()) { Stop("done"); return; }
+	float left = g_ends - ldf(kLevelTimer);
+	if (g_ends > 0 && left < kEaseSeconds)
+	{
+		//the rate goes from the long steps' to the engine's own, by equal factors over the second
+		float along = std::clamp(1.0f - left / kEaseSeconds, 0.0f, 1.0f), from = skip_rate(), to = (float)engine_top_rate();
+		set_fast_forward(true, from * std::pow(std::max(1.0f, to / from), along));
+		g_gx_skip_frames = false;
+		return;
+	}
+	set_fast_forward(true);
+	g_gx_skip_frames = ++g_drawn < kShowEvery;
 	if (!g_gx_skip_frames) g_drawn = 0;
 }
 
@@ -236,16 +252,26 @@ void cutscenes_frame()
 	if (g_state != Skip::Waiting) return;
 	uint32_t state;
 	if (!local_player_state(state)) return; //still loading
+	//the level is there but stands still behind the loading screen until its "Continue" is
+	//pressed: the mission has begun once its time counts
+	float played = ldf(kLevelTimer);
+	g_counting = played > g_played ? g_counting + 1 : 0;
+	g_played = played;
+	if (g_counting < kCountingFrames) return;
 	if (local_cutscene_locked()) Start();
-	else if (++g_frames > kWaitFrames) g_state = Skip::Idle;
+	else if (++g_frames > kWaitFrames)
+	{
+		g_state = Skip::Idle;
+		if (g_trace) rt_log("goldeneye: skip cutscenes: no opening, the player has the controls");
+	}
 }
 
 void install_cutscenes()
 {
 	if (const char* e = std::getenv("GE_SKIP_CUTSCENES")) g_skip_cutscenes = std::atoi(e) != 0;
 	if (const char* e = std::getenv("GE_ENTRANCE")) g_forced_entrance = std::atoi(e);
-	if (const char* e = std::getenv("GE_SKIP_SPEED")) g_top_speed = std::clamp(std::atof(e), 1.0, 64.0);
 	g_trace = std::getenv("GE_TRACE") != nullptr;
+	LoadOpenings(std::string(GE_ROOT) + "/config/openings.txt");
 	orig_menu_pending = ppc_hook("ge_menu_pending", MenuPending);
 	orig_level_change = ppc_hook("StartLevelChange", LevelChange);
 	orig_frame_draw = ppc_hook("ge_frame_draw", FrameDraw);

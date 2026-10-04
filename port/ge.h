@@ -38,8 +38,11 @@ inline bool in_play() { return guest_ptr(ld32(kPlayerPtr)) && ld8(kPaused) == 0;
 void each_frame(uint32_t frame); //goldeneye.cpp, called by the limiter's hook once a game frame
 
 void install_fps();
-void set_fast_forward(bool on); //the frame rate's set-up for a clock that runs fast
-bool frame_late(); //the next frame is already due: the last one took longer than its time //framerate.cpp
+//long steps that nothing waits for, to get through a cutscene. easeRate: the engine's rate
+//for steps that are shown a frame each instead, 0 for the long ones
+void set_fast_forward(bool on, float easeRate = 0.0f);
+float skip_rate(); //frames a second of game time in the long steps
+uint32_t engine_top_rate();
 const uint32_t kGameFps = 30;
 uint32_t fps_limit(); //the most frames a second the engine may run
 void set_fps_limit(uint32_t fps);
@@ -83,10 +86,10 @@ void set_ads_fov(float degrees);
 void ads_fov_apply(uint32_t controller); //after the local controller's update
 void install_native(); //native.cpp
 void install_cutscenes(); //cutscenes.cpp
-bool skip_cutscenes(); //a mission's opening cutscene is fast-forwarded
+bool skip_cutscenes(); //a mission's opening cutscene is skipped
 void set_skip_cutscenes(bool on);
 void cutscenes_frame(); //once a frame, on the game's thread
-bool skipping_cutscene(); //the fast forward is running
+bool skipping_cutscene(); //an opening is being skipped right now
 bool cutscene_input_waiting(); //qte.cpp, a cutscene asked for a button in the last frames
 void install_qte(); //qte.cpp
 bool auto_qte(); //quick time events press their own buttons

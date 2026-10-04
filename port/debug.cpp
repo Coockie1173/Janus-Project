@@ -9,6 +9,8 @@
 //(build/scan.txt) that changed over every odd interval and stood still over every even one
 //turn the view with GE_STICK in the odd ones and the view's angles are in there
 //GE_SCANINT=1 does it with raw words instead
+//GE_SCANWATCH="55,65" after a GE_SCANPAT scan: the first float that rose by that much over the
+//first pair gets GE_WATCH'ed and the 0x300 bytes around it go to build/scan-obj.txt
 //GE_SCANPAT="==+.-" gives the rule itself, a letter for each pair of snapshots: = the same word,
 //! another, + - a float gone up or down, u d a word gone up or down, anything else: no rule
 //GE_POKE="50:80ABCDEF=f1.5 52:80ABCDEF+=f0.2" store or add a float (f) or a hex word (x)
@@ -86,6 +88,7 @@ float fl(const std::vector<uint8_t>& snap, size_t off) {
     return f;
 }
 
+void watch_main(double t, uint32_t addr);
 void scan_main(std::vector<double> times) {
     std::vector<std::vector<uint8_t>> snaps;
     for (double t : times) {
@@ -100,6 +103,9 @@ void scan_main(std::vector<double> times) {
     size_t n = snaps[0].size(), found = 0;
     if (const char* pat = std::getenv("GE_SCANPAT")) { //its own rule a pair of snapshots
         size_t pairs = std::min(std::strlen(pat), snaps.size() - 1);
+        float rise_lo = 0, rise_hi = 0;
+        uint32_t rise_addr = 0;
+        if (const char* w = std::getenv("GE_SCANWATCH")) std::sscanf(w, "%f,%f", &rise_lo, &rise_hi);
         for (size_t off = 0; off + 4 <= n; off += 4) {
             bool ok = true;
             for (size_t i = 0; ok && i < pairs; ++i) {
@@ -125,9 +131,20 @@ void scan_main(std::vector<double> times) {
             for (auto& sn : snaps) std::fprintf(out, " %g", fl(sn, off));
             std::fprintf(out, "\n");
             ++found;
+            float rise = fl(snaps[1], off) - fl(snaps[0], off);
+            if (!rise_addr && rise_hi > 0 && rise >= rise_lo && rise <= rise_hi && addr >= 0x80700000u) rise_addr = addr;
         }
         std::fclose(out);
         rt_log("scan: %zu words in build/scan.txt", found);
+        if (rise_addr) {
+            if (FILE* obj = std::fopen("build/scan-obj.txt", "w")) {
+                for (uint32_t a = rise_addr - 0x200; a < rise_addr + 0x100; a += 4) std::fprintf(obj, "%08X %08X\n", a, ld32(a));
+                std::fclose(obj);
+            }
+#ifndef _WIN32
+            watch_main(0, rise_addr);
+#endif
+        }
         return;
     }
     if (std::getenv("GE_SCANINT")) { //words instead (flags, counters), same rule on raw values

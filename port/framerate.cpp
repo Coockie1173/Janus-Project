@@ -22,6 +22,8 @@ uint32_t g_max_written = 0; //the highest rate we last wrote, so we know it's ou
 bool g_fps_log = false;
 std::atomic<bool> g_fast{false}; //a cutscene is fast-forwarded
 bool g_fast_applied = false;
+std::atomic<float> g_skip_rate{3.0f}; //GE_SKIP_RATE
+std::atomic<float> g_ease_rate{0.0f}; //the engine's rate while a skip eases out, 0 when it doesn't
 PPCFunc orig_tick = nullptr, orig_vi_wait = nullptr;
 
 //OSSleepTicks(OSTime), sleeps this thread on an alarm so the others can run
@@ -43,8 +45,8 @@ void guest_sleep(PPCContext& c, uint64_t ticks) {
 //up to 60 we show frames at VI's retrace, above that VI stays as it is since the SDK
 //and the game time things by retraces: frames get shown as they're drawn, and the game's
 //wait for a retrace becomes a sleep until the next frame is due (vi_wait)
-//fast-forwarding goes the way of a rate above 60 whatever the rate is: retraces come many
-//times as often then, and neither the game nor the picture should wait for one
+//skipping a cutscene goes the way of a rate above 60 whatever the rate is: retraces come
+//in bursts as the clock jumps, and neither the game nor the picture should wait for one
 void apply_rate(uint32_t fps, bool fast) {
     bool sameRate = fps == g_fps_applied;
     g_fps_applied = fps;
@@ -70,7 +72,7 @@ void frame_tick(PPCContext& c) {
         if (ldf(kFpsNow) > (float)want) stf(kFpsNow, (float)want);
         g_max_written = want;
     }
-    if (sleep_ticks && (fps > 60 || fast)) {
+    if (sleep_ticks && fps > 60 && !fast) {
         //the limiter spins until the next frame's time, so sleep up to just before it
         uint64_t next = (uint64_t)ld32(kNextFrame) << 32 | ld32(kNextFrame + 4), now = os_tb_now();
         uint64_t margin = tb_hz() / 5000; //0.2 ms
@@ -82,11 +84,21 @@ void frame_tick(PPCContext& c) {
         frame = f;
         each_frame(f);
     }
-    //a fast forward runs at the engine's lowest rate (17 in play): the longest step the game
-    //takes by itself, so the fewest frames for the same time
+    //skipping a cutscene: long steps (g_skip_rate frames a second of the game's time) that
+    //nothing waits for, the guest's clock jumps to where the next frame is due, so sound, timers
+    //and the disc see the same time go by as the game does
+    //easing out of it (g_ease_rate): the steps get shorter and each frame stays up for one
+    //frame of our own rate, so the clock only jumps what a step is longer than that
     if (fast) {
-        uint32_t low = ld32(kFpsMax - 4);
-        if (low >= 10 && low <= kGameFps) stf(kFpsNow, (float)low);
+        float ease = g_ease_rate;
+        uint32_t top = engine_top_rate();
+        stf(kFpsNow, ease > 0 ? std::min(ease, (float)top) : g_skip_rate.load());
+        //the sound first: the blocks the last jump made due get mixed before the next one
+        for (int i = 0; i < 20000 && hw_ai_behind(); ++i) guest_sleep(c, tb_hz() / 20000);
+        uint64_t next = (uint64_t)ld32(kNextFrame) << 32 | ld32(kNextFrame + 4), now = os_tb_now();
+        uint64_t shown = ease > 0 ? tb_hz() / top : 0;
+        if (next > now + shown && next - now < tb_hz() * 2)
+            rt_advance(std::chrono::nanoseconds((next - now - shown) * 4000 / g_bus_mhz + 1000));
     }
     static const char* hitch = std::getenv("GE_HITCH"); //"t,t,...", a 60 ms stall at those times to test with
     if (hitch && f != 0) {
@@ -148,6 +160,7 @@ void install_fps() {
     sleep_ticks = ppc_lookup(kOSSleepTicks);
     orig_vi_wait = ppc_hook("VIWaitForRetrace", vi_wait);
     if (!orig_vi_wait) rt_die("goldeneye: VIWaitForRetrace is not hooked in this build");
+    if (const char* r = std::getenv("GE_SKIP_RATE")) g_skip_rate = std::clamp((float)std::atof(r), 1.0f, 30.0f);
     const char* e = std::getenv("GE_FPS");
     if (!e) return;
     int fps = std::atoi(e);
@@ -163,8 +176,19 @@ void install_fps() {
     apply_rate(g_fps, false);
 }
 
-void set_fast_forward(bool on) { g_fast = on; }
-bool frame_late() { return os_tb_now() >= ((uint64_t)ld32(kNextFrame) << 32 | ld32(kNextFrame + 4)); }
+void set_fast_forward(bool on, float easeRate)
+{
+	g_ease_rate = on ? easeRate : 0.0f;
+	g_fast = on;
+	g_ai_catch_up = on;
+}
+float skip_rate() { return g_skip_rate; }
+//the highest rate the engine goes to right now (the game lowers it for some scenes)
+uint32_t engine_top_rate()
+{
+	uint32_t top = ld32(kFpsMax);
+	return top >= 10 && top <= 1000 ? top : fps_limit();
+}
 uint32_t fps_limit() { return g_fps ? g_fps.load() : kGameFps; }
 void set_fps_limit(uint32_t fps) { g_fps = fps <= kGameFps ? 0 : std::min(fps, 1000u); }
 

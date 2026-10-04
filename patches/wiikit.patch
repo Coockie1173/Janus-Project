@@ -442,7 +442,7 @@ index 0000000..bb49877
 +            res[a] = v
 +        return res
 diff --git a/runtime/audio.cpp b/runtime/audio.cpp
-index 4050960..f5a94c7 100644
+index 4050960..48fa72e 100644
 --- a/runtime/audio.cpp
 +++ b/runtime/audio.cpp
 @@ -18,6 +18,7 @@
@@ -453,22 +453,40 @@ index 4050960..f5a94c7 100644
  #include <cmath>
  #include <cstdio>
  #include <cstdlib>
-@@ -70,8 +71,15 @@ void audio_init(bool enabled) {
+@@ -70,6 +71,13 @@ void audio_init(bool enabled) {
      rt_log("audio: %s", SDL_GetAudioDeviceName(SDL_GetAudioStreamDevice(stream)));
  }
  
 +std::atomic<bool> muted{false};
-+void audio_mute(bool on) { muted = on; }
++std::atomic<float> fade_gain{1.0f}, fade_step{0.0f};  // the gain, and what a sample frame adds to it while fading in
++void audio_mute(bool on, double fade_in) {
++    if (!on && muted && fade_in > 0) { fade_gain = 0.0f; fade_step = (float)(1.0 / (fade_in * 32000.0)); }
++    muted = on;
++}
 +
  void audio_play(const uint8_t* be_rl, uint32_t frames, uint32_t rate) {
      if (!frames || (!stream && !dump)) return;
-+    if (muted) {
-+        if (stream && playing) { SDL_PauseAudioStreamDevice(stream); SDL_ClearAudioStream(stream); playing = false; }
+     static std::vector<int16_t> lr;
+@@ -90,6 +98,19 @@ void audio_play(const uint8_t* be_rl, uint32_t frames, uint32_t rate) {
+         }
+     }
+     if (!stream) return;
++    if (muted) {                                     // the dump still has it
++        if (playing) { SDL_PauseAudioStreamDevice(stream); SDL_ClearAudioStream(stream); playing = false; }
 +        return;
 +    }
-     static std::vector<int16_t> lr;
-     lr.resize(2 * (size_t)frames);
-     for (uint32_t i = 0; i < frames; ++i) {
++    if (float g = fade_gain; g < 1.0f) {             // coming back from a mute
++        float step = fade_step;
++        for (uint32_t i = 0; i < frames; ++i) {
++            lr[2 * i] = (int16_t)(lr[2 * i] * g);
++            lr[2 * i + 1] = (int16_t)(lr[2 * i + 1] * g);
++            g = std::min(1.0f, g + step);
++        }
++        fade_gain = g;
++    }
+     if (rate != stream_rate) {
+         SDL_AudioSpec spec = {SDL_AUDIO_S16, 2, (int)rate};
+         SDL_SetAudioStreamFormat(stream, &spec, nullptr);
 diff --git a/runtime/core.cpp b/runtime/core.cpp
 index d0baebf..8f66089 100644
 --- a/runtime/core.cpp
@@ -1735,7 +1753,7 @@ index 7943c4d..59da23b 100644
  layout(binding = 1) uniform sampler2D s1;
  layout(binding = 2) uniform sampler2D s2;
 diff --git a/runtime/hw.cpp b/runtime/hw.cpp
-index c53d227..376c463 100644
+index c53d227..75f4ff4 100644
 --- a/runtime/hw.cpp
 +++ b/runtime/hw.cpp
 @@ -25,13 +25,16 @@
@@ -1904,15 +1922,43 @@ index c53d227..376c463 100644
      if (!ar_busy) return now + std::chrono::milliseconds(100);
      if (now < ar_done) return ar_done;
      ar_busy = false;
-@@ -913,7 +960,7 @@ std::chrono::steady_clock::time_point ar_tick() {    // an ARAM DMA's end: its i
+@@ -912,8 +959,14 @@ std::chrono::steady_clock::time_point ar_tick() {    // an ARAM DMA's end: its i
+     return now + std::chrono::milliseconds(100);
  }
  
++bool g_ai_catch_up = false;
++bool hw_ai_behind() {
++    std::lock_guard<std::recursive_mutex> lk(g_hw);
++    return ai_dma_on && ai_dma_period.count() > 0 && rt_now() - ai_dma_next > ai_dma_period;
++}
++
  std::chrono::steady_clock::time_point ai_tick() {
 -    auto now = HostClock::now();
 +    auto now = rt_now();
      if (!ai_dma_on || ai_dma_period.count() <= 0) return now + std::chrono::milliseconds(100);
      if (now >= ai_dma_next) {
          // The next block waits for the guest's mix of it: its AI interrupt
+@@ -922,6 +975,11 @@ std::chrono::steady_clock::time_point ai_tick() {
+         // without its frame is a gap in the sound. The host's audio queue
+         // absorbs the wait.
+         bool ready = ai_frame_ready();
++        // catching up after a jump of the clock (rt_advance): every block that
++        // fell due is played, each as soon as the guest has mixed it
++        static int waits = 0;
++        if (g_ai_catch_up && !ready && ++waits < 20000) return now + std::chrono::microseconds(20);
++        waits = 0;
+         if (!ready && now - ai_dma_next < std::chrono::milliseconds(50))
+             return now + std::chrono::microseconds(250);
+         ai_dma_block();
+@@ -930,7 +988,7 @@ std::chrono::steady_clock::time_point ai_tick() {
+         // game stopped mixing) or a long stall starts it afresh: catching up
+         // then would only give up on the blocks after it too
+         ai_dma_next += ai_dma_period;
+-        if (!ready || now - ai_dma_next > std::chrono::milliseconds(100)) ai_dma_next = now + ai_dma_period;
++        if (!ready || (!g_ai_catch_up && now - ai_dma_next > std::chrono::milliseconds(100))) ai_dma_next = now + ai_dma_period;
+         os_raise();
+     }
+     return ai_dma_next;
 diff --git a/runtime/ios.cpp b/runtime/ios.cpp
 index 23d837a..e673c0e 100644
 --- a/runtime/ios.cpp
@@ -3059,7 +3105,7 @@ index c544428..d46f70a 100644
 +void mem_watch_tick();
 +uint64_t mem_watch_faults();
 diff --git a/runtime/os.cpp b/runtime/os.cpp
-index aa1274e..0f3af3e 100644
+index aa1274e..3d497c6 100644
 --- a/runtime/os.cpp
 +++ b/runtime/os.cpp
 @@ -109,6 +109,7 @@ void load_regs(PPCContext& c, uint32_t ctx) {
@@ -3097,7 +3143,7 @@ index aa1274e..0f3af3e 100644
          if (now >= next_vi) {
              hw_vi_retrace();
              vi_period = hw_vi_field_period();
-@@ -389,8 +393,37 @@ LONG WINAPI on_crash(EXCEPTION_POINTERS* ep) {
+@@ -389,8 +393,46 @@ LONG WINAPI on_crash(EXCEPTION_POINTERS* ep) {
  }  // namespace
  
  // ---- services ----------------------------------------------------------------------------------
@@ -3130,13 +3176,22 @@ index aa1274e..0f3af3e 100644
 +    clock_kick();
 +}
 +
++void rt_advance(std::chrono::nanoseconds by) {
++    if (by.count() <= 0) return;
++    {
++        std::lock_guard<std::mutex> lk(g_speed_mx);
++        g_speed_gain += by.count();
++    }
++    clock_kick();
++}
++
  uint64_t os_tb_now() {
 -    int64_t ns = std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - g_t0).count();
 +    int64_t ns = std::chrono::duration_cast<std::chrono::nanoseconds>(rt_now() - g_t0).count();
      return (uint64_t)(ns / 4000 * g_bus_mhz + ns % 4000 * g_bus_mhz / 4000) + (uint64_t)g_tb_offset.load();
  }
  
-@@ -435,7 +468,7 @@ void os_raise() {
+@@ -435,7 +477,7 @@ void os_raise() {
  
  // Nothing but an interrupt can end the loop: wait for one (with a 1 ms
  // bound, in case a line is raised some other way), then deliver it.
@@ -3145,7 +3200,7 @@ index aa1274e..0f3af3e 100644
      if (c.msr & MSR_EE) hw_cpu_idle();
      if (!g_ppc_pending.load(std::memory_order_relaxed) && (c.msr & MSR_EE)) {
          g_idle_waiting.store(true, std::memory_order_seq_cst);
-@@ -445,7 +478,7 @@ void ppc_idle(PPCContext& c) {
+@@ -445,7 +487,7 @@ void ppc_idle(PPCContext& c) {
      PPC_POLL(c);
  }
  
@@ -3154,7 +3209,7 @@ index aa1274e..0f3af3e 100644
      while (c.msr & MSR_EE) {
          g_ppc_pending.store(0);
          int exc = hw_external_pending() ? EXC_EXTERNAL : dec_due() ? EXC_DECREMENTER : -1;
-@@ -455,12 +488,12 @@ void ppc_poll(PPCContext& c) {
+@@ -455,12 +497,12 @@ void ppc_poll(PPCContext& c) {
      }
  }
  
@@ -3170,7 +3225,7 @@ index aa1274e..0f3af3e 100644
      t_ppc = &c;
      rt_die("%s at %s", what, rt_name(addr).c_str());
  }
-@@ -495,6 +528,28 @@ void os_report_running(int depth) {
+@@ -495,6 +537,28 @@ void os_report_running(int depth) {
      rt_backtrace(c, stderr, depth);
  }
  
@@ -3398,7 +3453,7 @@ index 99351d5..af71db9 100644
      if (!w) ps_quant(type, scale, ea + sz, c.ps1[s], &sz);
  }
 diff --git a/runtime/rt.h b/runtime/rt.h
-index 75fec5e..593c4fa 100644
+index 75fec5e..eaa11ec 100644
 --- a/runtime/rt.h
 +++ b/runtime/rt.h
 @@ -17,6 +17,10 @@ void rt_load_symbols(const char* tsv);
@@ -3412,7 +3467,7 @@ index 75fec5e..593c4fa 100644
  // The guest call chain from a context: LR, then the saved LRs up the back chain.
  void rt_backtrace(const PPCContext& c, FILE* out, int max = 24);
  
-@@ -58,10 +62,20 @@ static inline uint64_t tb_hz() { return (uint64_t)g_bus_mhz * 250000; }
+@@ -58,10 +62,27 @@ static inline uint64_t tb_hz() { return (uint64_t)g_bus_mhz * 250000; }
  
  // ---- the OS layer (os.cpp) --------------------------------------------------------------
  void os_report_running(int depth);                // stderr: where the running guest thread is
@@ -3429,11 +3484,18 @@ index 75fec5e..593c4fa 100644
 +// speed of 8 the guest lives eight seconds a second, everything in step.
 +std::chrono::steady_clock::time_point rt_now();
 +void rt_set_speed(double speed);                  // 1: real time
++void rt_advance(std::chrono::nanoseconds by);     // the guest's clock jumps ahead: that much time has passed at once
++// After a jump the AI is behind by the blocks that fell due. With
++// g_ai_catch_up they are all played, one as soon as the guest has mixed the
++// last (otherwise it starts afresh past 100 ms); hw_ai_behind says whether
++// there are any left, for a port that waits for them before it jumps again.
++extern bool g_ai_catch_up;
++bool hw_ai_behind();
 +double rt_speed();
  void os_watch(int seconds);                       // report the running thread periodically
  void os_profile();                                // WIIKIT_PROFILE: sample the guest code (=render: the renderer), list the hot functions
  
-@@ -74,6 +88,18 @@ void gx_submit_pending();                         // after a burst, outside g_hw
+@@ -74,6 +95,18 @@ void gx_submit_pending();                         // after a burst, outside g_hw
  // game that reads the copy on the CPU (the renderer otherwise keeps copies
  // on the host GPU only). False if no copy was made to addr (physical).
  bool gx_copy_to_ram(uint32_t addr);
@@ -3452,15 +3514,17 @@ index 75fec5e..593c4fa 100644
  void gx_draw_done_reached();                      // the renderer: the game's draw-done point is drawn
  void hw_run_locked(const std::function<void()>& fn);   // run fn holding the hardware lock
  
-@@ -106,6 +132,7 @@ void wpad_set_classic_filter(WpadClassicFilter f);
+@@ -106,6 +139,9 @@ void wpad_set_classic_filter(WpadClassicFilter f);
  void wpad_filter_classic(int chan, ClassicState& s);  // the port's filter, if it has one
  
  // ---- audio (ax.cpp, audio.cpp) --------------------------------------------------------
-+void audio_mute(bool on);                          // nothing is played, and what was queued is dropped
++// Muted, nothing is played and what was queued is dropped. Unmuting with
++// fade_in brings the sound back from silence over that many seconds.
++void audio_mute(bool on, double fade_in = 0);
  void ax_command_list(uint32_t addr);               // the AX micro-code: mix one frame
  uint8_t aram_read(uint32_t addr);                  // the GameCube's ARAM (hw.cpp), where its AX reads samples
  bool ax_load_coefs(const char* dir);               // dsp_coef.bin: the polyphase resampler's table
-@@ -123,6 +150,10 @@ extern bool g_sysconf_eurgb60;                     // IPL.E60, after sysconf_pre
+@@ -123,6 +159,10 @@ extern bool g_sysconf_eurgb60;                     // IPL.E60, after sysconf_pre
  
  // ---- IOS (ios.cpp) ------------------------------------------------------------------
  void ios_init(const char* disc_root, const char* nand_root);
