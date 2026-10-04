@@ -42,7 +42,16 @@
 //- 803144D0 an entity (the file at +0x1C, the hash at +0x20, its entry in the file's placed
 //  list kept at +0x28), then the objects from +0x10
 //- 80308C20 something skinned, not drawn here
+//the matrix at +0x98 is only as new as the last time the game asked for it, so it's asked
+//for here as the scoops do: fn_80301960 (object, the parent's matrix, a word of flags) gives
+//the object's matrix in the world. called for the item first, with the identity
 //these are gathered every frame, and sent again when anything moved
+//
+//people are purple: a body whose shape comes from fn_800F24E0 (the body's vtable +0x24) keeps
+//it at +0x18C, 16 floats in the item's space with the kind last: 0 a sphere (the centre, then
+//the radius at +0x10), 1 a capsule (the foot, the axis at +0x10, the radius at +0x20)
+//all of the world's items are gone over for those (the first list of its +0xA4). one the view
+//is inside of is left out, that's the player's own
 //
 //GE_COLLISION=1 start with it on
 //GE_TRACE=1 log what got gathered
@@ -75,7 +84,10 @@ const uint32_t kItems = 0xA4, kItemList = 0x8, kItemBody = 0x158, kBodyFlags = 0
 const uint32_t kObjectNext = 0x4, kObjectList = 0x10, kObjectVt = 0x18, kObjectFile = 0x1C, kObjectHash = 0x20, kObjectEntry = 0x28;
 const uint32_t kObjectMatrix = 0x98, kObjectChildren = 0x130, kScoop = 0x50;
 const uint32_t kGroupScoop = 0x8031D920, kEntityScoop = 0x803144D0;
-enum Kind { kLevel, kProp, kMoving };
+const uint32_t kAllItems = 0x0, kItemMatrix = 0x98, kBodyVtShape = 0x24, kShapeGetter = 0x800F24E0, kBodyShape = 0x18C;
+const uint32_t kWorldMatrixFn = 0x80301960;
+const int kRegather = 30; //frames between two looks at the level, whatever the signature says
+enum Kind { kLevel, kProp, kMoving, kPerson };
 const uint32_t kMaxVertices = 6000000;
 const int kSettle = 5; //frames a change waits, so nothing half loaded is read
 
@@ -120,6 +132,8 @@ uint32_t Header(uint32_t file)
 	return guest_ptr(header) && ld32(header) == kGeom ? header : 0;
 }
 
+void Emit(const float p[3][3], Kind kind);
+
 void Triangle(const float* matrix, uint32_t vertices, const uint16_t* index, Kind kind)
 {
 	float p[3][3];
@@ -130,6 +144,11 @@ void Triangle(const float* matrix, uint32_t vertices, const uint16_t* index, Kin
 		float x = ldf(at), y = ldf(at + 4), z = ldf(at + 8);
 		for (int k = 0; k < 3; ++k) p[i][k] = x * matrix[k] + y * matrix[4 + k] + z * matrix[8 + k] + matrix[12 + k];
 	}
+	Emit(p, kind);
+}
+
+void Emit(const float p[3][3], Kind kind)
+{
 	float a[3], b[3];
 	for (int k = 0; k < 3; ++k)
 	{
@@ -143,8 +162,8 @@ void Triangle(const float* matrix, uint32_t vertices, const uint16_t* index, Kin
 
 	//by its slope, lit from above and a bit from the side so the walls differ
 	static const float floor[3] = {0.36f, 0.78f, 0.42f}, wall[3] = {0.58f, 0.62f, 0.72f}, ceiling[3] = {0.78f, 0.38f, 0.38f};
-	static const float prop[3] = {0.88f, 0.66f, 0.30f}, moving[3] = {0.30f, 0.62f, 0.95f};
-	const float* base = kind == kMoving ? moving : n[1] > 0.7f ? floor : n[1] < -0.7f ? ceiling : kind == kProp ? prop : wall;
+	static const float prop[3] = {0.88f, 0.66f, 0.30f}, moving[3] = {0.30f, 0.62f, 0.95f}, person[3] = {0.80f, 0.40f, 0.90f};
+	const float* base = kind == kPerson ? person : kind == kMoving ? moving : n[1] > 0.7f ? floor : n[1] < -0.7f ? ceiling : kind == kProp ? prop : wall;
 	float light = 0.5f + 0.5f * std::fabs(n[0] * 0.41f + n[1] * 0.82f + n[2] * 0.40f);
 	for (int i = 0; i < 3; ++i)
 	{
@@ -250,36 +269,190 @@ uint32_t ObjectEntity(uint32_t object)
 	return 0;
 }
 
-void Objects(uint32_t object, int depth)
+PPCFunc g_world_matrix = nullptr;
+uint32_t g_scratch = 0; //guest stack room while gathering: the flags' word, then an identity matrix
+
+//the object's matrix in the world as the game works it out, copied to the level's slot of the
+//scratch room, 0 when it can't be asked. the function keeps its answer and some flags in the
+//object (+0x8C to +0xD8), those are put back so the game finds what it left
+uint32_t WorldMatrix(PPCContext& c, uint32_t object, uint32_t parent, uint32_t& flags, int level)
+{
+	const uint32_t kKept = 0x88, kKeptSize = 0x50;
+	uint8_t kept[kKeptSize];
+	for (uint32_t i = 0; i < kKeptSize; ++i) kept[i] = ld8(object + kKept + i);
+	st32(g_scratch, flags);
+	c.r[3] = object;
+	c.r[4] = parent;
+	c.r[5] = g_scratch;
+	g_world_matrix(c);
+	flags = ld32(g_scratch);
+	uint32_t world = c.r[3], slot = g_scratch + 0x50 + level * 0x40;
+	bool known = Readable(world, 0x40);
+	for (uint32_t i = 0; i < 0x40 && known; i += 4) st32(slot + i, ld32(world + i));
+	for (uint32_t i = 0; i < kKeptSize; ++i) st8(object + kKept + i, kept[i]);
+	return known ? slot : 0;
+}
+
+void Objects(PPCContext& c, uint32_t object, uint32_t parent, uint32_t parentFlags, int depth)
 {
 	for (int n = 0; n < 512 && Readable(object, 0x140) && depth < 8; ++n, object = ld32(object + kObjectNext))
 	{
 		uint32_t vtable = ld32(object + kObjectVt);
 		uint32_t scoop = Readable(vtable, 0x54) ? ld32(vtable + kScoop) : 0;
-		if (scoop == kGroupScoop) Objects(ld32(object + kObjectChildren), depth + 1);
-		else if (scoop == kEntityScoop)
+		if (scoop != kGroupScoop && scoop != kEntityScoop) continue;
+		uint32_t flags = parentFlags;
+		uint32_t world = WorldMatrix(c, object, parent, flags, depth + 1);
+		if (!world) continue;
+		if (scoop == kGroupScoop) Objects(c, ld32(object + kObjectChildren), world, flags, depth + 1);
+		else
 		{
 			float matrix[16];
-			if (Matrix(object + kObjectMatrix, matrix)) Collider(ObjectEntity(object), matrix, kMoving);
+			if (Matrix(world, matrix)) Collider(ObjectEntity(object), matrix, kMoving);
 		}
-		else continue;
-		Objects(ld32(object + kObjectList), depth + 1);
+		Objects(c, ld32(object + kObjectList), world, flags, depth + 1);
 	}
 }
 
-void GatherMoving()
+void Add(float* out, const float* a, const float* b, float scale)
 {
-	g_mesh.clear();
+	for (int k = 0; k < 3; ++k) out[k] = a[k] + b[k] * scale;
+}
+
+//a capsule from a to a + axis, a sphere when the axis is nothing
+void Capsule(const float* foot, const float* axis, float radius)
+{
+	const int kAround = 12, kUp = 4;
+	float length = std::sqrt(axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]);
+	float up[3] = {0, 1, 0};
+	if (length > 1e-4f)
+		for (int k = 0; k < 3; ++k) up[k] = axis[k] / length;
+	float other[3] = {std::fabs(up[1]) < 0.9f ? 0.0f : 1.0f, std::fabs(up[1]) < 0.9f ? 1.0f : 0.0f, 0.0f};
+	float u[3] = {up[1] * other[2] - up[2] * other[1], up[2] * other[0] - up[0] * other[2], up[0] * other[1] - up[1] * other[0]};
+	float ul = std::sqrt(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]);
+	for (float& v : u) v /= ul;
+	float v[3] = {up[1] * u[2] - up[2] * u[1], up[2] * u[0] - up[0] * u[2], up[0] * u[1] - up[1] * u[0]};
+
+	//rows of points from the bottom pole to the top one, the two middle rows are the cylinder's ends
+	float rows[2 * kUp + 2][kAround][3];
+	for (int row = 0; row < 2 * kUp + 2; ++row)
+	{
+		bool top = row > kUp;
+		float angle = ((top ? row - kUp - 1 : row - kUp) * 1.5707963f) / kUp;
+		for (int i = 0; i < kAround; ++i)
+		{
+			float around = i * 6.2831853f / kAround;
+			float* point = rows[row][i];
+			Add(point, foot, up, (top ? length : 0.0f) + radius * std::sin(angle));
+			Add(point, point, u, radius * std::cos(angle) * std::cos(around));
+			Add(point, point, v, radius * std::cos(angle) * std::sin(around));
+		}
+	}
+	for (int row = 0; row + 1 < 2 * kUp + 2; ++row)
+		for (int i = 0; i < kAround; ++i)
+		{
+			int next = (i + 1) % kAround;
+			float a[3][3], b[3][3];
+			for (int k = 0; k < 3; ++k)
+			{
+				a[0][k] = rows[row][i][k];
+				a[1][k] = rows[row][next][k];
+				a[2][k] = rows[row + 1][i][k];
+				b[0][k] = rows[row][next][k];
+				b[1][k] = rows[row + 1][next][k];
+				b[2][k] = rows[row + 1][i][k];
+			}
+			Emit(a, kPerson);
+			Emit(b, kPerson);
+		}
+}
+
+//where the view is from: the point the clip matrix takes to x, y and w of 0
+float g_eye[3]{};
+bool g_eye_known = false;
+void FindEye()
+{
+	const float* m = g_clip;
+	float a[3][3] = {{m[0], m[4], m[8]}, {m[1], m[5], m[9]}, {m[3], m[7], m[11]}}, b[3] = {-m[12], -m[13], -m[15]};
+	auto det = [](const float r[3][3]) {
+		return r[0][0] * (r[1][1] * r[2][2] - r[1][2] * r[2][1]) - r[0][1] * (r[1][0] * r[2][2] - r[1][2] * r[2][0]) + r[0][2] * (r[1][0] * r[2][1] - r[1][1] * r[2][0]);
+	};
+	float whole = det(a);
+	g_eye_known = std::fabs(whole) > 1e-6f;
+	for (int k = 0; k < 3 && g_eye_known; ++k)
+	{
+		float r[3][3];
+		for (int i = 0; i < 3; ++i)
+			for (int j = 0; j < 3; ++j) r[i][j] = j == k ? b[i] : a[i][j];
+		g_eye[k] = det(r) / whole;
+	}
+}
+
+void Person(uint32_t item, uint32_t body)
+{
+	uint32_t vtable = ld32(body);
+	if (!Readable(vtable, 0x44) || ld32(vtable + kBodyVtShape) != kShapeGetter || !Readable(body, kBodyShape + 0x40)) return;
+	float shape[9], matrix[16];
+	for (int i = 0; i < 9; ++i)
+		if (!std::isfinite(shape[i] = ldf(body + kBodyShape + i * 4))) return;
+	uint32_t kind = ld32(body + kBodyShape + 0x3C);
+	if (kind > 1 || !Matrix(item + kItemMatrix, matrix)) return;
+	float radius = kind ? shape[8] : shape[4];
+	if (!(radius > 0.01f) || radius > 50.0f) return;
+	float foot[3], axis[3] = {0, 0, 0};
+	for (int k = 0; k < 3; ++k)
+	{
+		foot[k] = shape[0] * matrix[k] + shape[1] * matrix[4 + k] + shape[2] * matrix[8 + k] + matrix[12 + k];
+		if (kind) axis[k] = shape[4] * matrix[k] + shape[5] * matrix[4 + k] + shape[6] * matrix[8 + k];
+	}
+	if (g_eye_known)
+	{
+		//how far the eye is from the capsule's axis
+		float along = 0, span = axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2], far = 0;
+		for (int k = 0; k < 3; ++k) along += (g_eye[k] - foot[k]) * axis[k];
+		along = span > 1e-6f ? std::fmin(std::fmax(along / span, 0.0f), 1.0f) : 0.0f;
+		for (int k = 0; k < 3; ++k)
+		{
+			float d = g_eye[k] - foot[k] - axis[k] * along;
+			far += d * d;
+		}
+		if (far < (radius + 0.3f) * (radius + 0.3f)) return;
+	}
+	Capsule(foot, axis, radius);
+}
+
+template <class Fn> void EachItem(uint32_t list, Fn fn)
+{
 	uint32_t lists = ld32(kWorld + kItems);
-	uint32_t node = Readable(lists, 0x30) ? ld32(lists + kItemList) : 0;
+	uint32_t node = Readable(lists, 0x30) ? ld32(lists + list) : 0;
 	for (int n = 0; n < 4096 && Readable(node, 0xC); ++n, node = ld32(node + 4))
 	{
 		uint32_t item = ld32(node + 8);
 		if (!Readable(item, 0x160)) continue;
 		uint32_t body = ld32(item + kItemBody);
 		if (Readable(body, 0x10) && (ld16(body + kBodyFlags) & kBodyNoCollide)) continue;
-		Objects(ld32(item + kItemObjects), 0);
+		fn(item, Readable(body, 0x10) ? body : 0);
 	}
+}
+
+void GatherMoving(PPCContext& c)
+{
+	g_mesh.clear();
+	//the game's own function is called on its thread, with room under its stack, and the registers put back after
+	PPCContext saved = c;
+	c.r[1] -= 0x400;
+	g_scratch = c.r[1] + 0x40;
+	uint32_t identity = g_scratch + 0x10;
+	for (int i = 0; i < 16; ++i) stf(identity + i * 4, i % 5 == 0 ? 1.0f : 0.0f);
+	EachItem(kItemList, [&](uint32_t item, uint32_t) {
+		uint32_t flags = 0;
+		if (uint32_t world = WorldMatrix(c, item, identity, flags, 0)) Objects(c, ld32(item + kItemObjects), world, flags, 0);
+	});
+	c = saved;
+
+	FindEye();
+	EachItem(kAllItems, [&](uint32_t item, uint32_t body) {
+		if (body) Person(item, body);
+	});
 	g_moving.swap(g_mesh);
 }
 
@@ -345,27 +518,28 @@ void Gather()
 		}
 	});
 	g_level.swap(g_mesh);
-	if (g_trace) rt_log("goldeneye: collision view has %zu triangles of the level, %u entities it doesn't know", g_level.size() / 3, g_unknown);
 }
 
 //the level and what moves as one mesh, sent when it isn't what the runtime has
-void Send(bool changed)
+void Send()
 {
-	size_t level = g_level.size(), moving = g_moving.size();
-	if (!changed && g_sent.size() == level + moving && (!moving || !std::memcmp(g_sent.data() + level, g_moving.data(), moving * sizeof(Vertex)))) return;
-	g_sent = g_level;
-	g_sent.insert(g_sent.end(), g_moving.begin(), g_moving.end());
+	g_mesh = g_level;
+	g_mesh.insert(g_mesh.end(), g_moving.begin(), g_moving.end());
+	if (g_mesh.size() == g_sent.size() && (g_mesh.empty() || !std::memcmp(g_mesh.data(), g_sent.data(), g_mesh.size() * sizeof(Vertex)))) return;
+	g_sent.swap(g_mesh);
 	gx_debug_mesh(g_sent.data(), (uint32_t)g_sent.size());
-	static size_t traced = SIZE_MAX;
-	if (g_trace && traced != moving) rt_log("goldeneye: collision view has %zu triangles that move", moving / 3);
-	traced = moving;
+	static size_t level = SIZE_MAX, moving = SIZE_MAX;
+	if (g_trace && (level != g_level.size() || moving != g_moving.size()))
+		rt_log("goldeneye: collision view has %zu triangles of the level, %zu that move, %u entities it doesn't know", g_level.size() / 3, g_moving.size() / 3, g_unknown);
+	level = g_level.size();
+	moving = g_moving.size();
 }
 } //namespace
 
 bool collision_view() { return g_view; }
 void set_collision_view(bool on) { g_view = on; }
 
-void collision_frame()
+void collision_frame(PPCContext& c)
 {
 	static const float none[16]{};
 	if (!g_view || !guest_ptr(ld32(kPlayerPtr)))
@@ -380,10 +554,11 @@ void collision_frame()
 		g_signature = signature;
 		g_settle = g_shown ? kSettle : 1;
 	}
-	bool gathered = g_settle && --g_settle == 0;
-	if (gathered) Gather();
-	GatherMoving();
-	Send(gathered);
+	//a part may fill in after its pointer was there, so the level is looked at again now and then
+	static int frames = 0;
+	if ((g_settle && --g_settle == 0) || ++frames % kRegather == 0) Gather();
+	GatherMoving(c);
+	Send();
 	gx_debug_view(true, g_clip);
 	g_shown = true;
 }
@@ -400,6 +575,8 @@ void CameraApply(PPCContext& c)
 
 void install_collision()
 {
+	g_world_matrix = ppc_lookup(kWorldMatrixFn);
+	if (!g_world_matrix) rt_die("goldeneye: fn_80301960 is not in this build");
 	orig_camera_apply = ppc_hook("ge_camera_apply", CameraApply);
 	if (!orig_camera_apply) rt_die("goldeneye: the camera is not hooked in this build");
 	if (const char* e = std::getenv("GE_COLLISION")) g_view = std::atoi(e) != 0;
