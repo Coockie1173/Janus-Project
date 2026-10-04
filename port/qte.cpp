@@ -36,6 +36,7 @@ const uint32_t kActPressed = 0x534; //the controller's actions pressed this fram
 std::atomic<bool> g_auto_qte{false};
 PPCFunc orig_cutscene_input = nullptr;
 bool g_trace = false;
+std::atomic<uint32_t> g_waiting_frame{~0u}; //the last frame an input waited for a button in
 
 uint32_t ButtonBit(uint32_t button)
 {
@@ -79,6 +80,7 @@ void CutsceneInput(PPCContext& c)
 	uint32_t input = c.r[3], ctrl = local_controller();
 	if (!guest_ptr(input)) { orig_cutscene_input(c); return; }
 	bool wasDone = ld8(input + kDone) != 0;
+	if (!wasDone && Wanted(input)) g_waiting_frame = ld32(kFrameCount);
 	uint32_t wanted = g_auto_qte && !wasDone && guest_ptr(ctrl) ? Wanted(input) : 0;
 	if (!wanted)
 	{
@@ -94,6 +96,8 @@ void CutsceneInput(PPCContext& c)
 }
 
 } //namespace
+
+bool cutscene_input_waiting() { return ld32(kFrameCount) - g_waiting_frame < 4; }
 
 bool auto_qte() { return g_auto_qte; }
 void set_auto_qte(bool on) { g_auto_qte = on; }

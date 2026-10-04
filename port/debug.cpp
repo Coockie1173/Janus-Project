@@ -57,7 +57,8 @@ namespace {
 
 using Clock = std::chrono::steady_clock;
 const Clock::time_point t0 = Clock::now();
-double now_s() { return std::chrono::duration<double>(Clock::now() - t0).count(); }
+//the guest's time: a fast-forwarded cutscene counts for as long as it would have taken
+double now_s() { return std::chrono::duration<double>(rt_now() - t0).count(); }
 
 //a replay (GE_REPLAY) gets the game somewhere first, the scripted times count from its end
 std::atomic<bool> replaying{false};

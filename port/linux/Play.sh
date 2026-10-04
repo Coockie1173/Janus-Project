@@ -5,7 +5,7 @@
 #     ./Play.sh --fps 120 --fov 70 --mouse 1.5 --fullscreen --fast-start --cheats
 #     ./Play.sh --offline              no hosts file: the game does not find its servers
 #     ./Play.sh --always-mouse         the cheat "Always Enable Mouse": mouse look in every player state
-#     ./Play.sh --skip-cutscenes       a mission starts at the checkpoint after its opening cutscene
+#     ./Play.sh --skip-cutscenes       a mission's opening cutscene is fast-forwarded
 #     ./Play.sh --no-level-timer       the hud without the level's time (it is on by default)
 #     ./Play.sh --auto-qte             quick time events press their own buttons
 #     ./Play.sh --extras-menu          the cheat "Unused Extras Menu"

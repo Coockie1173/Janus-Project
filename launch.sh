@@ -15,7 +15,7 @@
 #                                      else hosts; direct never does)
 #     ./launch.sh --always-mouse       the cheat "Always Enable Mouse": mouse look in every player state
 #                                      (cutscenes, melee, climbing...), also in the F1 menu's Cheats
-#     ./launch.sh --skip-cutscenes     a mission starts at the checkpoint after its opening cutscene (also in
+#     ./launch.sh --skip-cutscenes     a mission's opening cutscene is fast-forwarded (also in
 #                                      the F1 menu's Enhancements)
 #     ./launch.sh --no-level-timer     the hud without the level's time (on by default, the F1 menu's Enhancements)
 #     ./launch.sh --auto-qte           quick time events press their own buttons (the F1 menu's Enhancements)

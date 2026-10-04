@@ -66,6 +66,18 @@ const char* state_name(uint32_t st) { //the Ghidra project's PlayerStates
     return "Unknown";
 }
 
+//while a cutscene is fast-forwarded, in the bottom right corner
+void skipping_label() {
+    const char* text = "Skipping cutscene...";
+    ImFont* font = ImGui::GetFont();
+    float size = font->FontSize * 1.5f, pad = 6;
+    ImVec2 box = font->CalcTextSizeA(size, FLT_MAX, 0, text), screen = ImGui::GetIO().DisplaySize;
+    ImVec2 at(screen.x - box.x - 24 - pad, screen.y - box.y - 24 - pad);
+    ImDrawList* dl = ImGui::GetBackgroundDrawList();
+    dl->AddRectFilled(ImVec2(at.x - pad, at.y - pad), ImVec2(at.x + box.x + pad, at.y + box.y + pad), IM_COL32(0, 0, 0, 150), 3);
+    dl->AddText(font, size, at, IM_COL32(255, 255, 255, 255), text);
+}
+
 void player_state() {
     char text[64];
     uint32_t st;
@@ -198,7 +210,7 @@ void watches() {
 }
 
 void draw() {
-    if (!overlay_open() && !g_show_state) return;
+    if (!overlay_open() && !g_show_state && !skipping_cutscene()) return;
     //with only the state shown the cursor stays hidden over the picture
     ImGuiIO& io = ImGui::GetIO();
     if (overlay_open()) io.ConfigFlags &= ~ImGuiConfigFlags_NoMouseCursorChange;
@@ -207,6 +219,7 @@ void draw() {
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
     if (g_show_state) player_state();
+    if (skipping_cutscene()) skipping_label();
     if (g_open) watches();
     settings_draw();
     ImGui::Render();

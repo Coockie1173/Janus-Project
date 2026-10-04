@@ -441,6 +441,34 @@ index 0000000..bb49877
 +                v = ALL                                  # (a branch writes no CR: never asked)
 +            res[a] = v
 +        return res
+diff --git a/runtime/audio.cpp b/runtime/audio.cpp
+index 4050960..f5a94c7 100644
+--- a/runtime/audio.cpp
++++ b/runtime/audio.cpp
+@@ -18,6 +18,7 @@
+ #include "rt.h"
+ #include <SDL3/SDL.h>
+ #include <algorithm>
++#include <atomic>
+ #include <cmath>
+ #include <cstdio>
+ #include <cstdlib>
+@@ -70,8 +71,15 @@ void audio_init(bool enabled) {
+     rt_log("audio: %s", SDL_GetAudioDeviceName(SDL_GetAudioStreamDevice(stream)));
+ }
+ 
++std::atomic<bool> muted{false};
++void audio_mute(bool on) { muted = on; }
++
+ void audio_play(const uint8_t* be_rl, uint32_t frames, uint32_t rate) {
+     if (!frames || (!stream && !dump)) return;
++    if (muted) {
++        if (stream && playing) { SDL_PauseAudioStreamDevice(stream); SDL_ClearAudioStream(stream); playing = false; }
++        return;
++    }
+     static std::vector<int16_t> lr;
+     lr.resize(2 * (size_t)frames);
+     for (uint32_t i = 0; i < frames; ++i) {
 diff --git a/runtime/core.cpp b/runtime/core.cpp
 index d0baebf..8f66089 100644
 --- a/runtime/core.cpp
@@ -623,7 +651,7 @@ index 3d2da4e..d6e9264 100644
      X(PFNGLVERTEXARRAYELEMENTBUFFERPROC, glVertexArrayElementBuffer)                                \
      X(PFNGLENABLEVERTEXARRAYATTRIBPROC, glEnableVertexArrayAttrib)                                  \
 diff --git a/runtime/gx.cpp b/runtime/gx.cpp
-index a6b37f2..003e9a8 100644
+index a6b37f2..e6269b5 100644
 --- a/runtime/gx.cpp
 +++ b/runtime/gx.cpp
 @@ -25,6 +25,7 @@
@@ -649,7 +677,15 @@ index a6b37f2..003e9a8 100644
  namespace {
  
  uint32_t pi_base, pi_end, pi_wptr;                 // PI CPU FIFO (physical addresses)
-@@ -139,7 +148,9 @@ void flush(bool force) {
+@@ -114,6 +123,7 @@ bool mem_ok(uint32_t a, size_t n) {
+ 
+ // ---- the record ------------------------------------------------------------------------------
+ bool video = false;
++bool skip_frame = false;                             // g_gx_skip_frames, as of this frame's start
+ std::vector<uint8_t> rec;
+ int rec_frames = 0;
+ 
+@@ -139,7 +149,9 @@ void flush(bool force) {
      submit_pending = true;
  }
  
@@ -659,7 +695,7 @@ index a6b37f2..003e9a8 100644
      uint64_t h = 0x9E3779B97F4A7C15ull ^ n;
      size_t i = 0;
      for (; i + 8 <= n; i += 8) {
-@@ -152,6 +163,53 @@ uint64_t hash_mem(const uint8_t* p, size_t n) {
+@@ -152,6 +164,53 @@ uint64_t hash_mem(const uint8_t* p, size_t n) {
      return h;
  }
  
@@ -713,7 +749,7 @@ index a6b37f2..003e9a8 100644
  // ---- textures --------------------------------------------------------------------------------
  // Decoded textures are cached by what names them (address, format, size,
  // levels, palette) and re-uploaded when their bytes change. Bytes are hashed
-@@ -169,14 +227,25 @@ struct TexKeyHash {
+@@ -169,14 +228,25 @@ struct TexKeyHash {
          return (size_t)(k.addr * 0x9E3779B1u ^ k.shape * 0x85EBCA77u ^ k.levels ^ k.tlut);
      }
  };
@@ -741,7 +777,7 @@ index a6b37f2..003e9a8 100644
  
  // texture format an EFB copy format produces in RAM (for its size)
  uint32_t copy_tex_fmt(uint32_t cf) {
-@@ -184,7 +253,11 @@ uint32_t copy_tex_fmt(uint32_t cf) {
+@@ -184,7 +254,11 @@ uint32_t copy_tex_fmt(uint32_t cf) {
      return f[cf & 15];
  }
  
@@ -753,7 +789,7 @@ index a6b37f2..003e9a8 100644
      uint32_t gen = bp[0x00], used = 0;
      int ntev = (int)(gen >> 10 & 15) + 1, nind = (int)(gen >> 16 & 7);
      for (int s = 0; s < ntev; ++s) {
-@@ -192,7 +265,7 @@ uint32_t used_maps() {
+@@ -192,7 +266,7 @@ uint32_t used_maps() {
          if (t & 0x40) used |= 1u << (t & 7);
      }
      for (int i = 0; i < nind && i < 4; ++i) used |= 1u << (bp[0x27] >> (6 * i) & 7);
@@ -762,7 +798,7 @@ index a6b37f2..003e9a8 100644
  }
  
  void bind_map(int m) {
-@@ -203,9 +276,75 @@ void bind_map(int m) {
+@@ -203,9 +277,75 @@ void bind_map(int m) {
      uint32_t fmt = img0 >> 20 & 15, addr = (img3 & 0xFFFFFF) << 5;
      if (img1 >> 21 & 1) warn_once("texture preloaded in TMEM (not modelled), map", m);
  
@@ -841,7 +877,7 @@ index a6b37f2..003e9a8 100644
          uint64_t tag = 1ull << 32 | addr;
          if (map_bound[m] != tag) {
              put<uint8_t>(VC_TEXEFB);
-@@ -224,6 +363,19 @@ void bind_map(int m) {
+@@ -224,6 +364,19 @@ void bind_map(int m) {
          levels = (int)((mode1 >> 8 & 0xFF) + 15) / 16 + 1;
          if (levels > full) levels = full;
      }
@@ -861,7 +897,7 @@ index a6b37f2..003e9a8 100644
      size_t total = 0;
      for (int l = 0; l < levels; ++l) total += gxtex_size(fmt, std::max(1, w >> l), std::max(1, h >> l));
      if (!addr || !mem_ok(addr, total)) { warn_once("texture outside memory at", addr); return; }
-@@ -246,9 +398,21 @@ void bind_map(int m) {
+@@ -246,9 +399,21 @@ void bind_map(int m) {
      TexEntry& e = it->second;
      bool upload = false;
      if (fresh || e.gen != tex_gen) {
@@ -886,7 +922,7 @@ index a6b37f2..003e9a8 100644
          e.gen = tex_gen;
      }
      if (upload) {
-@@ -283,6 +447,7 @@ void bind_map(int m) {
+@@ -283,6 +448,7 @@ void bind_map(int m) {
  }
  
  void sync_textures() {
@@ -894,7 +930,7 @@ index a6b37f2..003e9a8 100644
      uint32_t todo = used_maps() & tex_dirty;
      for (int m = 0; m < 8; ++m)
          if (todo >> m & 1) bind_map(m);
-@@ -351,11 +516,14 @@ VtxFmt vtx_fmt(int v) {
+@@ -351,11 +517,14 @@ VtxFmt vtx_fmt(int v) {
          f.tc_fmt[i] = t[i][1];
          f.tc_sc[i] = 1.0f / (float)(1u << t[i][2]);
      }
@@ -910,7 +946,7 @@ index a6b37f2..003e9a8 100644
  }
  
  // bytes per vertex for vertex format `v`
-@@ -378,6 +546,35 @@ int vertex_size(const VtxFmt& f) {
+@@ -378,6 +547,35 @@ int vertex_size(const VtxFmt& f) {
      return n;
  }
  
@@ -946,7 +982,7 @@ index a6b37f2..003e9a8 100644
  // an attribute's data: in the stream (direct) or in its array (indexed)
  const uint8_t* fetch(uint32_t mode, int arr, int size, const uint8_t*& p, uint32_t sub = 0) {
      if (mode == 1) { const uint8_t* q = p; p += size; return q; }
-@@ -387,52 +584,125 @@ const uint8_t* fetch(uint32_t mode, int arr, int size, const uint8_t*& p, uint32
+@@ -387,53 +585,126 @@ const uint8_t* fetch(uint32_t mode, int arr, int size, const uint8_t*& p, uint32
      return host(virt(cp[0xA0 + arr] + idx * cp[0xB0 + arr] + sub));
  }
  
@@ -1097,12 +1133,14 @@ index a6b37f2..003e9a8 100644
  void efb_copy(uint32_t v) {
      if (v >> 14 & 1) {                                 // to the XFB: the frame is done
          ++st.frames;
+-        if (video) {
 +        if (!(st.frames & 1023)) mem_watch_tick();
 +        if (g_vperf_on) perf_frame();
-         if (video) {
++        if (video && !skip_frame) {
              put<uint8_t>(VC_FRAME);
              ++rec_frames;
-@@ -445,7 +715,21 @@ void efb_copy(uint32_t v) {
+             flush(true);
+@@ -445,7 +716,21 @@ void efb_copy(uint32_t v) {
      if (v >> 9 & 1) { w = (w + 1) / 2; h = (h + 1) / 2; }
      uint32_t tpf = v >> 3 & 15, real = tpf / 2 + (tpf & 1) * 8;
      size_t size = gxtex_size(copy_tex_fmt(real), w, h);
@@ -1125,7 +1163,7 @@ index a6b37f2..003e9a8 100644
      tex_dirty = 0xFF;
  }
  
-@@ -454,13 +738,15 @@ void bp_write(uint32_t v) {
+@@ -454,13 +739,16 @@ void bp_write(uint32_t v) {
      if (reg == 0xFE) { bp_mask = val; return; }
      bp[reg] = (bp[reg] & ~bp_mask) | (val & bp_mask);
      bp_mask = 0xFFFFFF;
@@ -1137,12 +1175,22 @@ index a6b37f2..003e9a8 100644
          // for it asleep (GXWaitDrawDone), and its other threads (the
          // disc, the sound stream) run meanwhile
 -        if (video) { put<uint8_t>(VC_DRAWDONE); flush(true); return; }
++        skip_frame = g_gx_skip_frames;                                // a frame is skipped whole, from its draw-done to the next
 +        if (video && !g_gx_early_done) { put<uint8_t>(VC_DRAWDONE); flush(true); return; }
 +        if (video) flush(true);                                       // the renderer follows, frames_ahead behind at most
          pe_ctrl |= 8; ++st.done; os_raise();
          return;
      case 0x47: pe_token = (uint16_t)val; return;                      // token
-@@ -504,16 +790,323 @@ void xf_load(uint32_t addr, uint32_t n, const uint8_t* src) {
+@@ -477,7 +765,7 @@ void bp_write(uint32_t v) {
+     }
+     if ((reg >= 0x80 && reg < 0x9C) || (reg >= 0xA0 && reg < 0xBC))
+         tex_dirty |= (uint8_t)(1u << ((reg & 3) + (reg >= 0xA0 ? 4 : 0)));
+-    if (video) {
++    if (video && !(skip_frame && reg == 0x52)) {                      // a skipped frame copies nothing: the EFB is the last one drawn
+         put<uint8_t>(VC_BP);
+         put<uint32_t>(reg << 24 | bp[reg]);
+     }
+@@ -504,16 +792,323 @@ void xf_load(uint32_t addr, uint32_t n, const uint8_t* src) {
  // parse one command at p (n bytes available); returns its length, 0 if incomplete
  size_t parse(const uint8_t* p, size_t n, bool in_dl);
  
@@ -1408,7 +1456,7 @@ index a6b37f2..003e9a8 100644
 -        size_t k = parse(p + off, size - off, true);
 -        if (!k) break;
 -        off += k;
-+    if (!video || !dl_cache_on || dl_building || trace_file()) { dl_parse(p, 0, size); return; }
++    if (!video || !dl_cache_on || dl_building || skip_frame || trace_file()) { dl_parse(p, 0, size); return; }
 +
 +    ++dl_stat.calls;
 +    if (dl_cache.size() > 50000) dl_cache.clear();   // lists made anew at new addresses: start over
@@ -1471,7 +1519,7 @@ index a6b37f2..003e9a8 100644
      }
  }
  
-@@ -525,6 +1118,9 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
+@@ -525,6 +1120,9 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
      case 0x08:
          if (n < 6) return 0;
          cp[p[1]] = be32(p + 2);
@@ -1481,7 +1529,7 @@ index a6b37f2..003e9a8 100644
          TRACE("CP %02X %08X\n", p[1], cp[p[1]]);
          return 6;
      case 0x10: {
-@@ -556,8 +1152,9 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
+@@ -556,54 +1154,28 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
      if (op >= 0x80 && op < 0xC0) {
          if (n < 3) return 0;
          uint32_t count = (uint32_t)p[1] << 8 | p[2];
@@ -1493,8 +1541,9 @@ index a6b37f2..003e9a8 100644
          if (n < len) return 0;
          ++st.draws;
          st.verts += count;
-@@ -565,45 +1162,18 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
-         if (video && count) {
+         TRACE("DRAW %02X fmt %d n %u%s\n", op & 0xF8, op & 7, count, in_dl ? " (dl)" : "");
+-        if (video && count) {
++        if (video && count && !skip_frame) {
              if (bp[0xF1] >> 21 & 7) warn_once("fog (not drawn), type", bp[0xF1] >> 21 & 7);
              if (bp[0xF4] >> 2 & 3) warn_once("Z texture (not drawn), op", bp[0xF4] >> 2 & 3);
 +            const uint8_t fl = pl.flags;
@@ -1548,7 +1597,7 @@ index a6b37f2..003e9a8 100644
          }
          return len;
      }
-@@ -614,8 +1184,17 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
+@@ -614,8 +1186,17 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
  
  void feed(const uint8_t* b, int n) {
      if (desync) return;
@@ -1567,7 +1616,7 @@ index a6b37f2..003e9a8 100644
      while (off < stream.size()) {
          size_t k = parse(stream.data() + off, stream.size() - off, false);
          if (!k) { --st.cmds; break; }
-@@ -714,7 +1293,10 @@ bool gx_copy_to_ram(uint32_t addr) {
+@@ -714,7 +1295,10 @@ bool gx_copy_to_ram(uint32_t addr) {
      hw_run_locked([&] {
          std::memcpy(host(virt(addr)), out.data(), out.size());
          auto c = copies.find(addr);                          // the GPU's copy still stands for these bytes
@@ -1579,15 +1628,16 @@ index a6b37f2..003e9a8 100644
      });
      return true;
  }
-@@ -729,6 +1311,7 @@ void gx_init() {
+@@ -729,6 +1313,8 @@ void gx_init() {
  // AI's, which start each audio frame's mix, above all. So does this wait.
  // A handler may switch guest threads, and another thread may hand the
  // record over in the meantime.
 +bool g_gx_early_done = false;
++bool g_gx_skip_frames = false;
  void gx_draw_done_reached() {
      hw_run_locked([] { pe_ctrl |= 8; ++st.done; os_raise(); });
  }
-@@ -738,7 +1321,7 @@ void gx_submit_pending() {
+@@ -738,7 +1324,7 @@ void gx_submit_pending() {
      submit_pending = false;
      while (!rec.empty()) {
          int frames = rec_frames;
@@ -1596,7 +1646,7 @@ index a6b37f2..003e9a8 100644
          if (t_ppc && g_ppc_pending.load(std::memory_order_relaxed)) ppc_poll(*t_ppc);
      }
  }
-@@ -768,12 +1351,17 @@ static void gp_run() {
+@@ -768,12 +1354,17 @@ static void gp_run() {
  
  void gx_pipe_burst(const uint8_t* b, int n) {
      uint32_t at = pi_wptr_addr();
@@ -1620,7 +1670,7 @@ index a6b37f2..003e9a8 100644
      }
      if (!linked()) return;
      if (held.empty() && !(bp_enabled() && at == bp_addr())) { feed(b, n); return; }
-@@ -861,4 +1449,11 @@ void gx_report() {
+@@ -861,4 +1452,11 @@ void gx_report() {
             (unsigned long long)st.dls, (unsigned long long)st.copies, (unsigned long long)st.frames,
             (unsigned long long)st.done, (unsigned long long)st.uploads, (unsigned long long)st.peeks,
             (unsigned long long)st.readbacks);
@@ -1694,7 +1744,7 @@ index 7943c4d..59da23b 100644
  layout(binding = 1) uniform sampler2D s1;
  layout(binding = 2) uniform sampler2D s2;
 diff --git a/runtime/hw.cpp b/runtime/hw.cpp
-index c53d227..319db62 100644
+index c53d227..376c463 100644
 --- a/runtime/hw.cpp
 +++ b/runtime/hw.cpp
 @@ -25,13 +25,16 @@
@@ -1733,7 +1783,7 @@ index c53d227..319db62 100644
 +    std::lock_guard<std::recursive_mutex> lk(g_hw);
 +    if (boot != dsp_boot || dsp_ucode != Ucode::AX) return;
 +    ++dsp_frames;
-+    dbg_cmdlist = std::chrono::steady_clock::now();
++    dbg_cmdlist = rt_now();
 +    dsp_send(0xDCD10002, true);
 +}
 +void ax_main() {
@@ -1776,7 +1826,12 @@ index c53d227..319db62 100644
          } else if ((m >> 16) == 0xBABE) {
              dsp_cmdlist_next = true;
          } else if (m != 0xCDD10003) {                // 0xCDD10003: carry on
-@@ -218,6 +261,7 @@ void dsp_cr_write(uint16_t v) {
+@@ -214,10 +257,11 @@ void dsp_cr_write(uint16_t v) {
+     uint16_t old = dsp_cr;
+     if (dsp_dbg) rt_log("dsp: control %04X -> %04X", old, v);
+     uint16_t keep = (uint16_t)(old & (DSP_AIDINT | DSP_ARINT | DSP_DSPINT) & ~v);  // write 1 to clear
+-    if ((old & DSP_AIDINT) && (v & DSP_AIDINT)) dbg_aid_acked = std::chrono::steady_clock::now();
++    if ((old & DSP_AIDINT) && (v & DSP_AIDINT)) dbg_aid_acked = rt_now();
      keep |= old & DSP_DMA;                           // read only: an ARAM DMA runs
      dsp_cr = (uint16_t)((v & ~(DSP_AIDINT | DSP_ARINT | DSP_DSPINT | DSP_RES | DSP_PIINT | DSP_DMA)) | keep);
      if (v & DSP_RES) {
@@ -1784,6 +1839,50 @@ index c53d227..319db62 100644
          dsp_ucode = Ucode::ROM;
          dsp_to_cpu.clear();
      }
+@@ -252,7 +296,7 @@ void dsp_ar_dma() {
+         dsp_ar[4] &= 0x8000;
+         dsp_ar[5] = 0;
+         ar_busy = true;
+-        ar_done = std::chrono::steady_clock::now() + std::chrono::nanoseconds((cnt / 32 + 1) * 506);
++        ar_done = rt_now() + std::chrono::nanoseconds((cnt / 32 + 1) * 506);
+         dsp_cr |= DSP_DMA;
+         return;
+     }
+@@ -302,7 +346,7 @@ void ai_dma_block() {                                // a block starts: its samp
+         }
+     }
+     ai_dma_period = std::chrono::nanoseconds(bytes * 1000000000ull / (4ull * rate));
+-    ai_dma_block_start = HostClock::now();
++    ai_dma_block_start = rt_now();
+     dsp_cr |= DSP_AIDINT;
+     dbg_aid_raised = ai_dma_block_start;
+ }
+@@ -311,14 +355,14 @@ void ai_dma_write(uint16_t v) {
+     if (on && !ai_dma_on) {
+         store_write(0xCC005036, v, 2);
+         ai_dma_block();
+-        ai_dma_next = HostClock::now() + ai_dma_period;
++        ai_dma_next = rt_now() + ai_dma_period;
+     }
+     ai_dma_on = on;
+ }
+ uint16_t ai_dma_blocks_left() {
+     uint16_t ctl = (uint16_t)store_read(0xCC005036, 2) & 0x7FFF;
+     if (!ai_dma_on || ai_dma_period.count() <= 0) return 0;
+-    auto done = HostClock::now() - ai_dma_block_start;
++    auto done = rt_now() - ai_dma_block_start;
+     int64_t left = (int64_t)ctl - (int64_t)(ctl * done.count() / ai_dma_period.count());
+     return (uint16_t)(left < 0 ? 0 : left > ctl ? ctl : left);
+ }
+@@ -517,7 +561,7 @@ bool di_irq() {
+ void di_command() {                                  // TSTART: the command starts
+     uint32_t len = (di[DI_CMD0] >> 24) == 0xA8 ? di[DI_LEN] & ~31u : 0;
+     di_busy = true;
+-    di_done = std::chrono::steady_clock::now() + std::chrono::microseconds(1000 + len / 16);
++    di_done = rt_now() + std::chrono::microseconds(1000 + len / 16);
+ }
+ void di_finish() {                                   // its time has passed: its effect, the interrupt
+     uint32_t cmd = di[DI_CMD0] >> 24;
 @@ -846,7 +890,10 @@ void ppc_wpar_write(uint32_t) { gathered = 0; }
  
  void ppc_mmio_write(uint32_t a, uint32_t v, int size) {
@@ -1796,8 +1895,35 @@ index c53d227..319db62 100644
          if (gathered >= 32) {
              {
                  std::lock_guard<std::recursive_mutex> lk(g_hw);
+@@ -893,7 +940,7 @@ std::chrono::steady_clock::time_point hw_tick() {
+ }
+ 
+ std::chrono::steady_clock::time_point di_tick() {    // a disc command's end
+-    auto now = HostClock::now();
++    auto now = rt_now();
+     if (!di_busy) return now + std::chrono::milliseconds(100);
+     if (now < di_done) return di_done;
+     di_busy = false;
+@@ -903,7 +950,7 @@ std::chrono::steady_clock::time_point di_tick() {    // a disc command's end
+ }
+ 
+ std::chrono::steady_clock::time_point ar_tick() {    // an ARAM DMA's end: its interrupt
+-    auto now = HostClock::now();
++    auto now = rt_now();
+     if (!ar_busy) return now + std::chrono::milliseconds(100);
+     if (now < ar_done) return ar_done;
+     ar_busy = false;
+@@ -913,7 +960,7 @@ std::chrono::steady_clock::time_point ar_tick() {    // an ARAM DMA's end: its i
+ }
+ 
+ std::chrono::steady_clock::time_point ai_tick() {
+-    auto now = HostClock::now();
++    auto now = rt_now();
+     if (!ai_dma_on || ai_dma_period.count() <= 0) return now + std::chrono::milliseconds(100);
+     if (now >= ai_dma_next) {
+         // The next block waits for the guest's mix of it: its AI interrupt
 diff --git a/runtime/ios.cpp b/runtime/ios.cpp
-index 23d837a..b2f6f19 100644
+index 23d837a..e673c0e 100644
 --- a/runtime/ios.cpp
 +++ b/runtime/ios.cpp
 @@ -25,18 +25,41 @@
@@ -1868,7 +1994,32 @@ index 23d837a..b2f6f19 100644
      if (path == "/dev/di") d = std::make_unique<DI>();
      else if (path == "/dev/fs") d = std::make_unique<FS>();
      else if (path == "/dev/es") d = std::make_unique<ES>();
-@@ -522,8 +554,17 @@ void ios_idle() {
+@@ -395,7 +427,7 @@ void reply(uint32_t addr, int32_t result) {
+     wr32(addr, 8);
+     wr32(addr + 4, (uint32_t)result);
+     wr32(addr + 8, cmd);
+-    replies.push_back({addr, Clock::now() + kReplyLatency});
++    replies.push_back({addr, rt_now() + kReplyLatency});
+ }
+ 
+ int32_t execute(uint32_t addr) {
+@@ -464,7 +496,7 @@ void update() {
+         if (r != PENDING) reply(addr, r);
+         return;
+     }
+-    if (!replies.empty() && ready() && Clock::now() >= replies.front().due) {
++    if (!replies.empty() && ready() && rt_now() >= replies.front().due) {
+         arm_msg = replies.front().addr & 0x7FFFFFFFu; // physical
+         replies.pop_front();
+         ctrl.y1 = true;
+@@ -516,14 +548,23 @@ uint32_t ios_ipc_read(uint32_t reg) {
+ }
+ 
+ void ios_idle() {
+-    auto now = Clock::now();
++    auto now = rt_now();
+     for (Reply& r : replies) r.due = std::min(r.due, now);
+     update();
  }
  
  Clock::time_point ios_tick() {
@@ -1876,7 +2027,7 @@ index 23d837a..b2f6f19 100644
      update();
 -    return replies.empty() ? Clock::time_point::max() : replies.front().due;
 +    auto next = replies.empty() ? Clock::time_point::max() : replies.front().due;
-+    return waiting ? std::min(next, Clock::now() + std::chrono::milliseconds(1)) : next;
++    return waiting ? std::min(next, rt_now() + std::chrono::milliseconds(1)) : next;
 +}
 +
 +void ios_net_add_host(const char* name, const char* address) {
@@ -2917,7 +3068,7 @@ index c544428..d46f70a 100644
 +void mem_watch_tick();
 +uint64_t mem_watch_faults();
 diff --git a/runtime/os.cpp b/runtime/os.cpp
-index aa1274e..f59b7dd 100644
+index aa1274e..0f3af3e 100644
 --- a/runtime/os.cpp
 +++ b/runtime/os.cpp
 @@ -109,6 +109,7 @@ void load_regs(PPCContext& c, uint32_t ctx) {
@@ -2928,7 +3079,73 @@ index aa1274e..f59b7dd 100644
      try {
          {
              std::unique_lock<std::mutex> lk(g_mx);
-@@ -435,7 +436,7 @@ void os_raise() {
+@@ -288,10 +289,13 @@ void clock_block(std::chrono::nanoseconds d) {
+ }
+ const auto clock_margin = std::chrono::microseconds(200);
+ #endif
++// wake is the guest's time (rt_now), a host clock that can run fast
+ void clock_sleep(Clock::time_point wake) {
+     using namespace std::chrono;
+     for (;;) {
+-        auto left = wake - Clock::now();
++        auto left = duration_cast<nanoseconds>(wake - rt_now());
++        double speed = rt_speed();
++        if (speed != 1.0) left = nanoseconds((int64_t)((double)left.count() / speed));
+         if (left <= nanoseconds(0) || g_kick.exchange(false)) return;
+         if (left > clock_margin + microseconds(100)) clock_block(duration_cast<nanoseconds>(left - clock_margin));
+         else std::this_thread::yield();
+@@ -320,9 +324,9 @@ void clock_main() {
+     // retraces at the rate VI is programmed for: 59.94 Hz NTSC and EuRGB60,
+     // 50 Hz PAL
+     auto vi_period = hw_vi_field_period();
+-    auto next_vi = Clock::now() + vi_period;
++    auto next_vi = rt_now() + vi_period;
+     for (;;) {
+-        auto now = Clock::now();
++        auto now = rt_now();
+         if (now >= next_vi) {
+             hw_vi_retrace();
+             vi_period = hw_vi_field_period();
+@@ -389,8 +393,37 @@ LONG WINAPI on_crash(EXCEPTION_POINTERS* ep) {
+ }  // namespace
+ 
+ // ---- services ----------------------------------------------------------------------------------
++// the host's clock, times the speed since it was last set
++std::mutex g_speed_mx;
++std::atomic<double> g_speed{1.0};
++std::atomic<int64_t> g_speed_gain{0};            // ns the guest's clock is ahead of the host's, as of g_speed_since
++Clock::time_point g_speed_since;
++Clock::time_point rt_now() {
++    auto host = Clock::now();
++    if (g_speed.load(std::memory_order_relaxed) == 1.0)
++        return host + std::chrono::nanoseconds(g_speed_gain.load(std::memory_order_relaxed));
++    std::lock_guard<std::mutex> lk(g_speed_mx);
++    auto run = std::chrono::duration_cast<std::chrono::nanoseconds>(host - g_speed_since).count();
++    return host + std::chrono::nanoseconds(g_speed_gain.load() + (int64_t)((double)run * (g_speed.load() - 1.0)));
++}
++double rt_speed() { return g_speed.load(std::memory_order_relaxed); }
++void rt_set_speed(double speed) {
++    if (!(speed >= 1.0)) speed = 1.0;
++    {
++        std::lock_guard<std::mutex> lk(g_speed_mx);
++        auto host = Clock::now();
++        if (g_speed.load() != 1.0) {
++            auto run = std::chrono::duration_cast<std::chrono::nanoseconds>(host - g_speed_since).count();
++            g_speed_gain += (int64_t)((double)run * (g_speed.load() - 1.0));
++        }
++        g_speed_since = host;
++        g_speed = speed;
++    }
++    clock_kick();
++}
++
+ uint64_t os_tb_now() {
+-    int64_t ns = std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - g_t0).count();
++    int64_t ns = std::chrono::duration_cast<std::chrono::nanoseconds>(rt_now() - g_t0).count();
+     return (uint64_t)(ns / 4000 * g_bus_mhz + ns % 4000 * g_bus_mhz / 4000) + (uint64_t)g_tb_offset.load();
+ }
+ 
+@@ -435,7 +468,7 @@ void os_raise() {
  
  // Nothing but an interrupt can end the loop: wait for one (with a 1 ms
  // bound, in case a line is raised some other way), then deliver it.
@@ -2937,7 +3154,7 @@ index aa1274e..f59b7dd 100644
      if (c.msr & MSR_EE) hw_cpu_idle();
      if (!g_ppc_pending.load(std::memory_order_relaxed) && (c.msr & MSR_EE)) {
          g_idle_waiting.store(true, std::memory_order_seq_cst);
-@@ -445,7 +446,7 @@ void ppc_idle(PPCContext& c) {
+@@ -445,7 +478,7 @@ void ppc_idle(PPCContext& c) {
      PPC_POLL(c);
  }
  
@@ -2946,7 +3163,7 @@ index aa1274e..f59b7dd 100644
      while (c.msr & MSR_EE) {
          g_ppc_pending.store(0);
          int exc = hw_external_pending() ? EXC_EXTERNAL : dec_due() ? EXC_DECREMENTER : -1;
-@@ -455,12 +456,12 @@ void ppc_poll(PPCContext& c) {
+@@ -455,12 +488,12 @@ void ppc_poll(PPCContext& c) {
      }
  }
  
@@ -2962,7 +3179,7 @@ index aa1274e..f59b7dd 100644
      t_ppc = &c;
      rt_die("%s at %s", what, rt_name(addr).c_str());
  }
-@@ -495,6 +496,28 @@ void os_report_running(int depth) {
+@@ -495,6 +528,28 @@ void os_report_running(int depth) {
      rt_backtrace(c, stderr, depth);
  }
  
@@ -3190,7 +3407,7 @@ index 99351d5..af71db9 100644
      if (!w) ps_quant(type, scale, ea + sz, c.ps1[s], &sz);
  }
 diff --git a/runtime/rt.h b/runtime/rt.h
-index 75fec5e..0ca3f8d 100644
+index 75fec5e..7870a20 100644
 --- a/runtime/rt.h
 +++ b/runtime/rt.h
 @@ -17,6 +17,10 @@ void rt_load_symbols(const char* tsv);
@@ -3204,7 +3421,7 @@ index 75fec5e..0ca3f8d 100644
  // The guest call chain from a context: LR, then the saved LRs up the back chain.
  void rt_backtrace(const PPCContext& c, FILE* out, int max = 24);
  
-@@ -58,6 +62,9 @@ static inline uint64_t tb_hz() { return (uint64_t)g_bus_mhz * 250000; }
+@@ -58,10 +62,20 @@ static inline uint64_t tb_hz() { return (uint64_t)g_bus_mhz * 250000; }
  
  // ---- the OS layer (os.cpp) --------------------------------------------------------------
  void os_report_running(int depth);                // stderr: where the running guest thread is
@@ -3214,7 +3431,18 @@ index 75fec5e..0ca3f8d 100644
  void os_install();                                // hooks, time
  void os_start_main(uint32_t entry);               // run __start on a guest host thread, and return
  void os_raise();                                  // a device changed its interrupt line
-@@ -74,6 +81,14 @@ void gx_submit_pending();                         // after a burst, outside g_hw
+ uint64_t os_tb_now();                             // guest time base now
++// The guest's clock as a host time point: the host's own while the speed is 1,
++// ahead of it by whatever was fast-forwarded. The time base, the decrementer,
++// VI's retraces, the AI's blocks and every device's delay go by it, so at a
++// speed of 8 the guest lives eight seconds a second, everything in step.
++std::chrono::steady_clock::time_point rt_now();
++void rt_set_speed(double speed);                  // 1: real time
++double rt_speed();
+ void os_watch(int seconds);                       // report the running thread periodically
+ void os_profile();                                // WIIKIT_PROFILE: sample the guest code (=render: the renderer), list the hot functions
+ 
+@@ -74,6 +88,18 @@ void gx_submit_pending();                         // after a burst, outside g_hw
  // game that reads the copy on the CPU (the renderer otherwise keeps copies
  // on the host GPU only). False if no copy was made to addr (physical).
  bool gx_copy_to_ram(uint32_t addr);
@@ -3226,10 +3454,22 @@ index 75fec5e..0ca3f8d 100644
 +// copy to an XFB), not at VI's retrace, which stays at the console's rate
 +// with everything the SDK times by it.
 +extern bool g_present_on_frame;
++// A port fast-forwarding (rt_set_speed): frames begun while it is set are
++// not drawn and not shown, only the GP's state is kept up, so the picture
++// stays the last frame drawn.
++extern bool g_gx_skip_frames;
  void gx_draw_done_reached();                      // the renderer: the game's draw-done point is drawn
  void hw_run_locked(const std::function<void()>& fn);   // run fn holding the hardware lock
  
-@@ -123,6 +138,10 @@ extern bool g_sysconf_eurgb60;                     // IPL.E60, after sysconf_pre
+@@ -106,6 +132,7 @@ void wpad_set_classic_filter(WpadClassicFilter f);
+ void wpad_filter_classic(int chan, ClassicState& s);  // the port's filter, if it has one
+ 
+ // ---- audio (ax.cpp, audio.cpp) --------------------------------------------------------
++void audio_mute(bool on);                          // nothing is played, and what was queued is dropped
+ void ax_command_list(uint32_t addr);               // the AX micro-code: mix one frame
+ uint8_t aram_read(uint32_t addr);                  // the GameCube's ARAM (hw.cpp), where its AX reads samples
+ bool ax_load_coefs(const char* dir);               // dsp_coef.bin: the polyphase resampler's table
+@@ -123,6 +150,10 @@ extern bool g_sysconf_eurgb60;                     // IPL.E60, after sysconf_pre
  
  // ---- IOS (ios.cpp) ------------------------------------------------------------------
  void ios_init(const char* disc_root, const char* nand_root);

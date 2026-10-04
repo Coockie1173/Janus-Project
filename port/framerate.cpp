@@ -20,6 +20,8 @@ std::atomic<uint32_t> g_fps{0}; //0 is the game's own 30
 uint32_t g_fps_applied = 0; //what the game's thread has set itself up for
 uint32_t g_max_written = 0; //the highest rate we last wrote, so we know it's ours to replace
 bool g_fps_log = false;
+std::atomic<bool> g_fast{false}; //a cutscene is fast-forwarded
+bool g_fast_applied = false;
 PPCFunc orig_tick = nullptr, orig_vi_wait = nullptr;
 
 //OSSleepTicks(OSTime), sleeps this thread on an alarm so the others can run
@@ -41,21 +43,26 @@ void guest_sleep(PPCContext& c, uint64_t ticks) {
 //up to 60 we show frames at VI's retrace, above that VI stays as it is since the SDK
 //and the game time things by retraces: frames get shown as they're drawn, and the game's
 //wait for a retrace becomes a sleep until the next frame is due (vi_wait)
-void apply_rate(uint32_t fps) {
+//fast-forwarding goes the way of a rate above 60 whatever the rate is: retraces come many
+//times as often then, and neither the game nor the picture should wait for one
+void apply_rate(uint32_t fps, bool fast) {
+    bool sameRate = fps == g_fps_applied;
     g_fps_applied = fps;
-    g_gx_early_done = fps > kGameFps; //the game's thread doesn't wait for the renderer
-    g_present_on_frame = fps > 60;
-    rt_log("goldeneye: frame rate up to %u%s", fps ? fps : kGameFps, fps > 60 ? " (frames shown as drawn, not at VI's retrace)" : "");
+    g_fast_applied = fast;
+    g_gx_early_done = fps > kGameFps || fast; //the game's thread doesn't wait for the renderer
+    g_present_on_frame = fps > 60 || fast;
+    if (!sameRate) rt_log("goldeneye: frame rate up to %u%s", fps ? fps : kGameFps, fps > 60 ? " (frames shown as drawn, not at VI's retrace)" : "");
 }
 
 void vi_wait(PPCContext& c) {
-    if (g_fps_applied > 60) guest_sleep(c, tb_hz() / 4000);
+    if (g_fps_applied > 60 || g_fast_applied) guest_sleep(c, tb_hz() / 4000);
     else orig_vi_wait(c);
 }
 
 void frame_tick(PPCContext& c) {
     uint32_t fps = g_fps;
-    if (fps != g_fps_applied) apply_rate(fps);
+    bool fast = g_fast;
+    if (fps != g_fps_applied || fast != g_fast_applied) apply_rate(fps, fast);
     //raise the game's highest rate to ours, or update it if it was already ours
     uint32_t want = fps ? fps : kGameFps, max = ld32(kFpsMax);
     if (max && max != want && (max < want || max == g_max_written)) {
@@ -63,7 +70,7 @@ void frame_tick(PPCContext& c) {
         if (ldf(kFpsNow) > (float)want) stf(kFpsNow, (float)want);
         g_max_written = want;
     }
-    if (sleep_ticks && fps > 60) {
+    if (sleep_ticks && (fps > 60 || fast)) {
         //the limiter spins until the next frame's time, so sleep up to just before it
         uint64_t next = (uint64_t)ld32(kNextFrame) << 32 | ld32(kNextFrame + 4), now = os_tb_now();
         uint64_t margin = tb_hz() / 5000; //0.2 ms
@@ -146,9 +153,11 @@ void install_fps() {
     }
     if (fps <= (int)kGameFps || fps > 1000) { rt_log("goldeneye: GE_FPS is 31..1000; the game's own 30 kept"); return; }
     g_fps = (uint32_t)fps;
-    apply_rate(g_fps);
+    apply_rate(g_fps, false);
 }
 
+void set_fast_forward(bool on) { g_fast = on; }
+bool engine_rate_held() { return ldf(kFpsNow) >= (float)ld32(kFpsMax) - 2.0f; }
 uint32_t fps_limit() { return g_fps ? g_fps.load() : kGameFps; }
 void set_fps_limit(uint32_t fps) { g_fps = fps <= kGameFps ? 0 : std::min(fps, 1000u); }
 

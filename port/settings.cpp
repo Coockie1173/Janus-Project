@@ -368,7 +368,7 @@ void build_pages() {
 
     Page& enhancements = g_pages[kEnhancements];
     enhancements.title = "Enhancements";
-    enhancements.rows.push_back({"Skip Intro Cutscenes (Experimental)", "On: a mission starts at the checkpoint after its opening cutscene.",
+    enhancements.rows.push_back({"Skip Intro Cutscenes (Experimental)", "On: a mission's opening cutscene is fast-forwarded.",
         [] { return std::string(skip_cutscenes() ? "On" : "Off"); },
         [](int) { set_skip_cutscenes(!skip_cutscenes()); g_dirty = true; }});
     enhancements.rows.push_back({"Level Timer", "On: the hud shows the time played in the level.",

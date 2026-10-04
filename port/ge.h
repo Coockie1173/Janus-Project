@@ -37,7 +37,9 @@ inline bool in_play() { return guest_ptr(ld32(kPlayerPtr)) && ld8(kPaused) == 0;
 //the parts
 void each_frame(uint32_t frame); //goldeneye.cpp, called by the limiter's hook once a game frame
 
-void install_fps(); //framerate.cpp
+void install_fps();
+void set_fast_forward(bool on); //the frame rate's set-up for a clock that runs fast
+bool engine_rate_held(); //the engine runs at its highest rate: its frames come on time //framerate.cpp
 const uint32_t kGameFps = 30;
 uint32_t fps_limit(); //the most frames a second the engine may run
 void set_fps_limit(uint32_t fps);
@@ -55,6 +57,7 @@ int mouse_mode(); //0 auto, 1 direct, 2 stick
 void set_mouse_mode(int m);
 uint32_t local_controller(); //0 when there's none (menus, loading)
 bool local_player_state(uint32_t& state); //the controller's +0x704 for the local player
+bool local_cutscene_locked(); //state 0x22 with the view and the aim both the cutscene's
 bool mouse_invert();
 void set_mouse_invert(bool on);
 const float kAdsSensMin = 0.05f, kAdsSensMax = 2.0f;
@@ -80,8 +83,11 @@ void set_ads_fov(float degrees);
 void ads_fov_apply(uint32_t controller); //after the local controller's update
 void install_native(); //native.cpp
 void install_cutscenes(); //cutscenes.cpp
-bool skip_cutscenes(); //missions start at the checkpoint after their opening
+bool skip_cutscenes(); //a mission's opening cutscene is fast-forwarded
 void set_skip_cutscenes(bool on);
+void cutscenes_frame(); //once a frame, on the game's thread
+bool skipping_cutscene(); //the fast forward is running
+bool cutscene_input_waiting(); //qte.cpp, a cutscene asked for a button in the last frames
 void install_qte(); //qte.cpp
 bool auto_qte(); //quick time events press their own buttons
 void set_auto_qte(bool on);

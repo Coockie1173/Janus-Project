@@ -16,7 +16,7 @@
 //GE_GECKO_EXTRA=F[:F...] more gecko files
 //GE_FOV=D field of view in degrees (the game's is 49)
 //GE_ADS_FOV=D field of view aiming down the sight (the game's is 22.5 with the pistol)
-//GE_SKIP_CUTSCENES=1 missions start at the checkpoint after the opening cutscene
+//GE_SKIP_CUTSCENES=1 a mission's opening cutscene is fast-forwarded
 //GE_AUTO_QTE=1 quick time events press their own buttons
 //GE_LEVEL_TIMER=0 no level timer in the hud
 //GE_EXTRAS_MENU=1 cheat, the menu's unused extras page
@@ -36,6 +36,7 @@ void each_frame(uint32_t frame) {
     gecko_apply();
     tweaks_apply();
     fov_apply();
+    cutscenes_frame();
     mouse_frame(frame);
 }
 

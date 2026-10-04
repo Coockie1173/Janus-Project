@@ -13,7 +13,7 @@ cp build/out-win/wiiboot.exe "$S/GoldenEye.exe"
 build/deps/llvm-mingw/bin/x86_64-w64-mingw32-strip "$S/GoldenEye.exe"
 cp build/deps/sdl3-win/bin/SDL3.dll "$S/"
 cp config/keys.txt "$S/keys.txt"
-cp config/keys.txt config/hosts.txt config/checkpoints.txt build/recomp/symbols.tsv "$S/config/"
+cp config/keys.txt config/hosts.txt build/recomp/symbols.tsv "$S/config/"
 cp build/patched/gecko.txt "$S/config/gecko-codes.txt"
 cp config/gecko/*.txt "$S/config/gecko/"
 for f in font_western.bin font_japanese.bin dsp_coef.bin; do
