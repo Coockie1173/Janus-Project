@@ -122,3 +122,4 @@ gave and where real names disagree.
 - [Dolphin](https://dolphin-emu.org) for the signature database and as the
   reference for the console's behaviour.
 - [SDL](https://libsdl.org).
+- Special thanks to FitterSpace and AlpineEscape for testing.
