@@ -13,6 +13,7 @@
 //net.cpp the hosts file for the game's servers
 //overlay.cpp the debug overlay (F3), memory watches from a .dmw file (dmw.cpp)
 //settings.cpp the settings menu (F1)
+//hotkeys.cpp keys that change the menu's settings in play (hotkeys.h)
 //crashdump.cpp crash, die and stall dumps into build/crashes
 //diagnostics.cpp the sampling profiler
 //debug.cpp aids for finding things in the running game

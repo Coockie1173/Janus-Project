@@ -4,6 +4,7 @@
 //GE_STICK="42-43:r1,0 45-46:l0,1" hold a stick (r or l, then x,y in -1..1 with y up)
 //GE_BUTTONS="66-66.3:0004 69-70:2000" hold classic buttons, KPAD's bits in hex (10000 on: Extra 1...)
 //(ZR 0004, ZL 0080, R 0200, L 2000, a 0010, b 0040, x 0008, y 0020)
+//GE_KEYS="5:F1 6:Down 7:Return 9:Left_Shift" press keys, SDL's names with _ for a space
 //GE_MOUSEMOVE="66-67:300,0" fake mouse motion in pixels a second (x right, y down)
 //GE_SCAN="41,43.5,44.5,46.5,49" snapshots guest memory at those times, then lists the floats
 //(build/scan.txt) that changed over every odd interval and stood still over every even one
@@ -37,6 +38,7 @@
 #include "mem.h"
 #include "rt.h"
 #include "video.h"
+#include <SDL3/SDL.h>
 #ifndef _WIN32
 #include <csignal>
 #include <sys/mman.h>
@@ -50,6 +52,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <utility>
@@ -73,6 +76,24 @@ void sleep_until_s(double t) {
 }
 
 struct Hold { double a, b; char stick; float x, y; };
+
+struct KeyPress { double t; SDL_Scancode key; };
+void KeysMain(std::vector<KeyPress> keys)
+{
+	for (const KeyPress& k : keys)
+	{
+		sleep_until_s(k.t);
+		for (bool down : {true, false})
+		{
+			SDL_Event e{};
+			e.type = down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
+			e.key.scancode = k.key;
+			e.key.down = down;
+			SDL_PushEvent(&e);
+			std::this_thread::sleep_for(std::chrono::milliseconds(60));
+		}
+	}
+}
 std::vector<Hold> holds, moves;
 struct Press { double a, b; uint32_t bits; };
 std::vector<Press> presses;
@@ -562,6 +583,20 @@ void debug_install() {
             q = *end ? end + 1 : end;
         }
         if (times.size() >= 2) std::thread(scan_main, times).detach();
+    }
+    if (const char* e = std::getenv("GE_KEYS")) {
+        std::vector<KeyPress> keys;
+        std::stringstream all(e);
+        for (std::string part; all >> part;) {
+            size_t colon = part.find(':');
+            if (colon == std::string::npos) continue;
+            std::string name = part.substr(colon + 1);
+            std::replace(name.begin(), name.end(), '_', ' ');
+            SDL_Scancode key = SDL_GetScancodeFromName(name.c_str());
+            if (key == SDL_SCANCODE_UNKNOWN) rt_log("goldeneye: GE_KEYS: no key called %s", name.c_str());
+            else keys.push_back({std::atof(part.c_str()), key});
+        }
+        std::thread(KeysMain, keys).detach();
     }
     if (const char* e = std::getenv("GE_POKE")) {
         std::vector<Poke> pokes;

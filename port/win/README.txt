@@ -53,6 +53,10 @@ F1 in the game opens its settings menu: the field of view, the frame rate, the m
 gamepad and the key bindings, changed while you play (a mission is paused
 first). It writes the same settings.env and keys.txt as the window.
 
+Its Hotkeys page puts settings on keys of your own: a key for 30 frames a second and back,
+one that turns the level timer on and off, one for a wider view... They work while you play,
+with the menu closed, and are kept in hotkeys.txt.
+
 keys.txt holds every binding, with the names to use explained at its top.
 Delete it to get the defaults back (a copy is in config\keys.txt).
 

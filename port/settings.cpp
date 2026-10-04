@@ -1,8 +1,10 @@
 //the settings menu (F1), drawn like the game's own menus: cream lines, blue bars and the
 //white bar under the cursor
 //
-//five pages: screen (fov and frame rate), controls (mouse, gamepad), key bindings,
+//six pages: screen (fov and frame rate), controls (mouse, gamepad), key bindings, hotkeys,
 //enhancements and cheats. changes count right away
+//what the pages change is one list of settings (hotkeys.h), a hotkey is a key on one of them.
+//it works with the menu closed and says what it did at the top of the picture
 //fov and mouse go in the launcher's settings file, the rest in the runtime's key file
 //(only the [Classic Controller] lines changed here get rewritten) so the launcher and this
 //menu show the same thing
@@ -16,6 +18,7 @@
 //
 //GE_SETTINGS=N start with the menu up on page N, handy for screenshots
 #include "ge.h"
+#include "hotkeys.h"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -181,16 +184,24 @@ struct Row {
     bool binding = false; //the value is a list of keys, not something to step through
     std::function<float()> slider; //for a slider, where its knob is in 0..1
     std::function<void(float)> slide; //and the knob dragged there
+    bool wide = false; //the value goes against the right edge in the room the label leaves
+    const char* does = nullptr; //what Enter and Delete are called at the foot, when it's not the usual
+    const char* clears = nullptr;
 };
 struct Page { std::string title; std::vector<Row> rows; };
 
-enum { kRoot, kScreen, kControls, kBindings, kEnhancements, kCheats, kPageCount };
+enum { kRoot, kScreen, kControls, kBindings, kEnhancements, kCheats, kHotkeys, kHotkeyEdit, kPageCount };
 std::vector<Page> g_pages;
 int g_page = kRoot, g_row = 0, g_scroll = 0;
 int g_root_row = 0; //where the cursor was on the first page
 int g_listening = -1; //the binding row waiting for a key
 int g_dragging = -1; //the slider row the mouse has by the knob
 bool g_dirty = false; //the launcher's file needs writing
+std::vector<Setting> g_settings;
+int g_edit = -1; //the hotkey on the edit page
+bool g_hotkeysChanged = false; //the two hotkey pages need building again
+std::string g_toast; //what a hotkey just did
+Clock::time_point g_toastUntil{};
 
 template <size_t N> int index_of(const char* const (&names)[N], const std::string& v, int otherwise) {
     for (size_t i = 0; i < N; ++i)
@@ -200,20 +211,24 @@ template <size_t N> int index_of(const char* const (&names)[N], const std::strin
 //the frame rates the slider stops at, same as the launcher's
 const uint32_t kFpsStops[] = {30, 40, 50, 60, 75, 90, 100, 120, 144, 165, 180, 200, 240, 275};
 const int kFpsStopCount = (int)std::size(kFpsStops);
-int fps_stop() { //the stop nearest to the current rate
-    int best = 0;
-    for (int i = 1; i < kFpsStopCount; ++i)
-        if (std::abs((int)kFpsStops[i] - (int)fps_limit()) < std::abs((int)kFpsStops[best] - (int)fps_limit())) best = i;
-    return best;
-}
-void set_fps_stop(int i) {
-    set_fps_limit(kFpsStops[std::clamp(i, 0, kFpsStopCount - 1)]);
-    g_fps_changed = g_dirty = true;
+int FpsStop(float fps) //the stop nearest to a rate
+{
+	int best = 0;
+	for (int i = 1; i < kFpsStopCount; ++i)
+	{
+		if (std::fabs((float)kFpsStops[i] - fps) < std::fabs((float)kFpsStops[best] - fps)) best = i;
+	}
+	return best;
 }
 const char* const kInputNames[] = {"Auto", "Pad", "Keyboard"};
 const char* const kFaceNames[] = {"Position", "Label"};
 const float kDeadZoneMax = 0.9f;
-float dead_zone() { return std::clamp((float)std::atof(g_keys.get("Dead Zone", "0.15").c_str()), 0.0f, kDeadZoneMax); }
+KeyFile& Keys() //a hotkey can get here before the menu was ever opened
+{
+	if (g_keys.lines.empty()) load_keys();
+	return g_keys;
+}
+float dead_zone() { return std::clamp((float)std::atof(Keys().get("Dead Zone", "0.15").c_str()), 0.0f, kDeadZoneMax); }
 void set_dead_zone(float z) { //in hundredths, only writes the file when it changes
     char b[16];
     std::snprintf(b, sizeof b, "%.2f", std::clamp(z, 0.0f, kDeadZoneMax));
@@ -230,12 +245,284 @@ void restore_bindings() {
     save_keys();
 }
 
+Setting& AddSetting(int page, Setting::Kind kind, const char* id, const char* label, const char* hint)
+{
+	Setting s;
+	s.id = id;
+	s.label = label;
+	s.hint = hint;
+	s.page = page;
+	s.kind = kind;
+	g_settings.push_back(s);
+	return g_settings.back();
+}
+
+void AddToggle(int page, const char* id, const char* label, const char* hint, bool (*get)(), void (*set)(bool))
+{
+	Setting& s = AddSetting(page, Setting::kToggle, id, label, hint);
+	s.get = [get] { return get() ? 1.0f : 0.0f; };
+	s.set = [set](float v) { set(v > 0.5f); g_dirty = true; };
+	s.step = [](float v, int) { return v > 0.5f ? 0.0f : 1.0f; };
+	s.show = [](float v) { return std::string(v > 0.5f ? "On" : "Off"); };
+}
+
+void AddChoice(int page, const char* id, const char* label, const char* hint, std::vector<const char*> names,
+	std::function<int()> get, std::function<void(int)> set)
+{
+	Setting& s = AddSetting(page, Setting::kChoice, id, label, hint);
+	int count = (int)names.size();
+	s.get = [get] { return (float)get(); };
+	s.set = [set, count](float v) { set(std::clamp((int)std::lround(v), 0, count - 1)); };
+	s.step = [count](float v, int d) { return (float)(((int)std::lround(v) + d + count) % count); };
+	s.show = [names, count](float v) { return std::string(names[std::clamp((int)std::lround(v), 0, count - 1)]); };
+}
+
+//from lo to hi in steps of by, shown with that many decimals
+Setting& AddRange(int page, const char* id, const char* label, const char* hint, std::function<float()> get,
+	std::function<void(float)> set, float lo, float hi, float by, int decimals)
+{
+	Setting& s = AddSetting(page, Setting::kRange, id, label, hint);
+	auto snap = [lo, hi, by](float v) { return std::clamp(std::round(v / by) * by, lo, hi); };
+	s.get = get;
+	s.set = set;
+	s.step = [snap, by](float v, int d) { return snap(v + by * (float)d); };
+	s.show = [decimals](float v)
+	{
+		char b[24];
+		std::snprintf(b, sizeof b, "%.*f", decimals, v);
+		return std::string(b);
+	};
+	s.frac = [lo, hi](float v) { return (v - lo) / (hi - lo); };
+	s.at = [snap, lo, hi](float f) { return snap(lo + f * (hi - lo)); };
+	return s;
+}
+
+//everything the pages change, in the order the pages list it
+void BuildSettings()
+{
+	AddRange(kScreen, "fov", "Field of View", "How wide the view is in play, in degrees. The game's own is 49.",
+		fov, [](float v) { set_fov(v); g_dirty = true; }, kFovMin, kFovMax, 1, 0);
+	//whole degrees, and the game's 22.5 on the way past
+	Setting& adsFov = AddRange(kScreen, "ads_fov", "Aim Field of View", "How wide the view is aiming down the sight. The game's own is 22.5 with the pistol.",
+		ads_fov, [](float v) { set_ads_fov(v); g_dirty = true; }, kAdsFovMin, kFovMax, 1, 0);
+	adsFov.step = [](float f, int d)
+	{
+		float next = d > 0 ? std::floor(f) + 1 : std::ceil(f) - 1;
+		if ((f < kGameAdsFov) != (next < kGameAdsFov)) next = kGameAdsFov;
+		return std::clamp(next, kAdsFovMin, kFovMax);
+	};
+	adsFov.show = [](float v)
+	{
+		char b[16];
+		std::snprintf(b, sizeof b, "%g", v);
+		return std::string(b);
+	};
+	Setting& fps = AddRange(kScreen, "fps", "Max Frame Rate", "The most frames a second the game runs at. 30 is the console's; heavy levels may not hold the highest.",
+		[] { return (float)fps_limit(); },
+		[](float v) { set_fps_limit((uint32_t)std::lround(v)); g_fps_changed = g_dirty = true; },
+		(float)kFpsStops[0], (float)kFpsStops[kFpsStopCount - 1], 1, 0);
+	fps.step = [](float v, int d) { return (float)kFpsStops[std::clamp(FpsStop(v) + d, 0, kFpsStopCount - 1)]; };
+	fps.frac = [](float v) { return (float)FpsStop(v) / (float)(kFpsStopCount - 1); };
+	fps.at = [](float f) { return (float)kFpsStops[std::clamp((int)std::lround(f * (float)(kFpsStopCount - 1)), 0, kFpsStopCount - 1)]; };
+
+	Setting& sens = AddRange(kControls, "mouse_sens", "Mouse Sensitivity", "How far the view turns for the mouse's motion. Off leaves the mouse free.",
+		mouse_sens, [](float v) { set_mouse_sens(v); g_dirty = true; }, 0, kMouseSensMax, 0.05f, 2);
+	sens.show = [show = sens.show](float v) { return v > 0 ? show(v) : std::string("Off"); };
+	AddRange(kControls, "ads_sens", "Aim Sensitivity", "The mouse's sensitivity aiming down the sight, times the one above. 1.00 turns as far as without aiming.",
+		ads_sens, [](float v) { set_ads_sens(v); g_dirty = true; }, kAdsSensMin, kAdsSensMax, 0.05f, 2);
+	AddToggle(kControls, "aim_lock", "Lock Aim", "On: a press of Aim stays aimed down the sight until the next press.", aim_lock, set_aim_lock);
+	AddToggle(kControls, "mouse_invert", "Invert Mouse", "On: pushing the mouse forward looks down.", mouse_invert, set_mouse_invert);
+	AddChoice(kControls, "mouse_mode", "Mouse Look", "Auto turns the view itself, and uses the right stick in a network game someone else hosts.",
+		{"Auto", "Direct", "Stick"}, mouse_mode, [](int m) { set_mouse_mode(m); g_dirty = true; });
+	AddChoice(kControls, "input", "Player 1 Input", "What plays as the first controller: keyboard, mouse and gamepad together, or only one.",
+		{"Keyboard + Gamepad", "Gamepad", "Keyboard"},
+		[] { return index_of(kInputNames, Keys().get("Input"), 0); },
+		[](int v)
+		{
+			Keys().set("Input", kInputNames[v]);
+			save_keys();
+			video_set_input(v);
+		});
+	AddChoice(kControls, "face_buttons", "Gamepad Face Buttons", "Position: laid out as on the Classic Controller. Label: the button marked A is A.",
+		{kFaceNames[0], kFaceNames[1]},
+		[] { return index_of(kFaceNames, Keys().get("Face Buttons"), 0); },
+		[](int v)
+		{
+			Keys().set("Face Buttons", kFaceNames[v]);
+			save_keys();
+		});
+	Setting& deadZone = AddRange(kControls, "dead_zone", "Stick Dead Zone", "How far a gamepad's sticks move before they count.",
+		dead_zone, set_dead_zone, 0, kDeadZoneMax, 0.01f, 2);
+	deadZone.show = [](float v) { return std::to_string((int)std::lround(v * 100)) + "%"; };
+
+	AddToggle(kEnhancements, "skip_cutscenes", "Skip Intro Cutscenes (Experimental)", "On: a mission's opening cutscene is skipped.", skip_cutscenes, set_skip_cutscenes);
+	AddToggle(kEnhancements, "skip_movies", "Skip Movies", "On: briefings, the movies between missions and the logos are skipped.", skip_movies, set_skip_movies);
+	AddToggle(kEnhancements, "level_timer", "Level Timer", "On: the hud shows the time played in the level.", level_timer, set_level_timer);
+	AddToggle(kEnhancements, "auto_qte", "Auto Quick Time Events", "On: quick time events press their own buttons.", auto_qte, set_auto_qte);
+	AddToggle(kEnhancements, "auto_start", "Auto Start Mission", "On: a loaded mission starts by itself, without Continue being pressed.", auto_start, set_auto_start);
+	AddToggle(kEnhancements, "no_tutorials", "Disable Tutorials", "On: the tutorial boxes in the missions aren't shown.", no_tutorials, set_no_tutorials);
+
+	AddToggle(kCheats, "mouse_everywhere", "Always Enable Mouse", "On: the mouse turns the view where the game locks it: cutscenes, melee, climbing, death.", mouse_everywhere, set_mouse_everywhere);
+	AddToggle(kCheats, "extras_menu", "Unused Extras Menu", "On: Extras also lists Mission Select, Character Viewer, Movies and the Calibration Menu.", extras_menu, set_extras_menu);
+}
+
+Row SettingRow(int i)
+{
+	const Setting& s = g_settings[i];
+	Row r;
+	r.label = s.label;
+	r.hint = s.hint;
+	r.value = [i] { return g_settings[i].show(g_settings[i].get()); };
+	r.adjust = [i](int d) { g_settings[i].set(g_settings[i].step(g_settings[i].get(), d)); };
+	if (s.frac)
+	{
+		r.slider = [i] { return g_settings[i].frac(g_settings[i].get()); };
+		r.slide = [i](float f) { g_settings[i].set(g_settings[i].at(f)); };
+	}
+	return r;
+}
+
 void go(int page, int row = 0) {
     if (g_page == kRoot) g_root_row = g_row;
     g_page = page;
     g_row = row;
     g_scroll = 0;
     g_listening = g_dragging = -1;
+}
+
+Hotkey* EditedHotkey() { return g_edit >= 0 && g_edit < (int)Hotkeys().size() ? &Hotkeys()[g_edit] : nullptr; }
+
+void ChangeHotkey(const std::function<void(Hotkey&)>& change)
+{
+	Hotkey* h = EditedHotkey();
+	if (!h) return;
+	change(*h);
+	SaveHotkeys();
+	g_hotkeysChanged = true;
+}
+
+void RemoveHotkey(int i)
+{
+	if (i < 0 || i >= (int)Hotkeys().size()) return;
+	Hotkeys().erase(Hotkeys().begin() + i);
+	SaveHotkeys();
+	g_hotkeysChanged = true;
+}
+
+//the list, and the page for the one being edited. built again after every change, never from
+//inside a row (RefreshHotkeyPages)
+void BuildHotkeyPages()
+{
+	Page& list = g_pages[kHotkeys];
+	list.rows.clear();
+	for (size_t n = 0; n < Hotkeys().size(); ++n)
+	{
+		int i = (int)n;
+		Row r;
+		r.label = Describe(Hotkeys()[n]);
+		r.hint = "Select to change it. Delete removes it.";
+		r.binding = r.wide = true;
+		r.does = "Edit";
+		r.clears = "Remove";
+		r.value = [i] { return i < (int)Hotkeys().size() && !Hotkeys()[i].key.empty() ? Hotkeys()[i].key : std::string("-"); };
+		r.select = [i]
+		{
+			g_edit = i;
+			g_hotkeysChanged = true;
+			go(kHotkeyEdit);
+		};
+		r.clear = [i] { RemoveHotkey(i); };
+		list.rows.push_back(r);
+	}
+	Row add;
+	add.label = "Add Hotkey";
+	add.hint = "A key that changes one of the settings while you play, with the menu closed.";
+	add.select = []
+	{
+		Hotkeys().push_back(NewHotkey(0));
+		SaveHotkeys();
+		g_edit = (int)Hotkeys().size() - 1;
+		g_hotkeysChanged = true;
+		go(kHotkeyEdit);
+	};
+	list.rows.push_back(add);
+
+	Page& edit = g_pages[kHotkeyEdit];
+	edit.rows.clear();
+	Hotkey* h = EditedHotkey();
+	if (!h) //removed: only the way back is left
+	{
+		edit.rows.push_back({"Back", "The hotkey is gone.", {}, {}, [] { go(kHotkeys); }});
+		return;
+	}
+	const Setting& s = g_settings[h->setting];
+
+	Row setting;
+	setting.label = "Setting";
+	setting.hint = "What the key changes: " + s.hint;
+	setting.wide = true;
+	setting.value = [] { Hotkey* h = EditedHotkey(); return h ? g_settings[h->setting].label : std::string(); };
+	setting.adjust = [](int d)
+	{
+		ChangeHotkey([d](Hotkey& h)
+		{
+			int count = (int)g_settings.size();
+			std::string key = h.key;
+			h = NewHotkey((h.setting + d + count) % count);
+			h.key = key;
+		});
+	};
+	edit.rows.push_back(setting);
+
+	Row action;
+	action.label = "Action";
+	action.hint = h->action == Hotkey::kSwitch ? "Switch To: the key goes to the value, and back to what it was on the next press."
+		: "What a press of the key does to it.";
+	action.value = [] { Hotkey* h = EditedHotkey(); return h ? ActionName(*h) : std::string(); };
+	action.adjust = [](int d) { ChangeHotkey([d](Hotkey& h) { CycleAction(h, d); }); };
+	edit.rows.push_back(action);
+
+	if (HasValue(*h) && s.kind != Setting::kToggle)
+	{
+		Row value;
+		value.label = "Value";
+		value.hint = "What the key sets it to.";
+		value.value = [] { Hotkey* h = EditedHotkey(); return h ? g_settings[h->setting].show(h->value) : std::string(); };
+		value.adjust = [](int d) { ChangeHotkey([d](Hotkey& h) { h.value = g_settings[h.setting].step(h.value, d); }); };
+		if (s.frac)
+		{
+			value.slider = [] { Hotkey* h = EditedHotkey(); return h ? g_settings[h->setting].frac(h->value) : 0.0f; };
+			value.slide = [](float f) { ChangeHotkey([f](Hotkey& h) { h.value = g_settings[h.setting].at(f); }); };
+		}
+		edit.rows.push_back(value);
+	}
+
+	Row key;
+	key.label = "Key";
+	key.hint = "Select to choose the key. Delete leaves the hotkey without one.";
+	key.binding = true;
+	key.does = "Set Key";
+	key.value = [] { Hotkey* h = EditedHotkey(); return h && !h->key.empty() ? h->key : std::string("-"); };
+	key.select = [row = (int)edit.rows.size()] { g_listening = row; };
+	key.clear = [] { ChangeHotkey([](Hotkey& h) { h.key.clear(); }); };
+	edit.rows.push_back(key);
+
+	edit.rows.push_back({"Remove Hotkey", "Takes the hotkey off its key and out of the list.", {}, {}, []
+	{
+		RemoveHotkey(g_edit);
+		go(kHotkeys, std::max(0, g_edit - 1));
+	}});
+}
+
+//after an event or before the picture, when no row is running
+void RefreshHotkeyPages()
+{
+	if (!g_hotkeysChanged) return;
+	g_hotkeysChanged = false;
+	BuildHotkeyPages();
+	g_row = std::clamp(g_row, 0, (int)g_pages[g_page].rows.size() - 1);
+	if (g_listening >= (int)g_pages[g_page].rows.size()) g_listening = -1;
+	if (g_dragging >= 0 && !g_pages[g_page].rows[std::min(g_dragging, (int)g_pages[g_page].rows.size() - 1)].slide) g_dragging = -1;
 }
 
 void build_pages() {
@@ -245,36 +532,15 @@ void build_pages() {
     root.rows.push_back({"Screen Settings", "Adjust the field of view.", {}, {}, [] { go(kScreen); }});
     root.rows.push_back({"Control Settings", "Adjust the mouse and the gamepad.", {}, {}, [] { go(kControls); }});
     root.rows.push_back({"Key Bindings", "Choose the keys and mouse buttons for each action.", {}, {}, [] { go(kBindings); }});
+    root.rows.push_back({"Hotkeys", "Keys that change a setting while you play.", {}, {}, [] { go(kHotkeys); }});
     root.rows.push_back({"Enhancements", "Things the port adds to the game.", {}, {}, [] { go(kEnhancements); }});
     root.rows.push_back({"Cheats", "Things the game itself would not let you do.", {}, {}, [] { go(kCheats); }});
 
+    BuildSettings();
+    for (size_t i = 0; i < g_settings.size(); ++i) g_pages[g_settings[i].page].rows.push_back(SettingRow((int)i));
+
     Page& screen = g_pages[kScreen];
     screen.title = "Screen Settings";
-    screen.rows.push_back({"Field of View", "How wide the view is in play, in degrees. The game's own is 49.",
-        [] { return std::to_string((int)fov()); },
-        [](int d) { set_fov(std::clamp(fov() + (float)d, kFovMin, kFovMax)); g_dirty = true; }, {}, {}, false,
-        [] { return (fov() - kFovMin) / (kFovMax - kFovMin); },
-        [](float f) { set_fov(std::round(kFovMin + f * (kFovMax - kFovMin))); g_dirty = true; }});
-    //whole degrees, and the game's 22.5 on the way past
-    screen.rows.push_back({"Aim Field of View", "How wide the view is aiming down the sight. The game's own is 22.5 with the pistol.",
-        [] {
-            char b[16];
-            std::snprintf(b, sizeof b, "%g", ads_fov());
-            return std::string(b);
-        },
-        [](int d) {
-            float f = ads_fov(), next = d > 0 ? std::floor(f) + 1 : std::ceil(f) - 1;
-            if ((f < kGameAdsFov) != (next < kGameAdsFov)) next = kGameAdsFov;
-            set_ads_fov(std::clamp(next, kAdsFovMin, kFovMax));
-            g_dirty = true;
-        }, {}, {}, false,
-        [] { return (ads_fov() - kAdsFovMin) / (kFovMax - kAdsFovMin); },
-        [](float f) { set_ads_fov(std::round(kAdsFovMin + f * (kFovMax - kAdsFovMin))); g_dirty = true; }});
-    screen.rows.push_back({"Max Frame Rate", "The most frames a second the game runs at. 30 is the console's; heavy levels may not hold the highest.",
-        [] { return std::to_string(fps_limit()); },
-        [](int d) { set_fps_stop(fps_stop() + d); }, {}, {}, false,
-        [] { return (float)fps_stop() / (float)(kFpsStopCount - 1); },
-        [](float f) { set_fps_stop((int)std::lround(f * (float)(kFpsStopCount - 1))); }});
     screen.rows.push_back({"Restore Defaults", "Back to the game's own fields of view, and 60 frames a second.", {}, {}, [] {
         set_fov(kGameFov);
         set_ads_fov(kGameAdsFov);
@@ -284,62 +550,13 @@ void build_pages() {
 
     Page& controls = g_pages[kControls];
     controls.title = "Control Settings";
-    controls.rows.push_back({"Mouse Sensitivity", "How far the view turns for the mouse's motion. Off leaves the mouse free.",
-        [] {
-            char b[16];
-            std::snprintf(b, sizeof b, "%.2f", mouse_sens());
-            return mouse_sens() > 0 ? std::string(b) : std::string("Off");
-        },
-        [](int d) { set_mouse_sens(std::round((mouse_sens() + 0.05f * (float)d) * 20) / 20); g_dirty = true; }, {}, {}, false,
-        [] { return mouse_sens() / kMouseSensMax; },
-        [](float f) { set_mouse_sens(std::round(f * kMouseSensMax * 20) / 20); g_dirty = true; }});
-    controls.rows.push_back({"Aim Sensitivity", "The mouse's sensitivity aiming down the sight, times the one above. 1.00 turns as far as without aiming.",
-        [] {
-            char b[16];
-            std::snprintf(b, sizeof b, "%.2f", ads_sens());
-            return std::string(b);
-        },
-        [](int d) { set_ads_sens(std::round((ads_sens() + 0.05f * (float)d) * 20) / 20); g_dirty = true; }, {}, {}, false,
-        [] { return (ads_sens() - kAdsSensMin) / (kAdsSensMax - kAdsSensMin); },
-        [](float f) { set_ads_sens(std::round((kAdsSensMin + f * (kAdsSensMax - kAdsSensMin)) * 20) / 20); g_dirty = true; }});
-    controls.rows.push_back({"Lock Aim", "On: a press of Aim stays aimed down the sight until the next press.",
-        [] { return std::string(aim_lock() ? "On" : "Off"); },
-        [](int) { set_aim_lock(!aim_lock()); g_dirty = true; }});
-    controls.rows.push_back({"Invert Mouse", "On: pushing the mouse forward looks down.",
-        [] { return std::string(mouse_invert() ? "On" : "Off"); },
-        [](int) { set_mouse_invert(!mouse_invert()); g_dirty = true; }});
-    controls.rows.push_back({"Mouse Look", "Auto turns the view itself, and uses the right stick in a network game someone else hosts.",
-        [] { static const char* n[] = {"Auto", "Direct", "Stick"}; return std::string(n[mouse_mode()]); },
-        [](int d) { set_mouse_mode((mouse_mode() + d + 3) % 3); g_dirty = true; }});
-    controls.rows.push_back({"Player 1 Input", "What plays as the first controller: keyboard, mouse and gamepad together, or only one.",
-        [] {
-            static const char* n[] = {"Keyboard + Gamepad", "Gamepad", "Keyboard"};
-            return std::string(n[index_of(kInputNames, g_keys.get("Input"), 0)]);
-        },
-        [](int d) {
-            int v = (index_of(kInputNames, g_keys.get("Input"), 0) + d + 3) % 3;
-            g_keys.set("Input", kInputNames[v]);
-            save_keys();
-            video_set_input(v);
-        }});
-    controls.rows.push_back({"Gamepad Face Buttons", "Position: laid out as on the Classic Controller. Label: the button marked A is A.",
-        [] { return std::string(kFaceNames[index_of(kFaceNames, g_keys.get("Face Buttons"), 0)]); },
-        [](int) {
-            g_keys.set("Face Buttons", kFaceNames[1 - index_of(kFaceNames, g_keys.get("Face Buttons"), 0)]);
-            save_keys();
-        }});
-    controls.rows.push_back({"Stick Dead Zone", "How far a gamepad's sticks move before they count.",
-        [] { return std::to_string((int)std::lround(dead_zone() * 100)) + "%"; },
-        [](int d) { set_dead_zone(dead_zone() + 0.01f * (float)d); }, {}, {}, false,
-        [] { return dead_zone() / kDeadZoneMax; },
-        [](float f) { set_dead_zone(f * kDeadZoneMax); }});
     controls.rows.push_back({"Restore Defaults", "Back to the mouse and gamepad settings the port starts with.", {}, {}, [] {
         set_mouse_sens(1.0f);
         set_ads_sens(0.5f);
         set_aim_lock(false);
         set_mouse_invert(false);
         set_mouse_mode(0);
-        g_keys.set("Input", "Auto");
+        Keys().set("Input", "Auto");
         g_keys.set("Face Buttons", "Position");
         g_keys.set("Dead Zone", "0.15");
         save_keys();
@@ -366,35 +583,11 @@ void build_pages() {
     }
     bindings.rows.push_back({"Restore Defaults", "Back to the port's own keys for every action.", {}, {}, restore_bindings});
 
-    Page& enhancements = g_pages[kEnhancements];
-    enhancements.title = "Enhancements";
-    enhancements.rows.push_back({"Skip Intro Cutscenes (Experimental)", "On: a mission's opening cutscene is skipped.",
-        [] { return std::string(skip_cutscenes() ? "On" : "Off"); },
-        [](int) { set_skip_cutscenes(!skip_cutscenes()); g_dirty = true; }});
-    enhancements.rows.push_back({"Skip Movies", "On: briefings, the movies between missions and the logos are skipped.",
-        [] { return std::string(skip_movies() ? "On" : "Off"); },
-        [](int) { set_skip_movies(!skip_movies()); g_dirty = true; }});
-    enhancements.rows.push_back({"Level Timer", "On: the hud shows the time played in the level.",
-        [] { return std::string(level_timer() ? "On" : "Off"); },
-        [](int) { set_level_timer(!level_timer()); g_dirty = true; }});
-    enhancements.rows.push_back({"Auto Quick Time Events", "On: quick time events press their own buttons.",
-        [] { return std::string(auto_qte() ? "On" : "Off"); },
-        [](int) { set_auto_qte(!auto_qte()); g_dirty = true; }});
-    enhancements.rows.push_back({"Auto Start Mission", "On: a loaded mission starts by itself, without Continue being pressed.",
-        [] { return std::string(auto_start() ? "On" : "Off"); },
-        [](int) { set_auto_start(!auto_start()); g_dirty = true; }});
-    enhancements.rows.push_back({"Disable Tutorials", "On: the tutorial boxes in the missions aren't shown.",
-        [] { return std::string(no_tutorials() ? "On" : "Off"); },
-        [](int) { set_no_tutorials(!no_tutorials()); g_dirty = true; }});
-
-    Page& cheats = g_pages[kCheats];
-    cheats.title = "Cheats";
-    cheats.rows.push_back({"Always Enable Mouse", "On: the mouse turns the view where the game locks it: cutscenes, melee, climbing, death.",
-        [] { return std::string(mouse_everywhere() ? "On" : "Off"); },
-        [](int) { set_mouse_everywhere(!mouse_everywhere()); g_dirty = true; }});
-    cheats.rows.push_back({"Unused Extras Menu", "On: Extras also lists Mission Select, Character Viewer, Movies and the Calibration Menu.",
-        [] { return std::string(extras_menu() ? "On" : "Off"); },
-        [](int) { set_extras_menu(!extras_menu()); g_dirty = true; }});
+    g_pages[kEnhancements].title = "Enhancements";
+    g_pages[kCheats].title = "Cheats";
+    g_pages[kHotkeys].title = "Hotkeys";
+    g_pages[kHotkeyEdit].title = "Hotkey";
+    BuildHotkeyPages();
 }
 
 //the key or mouse button pressed for the listening action goes on that one and off every other
@@ -450,6 +643,7 @@ void open(bool on) {
 void back() {
     if (g_listening >= 0) g_listening = -1;
     else if (g_page == kRoot) open(false);
+    else if (g_page == kHotkeyEdit) go(kHotkeys, std::max(0, g_edit));
     else go(kRoot, g_root_row);
 }
 
@@ -562,13 +756,14 @@ void draw_frame(ImDrawList* dl, const Layout& L, const Page& page) {
         dl->AddRectFilledMultiColor(ImVec2(L.x(980), L.y(y)), ImVec2(L.x(1080), L.y(y + 3)), kCream, none, none, kCream);
     }
     const Row& row = page.rows[g_row];
-    std::string hint = g_listening >= 0 ? "Press a key or a mouse button. Esc leaves it as it is." : row.hint;
+    std::string hint = g_listening < 0 ? row.hint : g_page == kHotkeyEdit ? "Press a key. Esc leaves it as it is."
+        : "Press a key or a mouse button. Esc leaves it as it is.";
     float hs = fit(hint, 24 * u, 840 * u);
     text(dl, ImVec2(L.cx - text_width(hint, hs) / 2, L.y(592)), hs, kCream, hint);
     float left = L.x(210);
     left += key_hint(dl, L, left, L.y(625), "Esc", g_page == kRoot ? "Close" : "Back", false) + 28 * u;
-    if (row.binding && g_listening < 0) key_hint(dl, L, left, L.y(625), "Del", "Clear", false);
-    const char* does = row.binding ? "Add Key" : row.select || !row.adjust ? "Select" : "Change";
+    if (row.clear && g_listening < 0) key_hint(dl, L, left, L.y(625), "Del", row.clears ? row.clears : "Clear", false);
+    const char* does = row.does ? row.does : row.binding ? "Add Key" : row.select || !row.adjust ? "Select" : "Change";
     if (g_listening < 0) key_hint(dl, L, L.x(1070), L.y(625), row.select || !row.adjust ? "Enter" : "< >", does, true);
 }
 
@@ -585,12 +780,13 @@ void draw_rows(ImDrawList* dl, const Layout& L, const Page& page) {
         dl->AddRectFilled(ImVec2(x0, y0), ImVec2(x1, y1), sel ? kSelected : kBar);
         ImU32 colour = sel ? kSelectedText : kCream;
         float size = 31 * u, ty = y0 + 3 * u;
-        text(dl, ImVec2(x0 + 14 * u, ty), size, colour, r.label, !sel);
+        float ls = r.wide ? fit(r.label, size, (x1 - x0) * 0.7f) : size; //a long one leaves room for its value
+        text(dl, ImVec2(x0 + 14 * u, ty + (size - ls) * 0.55f), ls, colour, r.label, !sel);
         if (!r.value) continue;
         std::string v = r.value();
-        if (r.binding) { //the keys, against the right edge
+        if (r.binding || r.wide) { //the keys, against the right edge
             if (g_listening == i) v = std::fmod(ImGui::GetTime(), 1.0) < 0.6 ? "Press a key..." : "";
-            float room = x1 - x0 - 44 * u - text_width(r.label, size), vs = fit(v, 26 * u, room);
+            float room = x1 - x0 - 44 * u - text_width(r.label, ls), vs = fit(v, 26 * u, room);
             text(dl, ImVec2(x1 - 14 * u - text_width(v, vs), ty + (size - vs) * 0.55f), vs, colour, v, !sel);
             continue;
         }
@@ -658,6 +854,33 @@ void click(float x, float y) {
     if (x >= vx0 - 10 * g_layout.u) r.adjust(x < (vx0 + vx1) / 2 ? -1 : 1);
 }
 
+//a key pressed with the menu closed: its hotkeys go, and the picture says what they did
+bool HotkeyDown(const SDL_KeyboardEvent& k)
+{
+	std::string said;
+	if (k.repeat || overlay_open() || !PressHotkeys(k.scancode, said)) return false;
+	if (g_dirty)
+	{
+		save_launch_settings();
+		g_dirty = false;
+	}
+	g_toast = said;
+	g_toastUntil = Clock::now() + std::chrono::milliseconds(1800);
+	rt_log("goldeneye: hotkey %s: %s", SDL_GetScancodeName(k.scancode), said.c_str());
+	return true;
+}
+
+void DrawToast(ImDrawList* dl, const Layout& L)
+{
+	float left = std::chrono::duration<float>(g_toastUntil - Clock::now()).count();
+	if (left <= 0) return;
+	float u = L.u, a = std::min(1.0f, left / 0.3f); //fades out at the end
+	float size = fit(g_toast, 26 * u, L.w - 80 * u), w = text_width(g_toast, size), pad = 16 * u;
+	ImVec2 at(L.cx - w / 2, L.y(34));
+	dl->AddRectFilled(ImVec2(at.x - pad, at.y - 6 * u), ImVec2(at.x + w + pad, at.y + size + 8 * u), fade(kDim, a), 8 * u);
+	text(dl, at, size, fade(kCream, a), g_toast, false);
+}
+
 const char* mouse_name(int button) {
     switch (button) {
         case SDL_BUTTON_LEFT: return "Mouse Left";
@@ -674,7 +897,11 @@ void key_down(const SDL_KeyboardEvent& k) {
         if (k.repeat) return;
         const char* name = SDL_GetScancodeName(k.scancode);
         if (k.scancode == SDL_SCANCODE_ESCAPE) g_listening = -1;
-        else if (name && *name && SDL_GetScancodeFromName(name) == k.scancode) bind(name);
+        else if (!name || !*name || SDL_GetScancodeFromName(name) != k.scancode) return;
+        else if (g_page == kHotkeyEdit) {
+            ChangeHotkey([name](Hotkey& h) { h.key = name; });
+            g_listening = -1;
+        } else bind(name);
         return;
     }
     switch (k.scancode) {
@@ -724,11 +951,16 @@ uint32_t settings_buttons() {
 }
 
 #ifdef GE_IMGUI
+const std::vector<Setting>& Settings() { return g_settings; }
+bool menu_event(const SDL_Event* e);
+
 void settings_init() {
     ImFontConfig cfg;
     cfg.FontDataOwnedByAtlas = false;
     g_font = ImGui::GetIO().Fonts->AddFontFromMemoryTTF((void*)kMenuFont, (int)sizeof kMenuFont, kFontSize, &cfg);
     build_pages();
+    LoadHotkeys();
+    g_hotkeysChanged = true;
     rt_log("goldeneye: settings menu on F1");
     if (const char* e = std::getenv("GE_SETTINGS")) {
         open(true);
@@ -749,7 +981,13 @@ bool settings_event(const SDL_Event* e) {
         if (!e->key.repeat) open(!g_open);
         return true;
     }
-    if (!g_open) return false;
+    if (!g_open) return e->type == SDL_EVENT_KEY_DOWN && HotkeyDown(e->key);
+    bool taken = menu_event(e);
+    RefreshHotkeyPages();
+    return taken;
+}
+
+bool menu_event(const SDL_Event* e) {
     switch (e->type) {
         case SDL_EVENT_KEY_DOWN:
             if (e->key.scancode == SDL_SCANCODE_F3 || e->key.scancode == SDL_SCANCODE_F11 || e->key.scancode == SDL_SCANCODE_F12 ||
@@ -765,8 +1003,8 @@ bool settings_event(const SDL_Event* e) {
             else if (int i = row_at(e->motion.x, e->motion.y); i >= 0 && g_listening < 0) g_row = i;
             return true;
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
-            if (g_listening >= 0) {
-                if (const char* name = mouse_name(e->button.button)) bind(name);
+            if (g_listening >= 0) { //a hotkey is a key, the mouse's buttons stay the game's
+                if (const char* name = mouse_name(e->button.button); name && g_page != kHotkeyEdit) bind(name);
             } else if (e->button.button == SDL_BUTTON_LEFT) click(e->button.x, e->button.y);
             else if (e->button.button == SDL_BUTTON_RIGHT) back();
             return true;
@@ -790,9 +1028,10 @@ bool settings_event(const SDL_Event* e) {
 }
 
 //runs inside the overlay's ImGui frame
+bool settings_toast() { return Clock::now() < g_toastUntil; }
+
 void settings_draw() {
-    if (!g_open) return;
-    if (g_keys.lines.empty()) load_keys(); //opened before the window had read the key file
+    if (!g_open && !settings_toast()) return;
     ImVec2 size = ImGui::GetIO().DisplaySize;
     Layout& L = g_layout;
     L.w = size.x;
@@ -800,10 +1039,14 @@ void settings_draw() {
     L.u = std::min(size.y / 720, size.x / 960);
     L.cx = size.x / 2;
     ImDrawList* dl = ImGui::GetForegroundDrawList();
-    const Page& page = g_pages[g_page];
     dl->PushTextureID(g_font->ContainerAtlas->TexID);
-    draw_frame(dl, L, page);
-    draw_rows(dl, L, page);
+    if (g_open) {
+        if (g_keys.lines.empty()) load_keys(); //opened before the window had read the key file
+        RefreshHotkeyPages();
+        const Page& page = g_pages[g_page];
+        draw_frame(dl, L, page);
+        draw_rows(dl, L, page);
+    } else DrawToast(dl, L);
     dl->PopTextureID();
 }
 #endif
