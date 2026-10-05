@@ -21,6 +21,11 @@
 //frame of the engine's rate, each one shown, so it slows down to normal speed instead of
 //cutting to it. the sound fades back in after. a level that isn't in there just cuts
 //
+//a level played through that fast isn't quite the level played: doors were left in the wrong
+//state after it. so the first checkpoint the mission records after the skip is loaded again
+//right away, the way dying does it (ge_reload_checkpoint, 80008940: the level is loaded at
+//the restart point, with the level's state as a checkpoint leaves it)
+//
 //GE_SKIP_CUTSCENES=1 on
 //GE_SKIP_RATE=N the frames a second of game time while skipping (3)
 //GE_ENTRANCE=N start every mission at entrance N instead of 1, for trying out a level's
@@ -66,16 +71,21 @@ const float kEaseSeconds = 1.0f; //of the opening's end, slowing down to normal 
 const double kFadeSeconds = 1.0; //the sound coming back
 const uint32_t kShowEvery = 4; //one frame in this many is drawn, so it's seen to be moving
 const uint32_t kLevelTimer = 0x805C963C; //a float, seconds played in the level
+const uint32_t kReloadCheckpoint = 0x80008940; //ge_reload_checkpoint
+const uint32_t kApp = 0x805C94A8; //the app's object, ge_reload_checkpoint's r3
 
 using Clock = std::chrono::steady_clock;
 
-enum class Skip { Idle, Waiting, Running };
+//Checkpoint: the opening is over, the first checkpoint after it gets loaded again
+enum class Skip { Idle, Waiting, Running, Checkpoint };
 
 std::atomic<bool> g_skip_cutscenes{false};
 std::atomic<bool> g_running{false};
 PPCFunc orig_menu_pending = nullptr;
 PPCFunc orig_level_change = nullptr;
 PPCFunc orig_frame_draw = nullptr;
+PPCFunc reload_checkpoint = nullptr;
+bool g_reload = false; //the checkpoint after the opening is recorded and isn't loaded yet
 bool g_restarting = false; //the menu's restart action is running
 bool g_trace = false;
 int g_forced_entrance = -1; //GE_ENTRANCE
@@ -111,7 +121,8 @@ bool StartsCampaignLevel(uint32_t menu)
 	return item >= kItemOperative && item <= kItemClassic;
 }
 
-void Stop(const char* why)
+//skipped: the opening was played through, so the checkpoint after it is still to come
+void Stop(const char* why, bool skipped = false)
 {
 	if (g_state == Skip::Running)
 	{
@@ -125,7 +136,8 @@ void Stop(const char* why)
 			why, skipped, g_frames, took, ld32(kCurrentLevel), ldf(kLevelTimer));
 	}
 	else if (g_state == Skip::Waiting && g_trace) rt_log("goldeneye: skip cutscenes: not waiting any more, %s", why);
-	g_state = Skip::Idle;
+	g_state = skipped ? Skip::Checkpoint : Skip::Idle;
+	g_reload = false;
 }
 
 //a mission starts from its beginning: its opening is the next cutscene
@@ -165,10 +177,10 @@ void Run()
 	++g_frames;
 	if (!g_skip_cutscenes) { Stop("turned off"); return; }
 	if (std::chrono::duration<double>(rt_now() - g_started_guest).count() > kMaxSeconds) { Stop("given up"); return; }
-	if (cutscene_input_waiting()) { Stop("a button is wanted"); return; }
+	if (cutscene_input_waiting()) { Stop("a button is wanted", true); return; }
 	uint32_t state;
 	if (!local_player_state(state)) { Stop("the player is gone"); return; }
-	if (!local_cutscene_locked()) { Stop("done"); return; }
+	if (!local_cutscene_locked()) { Stop("done", true); return; }
 	float left = g_ends - ldf(kLevelTimer);
 	if (g_ends > 0 && left < kEaseSeconds)
 	{
@@ -228,7 +240,7 @@ void LevelChange(PPCContext& c)
 		}
 		else Stop("a level change");
 	}
-	else if (g_state == Skip::Running) Stop("a level change");
+	else if (g_state == Skip::Running || g_state == Skip::Checkpoint) Stop("a level change");
 	orig_level_change(c);
 }
 
@@ -244,6 +256,28 @@ void FrameDraw(PPCContext& c)
 bool skip_cutscenes() { return g_skip_cutscenes; }
 void set_skip_cutscenes(bool on) { g_skip_cutscenes = on; }
 bool skipping_cutscene() { return g_running; }
+
+void checkpoint_recorded(uint32_t entrance)
+{
+	if (entrance <= kMissionStart) return; //the mission's start, recorded as the level loads
+	if (g_state == Skip::Running) Stop("a checkpoint", true);
+	if (g_state == Skip::Checkpoint) g_reload = true;
+}
+
+void cutscenes_reload(PPCContext& c)
+{
+	if (!g_reload) return;
+	if (!g_skip_cutscenes) { Stop("turned off"); return; }
+	//the checkpoint's own save comes first, and the pause menu has its own ways out of the level
+	if (!in_play() || autosave_busy()) return;
+	rt_log("goldeneye: skip cutscenes: level %08X's first checkpoint, loading it again", ld32(kCurrentLevel));
+	g_state = Skip::Idle;
+	g_reload = false;
+	PPCContext saved = c;
+	c.r[3] = kApp;
+	reload_checkpoint(c);
+	c = saved;
+}
 
 //GE_TRACE: how long each frame took from the easing on to a while after the skip
 void TraceFrames()
@@ -295,7 +329,8 @@ void install_cutscenes()
 	orig_menu_pending = ppc_hook("ge_menu_pending", MenuPending);
 	orig_level_change = ppc_hook("StartLevelChange", LevelChange);
 	orig_frame_draw = ppc_hook("ge_frame_draw", FrameDraw);
-	if (!orig_menu_pending || !orig_level_change || !orig_frame_draw) rt_die("goldeneye: the menu's pending action is not hooked in this build");
+	reload_checkpoint = ppc_lookup(kReloadCheckpoint);
+	if (!orig_menu_pending || !orig_level_change || !orig_frame_draw || !reload_checkpoint) rt_die("goldeneye: the menu's pending action is not hooked in this build");
 }
 
 } //namespace ge

@@ -52,9 +52,11 @@ PPCFunc save_game = nullptr;
 void RecordRestart(PPCContext& c)
 {
 	if (g_trace) rt_log("goldeneye: checkpoint: level %08X entrance %d", ld32(kCurrentLevel), (int32_t)c.r[4]);
+	uint32_t entrance = c.r[4];
 	orig_record_restart(c);
 	g_level = ld32(kCurrentLevel);
 	g_pending = g_level != kFrontEnd;
+	if (g_pending) checkpoint_recorded(entrance);
 }
 
 void SaveWrite(PPCContext& c)
@@ -94,6 +96,7 @@ uint32_t Step(PPCContext& c)
 } //namespace
 
 bool autosave() { return g_autosave; }
+bool autosave_busy() { return g_pending || g_saving; }
 void set_autosave(bool on) { g_autosave = on; }
 
 void autosave_frame(PPCContext& c)
