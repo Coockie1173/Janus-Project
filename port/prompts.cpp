@@ -62,6 +62,9 @@ const uint32_t kStringFont = 0x14, kButtonFont = 0x07000033; //a string's font, 
 const char kGoldOn = 1, kGoldOff = 2; //in a key's text: the game's highlight colour from here, and back
 const uint16_t kGold = 0x2801, kPlain = 0x2800; //the font's colour codes, what <C1> and <C0> are written as
 const uint16_t kNoBreak = 0xA0; //a space a label isn't wrapped at
+const uint32_t kStickGlyph = 0x2708, kStickGlyphPro = 0x271E; //the left stick, on the classic and on the pro
+const char* const kSprintKey = "Extra 1"; //the key file's names
+const char* const kForwardKey = "Left Stick Up";
 const uint32_t kGlyphFirst = 0x2701, kGlyphLast = 0x273A; //the font's buttons
 const uint32_t kTextMsg = 0x800DDFC0; //GetTextMsg: (a text's hash, the answer) -> 1 when it's there
 const uint32_t kHudPromptText = 0x1708;
@@ -123,29 +126,34 @@ void ReadKeys()
 	}
 }
 
-//what a prompt shows for a character of the font, empty when it stays
+//what a prompt shows for one of the key file's buttons, empty when it has no key
 //a menu's button is on the keys a menu is used with when the button has one of them
-std::string KeyFor(uint32_t ch, bool menu)
+std::string KeyOf(const char* button, bool menu)
 {
 	if (g_pad) return {};
+	auto found = g_keys.find(Lower(button));
+	if (found == g_keys.end() || found->second.empty()) return {};
+	std::string key = found->second.front();
+	for (const char* preferred : kMenuKeys)
+	{
+		auto is = [&](const std::string& k) { return !SDL_strcasecmp(k.c_str(), preferred); };
+		if (!menu || std::none_of(found->second.begin(), found->second.end(), is)) continue;
+		key = preferred;
+		break;
+	}
+	for (const Shown& s : kShown)
+	{
+		if (!SDL_strcasecmp(s.key, key.c_str())) key = s.as;
+	}
+	return kGoldOn + ("[" + key + "]") + kGoldOff;
+}
+
+//and for a character of the font, empty when it stays
+std::string KeyFor(uint32_t ch, bool menu)
+{
 	for (const Glyph& g : kGlyphs)
 	{
-		if (g.ch != ch) continue;
-		auto found = g_keys.find(Lower(g.button));
-		if (found == g_keys.end() || found->second.empty()) return {};
-		std::string key = found->second.front();
-		for (const char* preferred : kMenuKeys)
-		{
-			auto is = [&](const std::string& k) { return !SDL_strcasecmp(k.c_str(), preferred); };
-			if (!menu || std::none_of(found->second.begin(), found->second.end(), is)) continue;
-			key = preferred;
-			break;
-		}
-		for (const Shown& s : kShown)
-		{
-			if (!SDL_strcasecmp(s.key, key.c_str())) key = s.as;
-		}
-		return kGoldOn + ("[" + key + "]") + kGoldOff;
+		if (g.ch == ch) return KeyOf(g.button, menu);
 	}
 	return {};
 }
@@ -235,21 +243,31 @@ void TextTag(PPCContext& c)
 }
 
 //the keys for a prompt's two buttons (fn_801CF680's hashes), empty when one of them has none
+//the left stick with a button is the stick pushed forward and the button: the climb and the
+//vault, on the stick and b. the port has those on the sprint key (ge_action_update, input.cpp)
+//so that's the key shown for b there, then the key that walks forward
 std::string PromptKeys(const PPCContext& c, uint32_t first, uint32_t second)
 {
 	ReadKeys();
 	std::string keys;
+	bool stick = false;
 	for (uint32_t button : {first, second})
 	{
 		if (!button) continue;
 		PPCContext call = c;
 		call.r[3] = button;
 		button_glyph(call);
-		std::string key = KeyFor(call.r[3], false);
+		uint32_t ch = call.r[3];
+		if (ch == kStickGlyph || ch == kStickGlyphPro) { stick = true; continue; }
+		std::string key = KeyFor(ch, false);
+		if (stick && IsButton(ch, "B") && !KeyOf(kSprintKey, false).empty()) key = KeyOf(kSprintKey, false);
 		if (key.empty()) return {};
 		keys += (keys.empty() ? "" : " + ") + key;
 	}
-	return keys;
+	if (!stick) return keys;
+	std::string forward = KeyOf(kForwardKey, false);
+	if (forward.empty()) return {};
+	return keys.empty() ? forward : keys + " + " + forward;
 }
 
 void SetTo(PPCContext& c, const std::vector<uint16_t>& text);
