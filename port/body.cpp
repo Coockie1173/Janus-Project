@@ -3,26 +3,29 @@
 //a body (the entity's +0x158, its entity at +4) is moved by its controller, position += speed
 //times the time step, and ge_body_update (800F0FC0) then has ge_body_collide (800F12D0) push
 //it out of the triangles it's in: ge_contacts_solve (802CF760), two passes over the contacts,
-//the push at +0xEC, flags at +0xA (1 on a floor, 2 at a wall)
+//the push at +0xEC, flags at +0xA (1 on a floor, 2 at a wall, 8 under a ceiling)
 //how far it gets pushed depends on how deep the step went in, so a step isn't the sum of
-//smaller ones. the levels lean on that: a vent's frame is a hair smaller than the body
-//(level 01810150's exit, mesh 912CAF00 under a low ceiling) and a 30th of a second's step goes deep
-//enough to come out the far side, with a jitter you can see on the console too. a 144th's
-//gets pushed straight back, the body swings between two contacts and never gets through
+//smaller ones, and the levels lean on that:
+//- a vent's frame is a hair smaller than the body (level 01810150's exit, mesh 912CAF00 under
+//  a low ceiling). a 30th of a second's step goes deep enough to come out the far side, with
+//  a jitter you can see on the console too. a 144th's gets pushed straight back
+//- the lip into level 01810144's vent is 10 cm. the console's step takes it in one frame, a
+//  144th's lifts the body 2 cm and leaves it there
+//- a ladder (the carrier's, level 01810147) takes a body that's in the air next to it:
+//  PlayerMove (8010DBE0) only looks for one with the body's flags at 0, then fn_801141F0
+//  starts state 0x18. the console's step goes off the edge, a 144th's stays at a wall there
 //
-//a step up is the same: the lip into level 01810144's vent is 10 cm, the console's step takes
-//it in one frame and a 144th's lifts the body 2 cm and leaves it there
-//
-//so a body that's pushed at something low (a ceiling pushes on it as well, or a lip has lifted
-//it off its floor) and gets nowhere moves the way the console's does:
-//it stays put until a 30th of a second's moves have added up and then takes them as one step,
-//the drop that keeps it on the floor (6 a second) included. that goes on until it's clear of
-//the walls or isn't pushed any more, or has slid along one for half a second. in the
-//open (a wall with nothing overhead), in a cutscene and in every state but walking and
-//sprinting the body is left alone. the game has no word for being in a vent, and
-//crouching doesn't tell either: in the recorded one the player stands (+0x390 stays 0.15) and
-//crouched at a wall in the open isn't stuck in anything. the ceiling and the lift are what tell
+//the game has nothing that says vent or ladder before it's on one, and neither crouching, a
+//ceiling nor a lift is common to the three. what is: the console's step gets somewhere
+//so a body that's pushed at something and gets nowhere tries the console's steps: it stays put
+//until a 30th of a second's moves have added up and takes them as one, the drop that keeps it
+//on the floor (6 a second) included. that goes on while they get it somewhere, until it's
+//clear of the walls, isn't pushed any more or has slid along one for half a second
+//at a real wall they get nowhere either: after four of them it's back to a step a frame, and
+//tries again a quarter of a second later if it's still pushed. the body doesn't move there
+//only walking and sprinting: a cutscene (state 0x22) and every other state has the body to itself
 #include "ge.h"
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 
@@ -32,16 +35,16 @@ namespace
 {
 
 const uint32_t kBodyEntity = 4, kEntityPos = 0xF8;
+const uint32_t kBodyFlags = 0xA, kBodyAtWall = 0xA; //a wall (2) or a ceiling (8) pushed it
 const uint32_t kCtrlEntity = 4, kCtrlTimeStep = 0x578;
 const uint32_t kStateMoving = 2, kStateSprinting = 3;
-const uint32_t kEntityCrouch = 0x390; //0.15 standing, 0.65 crouched, eases between the two (only traced)
 const float kConsoleStep = 1.0f / 30;
 const int kWindow = 8; //frames of pushing looked at
-const float kStuck = 0.1f; //blocked when less than this much of the pushing got anywhere
-const float kFree = 0.5f; //a console step that got this much of its way moved
-const float kLifted = 0.005f; //a body this far above its floor is on a lip
-const int kFreeSteps = 15; //and that many in a row is sliding along a wall, not being stuck
-const uint32_t kBodyFlags = 0xA, kBodyAtWall = 0xA, kBodyAtCeiling = 8; //a wall (2) or a ceiling (8) pushed it
+const float kStuck = 0.1f; //stuck when less than this much of the pushing got anywhere
+const float kMoved = 0.5f; //a console step that got this much of its way moved
+const int kMovedSteps = 15; //that many in a row is sliding along a wall, not being stuck
+const int kWallSteps = 4; //and that many stuck ones in a row is a wall
+const float kWallWait = 0.25f; //seconds before a wall is tried again
 const float kPushing = 1e-4f; //a frame's move that counts as pushing
 PPCFunc orig_body_update = nullptr;
 bool g_trace = false;
@@ -69,27 +72,98 @@ float Progress(const Vec3& from, const Vec3& to, const Vec3& move, float length)
 	return ((to.x - from.x) * move.x + (to.z - from.z) * move.z) / length;
 }
 
-struct Blocked
+struct Stuck
 {
 	uint32_t m_Entity{};
 	Vec3 m_Last{}; //where the last step left the body
 	float m_Wanted{}, m_Got{}; //over the window
 	int m_Frames{};
-	bool m_Tight{}; //a ceiling pushed the body in the window
-	bool m_Pushing{};
-	float m_FloorY{}; //how high the body was before it got stuck
-	bool m_Blocked{};
-	Vec3 m_Move{}; //what has added up since the last console step
+	float m_Wait{}; //seconds until a wall is tried again
+	bool m_Console{}; //taking the console's steps
+	Vec3 m_Move{}; //what has added up since the last one
 	float m_Time{};
-	int m_Moved{}; //console steps in a row that got somewhere
+	int m_Moved{}, m_Failed{}; //console steps in a row that got somewhere, and that didn't
 
 	void Reset(uint32_t entity)
 	{
-		*this = Blocked{};
+		*this = Stuck{};
 		m_Entity = entity;
 	}
+
+	void NewWindow()
+	{
+		m_Wanted = m_Got = 0;
+		m_Frames = 0;
+	}
 };
-Blocked g_body;
+Stuck g_body;
+
+//a step a frame, and a look at whether the pushing gets anywhere
+void FrameStep(PPCContext& c, uint32_t entity, const Vec3& move, float step)
+{
+	orig_body_update(c);
+	Vec3 now = ReadPos(entity);
+	Vec3 last = g_body.m_Last;
+	g_body.m_Last = now;
+	g_body.m_Wait = std::max(g_body.m_Wait - step, 0.0f);
+	float length = std::sqrt(move.x * move.x + move.z * move.z);
+	if (length <= kPushing)
+	{
+		g_body.NewWindow();
+		return;
+	}
+	g_body.m_Wanted += length;
+	g_body.m_Got += Progress(last, now, move, length);
+	if (++g_body.m_Frames < kWindow) return;
+	if (g_body.m_Got < g_body.m_Wanted * kStuck && g_body.m_Wait <= 0)
+	{
+		g_body.m_Console = true;
+		g_body.m_Move = {};
+		g_body.m_Time = 0;
+		g_body.m_Moved = g_body.m_Failed = 0;
+		if (g_trace) rt_log("goldeneye: body: stuck at %.2f %.2f %.2f, the console's steps from here", now.x, now.y, now.z);
+	}
+	g_body.NewWindow();
+}
+
+//the frame's move is kept until a console frame's worth has added up, then taken as one step
+void ConsoleStep(PPCContext& c, uint32_t body, uint32_t entity, const Vec3& move, float step)
+{
+	g_body.m_Move.x += move.x;
+	g_body.m_Move.y += move.y;
+	g_body.m_Move.z += move.z;
+	g_body.m_Time += step;
+	if (g_body.m_Time + step * 0.5f < kConsoleStep)
+	{
+		WritePos(entity, g_body.m_Last);
+		return;
+	}
+	Vec3 total = g_body.m_Move, last = g_body.m_Last;
+	WritePos(entity, {last.x + total.x, last.y + total.y, last.z + total.z});
+	orig_body_update(c);
+	Vec3 now = ReadPos(entity);
+	g_body.m_Last = now;
+	g_body.m_Move = {};
+	g_body.m_Time = 0;
+
+	float length = std::sqrt(total.x * total.x + total.z * total.z);
+	float got = length > kPushing ? Progress(last, now, total, length) : 0;
+	g_body.m_Moved = got > length * kMoved ? g_body.m_Moved + 1 : 0;
+	g_body.m_Failed = got < length * kStuck ? g_body.m_Failed + 1 : 0;
+	bool atWall = ld16(body + kBodyFlags) & kBodyAtWall;
+	const char* why = nullptr;
+	if (length <= kPushing) why = "not pushed any more";
+	else if (!atWall) why = "clear of the walls";
+	else if (g_body.m_Moved >= kMovedSteps) why = "sliding along a wall";
+	else if (g_body.m_Failed >= kWallSteps)
+	{
+		why = "a wall";
+		g_body.m_Wait = kWallWait;
+	}
+	if (!why) return;
+	g_body.m_Console = false;
+	if (g_trace) rt_log("goldeneye: body: %s at %.2f %.2f %.2f, a step a frame again", why, now.x, now.y, now.z);
+}
 
 void BodyUpdate(PPCContext& c)
 {
@@ -97,7 +171,6 @@ void BodyUpdate(PPCContext& c)
 	uint32_t entity = ld32(body + kBodyEntity);
 	bool ours = ctrl && guest_ptr(entity) && ld32(ctrl + kCtrlEntity) == entity && local_player_state(state);
 	float step = ours ? ldf(ctrl + kCtrlTimeStep) : 0;
-	//only on foot, a cutscene (state 0x22) has the body to itself
 	bool walking = ours && (state == kStateMoving || state == kStateSprinting);
 	if (!walking || !(step > 0) || step > kConsoleStep * 0.9f)
 	{
@@ -105,7 +178,6 @@ void BodyUpdate(PPCContext& c)
 		orig_body_update(c);
 		return;
 	}
-	Vec3 pos = ReadPos(entity);
 	if (g_body.m_Entity != entity)
 	{
 		//first frame on foot: nothing to compare with yet
@@ -114,78 +186,10 @@ void BodyUpdate(PPCContext& c)
 		g_body.m_Last = ReadPos(entity);
 		return;
 	}
+	Vec3 pos = ReadPos(entity);
 	Vec3 move{pos.x - g_body.m_Last.x, pos.y - g_body.m_Last.y, pos.z - g_body.m_Last.z};
-
-	if (!g_body.m_Blocked)
-	{
-		orig_body_update(c);
-		Vec3 now = ReadPos(entity);
-		float length = std::sqrt(move.x * move.x + move.z * move.z);
-		if (length > kPushing)
-		{
-			g_body.m_Wanted += length;
-			float got = Progress(g_body.m_Last, now, move, length);
-			g_body.m_Got += got;
-			if (ld16(body + kBodyFlags) & kBodyAtCeiling) g_body.m_Tight = true;
-			//the floor is where it last stood or got on with it
-			if (!g_body.m_Pushing) g_body.m_FloorY = g_body.m_Last.y;
-			g_body.m_Pushing = true;
-			if (got > length * kFree) g_body.m_FloorY = now.y;
-			if (++g_body.m_Frames >= kWindow)
-			{
-				//at something low: a ceiling on the body, or a lip that has lifted it a little
-				bool low = g_body.m_Tight || now.y - g_body.m_FloorY > kLifted;
-				if (low && g_body.m_Got < g_body.m_Wanted * kStuck)
-				{
-					g_body.m_Blocked = true;
-					g_body.m_Move = {};
-					g_body.m_Time = 0;
-					g_body.m_Moved = 0;
-					if (g_trace) rt_log("goldeneye: body: blocked at %.2f %.2f %.2f, the console's steps from here", now.x, now.y, now.z);
-				}
-				g_body.m_Wanted = g_body.m_Got = 0;
-				g_body.m_Frames = 0;
-				g_body.m_Tight = false;
-			}
-		}
-		else
-		{
-			g_body.m_Wanted = g_body.m_Got = 0;
-			g_body.m_Frames = 0;
-			g_body.m_Tight = false;
-			g_body.m_Pushing = false;
-		}
-		g_body.m_Last = now;
-		return;
-	}
-
-	g_body.m_Move.x += move.x;
-	g_body.m_Move.y += move.y;
-	g_body.m_Move.z += move.z;
-	g_body.m_Time += step;
-	if (g_body.m_Time + step * 0.5f < kConsoleStep)
-	{
-		//not a console frame's worth yet: the body waits where it was
-		WritePos(entity, g_body.m_Last);
-		return;
-	}
-	Vec3 total = g_body.m_Move;
-	WritePos(entity, {g_body.m_Last.x + total.x, g_body.m_Last.y + total.y, g_body.m_Last.z + total.z});
-	orig_body_update(c);
-	Vec3 now = ReadPos(entity);
-	float length = std::sqrt(total.x * total.x + total.z * total.z);
-	//free again: nothing pushed at any more, clear of the walls, or sliding along one for a while
-	bool atWall = ld16(body + kBodyFlags) & kBodyAtWall;
-	if (Progress(g_body.m_Last, now, total, length) > length * kFree) ++g_body.m_Moved;
-	else g_body.m_Moved = 0;
-	if (length <= kPushing || !atWall || g_body.m_Moved >= kFreeSteps)
-	{
-		g_body.m_Blocked = false;
-		if (g_trace) rt_log("goldeneye: body: free at %.2f %.2f %.2f", now.x, now.y, now.z);
-	}
-	g_body.m_Move = {};
-	g_body.m_Time = 0;
-	g_body.m_Last = now;
+	if (g_body.m_Console) ConsoleStep(c, body, entity, move, step);
+	else FrameStep(c, entity, move, step);
 }
 
 //GE_TRACEPOS=1: where the local player's body is after each update
@@ -195,7 +199,7 @@ void BodyUpdateTraced(PPCContext& c)
 	BodyUpdate(c);
 	if (!ctrl || ld32(ctrl + kCtrlEntity) != entity) return;
 	Vec3 pos = ReadPos(entity);
-	rt_log("pos: %.3f %.3f %.3f step %.4f crouch %.2f flags %X%s", pos.x, pos.y, pos.z, ldf(ctrl + kCtrlTimeStep), ldf(entity + kEntityCrouch), ld16(body + kBodyFlags), g_body.m_Blocked ? " blocked" : "");
+	rt_log("pos: %.3f %.3f %.3f step %.4f flags %X%s", pos.x, pos.y, pos.z, ldf(ctrl + kCtrlTimeStep), ld16(body + kBodyFlags), g_body.m_Console ? " console" : "");
 }
 
 } //namespace
@@ -204,7 +208,7 @@ void install_body()
 {
 	g_trace = std::getenv("GE_TRACE") != nullptr;
 	orig_body_update = ppc_hook("ge_body_update", std::getenv("GE_TRACEPOS") ? BodyUpdateTraced : BodyUpdate);
-	if (!orig_body_update) rt_log("goldeneye: ge_body_update is not hooked in this build, a blocked player keeps the frame rate's steps");
+	if (!orig_body_update) rt_log("goldeneye: ge_body_update is not hooked in this build, a stuck player keeps the frame rate's steps");
 }
 
 } //namespace ge
