@@ -24,6 +24,7 @@
 //at a real wall they get nowhere either: after four of them it's back to a step a frame, and
 //tries again a quarter of a second later if it's still pushed. the body doesn't move there
 //only walking and sprinting: a cutscene (state 0x22) and every other state has the body to itself
+//and not with noclip on: nothing is in the way then, and holding the body back would hold the flight back
 #include "ge.h"
 #include <algorithm>
 #include <cmath>
@@ -172,7 +173,7 @@ void BodyUpdate(PPCContext& c)
 	bool ours = ctrl && guest_ptr(entity) && ld32(ctrl + kCtrlEntity) == entity && local_player_state(state);
 	float step = ours ? ldf(ctrl + kCtrlTimeStep) : 0;
 	bool walking = ours && (state == kStateMoving || state == kStateSprinting);
-	if (!walking || !(step > 0) || step > kConsoleStep * 0.9f)
+	if (!walking || noclip() || !(step > 0) || step > kConsoleStep * 0.9f)
 	{
 		if (ours) g_body.Reset(0);
 		orig_body_update(c);
