@@ -16,7 +16,7 @@ strip --strip-debug "$S/GoldenEye"
 cp -L "$SDL" "$S/lib/libSDL3.so.0"
 strip --strip-unneeded "$S/lib/libSDL3.so.0"
 cp config/keys.txt "$S/keys.txt"
-cp config/keys.txt config/hosts.txt config/openings.txt build/recomp/symbols.tsv "$S/config/"
+cp config/keys.txt config/hosts.txt config/openings.txt config/cutscenes.txt build/recomp/symbols.tsv "$S/config/"
 cp build/patched/gecko.txt "$S/config/gecko-codes.txt"
 cp config/gecko/*.txt "$S/config/gecko/"
 for f in font_western.bin font_japanese.bin dsp_coef.bin; do

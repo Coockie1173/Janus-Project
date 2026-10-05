@@ -68,6 +68,7 @@ const float kEaseSeconds = 1.0f; //of the opening's end, slowing down to normal 
 const double kFadeSeconds = 1.0; //the sound coming back
 const uint32_t kShowEvery = 4; //one frame in this many is drawn, so it's seen to be moving
 const uint32_t kLevelTimer = 0x805C963C; //a float, seconds played in the level
+const uint32_t kTimelineHash = 0x20; //of a cutscene's timeline, the hash that names it
 
 using Clock = std::chrono::steady_clock;
 
@@ -79,7 +80,7 @@ PPCFunc orig_menu_pending = nullptr;
 PPCFunc orig_level_change = nullptr;
 PPCFunc orig_frame_draw = nullptr;
 bool g_restarting = false; //the menu's restart action is running, or its Continue Game: both go straight to StartLevelChange
-bool g_trace = false;
+bool g_trace = false, g_tracecut = false;
 int g_forced_entrance = -1; //GE_ENTRANCE
 uint32_t g_forced_level = 0; //GE_LEVEL, a level's hash: whichever mission the menu starts, this one loads
 Skip g_state = Skip::Idle;
@@ -87,7 +88,8 @@ uint32_t g_frames = 0; //frames in this state
 uint32_t g_drawn = 0; //frames since one was drawn
 uint32_t g_counting = 0; //frames in a row the level's time went up
 float g_played = 0;
-float g_ends = 0; //the level time this opening ends at, 0 if we don't know it
+float g_ends = 0; //the level time this cutscene ends at, 0 if we don't know it
+float g_armed_ends = 0; //the same for the cutscene that is waited for
 std::map<uint32_t, float> g_openings; //level hash -> the level time its opening ends at
 
 //lines of "level hash (hex), seconds"
@@ -99,6 +101,19 @@ void LoadOpenings(const std::string& path)
 		unsigned level = 0;
 		float seconds = 0;
 		if (std::sscanf(l.c_str(), "%x %f", &level, &seconds) == 2) g_openings[level] = seconds;
+	}
+}
+//a cutscene in the middle of a level that is skipped as well: lines of "level hash (hex),
+//the hash of the timeline that takes the player (hex), how long the player is kept, seconds"
+std::map<std::pair<uint32_t, uint32_t>, float> g_cutscenes;
+void LoadCutscenes(const std::string& path)
+{
+	std::ifstream f(path);
+	for (std::string l; std::getline(f, l);)
+	{
+		unsigned level = 0, cutscene = 0;
+		float seconds = 0;
+		if (std::sscanf(l.c_str(), "%x %x %f", &level, &cutscene, &seconds) == 3) g_cutscenes[{level, cutscene}] = seconds;
 	}
 }
 Clock::time_point g_started, g_started_guest;
@@ -123,7 +138,7 @@ void Stop(const char* why)
 		g_running = false;
 		double took = std::chrono::duration<double>(Clock::now() - g_started).count();
 		double skipped = std::chrono::duration<double>(rt_now() - g_started_guest).count();
-		rt_log("goldeneye: skip cutscenes: %s, %.1f s of cutscene (%u frames) in %.1f s, level %08X's opening ends at %.2f",
+		rt_log("goldeneye: skip cutscenes: %s, %.1f s of cutscene (%u frames) in %.1f s, level %08X's cutscene ends at %.2f",
 			why, skipped, g_frames, took, ld32(kCurrentLevel), ldf(kLevelTimer));
 	}
 	else if (g_state == Skip::Waiting && g_trace) rt_log("goldeneye: skip cutscenes: not waiting any more, %s", why);
@@ -137,7 +152,21 @@ void Arm(uint32_t level)
 	if (!g_skip_cutscenes) return;
 	g_state = Skip::Waiting;
 	g_frames = g_counting = 0;
+	auto known = g_openings.find(level);
+	g_armed_ends = known != g_openings.end() ? known->second : 0.0f;
 	if (g_trace) rt_log("goldeneye: skip cutscenes: level %08X starts, waiting for its opening", level);
+}
+
+//the player was just taken by a cutscene: one of config/cutscenes.txt is skipped like an opening
+void ArmCutscene(uint32_t cutscene)
+{
+	if (!g_skip_cutscenes || g_state != Skip::Idle) return;
+	auto known = g_cutscenes.find({ld32(kCurrentLevel), cutscene});
+	if (known == g_cutscenes.end()) return;
+	g_state = Skip::Waiting;
+	g_frames = g_counting = 0;
+	g_armed_ends = known->second > 0 ? ldf(kLevelTimer) + known->second : 0.0f;
+	if (g_trace) rt_log("goldeneye: skip cutscenes: cutscene %08X of level %08X starts", cutscene, ld32(kCurrentLevel));
 }
 
 void Start()
@@ -146,12 +175,11 @@ void Start()
 	g_frames = g_drawn = 0;
 	g_started = Clock::now();
 	g_started_guest = rt_now();
-	auto known = g_openings.find(ld32(kCurrentLevel));
-	g_ends = known != g_openings.end() ? known->second : 0.0f;
+	g_ends = g_armed_ends;
 	g_running = true;
 	set_fast_forward(true);
 	audio_mute(true);
-	rt_log("goldeneye: skip cutscenes: skipping level %08X's opening", ld32(kCurrentLevel));
+	rt_log("goldeneye: skip cutscenes: skipping a cutscene of level %08X", ld32(kCurrentLevel));
 }
 
 void Run()
@@ -298,21 +326,27 @@ void cutscenes_frame()
 	}
 }
 
-//GE_TRACECUT: the messages a cutscene's timeline sends its player (the id at +0xC, the actor's
-//slot in the byte at +3), and the player being taken as an actor and let go
+//the messages a cutscene's timeline sends its player (the id at +0xC, the actor's slot in the
+//byte at +3), and the player being taken as an actor and let go. the timeline that sent the
+//message the player is taken in names the cutscene: its hash is at +0x20
+//GE_TRACECUT logs them all
 PPCFunc orig_cutscene_message = nullptr, orig_player_take = nullptr, orig_player_release = nullptr;
+uint32_t g_sender = 0;
 void CutsceneMessage(PPCContext& c)
 {
 	uint32_t msg = c.r[4];
-	if (guest_ptr(msg))
+	if (g_tracecut && guest_ptr(msg))
 		rt_log("cut: t %.3f frame %u msg %08X slot %d %08X %08X %08X from %08X", ldf(kLevelTimer), ld32(kFrameCount), ld32(msg + 0xC), (int8_t)ld8(msg + 3),
 		       ld32(msg + 0x14), ld32(msg + 0x18), ld32(msg + 0x1C), c.r[5]);
+	g_sender = c.r[5]; //kept: the player is taken after the messages, not in one
 	orig_cutscene_message(c);
 }
 void PlayerTake(PPCContext& c)
 {
-	rt_log("cut: t %.3f frame %u the player %08X is taken", ldf(kLevelTimer), ld32(kFrameCount), c.r[3]);
+	uint32_t cutscene = guest_ptr(g_sender) ? ld32(g_sender + kTimelineHash) : 0;
+	if (g_tracecut || g_trace) rt_log("cut: t %.3f frame %u the player %08X is taken by cutscene %08X", ldf(kLevelTimer), ld32(kFrameCount), c.r[3], cutscene);
 	orig_player_take(c);
+	ArmCutscene(cutscene);
 }
 void PlayerRelease(PPCContext& c)
 {
@@ -330,13 +364,12 @@ void install_cutscenes()
 	orig_menu_pending = ppc_hook("ge_menu_pending", MenuPending);
 	orig_level_change = ppc_hook("StartLevelChange", LevelChange);
 	orig_frame_draw = ppc_hook("ge_frame_draw", FrameDraw);
-	if (std::getenv("GE_TRACECUT"))
-	{
-		orig_cutscene_message = ppc_hook("ge_cutscene_message", CutsceneMessage);
-		orig_player_take = ppc_hook("ge_cutscene_take", PlayerTake);
-		orig_player_release = ppc_hook("ge_cutscene_release", PlayerRelease);
-	}
-	if (!orig_menu_pending || !orig_level_change || !orig_frame_draw) rt_die("goldeneye: the menu's pending action is not hooked in this build");
+	g_tracecut = std::getenv("GE_TRACECUT") != nullptr;
+	LoadCutscenes(std::string(GE_ROOT) + "/config/cutscenes.txt");
+	orig_cutscene_message = ppc_hook("ge_cutscene_message", CutsceneMessage);
+	orig_player_take = ppc_hook("ge_cutscene_take", PlayerTake);
+	if (g_tracecut) orig_player_release = ppc_hook("ge_cutscene_release", PlayerRelease);
+	if (!orig_menu_pending || !orig_level_change || !orig_frame_draw || !orig_cutscene_message || !orig_player_take) rt_die("goldeneye: the menu's pending action is not hooked in this build");
 }
 
 } //namespace ge
