@@ -69,7 +69,7 @@ Things that only break above 60 fps.
 
 ## Graphics
 
-- [ ] **high** Flickering issue
+- [X] **high** Flickering issue
 - [ ] **medium** Bloom still looks incorrect
 - [ ] **medium** Facility: the colour filter / post processing "bubble" around the player doesn't cover
       the whole screen, worse at higher FOV
