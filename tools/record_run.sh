@@ -17,5 +17,6 @@ mkdir -p build/rec
 rm -rf "build/rec/$NAME.nand" build/rec/run.nand
 cp -a build/nand "build/rec/$NAME.nand"; cp -a build/nand build/rec/run.nand
 [ -f build/settings.env ] && cp build/settings.env "build/rec/$NAME.env"
+echo "REC_SKIP=${SKIP:-0}" >> "build/rec/$NAME.env" #the replay has to skip the openings as the recording did
 NAND=build/rec/run.nand GE_SKIP_CUTSCENES=${SKIP:-0} GE_RECORD=build/rec/$NAME.rec ./launch.sh --no-gui "$@"
 echo "recorded: build/rec/$NAME.rec ($(grep -c . "build/rec/$NAME.rec") lines)"

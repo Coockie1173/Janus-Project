@@ -19,7 +19,7 @@
 //GE_PORTAL_NEAR=N that distance (1.5 unless given), 0 leaves the game's answer alone
 //GE_ZONELOG=file writes a line for every view: the game's frame, seconds, the camera's
 //position, the zone it was found in (-1 for none), zones walked, portals kept and dropped,
-//portals kept by the fix. a view that walks fewer zones than the one before it also gets what
+//portals kept by the fix, the player's state, distance fallen, body flags and noclip. a view that walks fewer zones than the one before it also gets what
 //the clip worked from, for both views: each portal's 0x44 bytes, its link, the rectangle going
 //in, the answer (2: kept by the fix), and the two matrices at 806421E0 and 80642220 with the
 //screen's size and offset (the first 600 such views)
@@ -136,8 +136,11 @@ void Root(PPCContext& c)
 	const std::string view{ ViewState() }; //as the walk left them
 	static const auto start = std::chrono::steady_clock::now();
 	const double seconds{ std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count() };
-	std::fprintf(g_log, "%u %.4f pos %.3f %.3f %.3f zone %d walked %u kept %u dropped %u forced %u\n",
-		ld32(kFrameCount), seconds, x, y, z, g_zone, g_walked, g_kept, g_dropped, g_forced);
+	uint32_t state{ 0 }, bodyFlags{ 0 };
+	float fallen{ 0 };
+	const bool player{ player_state(state, fallen, bodyFlags) };
+	std::fprintf(g_log, "%u %.4f pos %.3f %.3f %.3f zone %d walked %u kept %u dropped %u forced %u state %d fallen %.3f body %X noclip %d\n",
+		ld32(kFrameCount), seconds, x, y, z, g_zone, g_walked, g_kept, g_dropped, g_forced, player ? (int)state : -1, fallen, bodyFlags, (int)noclip());
 	if (g_walked < g_walkedBefore && g_dumps < 600)
 	{
 		++g_dumps;

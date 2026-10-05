@@ -142,6 +142,7 @@ bool noclip(); //cheat, the player flies through walls and doesn't fall
 void set_noclip(bool on);
 void noclip_look(uint32_t controller); //before ge_look_apply, the game's own step is taken out
 void noclip_apply(uint32_t controller); //after the local controller's update
+bool player_state(uint32_t& state, float& fallen, uint32_t& bodyFlags); //the local player as of its last update, false before there is one
 void install_collision(); //collision.cpp
 void install_body(); //body.cpp
 bool collision_view(); //cheat, the level's collision is drawn in place of the world

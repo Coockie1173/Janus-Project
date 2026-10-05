@@ -3731,7 +3731,7 @@ index 8a4e097..8b1b1a8 100644
  void ppc_mmio_write(uint32_t addr, uint32_t, int) { rt_die("mmio write %08X", addr); }
  uint64_t ppc_timebase() { return 0; }
 diff --git a/runtime/video.cpp b/runtime/video.cpp
-index 5726093..a0ffc87 100644
+index 5726093..9643da1 100644
 --- a/runtime/video.cpp
 +++ b/runtime/video.cpp
 @@ -67,7 +67,8 @@ ClassicState classic[4];
@@ -4093,7 +4093,10 @@ index 5726093..a0ffc87 100644
 +        draw_state = ds;
 +        gl_state_stale = false;
 +    }
-+
+ 
+-    int offx = s10(bp[0x59]) * 2, offy = s10(bp[0x59] >> 10) * 2;
+-    float wd = std::fabs(fx(0x101A)), ht = std::fabs(fx(0x101B));
+-    glViewportIndexedf(0, (fx(0x101D) - wd - (float)offx) * (float)S, (fx(0x101E) - ht - (float)offy) * (float)S,
 +    // room for all the blocks in this quarter of the ring, or on to the next
 +    const size_t q = ubo_off / UBO_QUARTER;
 +    if ((ubo_off + 8192) / UBO_QUARTER != q) {
@@ -4284,10 +4287,7 @@ index 5726093..a0ffc87 100644
 +        }
 +    }
 +}
- 
--    int offx = s10(bp[0x59]) * 2, offy = s10(bp[0x59] >> 10) * 2;
--    float wd = std::fabs(fx(0x101A)), ht = std::fabs(fx(0x101B));
--    glViewportIndexedf(0, (fx(0x101D) - wd - (float)offx) * (float)S, (fx(0x101E) - ht - (float)offy) * (float)S,
++
 +// ---- a port's debug scene -------------------------------------------------------------------------
 +// While its view is on, the game's perspective draws are left out, and the
 +// scene is drawn once in their place: before the first draw without
@@ -4794,7 +4794,7 @@ index 5726093..a0ffc87 100644
      ++cnt.presents;
      int ww = 0, wh = 0;
      SDL_GetWindowSizeInPixels(win, &ww, &wh);
-@@ -1275,17 +1773,59 @@ void present() {
+@@ -1275,17 +1773,87 @@ void present() {
      glColorMask(1, 1, 1, 1);
      glClearColor(0, 0, 0, 1);
      glClear(GL_COLOR_BUFFER_BIT);
@@ -4851,13 +4851,41 @@ index 5726093..a0ffc87 100644
 +            static const auto t0 = std::chrono::steady_clock::now();
 +            if (xf_) std::fprintf(xf_, "%llu %llu %.3f\n", (unsigned long long)++shown, (unsigned long long)cnt.frames,
 +                                  std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
++            // WIIKIT_DARKTRACE=1: a picture much darker than the ones before it gets the next frame's GX
++            // commands traced (as F12), and so does the first one after it that is as bright again (60 times a run)
++            static const bool dark_on = std::getenv("WIIKIT_DARKTRACE") != nullptr;
++            if (dark_on) {
++                static double avg = -1;
++                static int dark = 0, traces = 0;
++                uint64_t sum = 0, n = 0;
++                for (size_t i = 0; i + 4 <= px.size(); i += 16) { sum += px[i] * 2 + px[i + 1] * 5 + px[i + 2]; ++n; }
++                const double luma = n ? (double)sum / (double)n / 8.0 : 0;
++                const double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
++                static double dark_since = 0;
++                if (avg < 0) avg = luma;
++                if (!dark) {
++                    if (avg > 4 && luma < avg * 0.5) {
++                        dark = 1;
++                        dark_since = secs;
++                        if (traces < 60) gx_trace_next_frame();
++                        rt_log("video: picture %llu went dark (%.1f after %.1f), frame %llu, %.3f s", (unsigned long long)shown, luma, avg,
++                               (unsigned long long)cnt.frames, secs);
++                    } else avg += (luma - avg) * 0.05;
++                } else if (luma > avg * 0.8 || secs - dark_since > 4) {
++                    if (luma > avg * 0.8 && traces++ < 60) gx_trace_next_frame();
++                    rt_log("video: picture %llu %s (%.1f), frame %llu, %.3f s", (unsigned long long)shown,
++                           luma > avg * 0.8 ? "bright again" : "stays dark", luma, (unsigned long long)cnt.frames, secs);
++                    dark = 0;
++                    avg = luma;
++                }
++            }
 +        }
 +    }
 +    if (overlay_cb.draw) overlay_cb.draw();
      if (opt.dump_dir && cnt.presents % (uint64_t)opt.dump_every == 0 && ww > 0 && wh > 0) {
          std::vector<uint8_t> px((size_t)ww * wh * 4), flip(px.size());   // the window, as shown
          glReadPixels(0, 0, ww, wh, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
-@@ -1317,7 +1857,6 @@ void setup() {
+@@ -1317,7 +1885,6 @@ void setup() {
      glNamedFramebufferTexture(efb_fbo, GL_DEPTH_ATTACHMENT, efb_dep, 0);
      if (glCheckNamedFramebufferStatus(efb_fbo, GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
          rt_die("video: the EFB framebuffer is incomplete");
@@ -4865,7 +4893,7 @@ index 5726093..a0ffc87 100644
      glBindFramebuffer(GL_FRAMEBUFFER, efb_fbo);
      glClearColor(0, 0, 0, 1);
      glClearDepth(1.0);
-@@ -1327,45 +1866,25 @@ void setup() {
+@@ -1327,45 +1894,25 @@ void setup() {
      const GLbitfield map = GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT;
      glNamedBufferStorage(vbo, VBO_CAP, nullptr, map);
      vbo_ptr = static_cast<uint8_t*>(glMapNamedBufferRange(vbo, 0, VBO_CAP, map));
@@ -4928,7 +4956,7 @@ index 5726093..a0ffc87 100644
  
      copy_prog = link(FULLSCREEN_VS, COPY_FS);
      if (!copy_prog) rt_die("video: the EFB copy program does not build");
-@@ -1462,6 +1981,13 @@ std::atomic<bool> want_relative{false};
+@@ -1462,6 +2009,13 @@ std::atomic<bool> want_relative{false};
  std::mutex motion_mx;
  float motion_x = 0, motion_y = 0;
  void video_set_relative_mouse(bool on) { want_relative = on; }
@@ -4942,7 +4970,7 @@ index 5726093..a0ffc87 100644
  void video_take_mouse_motion(float& dx, float& dy) {
      std::lock_guard<std::mutex> lk(motion_mx);
      dx = motion_x; dy = motion_y;
-@@ -1479,6 +2005,7 @@ ClassicState video_classic(int chan) {
+@@ -1479,6 +2033,7 @@ ClassicState video_classic(int chan) {
  void video_set_rumble(int chan, bool on) {
      if (chan >= 0 && chan < 4) rumble_want[chan] = on;
  }
@@ -4950,7 +4978,7 @@ index 5726093..a0ffc87 100644
  void video_retrace() {
      retraces.fetch_add(1);
      if (wake) SDL_SignalSemaphore(wake);
-@@ -1506,6 +2033,7 @@ void video_run(const char* title) {
+@@ -1506,6 +2061,7 @@ void video_run(const char* title) {
      SDL_GL_MakeCurrent(win, ctx);
      SDL_GL_SetSwapInterval(0);                   // VI paces the presents
      if (!gl_load()) rt_die("video: OpenGL functions missing");
@@ -4958,7 +4986,7 @@ index 5726093..a0ffc87 100644
      rt_log("video: %s, %s", (const char*)glGetString(GL_RENDERER), (const char*)glGetString(GL_VERSION));
      if (debug) {
          glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
-@@ -1529,11 +2057,15 @@ void video_run(const char* title) {
+@@ -1529,11 +2085,15 @@ void video_run(const char* title) {
      uint64_t frames_then = 0;
      uint32_t seen = retraces.load();
      std::string base_title = title;
@@ -4974,7 +5002,7 @@ index 5726093..a0ffc87 100644
              if (e.type == SDL_EVENT_GAMEPAD_ADDED) pad_added(e.gdevice.which);
              if (e.type == SDL_EVENT_GAMEPAD_REMOVED) pad_removed(e.gdevice.which);
              // F11 or Alt+Enter: fullscreen and back
-@@ -1592,7 +2124,14 @@ void video_run(const char* title) {
+@@ -1592,7 +2152,14 @@ void video_run(const char* title) {
                  double vtx = ms(g_vperf.vtx), tex = ms(g_vperf.tex), wait = ms(g_vperf.wait), draw = ms(g_vperf.draw),
                         pres = ms(g_vperf.present);
                  rt_log("perf: %.1f fps; frame %.1f ms; game thread: vertices %.1f, textures %.1f, waiting for the renderer %.1f; "
@@ -4990,7 +5018,7 @@ index 5726093..a0ffc87 100644
              }
              frames_then = cnt.frames;
              t_title = now;
-@@ -1608,6 +2147,8 @@ void video_run(const char* title) {
+@@ -1608,6 +2175,8 @@ void video_run(const char* title) {
              }
              if (c.readback) { if (c.copy) copy_readback(c.copy); else efb_readback(); busy = true; continue; }
              auto te = Clock::now();
@@ -4999,7 +5027,7 @@ index 5726093..a0ffc87 100644
              exec(c.data);
              if (g_vperf_on) g_vperf.draw += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - te).count();
              {
-@@ -1621,6 +2162,17 @@ void video_run(const char* title) {
+@@ -1621,6 +2190,17 @@ void video_run(const char* title) {
              if (retraces.load() != seen) break;
          }
          uint32_t r = retraces.load();

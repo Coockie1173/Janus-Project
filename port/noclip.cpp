@@ -50,6 +50,7 @@ std::atomic<bool> g_noclip{false};
 bool g_trace = false;
 uint32_t g_entity = 0, g_body = 0; //the entity the position is for and its body, 0 when there's none
 float g_pos[3]{};
+uint32_t g_ctrl = 0; //the local controller as of its last update, for player_state
 
 //the states the player moves themselves in: standing, moving, sprinting, in the air
 bool Free(uint32_t state) { return state == 0 || state == 2 || state == 3 || state == 4; }
@@ -85,8 +86,21 @@ void noclip_look(uint32_t ctrl)
 	}
 }
 
+//what the portal walk's log says of the player: the state, the distance fallen, the body's flags
+bool player_state(uint32_t& state, float& fallen, uint32_t& bodyFlags)
+{
+	if (!guest_ptr(g_ctrl)) return false;
+	const uint32_t entity{ ld32(g_ctrl + kEntity) };
+	const uint32_t body{ guest_ptr(entity) ? ld32(entity + kBody) : 0 };
+	state = ld32(g_ctrl + kPlayerState);
+	fallen = ldf(g_ctrl + kFallen);
+	bodyFlags = guest_ptr(body) ? ld16(body + kBodyFlags) : 0xFFFFu;
+	return true;
+}
+
 void noclip_apply(uint32_t ctrl)
 {
+	g_ctrl = ctrl;
 	uint32_t entity = ld32(ctrl + kEntity);
 	uint32_t body = guest_ptr(entity) ? ld32(entity + kBody) : 0;
 	if (!g_noclip || !guest_ptr(body) || !Free(ld32(ctrl + kPlayerState)))
