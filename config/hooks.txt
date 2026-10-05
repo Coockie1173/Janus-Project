@@ -45,3 +45,7 @@ ge_weapon_input        # the weapon buttons, once a frame: a slot's key presses 
 ge_weapon_next_slot    # the cycle's search for the next slot's item: answers with the key's slot instead
 ge_camera_apply        # a camera's matrices are worked out: the collision viewer keeps the player's world to clip matrix
 ge_world_draw          # the level is drawn for a view: the collision viewer takes that view's matrix and gathers
+ge_records_new         # an animator's collision records are made for a slot: remembered with the slot
+ge_records_release     # a slot gives its records back: forgotten
+ge_records_destroy     # a slot is destroyed with its records: forgotten
+ge_heap_free           # any block is freed: logged when it is a slot's records and the slot still holds them

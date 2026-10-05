@@ -9,6 +9,7 @@
 //movies.cpp skip movies
 //files.cpp a finished file read is counted once
 //autosave.cpp a checkpoint saves the game
+//records.cpp tells who frees an animator's collision records while they are held
 //tweaks.cpp the level timer, the unused extras menu, auto start, no tutorials
 //tank.cpp the tank: the mouse on its aim, its buttons, driving at higher frame rates
 //noclip.cpp fly through the level
@@ -108,6 +109,7 @@ bool auto_qte(); //quick time events press their own buttons
 void set_auto_qte(bool on);
 void install_movies(); //movies.cpp
 void install_files(); //files.cpp
+void install_records(); //records.cpp
 bool skip_movies(); //a movie that plays once is over before it starts
 void set_skip_movies(bool on);
 void install_tweaks(); //tweaks.cpp

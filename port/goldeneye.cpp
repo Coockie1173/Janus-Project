@@ -65,6 +65,7 @@ void install() {
     install_tweaks();
     install_movies();
     install_files();
+    install_records();
     install_tank();
     install_noclip();
     install_collision();
