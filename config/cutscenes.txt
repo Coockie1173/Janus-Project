@@ -1,5 +1,5 @@
-# Skip Intro Cutscenes (port/cutscenes.cpp): cutscenes in the middle of a level that are
-# skipped like its opening. level hash, the hash of the timeline that takes the player
+# Skip Zukovsky (port/cutscenes.cpp): cutscenes in the middle of a level that are
+# skipped like an opening with that option on. level hash, the hash of the timeline that takes the player
 # (GE_TRACE=1: "the player is taken by cutscene"), the seconds until the player is let go
 # again (0: not known, the skip then cuts instead of slowing down into its last second).
 01810144 04002580 113.0     # Nightclub, the meeting with Zukovsky (three timelines in a row)

@@ -17,6 +17,7 @@
 //GE_FOV=D field of view in degrees (the game's is 49)
 //GE_ADS_FOV=D field of view aiming down the sight (the game's is 22.5 with the pistol)
 //GE_SKIP_CUTSCENES=1 a mission's opening cutscene is skipped
+//GE_SKIP_ZUKOVSKY=1 the meeting with Zukovsky in Nightclub is skipped
 //GE_AUTO_QTE=1 quick time events press their own buttons
 //GE_LEVEL_TIMER=0 no level timer in the hud
 //GE_AUTO_START=1 a loaded mission starts without its "Continue" being pressed

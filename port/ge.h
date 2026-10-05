@@ -105,6 +105,8 @@ void install_native(); //native.cpp
 void install_cutscenes(); //cutscenes.cpp
 bool skip_cutscenes(); //a mission's opening cutscene is skipped
 void set_skip_cutscenes(bool on);
+bool skip_zukovsky(); //Nightclub's meeting with Zukovsky is skipped (config/cutscenes.txt)
+void set_skip_zukovsky(bool on);
 void cutscenes_frame(); //once a frame, on the game's thread
 bool skipping_cutscene(); //an opening is being skipped right now
 bool cutscene_input_waiting(); //qte.cpp, a cutscene asked for a button in the last frames
