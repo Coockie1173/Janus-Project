@@ -12,7 +12,7 @@ Importance:
 
 ## Do first
 
-- [ ] **high** Vents at high fps (Dam, Facility, Nightclub, Bunker, Archives, Outpost), most likely one cause:
+- [x] **high** Vents at high fps (Dam, Facility, Nightclub, Bunker, Archives, Outpost), most likely one cause:
       fixed where it was recorded (a vent's exit at 144)
 - [ ] **high** Carrier ladders at high fps
 - [ ] **high** The camera is locked while aiming in
@@ -29,13 +29,13 @@ Things that only break above 60 fps.
 
 - [x] Getting stuck at a vent's frame: a blocked player moves in the console's steps now (out of the
       recorded vent at 144, see docs/STATUS.md)
-- [ ] **high** Dam: the vent right after the boats dock can't be entered at 90 fps, however it is opened
-- [ ] **high** Facility labs vent: needs 75 or lower after the animation, 60 or lower if shot/hit
-- [ ] **high** Nightclub: side vent into the final area (the one going upstairs) breaks above 75 fps
-- [ ] **high** Nightclub: vent into the objective room breaks above 60 fps
-- [ ] **high** Bunker: vent in the first area has the same problems
-- [ ] **high** Archives: vent above the server room needs low fps
-- [ ] **high** Outpost: you get stuck in the vents, they're slightly too small, pushing through only works at low fps
+- [x] **high** Dam: the vent right after the boats dock can't be entered at 90 fps, however it is opened
+- [x] **high** Facility labs vent: needs 75 or lower after the animation, 60 or lower if shot/hit
+- [x] **high** Nightclub: side vent into the final area (the one going upstairs) breaks above 75 fps
+- [x] **high** Nightclub: vent into the objective room breaks above 60 fps
+- [x] **high** Bunker: vent in the first area has the same problems
+- [x] **high** Archives: vent above the server room needs low fps
+- [x] **high** Outpost: you get stuck in the vents, they're slightly too small, pushing through only works at low fps
 
 ### Movement
 
