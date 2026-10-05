@@ -19,6 +19,9 @@
 //everything else that shows a button (the menus' "Back" and "Select") sets a string to the
 //button's character with ge_string_set (800E8DC0), which gets the same treatment
 //
+//a key is drawn in the game's own highlight colour (the font's colour code 0x2801, what a
+//text's <C1> tag gives), so it stands out the way the button's picture did
+//
 //GE_TRACETEXT=1 log every text the game looks up and every tag written out, once each
 #include "ge.h"
 #include <SDL3/SDL.h>
@@ -56,6 +59,8 @@ const char* const kMenuKeys[] = {"Return", "Keypad Enter", "Backspace", "Escape"
 const uint32_t kTags = 0x8057A8A0; //the twelve tags, a pointer each
 const uint32_t kButtonGlyph = 0x80199040; //(a button's hash) -> its character in the font
 const uint32_t kStringFont = 0x14, kButtonFont = 0x07000033; //a string's font, the one with only buttons
+const char kGoldOn = 1, kGoldOff = 2; //in a key's text: the game's highlight colour from here, and back
+const uint16_t kGold = 0x2801, kPlain = 0x2800; //the font's colour codes, what <C1> and <C0> are written as
 const uint16_t kNoBreak = 0xA0; //a space a label isn't wrapped at
 const uint32_t kGlyphFirst = 0x2701, kGlyphLast = 0x273A; //the font's buttons
 const uint32_t kTextMsg = 0x800DDFC0; //GetTextMsg: (a text's hash, the answer) -> 1 when it's there
@@ -140,7 +145,7 @@ std::string KeyFor(uint32_t ch, bool menu)
 		{
 			if (!SDL_strcasecmp(s.key, key.c_str())) key = s.as;
 		}
-		return "[" + key + "]";
+		return kGoldOn + ("[" + key + "]") + kGoldOff;
 	}
 	return {};
 }
@@ -152,6 +157,12 @@ bool IsButton(uint32_t ch, const char* button)
 		if (g.ch == ch) return !SDL_strcasecmp(g.button, button);
 	}
 	return false;
+}
+
+//a key's text onto a prompt's characters, the two marks as the font's colour codes
+void Append(std::vector<uint16_t>& text, const std::string& key)
+{
+	for (unsigned char ch : key) text.push_back(ch == kGoldOn ? kGold : ch == kGoldOff ? kPlain : ch);
 }
 
 std::string Readable(uint32_t text, size_t most = 400)
@@ -180,7 +191,7 @@ uint32_t ShowKeys(uint32_t out, uint32_t count, bool menu)
 		uint16_t ch = ld16(out + i * 2);
 		std::string key = KeyFor(ch, menu);
 		if (key.empty()) { text.push_back(ch); continue; }
-		for (unsigned char k : key) text.push_back(k);
+		Append(text, key);
 		changed = true;
 	}
 	if (!changed || text.size() > kMostChars) return count;
@@ -246,7 +257,8 @@ void SetTo(PPCContext& c, const std::vector<uint16_t>& text);
 //the hud's prompt text set to the keys and what the prompt says (its characters, 0 for nothing)
 void PutKeys(PPCContext& c, uint32_t hud, const std::string& keys, uint32_t says)
 {
-	std::vector<uint16_t> text(keys.begin(), keys.end());
+	std::vector<uint16_t> text;
+	Append(text, keys);
 	if (guest_ptr(says) && ld16(says))
 	{
 		text.push_back(' ');
@@ -334,11 +346,11 @@ void StringSet(PPCContext& c)
 	if (!button) //the label of the button before
 	{
 		std::string key = KeyFor(labelButton, menu);
-		bool after = IsButton(labelButton, "A");
+		bool after = IsButton(labelButton, "A"); //the confirm's label ends at the right, the others start at the left
 		labelString = 0;
-		if (!after) { text.assign(key.begin(), key.end()); text.push_back(kNoBreak); }
+		if (!after) { Append(text, key); text.push_back(kNoBreak); }
 		for (uint32_t i = 0; i < count; ++i) text.push_back(ld16(from + i * 2));
-		if (after) { text.push_back(kNoBreak); text.insert(text.end(), key.begin(), key.end()); }
+		if (after) { text.push_back(kNoBreak); Append(text, key); }
 		SetTo(c, text);
 		return;
 	}
@@ -356,7 +368,7 @@ void StringSet(PPCContext& c)
 		uint16_t ch = ld16(from + i * 2);
 		std::string key = KeyFor(ch, menu);
 		if (key.empty()) { text.push_back(ch); continue; }
-		text.insert(text.end(), key.begin(), key.end());
+		Append(text, key);
 		changed = true;
 	}
 	if (!changed) { orig_string_set(c); return; }
