@@ -54,8 +54,8 @@ const uint32_t kPendingLevel = 0x7D4; //the level's hash
 const uint32_t kPendingEntrance = 0x7DC; //where in the level the player starts
 const uint32_t kMenuPage = 0x220, kMenuPages = 0x2C8;
 const uint32_t kActionRestartLevel = 3, kActionLoadLevel = 5, kActionContinue = 6; //6: the main menu's Continue Game
-//the item picked on the page the level starts from, 0x13..0x16 are the campaign's difficulties
-const uint16_t kItemOperative = 0x13, kItemClassic = 0x16;
+//the item picked on the page the level starts from, 0x13..0x16 are the campaign's difficulties, 0x17 its Time Trial
+const uint16_t kItemOperative = 0x13, kItemTimeTrial = 0x17;
 const uint32_t kMissionStart = 1; //the entrance a mission begins at
 const uint32_t kCurrentLevel = 0x805D1804; //the hash of the level that is loaded
 const uint32_t kAppPtr = 0x806EB694, kAppEntrance = 0x338; //the entrance StartLevelChange loads the level at
@@ -110,7 +110,7 @@ bool StartsCampaignLevel(uint32_t menu)
 	uint32_t page = ld32(menu + kMenuPages + ld32(menu + kMenuPage) * 4);
 	if (!guest_ptr(page)) return false;
 	uint16_t item = ld16(page + 0xC);
-	return item >= kItemOperative && item <= kItemClassic;
+	return item >= kItemOperative && item <= kItemTimeTrial;
 }
 
 void Stop(const char* why)
