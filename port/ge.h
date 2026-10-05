@@ -18,6 +18,7 @@
 //prompts.cpp the bound key in the game's prompts, where it shows a controller button
 //collision.cpp the level's collision drawn in place of the world
 //body.cpp a blocked player moves in the console's steps, so vents can be got through at any frame rate
+//unload.cpp a file that's let go stays loaded as long as on the console, so cutscenes end at any frame rate
 //native.cpp the engine's hot math routines written for the host
 //net.cpp the hosts file for the game's servers
 //overlay.cpp the debug overlay (F3), memory watches from a .dmw file (dmw.cpp)
@@ -145,6 +146,7 @@ void noclip_apply(uint32_t controller); //after the local controller's update
 bool player_state(uint32_t& state, float& fallen, uint32_t& bodyFlags); //the local player as of its last update, false before there is one
 void install_collision(); //collision.cpp
 void install_body(); //body.cpp
+void install_unload(); //unload.cpp
 bool collision_view(); //cheat, the level's collision is drawn in place of the world
 void set_collision_view(bool on);
 void collision_tick(); //every tick of the game's loop

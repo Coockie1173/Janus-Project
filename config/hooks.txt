@@ -60,3 +60,7 @@ ge_hud_prompt          # the hud's prompt, buttons and a text: the keys go in fr
 ge_hud_prompt_text     # the same with a text already made
 ge_string_set          # a hud or menu string is set: a button character in it becomes the bound key
 ge_body_update         # a blocked player moves in the console's steps (port/body.cpp)
+ge_cutscene_message    # a message to the cutscene player: GE_TRACECUT logs it
+ge_cutscene_take       # a cutscene takes the player: GE_TRACECUT logs it
+ge_cutscene_release    # and lets go: the same
+ge_file_update         # a file of the file manager is updated: one being unloaded waits the console's time (port/unload.cpp)

@@ -26,6 +26,7 @@
 //GE_ENTRANCE=N start every mission at entrance N instead of 1, for trying out a level's
 //entrances (0 is one too). nothing is skipped then
 //GE_TRACE=1 log every checkpoint
+//GE_TRACECUT=1 log what a cutscene's timeline tells its player
 #include "ge.h"
 #include <algorithm>
 #include <atomic>
@@ -285,6 +286,28 @@ void cutscenes_frame()
 	}
 }
 
+//GE_TRACECUT: the messages a cutscene's timeline sends its player (the id at +0xC, the actor's
+//slot in the byte at +3), and the player being taken as an actor and let go
+PPCFunc orig_cutscene_message = nullptr, orig_player_take = nullptr, orig_player_release = nullptr;
+void CutsceneMessage(PPCContext& c)
+{
+	uint32_t msg = c.r[4];
+	if (guest_ptr(msg))
+		rt_log("cut: t %.3f frame %u msg %08X slot %d %08X %08X %08X from %08X", ldf(kLevelTimer), ld32(kFrameCount), ld32(msg + 0xC), (int8_t)ld8(msg + 3),
+		       ld32(msg + 0x14), ld32(msg + 0x18), ld32(msg + 0x1C), c.r[5]);
+	orig_cutscene_message(c);
+}
+void PlayerTake(PPCContext& c)
+{
+	rt_log("cut: t %.3f frame %u the player %08X is taken", ldf(kLevelTimer), ld32(kFrameCount), c.r[3]);
+	orig_player_take(c);
+}
+void PlayerRelease(PPCContext& c)
+{
+	rt_log("cut: t %.3f frame %u the player %08X is let go", ldf(kLevelTimer), ld32(kFrameCount), c.r[3]);
+	orig_player_release(c);
+}
+
 void install_cutscenes()
 {
 	if (const char* e = std::getenv("GE_SKIP_CUTSCENES")) g_skip_cutscenes = std::atoi(e) != 0;
@@ -295,6 +318,12 @@ void install_cutscenes()
 	orig_menu_pending = ppc_hook("ge_menu_pending", MenuPending);
 	orig_level_change = ppc_hook("StartLevelChange", LevelChange);
 	orig_frame_draw = ppc_hook("ge_frame_draw", FrameDraw);
+	if (std::getenv("GE_TRACECUT"))
+	{
+		orig_cutscene_message = ppc_hook("ge_cutscene_message", CutsceneMessage);
+		orig_player_take = ppc_hook("ge_cutscene_take", PlayerTake);
+		orig_player_release = ppc_hook("ge_cutscene_release", PlayerRelease);
+	}
 	if (!orig_menu_pending || !orig_level_change || !orig_frame_draw) rt_die("goldeneye: the menu's pending action is not hooked in this build");
 }
 

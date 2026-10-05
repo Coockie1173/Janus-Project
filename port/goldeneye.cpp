@@ -70,6 +70,7 @@ void install() {
     install_zones();
     install_tank();
     install_body();
+    install_unload();
     install_noclip();
     install_collision();
     install_autosave();
