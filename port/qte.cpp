@@ -73,21 +73,23 @@ uint32_t Wanted(uint32_t input)
 }
 
 //makes this call's bash step the same as a frame's at 30 would be. pressed: the button is down
-void BashStep(uint32_t input, bool pressed)
+//held: it's down every frame (auto qte), which drops the level by the same a second at any rate
+//as it is, so only the smoothing is set up
+void BashStep(uint32_t input, bool pressed, bool held)
 {
 	float scale = ldf(kTimeScale), frames = ldf(kFrameTime) * kGameFps;
 	if (!(frames > 0.01f && frames < 0.999f) || !(scale > 0.0f)) return;
 	float step = frames * scale, press = ldf(kBashPress), smoothing = ldf(kBashSmoothing);
 	float level = ldf(input + kBashLevel), left = ldf(input + kBashTimeLeft);
 	bool open = left > 0.0f && left - step / kGameFps > 0.0f; //out of time the game puts the level at the top
-	if (open && pressed)
+	if (open && pressed && !held)
 	{
 		level = std::max(level - press * (scale - step), 0.0f);
 		stf(input + kBashLevel, level);
 	}
 	//the level the game will get to, and the smoothed one that takes its fifth to the right place
 	if (!open) level = kBashTop;
-	else if (pressed) level = std::max(level - press * step, 0.0f);
+	else if (pressed || held) level = std::max(level - press * step, 0.0f);
 	level = std::min(level + ldf(input + kBashClimb) * step, kBashTop);
 	if (!(smoothing > 0.0f && smoothing < 1.0f)) return;
 	float share = 1.0f - std::pow(1.0f - smoothing, step), smooth = ldf(input + kBashSmooth);
@@ -118,7 +120,7 @@ void CutsceneInput(PPCContext& c)
 	bool wasDone = ld8(input + kDone) != 0;
 	if (!wasDone && Wanted(input)) g_waiting_frame = ld32(kFrameCount);
 	uint32_t waits = !wasDone && guest_ptr(ctrl) ? Wanted(input) : 0, wanted = g_auto_qte ? waits : 0;
-	if (waits && ld32(input + kKind) - kKindBase == kKindBash) BashStep(input, (ld32(ctrl + kActPressed) & waits) == waits);
+	if (waits && ld32(input + kKind) - kKindBase == kKindBash) BashStep(input, (ld32(ctrl + kActPressed) & waits) == waits, wanted != 0);
 	if (!wanted)
 	{
 		orig_cutscene_input(c);
