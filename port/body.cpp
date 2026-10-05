@@ -10,15 +10,18 @@
 //enough to come out the far side, with a jitter you can see on the console too. a 144th's
 //gets pushed straight back, the body swings between two contacts and never gets through
 //
-//so a body in a tight spot (a ceiling pushes on it as well) that's pushed at something and
-//gets nowhere moves the way the console's does:
+//a step up is the same: the lip into level 01810144's vent is 10 cm, the console's step takes
+//it in one frame and a 144th's lifts the body 2 cm and leaves it there
+//
+//so a body that's pushed at something low (a ceiling pushes on it as well, or a lip has lifted
+//it off its floor) and gets nowhere moves the way the console's does:
 //it stays put until a 30th of a second's moves have added up and then takes them as one step,
 //the drop that keeps it on the floor (6 a second) included. that goes on until it's clear of
 //the walls or isn't pushed any more, or has slid along one for half a second. in the
 //open (a wall with nothing overhead), in a cutscene and in every state but walking and
 //sprinting the body is left alone. the game has no word for being in a vent, and
 //crouching doesn't tell either: in the recorded one the player stands (+0x390 stays 0.15) and
-//crouched at a wall in the open isn't stuck in anything. the ceiling on the body is what tells
+//crouched at a wall in the open isn't stuck in anything. the ceiling and the lift are what tell
 #include "ge.h"
 #include <cmath>
 #include <cstdlib>
@@ -36,6 +39,7 @@ const float kConsoleStep = 1.0f / 30;
 const int kWindow = 8; //frames of pushing looked at
 const float kStuck = 0.1f; //blocked when less than this much of the pushing got anywhere
 const float kFree = 0.5f; //a console step that got this much of its way moved
+const float kLifted = 0.005f; //a body this far above its floor is on a lip
 const int kFreeSteps = 15; //and that many in a row is sliding along a wall, not being stuck
 const uint32_t kBodyFlags = 0xA, kBodyAtWall = 0xA, kBodyAtCeiling = 8; //a wall (2) or a ceiling (8) pushed it
 const float kPushing = 1e-4f; //a frame's move that counts as pushing
@@ -72,6 +76,8 @@ struct Blocked
 	float m_Wanted{}, m_Got{}; //over the window
 	int m_Frames{};
 	bool m_Tight{}; //a ceiling pushed the body in the window
+	bool m_Pushing{};
+	float m_FloorY{}; //how high the body was before it got stuck
 	bool m_Blocked{};
 	Vec3 m_Move{}; //what has added up since the last console step
 	float m_Time{};
@@ -118,11 +124,18 @@ void BodyUpdate(PPCContext& c)
 		if (length > kPushing)
 		{
 			g_body.m_Wanted += length;
-			g_body.m_Got += Progress(g_body.m_Last, now, move, length);
+			float got = Progress(g_body.m_Last, now, move, length);
+			g_body.m_Got += got;
 			if (ld16(body + kBodyFlags) & kBodyAtCeiling) g_body.m_Tight = true;
+			//the floor is where it last stood or got on with it
+			if (!g_body.m_Pushing) g_body.m_FloorY = g_body.m_Last.y;
+			g_body.m_Pushing = true;
+			if (got > length * kFree) g_body.m_FloorY = now.y;
 			if (++g_body.m_Frames >= kWindow)
 			{
-				if (g_body.m_Tight && g_body.m_Got < g_body.m_Wanted * kStuck)
+				//at something low: a ceiling on the body, or a lip that has lifted it a little
+				bool low = g_body.m_Tight || now.y - g_body.m_FloorY > kLifted;
+				if (low && g_body.m_Got < g_body.m_Wanted * kStuck)
 				{
 					g_body.m_Blocked = true;
 					g_body.m_Move = {};
@@ -140,6 +153,7 @@ void BodyUpdate(PPCContext& c)
 			g_body.m_Wanted = g_body.m_Got = 0;
 			g_body.m_Frames = 0;
 			g_body.m_Tight = false;
+			g_body.m_Pushing = false;
 		}
 		g_body.m_Last = now;
 		return;
