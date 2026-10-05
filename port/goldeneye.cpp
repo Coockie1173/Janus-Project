@@ -31,6 +31,7 @@
 //GE_FPS=N frame rate the engine may reach (30 by default, auto is 60)
 //GE_NATIVE=0 run the recompiled math routines instead of the host ones
 //GE_CRASH_MEM=1 put the guest's memory in crash dumps (build/crashes)
+//GE_TRACETEXT=1 log the texts the game looks up and the buttons its prompts ask for
 //GE_DMW=F watch list for the debug overlay (F3), the .dmw in the project folder by default
 #include "debug.h"
 #include "ge.h"
@@ -72,6 +73,7 @@ void install() {
     install_collision();
     install_autosave();
     install_weapons();
+    install_prompts();
     if (std::getenv("GE_TRACE")) {
         orig_main = ppc_hook("main", [](PPCContext& c) {
             rt_log("goldeneye: main() reached");

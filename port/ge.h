@@ -15,6 +15,7 @@
 //tank.cpp the tank: the mouse on its aim, its buttons, driving at higher frame rates
 //noclip.cpp fly through the level
 //weapons.cpp a key for each weapon slot
+//prompts.cpp the bound key in the game's prompts, where it shows a controller button
 //collision.cpp the level's collision drawn in place of the world
 //native.cpp the engine's hot math routines written for the host
 //net.cpp the hosts file for the game's servers
@@ -144,6 +145,7 @@ bool collision_view(); //cheat, the level's collision is drawn in place of the w
 void set_collision_view(bool on);
 void collision_tick(); //every tick of the game's loop
 void install_weapons(); //weapons.cpp
+void install_prompts(); //prompts.cpp
 void weapon_buttons(ClassicState& s); //a slot's key, in the classic's filter
 bool sprint_key(); //input.cpp, the sprint key is down this frame
 void install_overlay(); //overlay.cpp
