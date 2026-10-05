@@ -39,8 +39,8 @@ Things that only break above 60 fps.
 
 ### Movement
 
-- [ ] **high** Carrier ladders get progressively harder to climb, need sprinting from 75 or 90 fps
-- [ ] **medium** Harder to walk onto slight vertical geometry changes (happens a lot in Outpost and Bunker)
+- [X] **high** Carrier ladders get progressively harder to climb, need sprinting from 75 or 90 fps
+- [X] **medium** Harder to walk onto slight vertical geometry changes (happens a lot in Outpost and Bunker)
 
 ### Doors
 
