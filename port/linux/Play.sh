@@ -7,6 +7,7 @@
 #     ./Play.sh --always-mouse         the cheat "Always Enable Mouse": mouse look in every player state
 #     ./Play.sh --skip-cutscenes       a mission's opening cutscene is skipped
 #     ./Play.sh --skip-zukovsky        the meeting with Zukovsky in Nightclub is skipped
+#     ./Play.sh --skip-briggs          the meeting with Sky Briggs in Carrier is skipped
 #     ./Play.sh --skip-movies          briefings, the movies between missions and the logos are skipped
 #     ./Play.sh --no-tutorials         the tutorial boxes in the missions aren't shown
 #     ./Play.sh --no-level-timer       the hud without the level's time (it is on by default)

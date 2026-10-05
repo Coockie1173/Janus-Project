@@ -22,8 +22,8 @@
 //cutting to it. the sound fades back in after. a level that isn't in there just cuts
 //
 //GE_SKIP_CUTSCENES=1 on
-//GE_SKIP_ZUKOVSKY=1 the cutscenes of config/cutscenes.txt are skipped the same way (Nightclub's
-//meeting with Zukovsky), an option of its own
+//GE_SKIP_ZUKOVSKY=1, GE_SKIP_BRIGGS=1 the cutscenes of config/cutscenes.txt are skipped the same
+//way (Nightclub's meeting with Zukovsky, Carrier's with Sky Briggs), each an option of its own
 //GE_SKIP_RATE=N the frames a second of game time while skipping (3)
 //GE_ENTRANCE=N start every mission at entrance N instead of 1, for trying out a level's
 //entrances (0 is one too). nothing is skipped then
@@ -78,7 +78,8 @@ enum class Skip { Idle, Waiting, Running };
 
 std::atomic<bool> g_skip_cutscenes{false};
 std::atomic<bool> g_skip_zukovsky{false};
-bool g_inside = false; //what is waited for or skipped is a cutscene inside a level: the other option's
+std::atomic<bool> g_skip_briggs{false};
+std::atomic<bool>* g_option = &g_skip_cutscenes; //the option what is waited for or skipped belongs to
 std::atomic<bool> g_running{false};
 PPCFunc orig_menu_pending = nullptr;
 PPCFunc orig_level_change = nullptr;
@@ -108,8 +109,14 @@ void LoadOpenings(const std::string& path)
 	}
 }
 //a cutscene in the middle of a level that is skipped as well: lines of "level hash (hex),
-//the hash of the timeline that takes the player (hex), how long the player is kept, seconds"
-std::map<std::pair<uint32_t, uint32_t>, float> g_cutscenes;
+//the hash of the timeline that takes the player (hex), how long the player is kept in
+//seconds, the option it is skipped with (zukovsky, briggs)"
+struct Inside
+{
+	float seconds;
+	std::atomic<bool>* option;
+};
+std::map<std::pair<uint32_t, uint32_t>, Inside> g_cutscenes;
 void LoadCutscenes(const std::string& path)
 {
 	std::ifstream f(path);
@@ -117,7 +124,10 @@ void LoadCutscenes(const std::string& path)
 	{
 		unsigned level = 0, cutscene = 0;
 		float seconds = 0;
-		if (std::sscanf(l.c_str(), "%x %x %f", &level, &cutscene, &seconds) == 3) g_cutscenes[{level, cutscene}] = seconds;
+		char option[32] = "";
+		if (std::sscanf(l.c_str(), "%x %x %f %31s", &level, &cutscene, &seconds, option) != 4) continue;
+		if (std::string(option) == "zukovsky") g_cutscenes[{level, cutscene}] = {seconds, &g_skip_zukovsky};
+		else if (std::string(option) == "briggs") g_cutscenes[{level, cutscene}] = {seconds, &g_skip_briggs};
 	}
 }
 Clock::time_point g_started, g_started_guest;
@@ -155,7 +165,7 @@ void Arm(uint32_t level)
 	Stop("a level change");
 	if (!g_skip_cutscenes) return;
 	g_state = Skip::Waiting;
-	g_inside = false;
+	g_option = &g_skip_cutscenes;
 	g_frames = g_counting = 0;
 	auto known = g_openings.find(level);
 	g_armed_ends = known != g_openings.end() ? known->second : 0.0f;
@@ -165,13 +175,13 @@ void Arm(uint32_t level)
 //the player was just taken by a cutscene: one of config/cutscenes.txt is skipped like an opening
 void ArmCutscene(uint32_t cutscene)
 {
-	if (!g_skip_zukovsky || g_state != Skip::Idle) return;
+	if (g_state != Skip::Idle) return;
 	auto known = g_cutscenes.find({ld32(kCurrentLevel), cutscene});
-	if (known == g_cutscenes.end()) return;
+	if (known == g_cutscenes.end() || !*known->second.option) return;
 	g_state = Skip::Waiting;
-	g_inside = true;
+	g_option = known->second.option;
 	g_frames = g_counting = 0;
-	g_armed_ends = known->second > 0 ? ldf(kLevelTimer) + known->second : 0.0f;
+	g_armed_ends = known->second.seconds > 0 ? ldf(kLevelTimer) + known->second.seconds : 0.0f;
 	if (g_trace) rt_log("goldeneye: skip cutscenes: cutscene %08X of level %08X starts", cutscene, ld32(kCurrentLevel));
 }
 
@@ -199,7 +209,7 @@ void Run()
 		return;
 	}
 	++g_frames;
-	if (!(g_inside ? g_skip_zukovsky : g_skip_cutscenes)) { Stop("turned off"); return; }
+	if (!*g_option) { Stop("turned off"); return; }
 	if (std::chrono::duration<double>(rt_now() - g_started_guest).count() > kMaxSeconds) { Stop("given up"); return; }
 	if (cutscene_input_waiting()) { Stop("a button is wanted"); return; }
 	uint32_t state;
@@ -292,6 +302,8 @@ bool skip_cutscenes() { return g_skip_cutscenes; }
 void set_skip_cutscenes(bool on) { g_skip_cutscenes = on; }
 bool skip_zukovsky() { return g_skip_zukovsky; }
 void set_skip_zukovsky(bool on) { g_skip_zukovsky = on; }
+bool skip_briggs() { return g_skip_briggs; }
+void set_skip_briggs(bool on) { g_skip_briggs = on; }
 bool skipping_cutscene() { return g_running; }
 
 //GE_TRACE: how long each frame took from the easing on to a while after the skip
@@ -366,6 +378,7 @@ void install_cutscenes()
 {
 	if (const char* e = std::getenv("GE_SKIP_CUTSCENES")) g_skip_cutscenes = std::atoi(e) != 0;
 	if (const char* e = std::getenv("GE_SKIP_ZUKOVSKY")) g_skip_zukovsky = std::atoi(e) != 0;
+	if (const char* e = std::getenv("GE_SKIP_BRIGGS")) g_skip_briggs = std::atoi(e) != 0;
 	if (const char* e = std::getenv("GE_ENTRANCE")) g_forced_entrance = std::atoi(e);
 	if (const char* e = std::getenv("GE_LEVEL")) g_forced_level = (uint32_t)std::strtoul(e, nullptr, 16);
 	g_trace = std::getenv("GE_TRACE") != nullptr;

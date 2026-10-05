@@ -6,6 +6,7 @@ rem     Play.bat --fps 120 --fov 70 --mouse 1.5 --fullscreen --fast-start --chea
 rem     Play.bat --always-mouse         the cheat "Always Enable Mouse": mouse look in every player state
 rem     Play.bat --skip-cutscenes       a mission's opening cutscene is skipped
 rem     Play.bat --skip-zukovsky        the meeting with Zukovsky in Nightclub is skipped
+rem     Play.bat --skip-briggs          the meeting with Sky Briggs in Carrier is skipped
 rem     Play.bat --skip-movies          briefings, the movies between missions and the logos are skipped
 rem     Play.bat --no-tutorials         the tutorial boxes in the missions aren't shown
 rem     Play.bat --no-level-timer       the hud without the level's time (it is on by default)

@@ -18,6 +18,7 @@
 #     ./launch.sh --skip-cutscenes     a mission's opening cutscene is skipped (also in
 #                                      the F1 menu's Enhancements)
 #     ./launch.sh --skip-zukovsky      the meeting with Zukovsky in Nightclub is skipped (the F1 menu's Enhancements)
+#     ./launch.sh --skip-briggs        the meeting with Sky Briggs in Carrier is skipped (the F1 menu's Enhancements)
 #     ./launch.sh --no-level-timer     the hud without the level's time (on by default, the F1 menu's Enhancements)
 #     ./launch.sh --auto-qte           quick time events press their own buttons (the F1 menu's Enhancements)
 #     ./launch.sh --skip-movies        briefings, the movies between missions and the logos are skipped
@@ -53,7 +54,7 @@ fi
 
 # the saved settings, then the command line over them
 LAUNCH_FPS=auto; LAUNCH_FOV=49; LAUNCH_MOUSE=1.0; LAUNCH_ONLINE=1; LAUNCH_FULLSCREEN=0; LAUNCH_FASTSTART=0; LAUNCH_MOUSEMODE=auto
-LAUNCH_CRASHDUMP=1; LAUNCH_CRASHMEM=0; LAUNCH_MOUSEINVERT=0; LAUNCH_MOUSEEVERYWHERE=0; LAUNCH_SKIPCUTSCENES=0; LAUNCH_SKIPZUKOVSKY=0
+LAUNCH_CRASHDUMP=1; LAUNCH_CRASHMEM=0; LAUNCH_MOUSEINVERT=0; LAUNCH_MOUSEEVERYWHERE=0; LAUNCH_SKIPCUTSCENES=0; LAUNCH_SKIPZUKOVSKY=0; LAUNCH_SKIPBRIGGS=0
 LAUNCH_LEVELTIMER=1; LAUNCH_AUTOQTE=0; LAUNCH_AUTOSTART=0; LAUNCH_SKIPMOVIES=0; LAUNCH_NOTUTORIALS=0; LAUNCH_AUTOSAVE=1; LAUNCH_EXTRASMENU=0; LAUNCH_UNLOCKALL=0; LAUNCH_ADSFOV=22.5; LAUNCH_ADSSENS=0.5; LAUNCH_AIMLOCK=0
 [ -f build/settings.env ] && . ./build/settings.env
 ARGS=
@@ -67,6 +68,7 @@ while [ $# -gt 0 ]; do
         --always-mouse) LAUNCH_MOUSEEVERYWHERE=1; shift ;;
         --skip-cutscenes) LAUNCH_SKIPCUTSCENES=1; shift ;;
         --skip-zukovsky) LAUNCH_SKIPZUKOVSKY=1; shift ;;
+        --skip-briggs) LAUNCH_SKIPBRIGGS=1; shift ;;
         --no-level-timer) LAUNCH_LEVELTIMER=0; shift ;;
         --auto-qte) LAUNCH_AUTOQTE=1; shift ;;
         --auto-start) LAUNCH_AUTOSTART=1; shift ;;
@@ -93,9 +95,9 @@ GE_MOUSE_EVERYWHERE=${GE_MOUSE_EVERYWHERE:-$LAUNCH_MOUSEEVERYWHERE}; GE_SKIP_CUT
 GE_LEVEL_TIMER=${GE_LEVEL_TIMER:-$LAUNCH_LEVELTIMER}; GE_EXTRAS_MENU=${GE_EXTRAS_MENU:-$LAUNCH_EXTRASMENU}; GE_UNLOCK_ALL=${GE_UNLOCK_ALL:-$LAUNCH_UNLOCKALL}
 GE_ADS_FOV=${GE_ADS_FOV:-$LAUNCH_ADSFOV}; GE_ADS_SENS=${GE_ADS_SENS:-$LAUNCH_ADSSENS}; GE_AIM_LOCK=${GE_AIM_LOCK:-$LAUNCH_AIMLOCK}
 GE_AUTO_QTE=${GE_AUTO_QTE:-$LAUNCH_AUTOQTE}; GE_AUTO_START=${GE_AUTO_START:-$LAUNCH_AUTOSTART}
-GE_SKIP_MOVIES=${GE_SKIP_MOVIES:-$LAUNCH_SKIPMOVIES}; GE_SKIP_ZUKOVSKY=${GE_SKIP_ZUKOVSKY:-$LAUNCH_SKIPZUKOVSKY}
+GE_SKIP_MOVIES=${GE_SKIP_MOVIES:-$LAUNCH_SKIPMOVIES}; GE_SKIP_ZUKOVSKY=${GE_SKIP_ZUKOVSKY:-$LAUNCH_SKIPZUKOVSKY}; GE_SKIP_BRIGGS=${GE_SKIP_BRIGGS:-$LAUNCH_SKIPBRIGGS}
 GE_NO_TUTORIALS=${GE_NO_TUTORIALS:-$LAUNCH_NOTUTORIALS}; GE_AUTOSAVE=${GE_AUTOSAVE:-$LAUNCH_AUTOSAVE}
-export GE_ADS_FOV GE_ADS_SENS GE_AIM_LOCK GE_AUTO_QTE GE_AUTO_START GE_SKIP_MOVIES GE_SKIP_ZUKOVSKY GE_NO_TUTORIALS GE_AUTOSAVE
+export GE_ADS_FOV GE_ADS_SENS GE_AIM_LOCK GE_AUTO_QTE GE_AUTO_START GE_SKIP_MOVIES GE_SKIP_ZUKOVSKY GE_SKIP_BRIGGS GE_NO_TUTORIALS GE_AUTOSAVE
 export GE_FPS GE_FOV GE_MOUSE GE_MOUSE_MODE GE_MOUSE_INVERT GE_MOUSE_EVERYWHERE GE_SKIP_CUTSCENES GE_LEVEL_TIMER GE_EXTRAS_MENU GE_UNLOCK_ALL
 # through X11 when there is one: a present on Wayland costs the renderer 2 ms, 0.3 there
 # (SDL_VIDEODRIVER in the environment overrides)

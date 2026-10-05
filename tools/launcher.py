@@ -55,7 +55,7 @@ ACTIONS = [
     ("Move left", "Left Stick Left"), ("Move right", "Left Stick Right"),
 ]
 DEFAULTS = {"fps": "auto", "fov": "49", "mouse": "1.0", "online": "1", "fullscreen": "0", "faststart": "0", "mousemode": "auto",
-            "mouseinvert": "0", "adsfov": "22.5", "adssens": "0.5", "aimlock": "0", "mouseeverywhere": "0", "skipcutscenes": "0", "skipzukovsky": "0", "skipmovies": "0", "notutorials": "0", "autosave": "1", "leveltimer": "1", "autoqte": "0", "autostart": "0", "extrasmenu": "0", "unlockall": "0",
+            "mouseinvert": "0", "adsfov": "22.5", "adssens": "0.5", "aimlock": "0", "mouseeverywhere": "0", "skipcutscenes": "0", "skipzukovsky": "0", "skipbriggs": "0", "skipmovies": "0", "notutorials": "0", "autosave": "1", "leveltimer": "1", "autoqte": "0", "autostart": "0", "extrasmenu": "0", "unlockall": "0",
             "crashdump": "1", "crashmem": "0"}
 
 #Tk's key names -> SDL's (the key file's)
@@ -403,6 +403,11 @@ def run_gui():
     ttk.Label(en, text="The meeting with Zukovsky in Nightclub is skipped.",
               foreground="gray", wraplength=520, justify="left").grid(row=13, column=0, sticky="w", padx=(30, 8))
 
+    skip_briggs = tk.BooleanVar(value=settings["skipbriggs"] == "1")
+    ttk.Checkbutton(en, text="Skip Sky Briggs (Experimental)", variable=skip_briggs).grid(row=14, column=0, sticky="w", **pad)
+    ttk.Label(en, text="The meeting with Sky Briggs in Carrier is skipped.",
+              foreground="gray", wraplength=520, justify="left").grid(row=15, column=0, sticky="w", padx=(30, 8))
+
     #cheats
     #the tab just lists whatever is in config/gecko/cheats.txt, so adding a cheat is adding it to that file
     ch = ttk.Frame(book)
@@ -444,6 +449,7 @@ def run_gui():
         settings["mouseeverywhere"] = "1" if always_mouse.get() else "0"
         settings["skipcutscenes"] = "1" if skip_cutscenes.get() else "0"
         settings["skipzukovsky"] = "1" if skip_zukovsky.get() else "0"
+        settings["skipbriggs"] = "1" if skip_briggs.get() else "0"
         settings["leveltimer"] = "1" if level_timer.get() else "0"
         settings["autoqte"] = "1" if auto_qte.get() else "0"
         settings["autostart"] = "1" if auto_start.get() else "0"
@@ -573,6 +579,8 @@ def run_game(args):
             s["skipcutscenes"] = "1"
         elif a == "--skip-zukovsky":
             s["skipzukovsky"] = "1"
+        elif a == "--skip-briggs":
+            s["skipbriggs"] = "1"
         elif a == "--no-level-timer":
             s["leveltimer"] = "0"
         elif a == "--auto-qte":
@@ -613,7 +621,7 @@ def run_game(args):
     for var, key in (("GE_FPS", "fps"), ("GE_FOV", "fov"), ("GE_MOUSE", "mouse"), ("GE_MOUSE_MODE", "mousemode"),
                      ("GE_MOUSE_INVERT", "mouseinvert"), ("GE_ADS_FOV", "adsfov"),
                      ("GE_ADS_SENS", "adssens"), ("GE_AIM_LOCK", "aimlock"), ("GE_MOUSE_EVERYWHERE", "mouseeverywhere"),
-                     ("GE_SKIP_CUTSCENES", "skipcutscenes"), ("GE_SKIP_ZUKOVSKY", "skipzukovsky"), ("GE_LEVEL_TIMER", "leveltimer"), ("GE_AUTO_QTE", "autoqte"), ("GE_AUTO_START", "autostart"), ("GE_SKIP_MOVIES", "skipmovies"), ("GE_NO_TUTORIALS", "notutorials"), ("GE_AUTOSAVE", "autosave"),
+                     ("GE_SKIP_CUTSCENES", "skipcutscenes"), ("GE_SKIP_ZUKOVSKY", "skipzukovsky"), ("GE_SKIP_BRIGGS", "skipbriggs"), ("GE_LEVEL_TIMER", "leveltimer"), ("GE_AUTO_QTE", "autoqte"), ("GE_AUTO_START", "autostart"), ("GE_SKIP_MOVIES", "skipmovies"), ("GE_NO_TUTORIALS", "notutorials"), ("GE_AUTOSAVE", "autosave"),
                      ("GE_EXTRAS_MENU", "extrasmenu"), ("GE_UNLOCK_ALL", "unlockall")):
         env.setdefault(var, s[key])
     if s["online"] == "0":
