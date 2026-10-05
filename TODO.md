@@ -14,9 +14,9 @@ Importance:
 
 - [x] **high** Vents at high fps (Dam, Facility, Nightclub, Bunker, Archives, Outpost), most likely one cause:
       fixed where it was recorded (a vent's exit at 144)
-- [ ] **high** Carrier ladders at high fps
+- [X] **high** Carrier ladders at high fps
 - [ ] **high** The camera is locked while aiming in
-- [ ] **high** Doors break when the intro skip is used
+- [x] **high** Doors break when the intro skip is used
 - [ ] **high** Tank: the cars are broken
 - [X] **high** Flickering issue
 - [ ] **high** Animated textures break above 60 fps
@@ -42,10 +42,10 @@ Things that only break above 60 fps.
 - [X] **high** Carrier ladders get progressively harder to climb, need sprinting from 75 or 90 fps
 - [X] **medium** Harder to walk onto slight vertical geometry changes (happens a lot in Outpost and Bunker)
 
-### Doors
+### Cutscenes
 
-- [ ] **medium** Nightclub doors rest in the wrong position
-- [ ] **medium** Archives doors stay ajar
+- [x] **high** Nightclub: after the opening the camera stays locked (player state 0x22) at high fps:
+      a file that's let go is unloaded after the console's time now, not four frames (seen at 144 and 275)
 
 ### Animation and timing
 
@@ -104,20 +104,20 @@ do several things.
 
 ## Aiming down sights
 
-- [x] Toggle ADS option (it's "Lock Aim" in F1 > Control Settings)
+- [x] Toggle ADS option (F1 > Control Settings)
 - [x] ADS sensitivity scale ("Aim Sensitivity", 0.5 by default)
 - [x] Option for how far ADS zooms ("Aim Field of View")
 - [ ] **high** The camera is locked while aiming in, until about half a second after the gun is up
       (not on the Airfield motorbike)
 - [ ] **medium** Airfield motorbike ignores Aim Field of View, zooms in too much
 - [ ] **medium** ACOG and reflex sights ignore Aim Field of View
-- [ ] **low** Rename "Lock Aim" to "Toggle ADS" (reads like ADS Snap now; "Toggle Aim" also works)
+- [x] **low** Rename "Lock Aim" to "Toggle ADS"
 - [ ] **low** ADS snap off by default with mouse and keyboard
 - [ ] **low** Maybe show Aim Field of View as a fraction of the FOV (0.75 = 75%) like the sensitivity scale, it's an angle now
 
 ## Cutscenes
 
-- [ ] **high** Doors break when the intro skip is used
+- [x] **high** Doors break when the intro skip is used
 - [ ] **medium** Cutscenes aren't sped through when entering from another level, in time trial mode, or from Continue Game
 - [ ] **medium** Outpost: crouch and melee the guard in front of the log, the camera stays near the ground
       for the whole takedown and you only hear it (there's a VOD, a clip on request)
