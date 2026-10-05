@@ -73,6 +73,7 @@ void install() {
     install_tank();
     install_body();
     install_unload();
+    install_timeline();
     install_noclip();
     install_collision();
     install_autosave();
