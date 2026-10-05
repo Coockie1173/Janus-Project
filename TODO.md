@@ -12,7 +12,6 @@ Importance:
 
 ## Do first
 
-- [ ] **critical** Final boss: the 3rd QTE takes no button
 - [ ] **high** Vents at high fps (Dam, Facility, Nightclub, Bunker, Archives, Outpost), most likely one cause
 - [ ] **high** Carrier ladders at high fps
 - [ ] **high** The camera is locked while aiming in
@@ -60,8 +59,8 @@ Things that only break above 60 fps.
 
 ## Quick time events
 
-- [ ] **critical** Final boss: the 3rd QTE (Trevelyan points a gun at you on the last platform) takes no
-      button, you die. Two testers hit it, the game can't be finished
+- [x] Final boss: the 3rd QTE (Trevelyan points a gun at you on the last platform) took no button, you
+      died: button bashes work at any fps now (seen on Dam's, the boss not played again yet)
 - [x] Prompts show the keys to press (seen on Dam's button bash, single presses come the same way)
 - [ ] **medium** Auto Quick Time Events on single presses and sequences (not checked yet)
 
