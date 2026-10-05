@@ -19,7 +19,7 @@ Importance:
 - [x] **high** Doors break when the intro skip is used
 - [ ] **high** Tank: the cars are broken
 - [X] **high** Flickering issue
-- [ ] **high** Animated textures break above 60 fps
+- [x] **high** Animated textures break above 60 fps
 
 ## High FPS
 
@@ -49,7 +49,8 @@ Things that only break above 60 fps.
 
 ### Animation and timing
 
-- [ ] **high** Animated textures break above 60 fps (fire, the Nightclub screens)
+- [x] **high** Animated textures break above 60 fps (fire, the Nightclub screens): they stood still from 64 fps on,
+      now they play at the console's speed (measured on a Nightclub flipbook at 144, see docs/STATUS.md)
 - [ ] **low** Bond's dancing animation is too fast
 - [ ] **low** Camera shake in the Carrier ending is too fast
 - [ ] **low** Breaches seem faster at higher fps (needs checking)

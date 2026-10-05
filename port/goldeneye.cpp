@@ -74,6 +74,7 @@ void install() {
     install_body();
     install_unload();
     install_timeline();
+    install_flipbooks();
     install_noclip();
     install_collision();
     install_autosave();

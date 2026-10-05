@@ -672,7 +672,7 @@ index 3d2da4e..a96ab70 100644
      X(PFNGLVERTEXARRAYELEMENTBUFFERPROC, glVertexArrayElementBuffer)                                \
      X(PFNGLENABLEVERTEXARRAYATTRIBPROC, glEnableVertexArrayAttrib)                                  \
 diff --git a/runtime/gx.cpp b/runtime/gx.cpp
-index a6b37f2..616bdb9 100644
+index a6b37f2..8f4b3b1 100644
 --- a/runtime/gx.cpp
 +++ b/runtime/gx.cpp
 @@ -25,6 +25,7 @@
@@ -805,7 +805,7 @@ index a6b37f2..616bdb9 100644
      uint32_t gen = bp[0x00], used = 0;
      int ntev = (int)(gen >> 10 & 15) + 1, nind = (int)(gen >> 16 & 7);
      for (int s = 0; s < ntev; ++s) {
-@@ -192,7 +266,7 @@ uint32_t used_maps() {
+@@ -192,9 +266,11 @@ uint32_t used_maps() {
          if (t & 0x40) used |= 1u << (t & 7);
      }
      for (int i = 0; i < nind && i < 4; ++i) used |= 1u << (bp[0x27] >> (6 * i) & 7);
@@ -813,8 +813,12 @@ index a6b37f2..616bdb9 100644
 +    return cached = used;
  }
  
++extern const bool frame_log_on;
++extern std::vector<uint32_t> frame_texs;
  void bind_map(int m) {
-@@ -203,9 +277,79 @@ void bind_map(int m) {
+     int off = (m & 3) + (m >= 4 ? 0x20 : 0);
+     uint32_t mode0 = bp[0x80 + off], mode1 = bp[0x84 + off], img0 = bp[0x88 + off],
+@@ -203,9 +279,79 @@ void bind_map(int m) {
      uint32_t fmt = img0 >> 20 & 15, addr = (img3 & 0xFFFFFF) << 5;
      if (img1 >> 21 & 1) warn_once("texture preloaded in TMEM (not modelled), map", m);
  
@@ -897,7 +901,16 @@ index a6b37f2..616bdb9 100644
          uint64_t tag = 1ull << 32 | addr;
          if (map_bound[m] != tag) {
              put<uint8_t>(VC_TEXEFB);
-@@ -224,6 +368,19 @@ void bind_map(int m) {
+@@ -216,7 +362,7 @@ void bind_map(int m) {
+         return;
+     }
+     if (!gxtex_known(fmt)) { warn_once("unknown texture format", fmt); return; }
+-
++    if (frame_log_on) frame_texs.push_back(addr);
+     int full = 1;
+     while ((w >> full) || (h >> full)) ++full;
+     int levels = 1;
+@@ -224,6 +370,19 @@ void bind_map(int m) {
          levels = (int)((mode1 >> 8 & 0xFF) + 15) / 16 + 1;
          if (levels > full) levels = full;
      }
@@ -917,7 +930,7 @@ index a6b37f2..616bdb9 100644
      size_t total = 0;
      for (int l = 0; l < levels; ++l) total += gxtex_size(fmt, std::max(1, w >> l), std::max(1, h >> l));
      if (!addr || !mem_ok(addr, total)) { warn_once("texture outside memory at", addr); return; }
-@@ -246,13 +403,27 @@ void bind_map(int m) {
+@@ -246,13 +405,27 @@ void bind_map(int m) {
      TexEntry& e = it->second;
      bool upload = false;
      if (fresh || e.gen != tex_gen) {
@@ -948,7 +961,7 @@ index a6b37f2..616bdb9 100644
          put<uint8_t>(VC_TEXUP);
          put<uint8_t>((uint8_t)m);
          put<uint32_t>(e.id);
-@@ -283,6 +454,7 @@ void bind_map(int m) {
+@@ -283,6 +456,7 @@ void bind_map(int m) {
  }
  
  void sync_textures() {
@@ -956,7 +969,7 @@ index a6b37f2..616bdb9 100644
      uint32_t todo = used_maps() & tex_dirty;
      for (int m = 0; m < 8; ++m)
          if (todo >> m & 1) bind_map(m);
-@@ -351,11 +523,14 @@ VtxFmt vtx_fmt(int v) {
+@@ -351,11 +525,14 @@ VtxFmt vtx_fmt(int v) {
          f.tc_fmt[i] = t[i][1];
          f.tc_sc[i] = 1.0f / (float)(1u << t[i][2]);
      }
@@ -972,7 +985,7 @@ index a6b37f2..616bdb9 100644
  }
  
  // bytes per vertex for vertex format `v`
-@@ -378,6 +553,35 @@ int vertex_size(const VtxFmt& f) {
+@@ -378,6 +555,35 @@ int vertex_size(const VtxFmt& f) {
      return n;
  }
  
@@ -1008,7 +1021,7 @@ index a6b37f2..616bdb9 100644
  // an attribute's data: in the stream (direct) or in its array (indexed)
  const uint8_t* fetch(uint32_t mode, int arr, int size, const uint8_t*& p, uint32_t sub = 0) {
      if (mode == 1) { const uint8_t* q = p; p += size; return q; }
-@@ -387,53 +591,131 @@ const uint8_t* fetch(uint32_t mode, int arr, int size, const uint8_t*& p, uint32
+@@ -387,53 +593,131 @@ const uint8_t* fetch(uint32_t mode, int arr, int size, const uint8_t*& p, uint32
      return host(virt(cp[0xA0 + arr] + idx * cp[0xB0 + arr] + sub));
  }
  
@@ -1171,7 +1184,7 @@ index a6b37f2..616bdb9 100644
              put<uint8_t>(VC_FRAME);
              ++rec_frames;
              flush(true);
-@@ -445,7 +727,22 @@ void efb_copy(uint32_t v) {
+@@ -445,7 +729,22 @@ void efb_copy(uint32_t v) {
      if (v >> 9 & 1) { w = (w + 1) / 2; h = (h + 1) / 2; }
      uint32_t tpf = v >> 3 & 15, real = tpf / 2 + (tpf & 1) * 8;
      size_t size = gxtex_size(copy_tex_fmt(real), w, h);
@@ -1195,7 +1208,7 @@ index a6b37f2..616bdb9 100644
      tex_dirty = 0xFF;
  }
  
-@@ -454,13 +751,15 @@ void bp_write(uint32_t v) {
+@@ -454,13 +753,15 @@ void bp_write(uint32_t v) {
      if (reg == 0xFE) { bp_mask = val; return; }
      bp[reg] = (bp[reg] & ~bp_mask) | (val & bp_mask);
      bp_mask = 0xFFFFFF;
@@ -1212,7 +1225,7 @@ index a6b37f2..616bdb9 100644
          pe_ctrl |= 8; ++st.done; os_raise();
          return;
      case 0x47: pe_token = (uint16_t)val; return;                      // token
-@@ -477,13 +776,18 @@ void bp_write(uint32_t v) {
+@@ -477,13 +778,18 @@ void bp_write(uint32_t v) {
      }
      if ((reg >= 0x80 && reg < 0x9C) || (reg >= 0xA0 && reg < 0xBC))
          tex_dirty |= (uint8_t)(1u << ((reg & 3) + (reg >= 0xA0 ? 4 : 0)));
@@ -1232,7 +1245,7 @@ index a6b37f2..616bdb9 100644
  void xf_load(uint32_t addr, uint32_t n, const uint8_t* src) {
      if (addr >= 0x1058) return;
      if (addr + n > 0x1058) n = 0x1058 - addr;
-@@ -493,6 +797,7 @@ void xf_load(uint32_t addr, uint32_t n, const uint8_t* src) {
+@@ -493,6 +799,7 @@ void xf_load(uint32_t addr, uint32_t n, const uint8_t* src) {
          for (uint32_t i = 0; i < n && i < 16; ++i) { float fv; std::memcpy(&fv, &xf[addr + i], 4); std::fprintf(tf, " %08X(%g)", xf[addr + i], fv); }
          std::fprintf(tf, "\n");
      }
@@ -1240,7 +1253,7 @@ index a6b37f2..616bdb9 100644
      if (video) {
          put<uint8_t>(VC_XF);
          put<uint16_t>((uint16_t)addr);
-@@ -504,16 +809,407 @@ void xf_load(uint32_t addr, uint32_t n, const uint8_t* src) {
+@@ -504,16 +811,415 @@ void xf_load(uint32_t addr, uint32_t n, const uint8_t* src) {
  // parse one command at p (n bytes available); returns its length, 0 if incomplete
  size_t parse(const uint8_t* p, size_t n, bool in_dl);
  
@@ -1496,8 +1509,8 @@ index a6b37f2..616bdb9 100644
 +    return true;
 +}
 +
-+std::vector<uint32_t> frame_lists;
-+const bool frame_log_on = std::getenv("WIIKIT_FRAMELOG") != nullptr;
++std::vector<uint32_t> frame_lists, frame_texs;
++extern const bool frame_log_on = std::getenv("WIIKIT_FRAMELOG") != nullptr;
 +void frame_log() {
 +    static const char* path = std::getenv("WIIKIT_FRAMELOG");
 +    if (!path) return;
@@ -1522,6 +1535,14 @@ index a6b37f2..616bdb9 100644
 +        std::fwrite(frame_lists.data(), 4, frame_lists.size(), lf);
 +    }
 +    frame_lists.clear();
++    // and the textures it bound, in FILE.tex: frame (u32), how many (u32), their addresses
++    static FILE* xf = std::fopen((std::string(path) + ".tex").c_str(), "wb");
++    if (xf) {
++        const uint32_t head[2] = {(uint32_t)st.frames, (uint32_t)frame_texs.size()};
++        std::fwrite(head, 4, 2, xf);
++        std::fwrite(frame_texs.data(), 4, frame_texs.size(), xf);
++    }
++    frame_texs.clear();
 +}
 +
 +// WIIKIT_DLCHECK=1: a kept list is decoded again every time it would be used, and what comes
@@ -1653,7 +1674,7 @@ index a6b37f2..616bdb9 100644
      }
  }
  
-@@ -525,6 +1221,9 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
+@@ -525,6 +1231,9 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
      case 0x08:
          if (n < 6) return 0;
          cp[p[1]] = be32(p + 2);
@@ -1663,7 +1684,7 @@ index a6b37f2..616bdb9 100644
          TRACE("CP %02X %08X\n", p[1], cp[p[1]]);
          return 6;
      case 0x10: {
-@@ -556,54 +1255,29 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
+@@ -556,54 +1265,29 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
      if (op >= 0x80 && op < 0xC0) {
          if (n < 3) return 0;
          uint32_t count = (uint32_t)p[1] << 8 | p[2];
@@ -1687,13 +1708,9 @@ index a6b37f2..616bdb9 100644
 -                auto t0 = std::chrono::steady_clock::now();
 -                sync_textures();
 -                g_vperf.tex += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count();
-+                uint64_t t0 = perf_ticks();
-+                decode_vertices(f, fl, p + 3, count, out);
-+                perf_vtx += perf_ticks() - t0;
-             } else {
+-            } else {
 -                sync_textures();
-+                decode_vertices(f, fl, p + 3, count, out);
-             }
+-            }
 -            // VC_DRAW, prim, vertex flags, pieces (u32), then each piece: n (u32), n vertices
 -            bool extend = rec.size() == draw_end && rec[draw_hdr + 1] == (op & 0xF8);
 -            if (!extend) {
@@ -1711,9 +1728,13 @@ index a6b37f2..616bdb9 100644
 -                auto t0 = std::chrono::steady_clock::now();
 -                fl = decode_vertices(f, p + 3, count, out);
 -                g_vperf.vtx += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count();
--            } else {
++                uint64_t t0 = perf_ticks();
++                decode_vertices(f, fl, p + 3, count, out);
++                perf_vtx += perf_ticks() - t0;
+             } else {
 -                fl = decode_vertices(f, p + 3, count, out);
--            }
++                decode_vertices(f, fl, p + 3, count, out);
+             }
 -            if (extend && rec[draw_hdr + 2] != fl) {      // other attributes: a draw of its own
 -                const uint8_t hdr[7] = {VC_DRAW, (uint8_t)(op & 0xF8), 0, 0, 0, 0, 0};
 -                rec.insert(rec.begin() + (ptrdiff_t)at, hdr, hdr + sizeof hdr);
@@ -1732,7 +1753,7 @@ index a6b37f2..616bdb9 100644
          }
          return len;
      }
-@@ -614,8 +1288,17 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
+@@ -614,8 +1298,17 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
  
  void feed(const uint8_t* b, int n) {
      if (desync) return;
@@ -1751,7 +1772,7 @@ index a6b37f2..616bdb9 100644
      while (off < stream.size()) {
          size_t k = parse(stream.data() + off, stream.size() - off, false);
          if (!k) { --st.cmds; break; }
-@@ -714,7 +1397,10 @@ bool gx_copy_to_ram(uint32_t addr) {
+@@ -714,7 +1407,10 @@ bool gx_copy_to_ram(uint32_t addr) {
      hw_run_locked([&] {
          std::memcpy(host(virt(addr)), out.data(), out.size());
          auto c = copies.find(addr);                          // the GPU's copy still stands for these bytes
@@ -1763,7 +1784,7 @@ index a6b37f2..616bdb9 100644
      });
      return true;
  }
-@@ -729,16 +1415,37 @@ void gx_init() {
+@@ -729,16 +1425,37 @@ void gx_init() {
  // AI's, which start each audio frame's mix, above all. So does this wait.
  // A handler may switch guest threads, and another thread may hand the
  // record over in the meantime.
@@ -1802,7 +1823,7 @@ index a6b37f2..616bdb9 100644
          if (t_ppc && g_ppc_pending.load(std::memory_order_relaxed)) ppc_poll(*t_ppc);
      }
  }
-@@ -768,12 +1475,17 @@ static void gp_run() {
+@@ -768,12 +1485,17 @@ static void gp_run() {
  
  void gx_pipe_burst(const uint8_t* b, int n) {
      uint32_t at = pi_wptr_addr();
@@ -1826,7 +1847,7 @@ index a6b37f2..616bdb9 100644
      }
      if (!linked()) return;
      if (held.empty() && !(bp_enabled() && at == bp_addr())) { feed(b, n); return; }
-@@ -861,4 +1573,11 @@ void gx_report() {
+@@ -861,4 +1583,11 @@ void gx_report() {
             (unsigned long long)st.dls, (unsigned long long)st.copies, (unsigned long long)st.frames,
             (unsigned long long)st.done, (unsigned long long)st.uploads, (unsigned long long)st.peeks,
             (unsigned long long)st.readbacks);
