@@ -14,7 +14,6 @@ Importance:
 
 - [ ] **critical** Final boss: the 3rd QTE takes no button
 - [ ] **high** Vents at high fps (Dam, Facility, Nightclub, Bunker, Archives, Outpost), most likely one cause
-- [ ] **high** Button bashes can't be won at high fps
 - [ ] **high** Carrier ladders at high fps
 - [ ] **high** The camera is locked while aiming in
 - [ ] **high** Doors break when the intro skip is used
@@ -55,8 +54,8 @@ Things that only break above 60 fps.
 
 ### Quick time events
 
-- [ ] **high** Button bashes can't be won at high fps (a press is worth less the higher the frame rate);
-      testers pause and drop to 30. Auto Quick Time Events gets past them but is off by default
+- [x] Button bashes can't be won at high fps (a press was worth less the higher the frame rate): a press
+      is worth what it is at 30 now (won by hand on Dam's at 144)
 - [x] Auto Quick Time Events option (only checked on Dam's button bash)
 
 ## Quick time events

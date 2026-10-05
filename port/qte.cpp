@@ -8,15 +8,21 @@
 //
 //the bash keeps a level at +0x3C that climbs by itself and drops with every frame the button
 //is pressed in, by an amount that goes with the frame's time. under the low mark it's won,
-//over the high one once the grace time (+0x40) ran out it's lost. so at a high frame rate
-//a press is worth less, pressing every frame is the same at any rate
+//over the high one once the time left (+0x40) ran out it's lost
+//the drop is 30 * 5 * the frame's time: 5 a press at the game's 30 frames a second, 1 at 144,
+//and no hand wins it there. the smoothing (+0x44 goes a fifth of the way to the level every
+//frame) is a frame's too. so above 30 the rest of the 5 is taken off the level before the
+//call, and the smoothed level is set up so that the fifth it moves by lands where the step's
+//share would have. nothing changes at 30
 //
 //for that one call the wanted bits are put into the pressed actions and taken out after
 //
 //GE_AUTO_QTE=1 on
 //GE_TRACE=1 log every input a cutscene starts and how it ends
 #include "ge.h"
+#include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstdlib>
 
 namespace ge
@@ -27,11 +33,19 @@ namespace
 //the input object, as ge_cutscene_input takes it in r3
 const uint32_t kButtons = 0x00; //four words
 const uint32_t kKind = 0x14;
+const uint32_t kBashLevel = 0x3C, kBashTimeLeft = 0x40, kBashSmooth = 0x44, kBashClimb = 0x48; //floats
 const uint32_t kCurrent = 0x50; //which of the four is next
 const uint32_t kSucceeded = 0x60, kDone = 0x62; //bytes
 const uint32_t kKindBase = 0x7B000000, kKindAllFirst = 2, kKindAllSecond = 4, kKindBash = 6;
 const uint32_t kNoButton = 0xFFFFFFFF;
 const uint32_t kActPressed = 0x534; //the controller's actions pressed this frame
+
+//the bash's numbers in the game's data
+const uint32_t kFrameTime = 0x806E9E50, kTimeScale = 0x806E9E64; //-0x7130(r13) seconds, -0x711C(r13)
+const uint32_t kBashRate = 0x806ED29C; //30, the level's units are a frame's at 30
+const uint32_t kBashPress = 0x806ED2A0; //5, a press at 30 (and the mark it's won under)
+const uint32_t kBashSmoothing = 0x806ED2A4; //0.2
+const float kBashTop = 100.0f;
 
 std::atomic<bool> g_auto_qte{false};
 PPCFunc orig_cutscene_input = nullptr;
@@ -58,6 +72,28 @@ uint32_t Wanted(uint32_t input)
 	return current < 4 ? ButtonBit(ld32(input + kButtons + current * 4)) : 0;
 }
 
+//makes this call's bash step the same as a frame's at 30 would be. pressed: the button is down
+void BashStep(uint32_t input, bool pressed)
+{
+	float scale = ldf(kTimeScale), frames = ldf(kFrameTime) * kGameFps;
+	if (!(frames > 0.01f && frames < 0.999f) || !(scale > 0.0f)) return;
+	float step = frames * scale, press = ldf(kBashPress), smoothing = ldf(kBashSmoothing);
+	float level = ldf(input + kBashLevel), left = ldf(input + kBashTimeLeft);
+	bool open = left > 0.0f && left - step / kGameFps > 0.0f; //out of time the game puts the level at the top
+	if (open && pressed)
+	{
+		level = std::max(level - press * (scale - step), 0.0f);
+		stf(input + kBashLevel, level);
+	}
+	//the level the game will get to, and the smoothed one that takes its fifth to the right place
+	if (!open) level = kBashTop;
+	else if (pressed) level = std::max(level - press * step, 0.0f);
+	level = std::min(level + ldf(input + kBashClimb) * step, kBashTop);
+	if (!(smoothing > 0.0f && smoothing < 1.0f)) return;
+	float share = 1.0f - std::pow(1.0f - smoothing, step), smooth = ldf(input + kBashSmooth);
+	stf(input + kBashSmooth, (smooth * (1.0f - share) + (share - smoothing) * level) / (1.0f - smoothing));
+}
+
 void Trace(uint32_t input, bool wasDone)
 {
 	static uint32_t seen = 0;
@@ -65,8 +101,8 @@ void Trace(uint32_t input, bool wasDone)
 	if (!done && seen != input)
 	{
 		seen = input;
-		rt_log("goldeneye: qte: kind %u, buttons %X %X %X %X", ld32(input + kKind) - kKindBase, ld32(input + kButtons),
-			ld32(input + kButtons + 4), ld32(input + kButtons + 8), ld32(input + kButtons + 12));
+		rt_log("goldeneye: qte: kind %u, buttons %X %X %X %X, bash time %.2f climb %.2f", ld32(input + kKind) - kKindBase, ld32(input + kButtons),
+			ld32(input + kButtons + 4), ld32(input + kButtons + 8), ld32(input + kButtons + 12), ldf(input + kBashTimeLeft), ldf(input + kBashClimb));
 	}
 	if (done && !wasDone)
 	{
@@ -81,7 +117,8 @@ void CutsceneInput(PPCContext& c)
 	if (!guest_ptr(input)) { orig_cutscene_input(c); return; }
 	bool wasDone = ld8(input + kDone) != 0;
 	if (!wasDone && Wanted(input)) g_waiting_frame = ld32(kFrameCount);
-	uint32_t wanted = g_auto_qte && !wasDone && guest_ptr(ctrl) ? Wanted(input) : 0;
+	uint32_t waits = !wasDone && guest_ptr(ctrl) ? Wanted(input) : 0, wanted = g_auto_qte ? waits : 0;
+	if (waits && ld32(input + kKind) - kKindBase == kKindBash) BashStep(input, (ld32(ctrl + kActPressed) & waits) == waits);
 	if (!wanted)
 	{
 		orig_cutscene_input(c);
