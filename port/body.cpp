@@ -6,15 +6,19 @@
 //the push at +0xEC, flags at +0xA (1 on a floor, 2 at a wall)
 //how far it gets pushed depends on how deep the step went in, so a step isn't the sum of
 //smaller ones. the levels lean on that: a vent's frame is a hair smaller than the body
-//(Outpost's exit, mesh 912CAF00 under a low ceiling) and a 30th of a second's step goes deep
+//(level 01810150's exit, mesh 912CAF00 under a low ceiling) and a 30th of a second's step goes deep
 //enough to come out the far side, with a jitter you can see on the console too. a 144th's
 //gets pushed straight back, the body swings between two contacts and never gets through
 //
-//so a body that's pushed at something and gets nowhere moves the way the console's does:
+//so a body in a tight spot (a ceiling pushes on it as well) that's pushed at something and
+//gets nowhere moves the way the console's does:
 //it stays put until a 30th of a second's moves have added up and then takes them as one step,
 //the drop that keeps it on the floor (6 a second) included. that goes on until it's clear of
-//the walls or isn't pushed any more, or has slid along one for half a second. walking and
-//sliding along a wall never get there and stay as smooth as the frame rate
+//the walls or isn't pushed any more, or has slid along one for half a second. in the
+//open (a wall with nothing overhead), in a cutscene and in every state but walking and
+//sprinting the body is left alone. the game has no word for being in a vent, and
+//crouching doesn't tell either: in the recorded one the player stands (+0x390 stays 0.15) and
+//crouched at a wall in the open isn't stuck in anything. the ceiling on the body is what tells
 #include "ge.h"
 #include <cmath>
 #include <cstdlib>
@@ -27,12 +31,13 @@ namespace
 const uint32_t kBodyEntity = 4, kEntityPos = 0xF8;
 const uint32_t kCtrlEntity = 4, kCtrlTimeStep = 0x578;
 const uint32_t kStateMoving = 2, kStateSprinting = 3;
+const uint32_t kEntityCrouch = 0x390; //0.15 standing, 0.65 crouched, eases between the two (only traced)
 const float kConsoleStep = 1.0f / 30;
 const int kWindow = 8; //frames of pushing looked at
 const float kStuck = 0.1f; //blocked when less than this much of the pushing got anywhere
 const float kFree = 0.5f; //a console step that got this much of its way moved
 const int kFreeSteps = 15; //and that many in a row is sliding along a wall, not being stuck
-const uint32_t kBodyFlags = 0xA, kBodyAtWall = 0xA; //a wall (2) or a ceiling (8) pushed it
+const uint32_t kBodyFlags = 0xA, kBodyAtWall = 0xA, kBodyAtCeiling = 8; //a wall (2) or a ceiling (8) pushed it
 const float kPushing = 1e-4f; //a frame's move that counts as pushing
 PPCFunc orig_body_update = nullptr;
 bool g_trace = false;
@@ -66,6 +71,7 @@ struct Blocked
 	Vec3 m_Last{}; //where the last step left the body
 	float m_Wanted{}, m_Got{}; //over the window
 	int m_Frames{};
+	bool m_Tight{}; //a ceiling pushed the body in the window
 	bool m_Blocked{};
 	Vec3 m_Move{}; //what has added up since the last console step
 	float m_Time{};
@@ -85,8 +91,9 @@ void BodyUpdate(PPCContext& c)
 	uint32_t entity = ld32(body + kBodyEntity);
 	bool ours = ctrl && guest_ptr(entity) && ld32(ctrl + kCtrlEntity) == entity && local_player_state(state);
 	float step = ours ? ldf(ctrl + kCtrlTimeStep) : 0;
-	bool walking = state == kStateMoving || state == kStateSprinting;
-	if (!ours || !walking || !(step > 0) || step > kConsoleStep * 0.9f)
+	//only on foot, a cutscene (state 0x22) has the body to itself
+	bool walking = ours && (state == kStateMoving || state == kStateSprinting);
+	if (!walking || !(step > 0) || step > kConsoleStep * 0.9f)
 	{
 		if (ours) g_body.Reset(0);
 		orig_body_update(c);
@@ -112,9 +119,10 @@ void BodyUpdate(PPCContext& c)
 		{
 			g_body.m_Wanted += length;
 			g_body.m_Got += Progress(g_body.m_Last, now, move, length);
+			if (ld16(body + kBodyFlags) & kBodyAtCeiling) g_body.m_Tight = true;
 			if (++g_body.m_Frames >= kWindow)
 			{
-				if (g_body.m_Got < g_body.m_Wanted * kStuck)
+				if (g_body.m_Tight && g_body.m_Got < g_body.m_Wanted * kStuck)
 				{
 					g_body.m_Blocked = true;
 					g_body.m_Move = {};
@@ -124,12 +132,14 @@ void BodyUpdate(PPCContext& c)
 				}
 				g_body.m_Wanted = g_body.m_Got = 0;
 				g_body.m_Frames = 0;
+				g_body.m_Tight = false;
 			}
 		}
 		else
 		{
 			g_body.m_Wanted = g_body.m_Got = 0;
 			g_body.m_Frames = 0;
+			g_body.m_Tight = false;
 		}
 		g_body.m_Last = now;
 		return;
@@ -167,11 +177,11 @@ void BodyUpdate(PPCContext& c)
 //GE_TRACEPOS=1: where the local player's body is after each update
 void BodyUpdateTraced(PPCContext& c)
 {
-	uint32_t entity = ld32(c.r[3] + kBodyEntity), ctrl = local_controller();
+	uint32_t body = c.r[3], entity = ld32(body + kBodyEntity), ctrl = local_controller();
 	BodyUpdate(c);
 	if (!ctrl || ld32(ctrl + kCtrlEntity) != entity) return;
 	Vec3 pos = ReadPos(entity);
-	rt_log("pos: %.3f %.3f %.3f step %.4f%s", pos.x, pos.y, pos.z, ldf(ctrl + kCtrlTimeStep), g_body.m_Blocked ? " blocked" : "");
+	rt_log("pos: %.3f %.3f %.3f step %.4f crouch %.2f flags %X%s", pos.x, pos.y, pos.z, ldf(ctrl + kCtrlTimeStep), ldf(entity + kEntityCrouch), ld16(body + kBodyFlags), g_body.m_Blocked ? " blocked" : "");
 }
 
 } //namespace
