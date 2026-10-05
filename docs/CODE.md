@@ -1,0 +1,913 @@
+# The port's code
+
+A reference for everything in `port/`: what each file does, the functions in it, the game
+functions it hooks, and every address and struct offset of the game's memory it relies on.
+The evidence for each named function is in `config/names-manual.tsv`, the reasoning behind each
+fix in the comment at the top of its file.
+
+Addresses are for **SJBE52** (NTSC-U) only. Offsets are hexadecimal, values are big-endian in
+guest memory. The recompiler and the hardware runtime (`wiikit/`) are not covered here, see its
+own README.
+
+Contents:
+
+1. [How the layer works](#1-how-the-layer-works)
+2. [Memory map](#2-memory-map)
+3. [The game's functions](#3-the-games-functions)
+4. [The files](#4-the-files)
+5. [Environment variables](#5-environment-variables)
+6. [Files read and written](#6-files-read-and-written)
+
+## 1. How the layer works
+
+The port is linked into `wiiboot` through `port/goldeneye.cmake` (`-DWIIKIT_EXTRA`). It
+registers itself with one static object, `RtGameLayer layer("GoldenEye 007", install)` in
+`goldeneye.cpp`, and the runtime calls `install()` before the game's `__start`.
+
+**Hooks.** `ppc_hook("name", fn)` replaces a recompiled function and returns the original,
+`ppc_lookup(address)` returns a recompiled function to call without replacing it. A name can
+only be hooked when it is listed in `config/hooks.txt` (the recompiler gives each listed
+function a slot) and named in `build/names.tsv` (from `config/names-manual.tsv`). A hook is a
+`void(PPCContext&)`: arguments in `c.r[3]`.., floats in `c.f[1]`.., the return address in `c.lr`,
+the result in `c.r[3]`.
+
+**Memory access.** `ld8/ld16/ld32/st8/st16/st32` read and write guest memory, `ge::ldf/stf`
+(`ge.h`) do floats. The `r` variants (`ld32r`, `st8r`...) skip the hardware-register check.
+`PPC_MEM(addr)` is the host pointer. `ge::guest_ptr(p)` is true for MEM1
+(`80003000..817FFFFF`) and MEM2 (`90000000..93FFFFFF`); every pointer read from the game is
+tested with it before it is followed.
+
+**Patterns used all over:**
+
+- *Set for one call, put back after.* A hook changes what the game reads, calls the original
+  and restores it, so saves, options and other readers never see the changed value (the mouse's
+  turn in `look_apply`, the sprint bit, the stick's sensitivity, the tank's drag, the hud's
+  timer).
+- *Only replace what is ours.* A value is written only when the game's own is there or the one
+  the port wrote last (`fov_apply`, the frame rate's highest, `Keep` in `tweaks.cpp`).
+- *Call the game on its own thread.* A game function is called from inside a hook with a copy of
+  the context (`PPCContext saved = c; ...; c = saved;`), with room made under the guest stack
+  when it needs a buffer (`collision.cpp`, `prompts.cpp`).
+- *The local controller.* Everything per player goes by `local_controller()`, the controller
+  the game's own test (`fn_80108D70`) said this console plays, found once a frame in
+  `controller_update` and valid for 4 frames.
+
+**Threads.** Hooks run on the game's (guest) thread. The settings menu and overlay are drawn on
+the renderer's thread, the classic controller's filter runs wherever the pad is read, the debug
+aids run threads of their own. What crosses threads is a `std::atomic`.
+
+**The frame.** `frame_tick` (the hook on `ge_frame_tick`, `framerate.cpp`) is the port's
+heartbeat. The engine spins in it between frames, so the per-frame work is done when the
+game's frame count changes:
+
+```
+frame_tick
+  apply_rate                 a changed frame rate or fast forward
+  each_frame(frame)          goldeneye.cpp
+    crash_test               GE_CRASH_TEST
+    gecko_apply              gecko codes
+    tweaks_apply             extras menu, unlock everything
+    fov_apply                the field of view
+    cutscenes_frame          skip cutscenes
+    mouse_frame              unused mouse motion dropped
+  autosave_frame(c)          a checkpoint's save, a step a frame
+  collision_tick             the collision viewer goes off (every tick)
+  orig_tick                  the game's own frame
+```
+
+**Install order** (`goldeneye.cpp`): hosts, fov, gecko, crash handler, profiler, debug, fps,
+native, cutscenes, qte, tweaks, movies, files, records, zones, tank, body, noclip, collision,
+autosave, weapons, prompts, then `wpad_set_classic(true)` (keys, mouse and gamepads all map to
+the classic controller), mouse, overlay.
+
+## 2. Memory map
+
+`r13` is `806F0F80` (the small data base); `-0x50B0(r13)` is `806EBED0`.
+
+### 2.1 Globals
+
+| Address | Type | What | Used by |
+|---|---|---|---|
+| `80574AB8` | vtable | `XItemHandler_PlayerTank` | tank |
+| `8057A8A0` | 12 ptrs | the text tags (`<ACT `, `<C0>`, `<menuSELECT>`...) | prompts |
+| `805C94A8` | object | the app (`ge_reload_checkpoint`'s r3) | names |
+| `805C963C` | float | `LevelTimer`, seconds played in the level | cutscenes, tweaks |
+| `805D10B8` | object | the memcard (save) manager, see 2.9 | autosave |
+| `805D1804` | u32 | hash of the level that is loaded (`01080004` is the front end) | autosave, cutscenes |
+| `805D1844` / `805D1848` | u32 / table | tutorials: count, rows of 0x68 | names |
+| `805D4020` | 4 × 0x1C | the actions on offer, see 2.4 | input |
+| `805D43EC` | ptr | the player made last (not the local one online) | notes only |
+| `805D5460` | struct | network state: `+0x10` non-zero on the host, `+0x30` 1 or 2 in a network game | input |
+| `805DE6A0` | struct | the profile's settings and progress, see 2.10 | tweaks, input |
+| `805E05AB` | u8 | `DisplayLevelTimer`, set in a time challenge | tweaks, autosave |
+| `805E05AC` | float | `MaxTimeChallenge`, the hud shows this minus the time | tweaks |
+| `805F4CCC` | object | the world, see 2.6 | collision |
+| `8060B3F0` | OSMutex | the heap's lock | names |
+| `80641F60` | 9 × 4x4 | the renderer's matrix block, see 2.8 | native |
+| `806421E0` | 4x4 | world to clip matrix of the camera applied last (a row vector times it) | collision, zones |
+| `80642220` | 4x4 | the second matrix the portal clip uses | zones |
+| `80643040` | table | the heaps | names |
+| `80643080` | object | the save file (`ge_save_write`'s r3) | autosave |
+| `806473CC` | object | the file system, see 2.9 | files |
+| `806E95F8` | 4 floats | aim limits in play, degrees: pitch from, to, yaw from, to | input |
+| `806E9608` | 4 floats | the same with state flag 0x80 (narrow) | input |
+| `806E96D8` | u8 | picks which throttle step the tank uses | tank |
+| `806E96E8`, `806E96F8` | float | the tank's throttle step a call | tank |
+| `806E9E40` | u32 | `-0x7140(r13)` the engine's lowest frame rate | framerate |
+| `806E9E44` | u32 | `-0x713C(r13)` the engine's highest frame rate (30 in play) | framerate |
+| `806E9E4C` | float | `-0x7134(r13)` the engine's current rate, every time step comes from it | framerate |
+| `806E9E50` | float | `-0x7130(r13)` the frame's time in seconds | qte |
+| `806E9E64` | float | `-0x711C(r13)` the time scale | qte |
+| `806EB694` | ptr | the app/view settings object, see 2.2 | fov, cutscenes, tweaks |
+| `806EB698` | ptr | a player (set while any exists: play, not menus) | `ge.h` |
+| `806EB69C` | u8 | 1 while the pause menu is up | `ge.h` |
+| `806EB9D8` / `806EB9DC` | struct | the restart point (0x37F8 bytes from `..DC`) | autosave |
+| `806EBED0` | u32 | `-0x50B0(r13)` frames run | `ge.h` |
+| `806EBEE8` | u64 | `-0x5098(r13)` the next frame's time in ticks | framerate |
+| `806EC00C` | u32 | `ge_save_write`'s state, 11 once the file is written | autosave |
+| `806EC298` | 2 × s32 | the screen's offset, x then y (`-0x4CE8(r13)`) | zones, native |
+| `806EC2BC` | 6 × u8 | matrix dirty bytes, see 2.8 | native |
+| `806EC2C8` | ptr | `-0x4CB8(r13)` the view: width at `+6`, height at `+8` | zones |
+| `806EC2D8` | ptr | the pads' object, pressed buttons at `+0x80 + pad * 8` | names |
+| `806ED29C` | float | 30, the button bash's rate | qte |
+| `806ED2A0` | float | 5, a bash press at 30 fps (and the mark it is won under) | qte |
+| `806ED2A4` | float | 0.2, the bash's smoothing | qte |
+| `80774704` | u32 | Extras menu data, `80580990` shows the unused pages | tweaks |
+| `8077470B` | u8 | Extras menu data, `0x19` with the above | tweaks |
+
+### 2.2 The app object (`*806EB694`)
+
+| Offset | Type | What |
+|---|---|---|
+| `+0x328` | float | the view's angle in degrees, 49 in play |
+| `+0x338` | u32 | the entrance `StartLevelChange` loads the level at (1 is a mission's start) |
+| `+0x354` | u32 | the step the level's load is at, `0x1A` waits for "Continue" |
+
+### 2.3 The menu object (`ge_menu_pending`'s r3)
+
+| Offset | Type | What |
+|---|---|---|
+| `+0x220` | u32 | the current page's index |
+| `+0x2C8` | ptrs | the pages; a page's `+0xC` (u16) is the item picked, `0x13..0x16` the campaign's difficulties |
+| `+0x7D4` | u32 | the pending level's hash |
+| `+0x7DC` | u32 | the pending entrance |
+| `+0x7E7` | u8 | split screen |
+| `+0x7E9` | u8 | the pending action runs once this is over 2 |
+| `+0x7EC` | u32 | the action: 1 tally continue, 2 quit, 3 restart level, 4 restart from checkpoint, 5 load the pending level |
+
+### 2.4 The controller (`ExPlayer` in the Ghidra project)
+
+One for every player, `ge_controller_update`'s r3. The tank's is another class with the same
+front part.
+
+| Offset | Type | What |
+|---|---|---|
+| `+0x000` | ptr | vtable (`80574AB8` for the tank) |
+| `+0x004` | ptr | its entity (the player), see 2.5 |
+| `+0x500` | 2 floats | the move stick, x then y |
+| `+0x52C` | float | tank: where the view looks, radians |
+| `+0x534` | u32 | actions pressed this frame |
+| `+0x538` | u32 | actions held |
+| `+0x578` | float | the frame's time step in seconds |
+| `+0x57C`, `+0x57D` | u8 | look flags (traces only) |
+| `+0x590` | 4 floats | the step `ge_look_apply` hands the body |
+| `+0x5E4` | u8 | in a cutscene (set with state 0x22) |
+| `+0x5ED` | s8 | holstered |
+| `+0x704` | u32 | `PlayerState`, see below |
+| `+0x708` | u32 | state flags, `0x80` narrow aim limits |
+| `+0x71C`, `+0x720` | float | the angle the view is drawn with (aiming changes it) |
+| `+0x968` | 4 floats | velocity |
+| `+0x978` | float | look pitch rate, radians a second, negative up |
+| `+0x97C` | float | look yaw rate, radians a second |
+| `+0x99C`, `+0x9A0` | float | tank: the aim's pitch and yaw |
+| `+0xA5C`, `+0xA64` | float | tank: the stick's throttle and the throttle |
+| `+0xBAA`, `+0xF58` | u8 | set by the actions' update from bit 4 held while moving |
+| `+0xBD9` | u8 | cutscene: the stick moves the aim inside the cutscene's view |
+| `+0xC40` | struct | inventory: count at `+8` (`+0xC48`), items at `+0xC` (`+0xC4C`) |
+| `+0xC96`, `+0xC97` | u8 | the slot's item in the hand, the one being changed to |
+| `+0xD00` | u8 | aim is held |
+| `+0xD10` | float | the aim blend, 0 to 1 in about eight frames (`+0xF48` its opposite) |
+| `+0xE59` | u8 | sprinting |
+| `+0xE64` | u8 | the sprint button is still down |
+| `+0xE78` | 4 floats | the fall's velocity |
+| `+0xE90` | float | the distance fallen |
+| `+0xED4` | u8 | aim on |
+| `+0xEDC`, `+0xEE0` | float | the aim's pitch and yaw inside a cutscene's view, radians |
+| `+0xF88` | u8 | tank: 1 skips `ge_tank_drive` |
+| `+0x1014` | 4 floats | the cutscene's aim limits, degrees |
+| `+0x1024` | u32 | cutscene: non-zero when the game reads the look stick itself |
+| `+0x1124` | float | cutscene: the yaw the script's limits are around |
+
+**Player states (`+0x704`):** `0x00` Standing, `0x02` Moving, `0x03` Sprinting, `0x04` Landing
+(in the air), `0x05` Death, `0x08` ClimbVault, `0x09` Melee, `0x22` FPSCutscene, `0x23`
+StartSlide, `0x24` Sliding, `0x25` EndSlide. The player has the view in 0, 2, 3 and 4.
+
+**Action bits (`+0x534`, `+0x538`, masks):** `0x4` action and sprint (the sources' "bit 4"), `0x200` next weapon,
+`0x4000` previous weapon. A cutscene's button number n is action bit `1 << (n - 1)`.
+
+**An action on offer** (`805D4020`, 0x1C each): `+0` its id (`46500001` none), `+0x10` the
+button's bit, `+0x14` 0 press / 1 held / 2 let go, `+0x15` set when the stick has to be
+forward.
+
+**An inventory item** (0x10 each): `+0` id (`02000000` none), `+4` how many, `+0xE` the slot's
+number (`0xFF` none).
+
+### 2.5 The entity and its body
+
+The entity (a player, a prop, a "world item"):
+
+| Offset | Type | What |
+|---|---|---|
+| `+0x98` | 4x4 | its matrix in the world, as new as the last time the game asked |
+| `+0xB8`, `+0xC0` | float | two of the matrix's floats, the tank hull's heading is their `atan2` |
+| `+0xDC` | float | yaw, radians, growing to the right |
+| `+0xF8` | 3 floats | position |
+| `+0x14C` | ptr | its objects, see 2.7 |
+| `+0x158` | ptr | its body |
+| `+0x16C` | ptr | its view object; the view's `+0x768` is the pitch, radians, negative up |
+| `+0x250` | | computed from the yaw |
+
+The body:
+
+| Offset | Type | What |
+|---|---|---|
+| `+0x00` | ptr | vtable: `+0x18` its step (`ge_body_update`), `+0x24` the shape getter (`800F24E0` for people), `+0x5C` `ge_body_move` |
+| `+0x04` | ptr | its entity |
+| `+0x08` | u16 | flags (masks): `0x1` no gravity, `0x2` no step through the collision, `0x8` not collided with |
+| `+0x0A` | u16 | contact flags (masks): `0x1` on a floor, `0x2` at a wall, `0x8` a ceiling |
+| `+0xBC` | 3 floats | the frame's step from the controller |
+| `+0xEC` | vector | the push out of the collision |
+| `+0xFC` | vector | the frame's move |
+| `+0x15C` | float | fall speed |
+| `+0x18C` | 16 floats | the shape in the item's space: kind last (`+0x3C`), 0 a sphere (centre, radius at `+0x10`), 1 a capsule (foot, axis at `+0x10`, radius at `+0x20`) |
+
+### 2.6 The world, maps and collision geometry
+
+The world (`805F4CCC`): `+0x1C` map count, `+0x20` the maps, `+0xA4` the item lists (`+0x0`
+all items, `+0x8` what a body may touch; a node's `+4` is the next, `+8` the item).
+
+A map: `+0x1C` its file, `+0x20` its hash, `+0x138` placement count, `+0x13C` placements,
+`+0x348` its index.
+
+A file: `+0x24` the `GEOM` header (`47454F4D`). The header's lists are two shorts and an
+offset: `+0x48` entities (16 bytes an entry), `+0x50` placed entities (20 bytes), `+0x70` map
+data (16 bytes). An entry: `+0` hash, `+4` top bit set while loaded, `+0xC` the pointer.
+Offsets in the file are relative to where they are stored.
+
+Map data: `+0x84` zone count, `+0x88` zones, 0x8C bytes each, the zone's entity hash first. A
+zone's `+0x70` is its rectangle, `+0xA8` portal link count, `+0xAC` the links (8 bytes each).
+
+A portal: 0x44 bytes, the quad's four corners at `+0x14` (12 bytes each).
+
+A placement: 0x9C bytes, a 4x4 matrix first, the entity's hash at `+0x80`.
+
+A geometry entity: `+0` vtable, `+4` flags (`0x100` collides), `+0x40` variants (the byte at
+`+0x43` a bit per variant, the other 24 bits an offset from `+0x40`; bit 0 is the mesh a body
+collides with), `+0x4C` its file, `+0x52` (u16) its part index. By vtable:
+
+| Vtable | Kind | Layout |
+|---|---|---|
+| `80591008` | split | `+0x54` part count, offsets to the parts from `+0x5C` |
+| `80590FB8` | list | `+0x54` (u8) count, hashes from `+0x58`, 0x14 apart |
+| `8058B9D8` | mesh | `+0x58` strips, `+0x5C` vertices (16 bytes each), `+0x68` a u16 of flags a triangle, `+0xA4` strip count |
+
+A strip: a 0x20 header (`+0` u16 triangles, `+4` u16 flags, `+8` size of what follows), then GX
+triangle strips (`+2` u16 vertex count, then 8 bytes a vertex, the position's index first).
+Strips with flags `0x101` and triangles with `0x200` are not collided with.
+
+### 2.7 Objects (what moves)
+
+An item's objects from `+0x14C`, each: `+0x4` next, `+0x10` its own list, `+0x18` vtable,
+`+0x1C` file, `+0x20` hash, `+0x28` its entry in the file's placed list, `+0x88..0xD8` what
+`fn_80301960` keeps (saved and put back around a call), `+0x98` matrix, `+0x114` four slots
+of animated collision records, `+0x130` children. The vtable's `+0x50` is its scoop and tells
+the kind: `8031D920` a group, `803144D0` an entity, `80308C20` something skinned.
+
+A collision record (`EXItemAnimator_Entity`, 0x1C bytes for each part): top bit of the first
+word set when a buffer of animated vertices is at `+8`. A slot is a pointer and a count.
+
+### 2.8 The renderer's matrices
+
+`80641F60`, 4x4 matrices 0x40 apart: `+0x000..0x080` the three outer ones A0..A2, `+0x0C0` the
+model matrix M, `+0x100` N, `+0x180..0x200` the products P = A × M, `+0x240..0x2C0`
+Q = P × N. Dirty bytes at `806EC2BC`: `+0` the Qs, `+1` everything, `+2` P0, `+3` P1, `+5` P2.
+
+### 2.9 Files and saves
+
+The file system (`806473CC`): `+0x24` which of the two reads is under way, `+0x38` (u8) a
+piece is being read, `+0x39` set by the start, `+0x3C` the piece's size, `+0x44` the two
+requests, `+0x58` the DVD file. Vtable `+0x14` opens, `+0x20` asks whether a piece is under
+way (`fn_80292520`).
+
+A request: `+0` its state (2 while a piece is read), `+0x120` its place on disc, `+0x128`
+bytes still to read, `+0x12C` its place in memory. Pieces are up to 0x10000 bytes.
+
+The memcard manager (`805D10B8`): `+0x8` state (0 or 10 idle, 0x12 writing, 0x13 written),
+`+0x18` the slot of the loaded profile (3 slots).
+
+A movie widget: `+0x8E` (u8) finished. Vtable `8057362C`, `+0xE0` is `ge_movie_start`.
+
+### 2.10 The profile (`805DE6A0`)
+
+| Offset | Address | What |
+|---|---|---|
+| `+0x38` | `805DE6D8` | a bit a mission, it can be picked |
+| `+0x40..0x4C` | `805DE6E0..EC` | a mask a difficulty, a bit a mission done on it |
+| `+0x104`, `+0x108` | `805DE7A4`, `805DE7A8` | look sensitivity across, up and down |
+| `+0x12C`, `+0x130` | `805DE7CC`, `805DE7D0` | the same aiming down the sight |
+
+### 2.11 A cutscene's input object (`ge_cutscene_input`'s r3)
+
+| Offset | Type | What |
+|---|---|---|
+| `+0x00` | 4 × u32 | the buttons, action bit number plus one (`FFFFFFFF` none) |
+| `+0x14` | u32 | the kind, `7B000000` plus 1, 3, 5 buttons in turn / 2, 4 all at once / 6 a bash |
+| `+0x3C` | float | the bash's level, 0 to 100 |
+| `+0x40` | float | the bash's time left |
+| `+0x44` | float | the smoothed level |
+| `+0x48` | float | the bash's climb |
+| `+0x50` | u32 | which of the four is next |
+| `+0x60`, `+0x62` | u8 | succeeded, done |
+
+### 2.12 Vehicles, strings, text
+
+A vehicle (`ge_vehicle_step`'s r3): `+0x58` flags (`0x100` damps by time), `+0x130` velocity
+keep, `+0x1B0` spin, `+0x1E0` three spin keeps, `+0x1FC` wheels, `+0x200` wheel count. A wheel
+is 0x90 bytes: `+0x54` spin, `+0x84` drag.
+
+The hud: `+0x1708` the prompt's string, elements `0x1C` and `0x1D` its two button sprites.
+
+A hud/menu string: `+0x14` its font (`07000033` is the one with only buttons).
+
+Font characters: `0x2701..0x273A` buttons (`0x2708` and `0x271E` the left stick), `0x2800`
+plain and `0x2801..0x2803` colours (`0x2801` the highlight), `0xA0` a space that is not wrapped
+at. The classic's and the pro's button characters are the `kGlyphs` table in `prompts.cpp`.
+
+Hash prefixes: `0181xxxx` levels, `0108xxxx` the front end, `7Dxxxxxx` menus, `7910xxxx`
+buttons, `7C10xxxx` action names, `7Bxxxxxx` cutscene input kinds, `43xxxxxx` texts
+(`43000204` "Select").
+
+### 2.13 KPAD's classic controller bits
+
+| Bit | Button | Bit | Button |
+|---|---|---|---|
+| `0x0002` | Left | `0x0080` | ZL (aim) |
+| `0x0004` | ZR (fire) | `0x0200` | R |
+| `0x0008` | x | `0x0400` | Plus (pause) |
+| `0x0010` | a | `0x2000` | L |
+| `0x0020` | y | `0x8000` | Right |
+| `0x0040` | b | | |
+
+`ClassicState::extra` is the port's own: bit 0 "Extra 1" the sprint key, bits 2..4 "Extra 3"
+to "Extra 5" the weapon slots.
+
+## 3. The game's functions
+
+Hooked (replaced, the original called from inside) unless marked *called* (through
+`ppc_lookup`) or *reference* (named for reading the code, not used by the port).
+
+| Address | Name | Arguments and result | File |
+|---|---|---|---|
+| `80006310` | `__start` | entry | reference |
+| `80292D50` | `main` | traced with `GE_TRACE` | goldeneye |
+| `802929A0` | `ge_frame_tick` | one pass of the main loop, the frame limiter | framerate |
+| `804C2FA0` | `VIWaitForRetrace` | a short sleep above 60 fps | framerate |
+| `804BBE30` | `OSSleepTicks` | (64-bit ticks in r3:r4), *called* | framerate |
+| `802BBE70` | `ge_frame_draw` | (r3 = 1 leaves the scene out) | cutscenes |
+| `80108A60` | `ge_controller_update` | (controller, f1 time step) once a frame | input |
+| `80108D70` | `fn_80108D70` | (controller) -> 0 if this console plays it, *called* | input |
+| `80101DC0` | `ge_look_input` | (controller, pad) reads the look stick; traced with `GE_TRACELOOK` | debug |
+| `80101EC0` | `ge_look_apply` | (controller) rates times the time step into rotation | input |
+| `801CDC30` | `ge_look_sens` | reads the look sensitivities | input |
+| `801CDE70` | `ge_look_sens_ads` | the same aiming down the sight | input |
+| `8010D970` | `ge_sprint_update` | (controller) starts and ends a sprint | input |
+| `8010DAF0` | `ge_sprint_end` | (controller) | input |
+| `8010DB10` | `PlayerSprint` | (controller) refills it | input |
+| `8010A260` | `ge_action_update` | (controller) the actions on offer, climb and vault | input |
+| `80142E60` | `ge_tank_update` | (controller) the tank's update | reference |
+| `80140600` | `ge_tank_look` | (controller) the tank's `ge_look_apply` | tank |
+| `801478C0` | `ge_tank_drive` | (controller) the throttle | tank |
+| `8036B310` | `ge_vehicle_step` | (vehicle, f1 time step) | tank |
+| `800F0FC0` | `ge_body_update` | (body) move, then collide | body |
+| `800EF380` | `ge_body_move` | (body) | reference |
+| `800F12D0` | `ge_body_collide` | (body) | reference |
+| `802CF760` | `ge_contacts_solve` | (scoop, body, out push, out flags, passes, callback) | reference |
+| `8015A430` | `ge_weapon_input` | (controller) the weapon buttons, once a frame | weapons |
+| `8014F490` | `ge_weapon_cycle` | (controller, 1 or -1); calls the search from `8014F5A0` and `8014F600` | reference |
+| `8014B0A0` | `ge_weapon_next_slot` | (controller, item, direction, with ammo, weapons only) -> item or -1 | weapons |
+| `8014AEC0` | `fn_8014AEC0` | (controller, item, weapons only, holstered, with ammo) -> usable, *called* | weapons |
+| `8001C4F0` | `ge_cutscene_input` | (input) once a frame | qte |
+| `802351F0` | `ge_menu_pending` | (menu) runs the pending action | cutscenes |
+| `8000C370` | `StartLevelChange` | (app, level hash, ...) | cutscenes |
+| `80008940` | `ge_reload_checkpoint` | (app) | reference |
+| `800CB010` | `ge_record_restart` | (-, entrance id, entrance hash) fills the restart point | autosave |
+| `800AF650` | `ge_save_game` | (manager, slot, delete, rename, checkpoint) -> 0 busy, 1 written, 5 failed, 6 no room, *called* | autosave |
+| `802B1330` | `ge_save_write` | (save file, slot, buffer, flags); flag bit 0: no "Saved" box | autosave |
+| `8018CD40` | `ge_hud_update` | (hud) | tweaks |
+| `8023D200` | `ge_pad_confirmed` | (front end, pad) -> the pad pressed select | tweaks |
+| `8019A080` | `ge_show_tutorial` | (hud, tutorial's hash) -> shown | tweaks |
+| `802AD300` | `ge_movie_start` | (widget, path, x, y, width, height, audio track, loops) | movies |
+| `8037F0F0` | `ge_file_read_start` | (file system, request, size) | files |
+| `8037E610` | `ge_file_read_done` | (file system) | files |
+| `8029DA30` | `ge_records_new` | (slot, parts) | records |
+| `8029DAA0` | `ge_records_release` | (slot) | records |
+| `8029D900` | `ge_records_destroy` | (slot, delete it too) | records |
+| `80342A50` | `ge_heap_free` | (block) | records |
+| `8032EE20` | `ge_zone_root` | (world, position) a view's portal walk | zones |
+| `802F33C0` | `ge_zone_at` | (tree, position) -> the zone's number | zones |
+| `8032FAA0` | `ge_zone_walk` | (world, map, zone, rectangle, depth) | zones |
+| `8032F2C0` | `ge_portal_clip` | (world, portal, link, rectangle, out) -> 0 when nothing is left | zones |
+| `80293E30` | `ge_camera_apply` | (camera); returns to `8017051C` for the player's view, `80007694` for the level's camera | collision |
+| `8032D380` | `ge_world_draw` | (world) | collision |
+| `80301960` | `fn_80301960` | (object, parent's matrix, flags word) -> the object's world matrix, *called* | collision |
+| `800DDFC0` | `GetTextMsg_MENU_Text` | (text's hash, answer) -> 1 when there; also *called* | prompts |
+| `801A6C20` | `ge_text_format` | (source, out) copies a text, writes out its tags | reference |
+| `801A6FF0` | `ge_text_action` | (r4 out, r5 tag, r6 place, r7 1 for ACT2) -> characters | prompts |
+| `801A7400` | `ge_text_tag` | (r4 tag index, r5 out) -> characters | prompts |
+| `801909D0` | `ge_hud_prompt` | (f1 y, hud, two button hashes, text hash, bright) | prompts |
+| `80190AF0` | `ge_hud_prompt_text` | the same with the text as a string | prompts |
+| `800E8DC0` | `ge_string_set` | (string, wide characters) | prompts |
+| `80199040` | `fn_80199040` | (button's hash) -> its font character, *called* | prompts |
+| `803AB100` | `ge_box_clip_codes` | (4x4, box, out[2]) | native |
+| `803A9FA0` | `ge_skin1` | (n, 3x4, in, out) -> end of out | native |
+| `803AA2E4` | `ge_skin2` | (n, 3x4, in, out, -, second 3x4, weights) | native |
+| `803AB2B4` | `ge_plane_ray` | (plane, f1 epsilon, out t, origin, direction) -> hit | native |
+| `803AB324` | `ge_tri_contains` | (-, a, b, c, point, normal) -> inside | native |
+| `800164B0` | `ge_vec4_transform` | (v, 4x4) v = M v | native |
+| `80014CE0` | `ge_vec4_sub` | (out, a, b) | native |
+| `8033C7B0` | `ge_segment_closest` | (segment, point, out) -> 1 origin, 2 between, 3 end | native |
+| `80297E80` | `ge_matrix_flush` | () redoes the dirty matrix products | native |
+| `802F2340` | `ge_box_in_rect` | (rect, box, 4x4) -> 0 out, -1 in | native |
+
+Other game functions the comments refer to: `fn_8012A1D0` (the controller's look update),
+`fn_80108350` (copies the frame's input into the controller), `fn_801222A0` / `fn_80122460` /
+`fn_801227A0` (state 0x22 entered, left, updated), `fn_80124130` (the aim inside a cutscene),
+`fn_8014BCD0` ("may aim" in a cutscene), `fn_800EECE0` (the body's gravity), `fn_8035D070` (a
+vehicle body's step), `fn_800074A0` (the frame's update), `fn_801703C0` (draws the player's
+view), `fn_80009CB0` > `fn_80379D20` > `fn_8032BCE0` (to `ge_world_draw`), `fn_80315C10` and
+`fn_80296160` (the collision's scoop and triangles), `fn_802CD850` (the collision variant),
+`fn_802E2A00` (lookup by hash), `fn_8027F410` and `fn_80302EA0` (the item and object lists),
+`fn_8029E070` / `fn_8029DE10` (animated vertices), `fn_80292520` and `fn_802923B0` (a read's
+status and its DVD callback), `fn_8037EA70` (the file pump), `fn_800AA260` ("Creating a real
+save"), `fn_8024D520` (`MenuLoadSave::UpdateNewSaveGame`, menu `7D000035`), `fn_801CF680` (an
+action bit's two button hashes), `fn_8023D140` (the menus' confirm character).
+
+## 4. The files
+
+### ge.h
+
+What the files share: the three globals (`kFrameCount`, `kPlayerPtr`, `kPaused`), `guest_ptr`,
+`ldf`, `stf`, `in_play()` (a player exists and the pause menu is not up), and the declaration
+of every function one file offers another. Limits and defaults are here too: `kGameFps` 30,
+`kGameFov` 49 (20..120), `kGameAdsFov` 22.5 (from 10), `kRadPerPixel` 0.0022,
+`kMouseSensMax` 5, `kAdsSensMin/Max` 0.05..2.
+
+### goldeneye.cpp
+
+The entry point. `install()` calls every `install_*`, hooks `main` under `GE_TRACE`, and puts
+the runtime on the classic controller. `each_frame(frame)` is the once-a-frame list in
+section 1. The file's header is the list of the main environment variables.
+
+### framerate.cpp
+
+The engine is variable-rate: `ge_frame_tick` runs a frame once `OSGetTime` passes the next
+frame's time and moves its current rate one up when the frame was on time, one down when late,
+between a lowest and highest rate. The game sets both to 30 in play; raising the highest is
+the whole unlock.
+
+| Function | What |
+|---|---|
+| `guest_sleep(c, ticks)` | `OSSleepTicks` on the guest thread, only with interrupts on |
+| `apply_rate(fps, fast)` | sets `g_gx_early_done` (above 30) and `g_present_on_frame` (above 60 or fast forward: frames shown as drawn, not at VI's retrace) |
+| `vi_wait` | hook: above 60 or in fast forward a quarter millisecond's sleep instead of the wait |
+| `frame_tick` | hook: writes the highest rate, sleeps up to 0.2 ms before the next frame above 60, runs the per-frame list, fast forwards, calls the game, then mends the rate after a long frame |
+| `install_fps` | hooks, `GE_FPS` (`auto` is 60 or the screen's rate if lower), `GE_SKIP_RATE` |
+| `set_fast_forward(on, easeRate)` | a cutscene is skipped: the rate is held at the skip rate (3) and the guest's clock jumps to the next frame (`rt_advance`) after the audio caught up (`hw_ai_behind`); `easeRate` shows each frame instead |
+| `skip_rate`, `engine_rate`, `engine_top_rate`, `fps_limit`, `set_fps_limit` | getters and the setter the menu uses |
+
+The rate fix: a frame more than three frame times late makes the limiter restart from its
+lowest rate and climb by 1 a frame. After the game's tick the rate is put back to what it was
+minus 1, and a climbing rate climbs 4 a frame. `GE_NO_RATE_FIX` turns it off, `GE_HITCH`
+makes 60 ms stalls to test it.
+
+### input.cpp
+
+Keyboard and mouse. The mouse does not go through the stick: its motion is added to the
+view's angles once a frame.
+
+| Function | What |
+|---|---|
+| `joined_game()` | a network game someone else hosts (`805D5460`) |
+| `mouse_on_stick()` | mode 2, or auto in a joined game (the host turns the players) |
+| `local_controller()`, `local_player_state()`, `local_cutscene_locked()`, `local_aim_blend()`, `local_look_name()` | the local player, for the other files |
+| `look_mode(ctrl)` | locked, view (states 0, 2, 3, 4, or a cutscene that reads the stick), aim (a cutscene with the aim free), forced (the cheat) |
+| `mouse_look(ctrl, player)` | the pitch is written to the view's `+0x768` (within ±1.35), the yaw is kept in `g_look_yaw` for `look_apply` |
+| `mouse_aim(ctrl)` | the aim inside a cutscene's view (`+0xEDC`, `+0xEE0`) within the game's limits |
+| `look_apply` | hook on `ge_look_apply`: `g_look_yaw / dt` added to the yaw rate (`+0x97C`) for the call |
+| `aim_sens_scale(ctrl)` | the sensitivity goes to the aim sensitivity by the aim blend |
+| `controller_update` | hook: finds the local controller with the game's test, applies the mouse, then `ads_fov_apply` and `noclip_apply` after the game's update; the `GE_TRACE` and `GE_TRACELOOK` logs |
+| `sprint_buttons`, `sprint_frame`, `sprint_read<I>` | sprint on its own key: for the three readers bit 4 is the sprint key, b only the action |
+| `action_update` | hook on `ge_action_update`: the sprint key is b too for a climb or vault |
+| `wheel_buttons` | the wheel as D-pad right/left presses, 80 ms held and 60 ms apart |
+| `aim_lock_buttons` | a press of aim stays aimed until the next |
+| `menu_buttons` | out of play ZR is a (select) and ZL is b (back); a trigger held when a menu closes stays out |
+| `mouse_stick` | the mouse on the right stick: deflection that gives the mouse's speed at sensitivity 100 (rate 2.95 rad/s, dead zone 0.12, pitch 1.25 times the yaw) |
+| `look_sens<I>` | hooks: the four sensitivities read as 100 for the call while the mouse is on the stick |
+| `classic_filter(chan, s)` | channel 0 only, in this order: settings, mouse stick, wheel, debug, sprint, weapons, aim lock, menu, tank |
+| `install_mouse` | environment, the filter, all the hooks |
+| `mouse_frame`, `mouse_applied`, `mouse_capture` | unused motion dropped once a frame; the cursor freed while an overlay is up |
+
+### fov.cpp
+
+`fov_apply()` writes the view's angle (`*806EB694 + 0x328`) only over the game's 49 or what
+it wrote last, so a cutscene keeps its own. `ads_fov_apply(ctrl)` runs after the controller's
+update: the game computes `view + (weapon's aimed angle - view) * blend` into `+0x71C`; the
+weapon's angle is worked back out of that, scaled by the option over 22.5, and the result
+written to `+0x71C` and `+0x720`, never wider than the view.
+
+### gecko.cpp
+
+Codes that patch code are applied to the dol before recompiling (`tools/gecko.py`); the rest
+run here once a frame. `gecko_load(path)` reads Dolphin's notation (`$` starts a code, `*` and
+`#` are comments), `gecko_apply()` runs them. Supported types: `00`, `02`, `04` writes, `08`
+serial write, `20..2E` conditions (an odd address is an endif first), `CC` on/off switch,
+`E0`, `E2`. Writes outside MEM1/MEM2 are dropped.
+
+### cutscenes.cpp
+
+Skip Intro Cutscenes: the opening plays through in very long steps (the engine held at 3
+frames a second of game time, nothing waits for a frame), muted, one frame in four drawn.
+
+State machine (`Skip::Idle`, `Waiting`, `Running`):
+
+| Function | What |
+|---|---|
+| `MenuPending` | hook: action 5 with a campaign level (a difficulty or Time Trial picked) at entrance 1 arms the skip; `GE_LEVEL` and `GE_ENTRANCE` replace the level or entrance |
+| `LevelChange` | hook on `StartLevelChange`: Restart Mission and Continue Game (action 6) arm it too, and so does the app's update loading the next mission after "Save and Continue" (the call returning to `80009334`); any other change stops it. `GE_TRACE` logs each one |
+| `Arm(level)`, `Start()`, `Stop(why)` | `Start` mutes and fast forwards, `Stop` fades the sound back in over a second and logs how long the opening was |
+| `cutscenes_frame()` | waiting: the level's time has to count 3 frames in a row, then a locked cutscene starts the skip; 150 frames with the controls means no opening |
+| `Run()` | stops when the option is turned off, after 600 s, when a button is wanted, the player is gone or has anything back; eases over the last second when the opening's end is known |
+| `FrameDraw` | hook: `r3 = 1` for the frames the skip does not show |
+| `LoadOpenings` | `config/openings.txt`: level hash, the level time its opening ends at |
+| `LoadCutscenes`, `ArmCutscene` | `config/cutscenes.txt`: level hash, timeline hash, seconds; level hash, timeline hash, seconds, option (`zukovsky`: `skip_zukovsky`, `GE_SKIP_ZUKOVSKY`; `briggs`: `skip_briggs`, `GE_SKIP_BRIGGS`); with its option on a cutscene of it that takes the player is skipped like an opening; `g_option` is the option the running skip belongs to |
+| `CutsceneMessage`, `PlayerTake` | hooks: the last timeline that sent the cutscene player a message (its hash at `+0x20`) names the cutscene the player is taken by; `GE_TRACECUT` logs every message |
+| `TraceFrames` | `GE_TRACE`: frame times through the easing |
+
+### qte.cpp
+
+`CutsceneInput` (hook on `ge_cutscene_input`): with Auto Quick Time Events on, the buttons
+the input waits for (`Wanted`) are put into the controller's pressed actions for the call.
+`BashStep` makes a button bash frame-rate independent whether auto is on or not: the drop a
+press makes is `30 * 5 * frame time`, so above 30 the rest of the 5 is taken off the level
+before the call and the smoothed level set up so its fifth lands where the step's share would
+have. `cutscene_input_waiting()` is true for 4 frames after an input waited for a button
+(the cutscene skip stops on it).
+
+### movies.cpp
+
+`MovieStart` (hook on `ge_movie_start`): with Skip Movies on, a movie that does not loop is
+not opened and its widget's "finished" byte (`+0x8E`) is set, which is all that anything
+waiting for a movie reads.
+
+### autosave.cpp
+
+A checkpoint saves the game. The game only writes a mission's progress from the pause menu's
+"Save and Quit", whose screen calls `ge_save_game` each frame until it answers; the port makes
+the same calls after every checkpoint.
+
+| Function | What |
+|---|---|
+| `RecordRestart` | hook on `ge_record_restart`: a checkpoint was recorded, a save is pending (not in the front end) |
+| `autosave_frame(c)` | once a frame: waits for play and an idle manager, then steps the save until it answers or 1800 frames went by, and logs the result |
+| `Step(c)` | calls `ge_save_game(manager, the profile's slot, 0, 0, 1)` with the registers put back after |
+| `ManagerIdle()`, `CanSave()` | the manager's state is 0 or 10; there is a profile, no time challenge and no joined game |
+| `SaveWrite` | hook on `ge_save_write`: flag bit 0 set for the port's own calls, so no "Saved" box waits for a button |
+
+### files.cpp
+
+A fix for a race in the game. `ge_file_read_start` and `ge_file_read_done` ask the drive
+whether a piece is over with interrupts on; when the read's interrupt lands inside the
+question a piece is counted twice, the request's rest goes negative and the read runs on over
+the heap. `Atomic(c, orig)` runs both with interrupts off (MSR bit `0x8000` cleared through
+`ppc_mtmsr`). `GE_FILE_RACE=off` leaves the game's own, `=force` provokes the race every
+100th piece; both log a piece counted twice.
+
+### records.cpp
+
+A diagnostic, nothing is changed. Every array of collision records `ge_records_new` makes is
+remembered with its slot; a `ge_heap_free` or a release through another slot while the slot
+still holds the array is logged with the guest call chain (`Chain`, 14 frames deep), at most
+16 reports.
+
+### zones.cpp
+
+The portal walk. The moment the camera is past a portal's plane the zone it came out of was
+dropped and the level went black for a moment in vents.
+
+| Function | What |
+|---|---|
+| `Root` | hook on `ge_zone_root`: counts a view's walk, writes its line to `GE_ZONELOG`, dumps both views when one walks fewer zones than the one before (first 600) |
+| `At`, `Walk` | hooks: the zone the walk starts from, zones walked |
+| `Eye(eye)` | the camera's position solved out of the clip matrix (the point its x, y and w rows give 0 for) |
+| `NearPortal(portal)` | the eye within `g_near` (1.5, `GE_PORTAL_NEAR`) of the portal's plane and quad |
+| `Clip` | hook on `ge_portal_clip`: a portal the game drops is kept with the rectangle as it came when the eye is near it |
+
+Nothing is hooked when `GE_PORTAL_NEAR=0` and there is no log.
+
+### tweaks.cpp
+
+| Option | How |
+|---|---|
+| Level timer | `HudUpdate`: for the call the flag `805E05AB` is set and the limit `805E05AC` is twice the level's time, so the hud shows limit - time = time |
+| Unused extras menu | `Keep` holds `80774704 = 80580990` and `8077470B = 0x19` each frame |
+| Unlock everything | `Keep` holds the five progress words (2.10) at -1 |
+| Auto start | `PadConfirmed`: answers yes while the load's step is `0x1A` |
+| No tutorials | `ShowTutorial`: answers 0 without asking the hud |
+
+`Keep(writes, on, written)` remembers what the game had and puts it back when the option is
+turned off. `tweaks_apply()` runs both once a frame.
+
+### tank.cpp
+
+The tank's controller never reaches `ge_look_apply`, so `TankLook` (hook on `ge_tank_look`)
+adds the mouse to both look rates for the call. `tank_buttons` moves the buttons round by one
+in the tank (ZR does R's, ZL does ZR's, R does ZL's). Three things in a vehicle's physics
+happen once a call with no time step in them; each is scaled for the call and put back:
+
+- `VehicleStep`: every wheel's drag becomes `1 - (1 - drag)^frames`, and the body's four keep
+  factors `keep^frames` (only for a body without flag `0x100`), `frames` being the time step
+  times 30.
+- `TankDrive`: the two throttle steps times `frames`.
+
+`ShortStep` only lets a step shorter than a 30th of a second be scaled. `is_tank(ctrl)` tests
+the vtable.
+
+### noclip.cpp
+
+`noclip_look(ctrl)` (before `ge_look_apply`) zeroes the controller's velocity and step.
+`noclip_apply(ctrl)` (after the controller's update) keeps its own position, moved by the move
+stick along the view at 6 units a second (20 with the sprint key), writes it to the entity,
+keeps the body's flags `0x1` and `0x2` set and the fall speed, velocity and distance at 0. The game's
+position is taken again when it jumps more than 4 units or the player is not in a free state;
+`Land(body)` clears them again.
+
+### weapons.cpp
+
+A key for each weapon slot. `weapon_buttons` (in the classic's filter) keeps the slot whose
+key went down for 250 ms. `WeaponInput` (hook on `ge_weapon_input`) presses "next weapon" for
+that call, and `NextSlot` (hook on `ge_weapon_next_slot`, only for the cycle's two calls)
+answers with the item in the key's slot that `fn_8014AEC0` says is usable, so everything the
+game does around a change still happens.
+
+### prompts.cpp
+
+The game's prompts show the bound key in place of a controller button.
+
+| Function | What |
+|---|---|
+| `ReadKeys()` | the key file's `[Classic Controller]` lines, read again when the file changed (checked every 500 ms) |
+| `KeyOf(button, menu)`, `KeyFor(ch, menu)` | the first key of a button, as `[E]` in the highlight colour; in a menu the key a menu is used with when the button has one |
+| `ShowKeys(out, count, menu)` | the button characters a tag wrote become keys |
+| `TextAction`, `TextTag` | hooks: `ShowKeys` on what `<ACT>` and the other tags wrote |
+| `PromptKeys(c, first, second)` | a hud prompt's two buttons as keys; the stick with b is the sprint key and forward |
+| `HudPrompt`, `HudPromptText` | hooks: called without the buttons, then `PutKeys` puts the keys in front of the text |
+| `TextOf(c, hash)` | calls `GetTextMsg` with a frame of its own under the stack |
+| `SetTo(c, text)` | calls `ge_string_set` with characters kept under the stack |
+| `StringSet` | hook: a button in any string set; a menu's lone button string is emptied and its key goes with the label set next |
+| `TextMsg` | `GE_TRACETEXT`: every text looked up, once |
+
+### collision.cpp
+
+The collision viewer (a cheat). The level's collision triangles are gathered from the game's
+structures (2.6, 2.7) and sent to the runtime (`gx_debug_mesh`, `gx_debug_view`), which draws
+them with the game's own clip matrix in place of what the game draws in 3D.
+
+| Function | What |
+|---|---|
+| `Rel`, `Readable`, `Loaded`, `Find`, `Header`, `MapData` | reading the file's lists safely |
+| `Emit(p, kind)` | a triangle coloured by slope and kind: floors green, walls grey, ceilings red, props orange, moving things blue, people purple |
+| `Triangle`, `Mesh`, `Entity`, `Collider` | a mesh's strips, the three entity kinds, and only what the game collides with (flag `0x100`, variant bit 0) |
+| `Gather()` | zones and placements of every loaded map into `g_level` |
+| `WorldMatrix(c, object, parent, flags, level)` | calls `fn_80301960`, puts back what it keeps in the object |
+| `Objects`, `ObjectEntity` | an item's object tree |
+| `Person`, `Capsule`, `FindEye` | a person's body shape; the one the eye is inside of is left out |
+| `GatherMoving(c)` | doors and people, every frame, into `g_moving` |
+| `Signature()` | a hash of every entry's pointer, changes when a part of the level comes or goes |
+| `Update(c)`, `Send()` | gather again 5 frames after a change and every 30 draws; send when the mesh changed |
+| `CameraApply` | hook: the call returning to `8017051C` is the player's view, gather there |
+| `WorldDraw` | hook: takes the clip matrix as the player's world draw begins |
+| `collision_tick()` | the viewer goes off with the option or the level |
+
+### body.cpp
+
+Vents at high frame rates. How far the collision pushes a body out depends on how deep the
+step went in, and the levels lean on a 30th of a second's step to get through a vent's frame.
+`BodyUpdate` (hook on `ge_body_update`), for the local player on foot (state 2 or 3) with a
+step under 0.9 of a 30th: when 8 frames of pushing got less than a tenth of their way the body
+is *blocked* and moves as the console's does, waiting until a 30th of a second's moves have
+added up and taking them as one step. Free again when nothing is pushed, it is clear of walls
+and ceilings, or 15 steps in a row got half their way. `BodyUpdateTraced` is the
+`GE_TRACEPOS` variant.
+
+### native.cpp
+
+Ten of Eurocom's hand-written paired-single routines written as plain float code in the same
+order of operations (`madd` fuses the multiply-adds the console fuses; `FP_CONTRACT OFF` for
+the rest). `Quant` is a quantised element as `psq_l` reads and `psq_st` writes it through a
+GQR. The table `g_routines` lists each with where it writes; `GE_NATIVE=check` runs the
+recompiled and the native one on the same input (`checked<I>`) and counts the differences,
+`GE_NATIVE=0` uses the recompiled ones.
+
+Constants read from the game's small data: `r2 - 0x2538` (the Newton step's constant in
+`plane_ray`), `r2 - 0x2E04` (zero, `segment_closest`), `r2 - 0x31FC` and `r2 - 0x3200` (one
+and zero, `BoxInRect`), `r13 - 0x4CE8` and `r13 - 0x4CE4` (the screen's offset).
+
+### net.cpp
+
+`install_hosts()` reads a hosts file (`/etc/hosts` format) into the runtime
+(`ios_net_add_host`) so the game's server names go to a community server, and turns on the
+network log with `GE_NETLOG`.
+
+### overlay.cpp, dmw.cpp, dmw.h
+
+The debug overlay (F3), drawn with Dear ImGui on the renderer's thread through
+`video_set_overlay` (only when ImGui's sources are in `build/deps/imgui`, `GE_IMGUI`). It
+shows a Dolphin Memory Engine watch list live, grouped as the file groups it or flat under a
+filter; the local player's state in the top right corner when asked; "Skipping cutscene..."
+in the bottom right. The settings menu and the hotkeys' line are drawn in the same frame.
+`overlay_open()` is true for either window, which frees the mouse.
+
+`dmw.cpp`: a small JSON reader (`Json`, `Parser`), `dmw_load` (a `.dmw` is
+`{"watchList": [...]}` of watches and groups), `watch_address` (follows the pointer chain,
+false when anything is not readable) and `watch_value` (types 0 byte, 1 halfword, 2 word,
+3 float, 4 double, 5 string, 6 bytes; bases decimal, hex, octal, binary).
+
+### settings.cpp, hotkeys.cpp, hotkeys.h
+
+The settings menu (F1), drawn like the game's own menus. Pages: root, Screen, Controls, Key
+Bindings, Enhancements, Cheats, Hotkeys (and the page editing one hotkey). While it is up the
+game gets no input and a game in play is paused first (a press of +); Esc with the menu closed
+is + as well.
+
+Everything the pages change is one list of `Setting` (`hotkeys.h`: id, label, hint, kind,
+`get`, `set`, `step`, `show`, a slider's `frac` and `at`), built in `BuildSettings()` with
+`AddToggle`, `AddChoice` and `AddRange`:
+
+| Page | Ids |
+|---|---|
+| Screen | `fov`, `ads_fov`, `fps` (stops 30 to 275) |
+| Controls | `mouse_sens`, `ads_sens`, `aim_lock`, `mouse_invert`, `mouse_mode`, `input`, `face_buttons`, `dead_zone` |
+| Enhancements | `skip_cutscenes`, `skip_movies`, `level_timer`, `auto_qte`, `auto_start`, `autosave`, `no_tutorials` |
+| Cheats | `mouse_everywhere`, `extras_menu`, `unlock_all`, `noclip`, `collision_view` |
+
+Key bindings (`kActions`): Fire ZR, Aim ZL, Melee L, Throw Grenade R, Reload Y, Crouch A,
+Action B, Sprint Extra 1, Cycle Grenades X, Next/Previous Weapon Right/Left, Weapon 1..3
+Extra 3..5, Firing Mode Up, Smartphone Down, Night Vision / Scores Minus, Pause Plus, and the
+four Left Stick directions. `KeyFile` rewrites only the `[Classic Controller]` lines it
+changed. `add_sprint_binding` and `AddWeaponBindings` migrate an older key file.
+
+Other parts: `save_launch_settings` (the launcher's `LAUNCH_*` lines), `build_pages`,
+`BuildHotkeyPages` / `RefreshHotkeyPages`, `bind`, `open`/`back`/`move`/`adjust`/`select`,
+the drawing (`Layout` is the game's 1280 × 720 menu screen centred in the window,
+`draw_frame`, `draw_rows`, `key_hint`, `DrawToast`), the input (`key_down`, `pad_down`,
+`click`, `drag`, `row_at`), and what the overlay calls: `settings_init`, `settings_event`,
+`settings_draw`, `settings_toast`, `settings_replay`. `settings_buttons()` is the + the
+classic's filter adds.
+
+`hotkeys.cpp`: a hotkey is a key on one setting with an action (`next`, `previous`, `set`,
+`switch`: set, and back on the next press). `LoadHotkeys`, `SaveHotkeys`, `NewHotkey`,
+`HasValue`, `ActionName`, `Describe`, `CycleAction`, `PressHotkeys(scancode, said)`. A press
+is handed to `debug_setting` so a recording keeps the value.
+
+### crashdump.cpp
+
+Crash, die and stall dumps into `build/crashes/<date>-<time>-<kind>/report.txt` (POSIX only):
+what happened, the host's faulting instruction and call stack, every guest thread with its
+call chain, the crashing thread's stack from r1, the `GE_*` / `WIIKIT_*` settings, the last
+log lines; `mem1.bin` and `mem2.bin` with `GE_CRASH_MEM`.
+
+| Function | What |
+|---|---|
+| `Guarded(out, name, part)` | a part of the dump under `sigsetjmp`: a fault in it skips that part |
+| `GuestFunctionAt(pc)`, `WriteHostFrame` | a host address named by the recompiled function that starts closest below it |
+| `WriteGameState`, `WriteSettings`, `WriteGuestStack`, `WriteMemory`, `WriteDump` | the parts |
+| `OnCrash` | SIGSEGV, SIGBUS, SIGFPE, SIGILL, SIGABRT on its own stack; lets the runtime's watched pages through (`mem_watch_fault`); a 10 s alarm ends a stuck dump (`OnStuck`) |
+| `OnDie` | `g_rt_on_die`: the runtime gave up (`rt_die`) |
+| `WatchForStalls` | a thread: no new frame for 20 s writes a stall dump, once |
+| `crash_test()` | `GE_CRASH_TEST`, once a frame |
+| `crash_thread_stack()` | a signal stack for the calling thread (`g_rt_on_thread`) |
+
+`tools/crash_report.py` names the host frames and disassembles around the guest addresses.
+
+### diagnostics.cpp
+
+The sampling profiler (POSIX only). `GE_PROFILE=F`: SIGPROF every millisecond of CPU time;
+`on_prof` stores the thread and the pc as an offset in the executable (`FFFFFFFF` outside it)
+and 40 return addresses. Every 10 s `F`, `F.stacks` and `F.maps` are written;
+`tools/profile_report.py` reads them. `install_pgo_writer` writes an instrumented build's
+counts every 15 s.
+
+### debug.cpp, debug.h
+
+Aids for finding things in the running game, each a thread or a filter started by an
+environment variable (section 5). Times are seconds of guest time from start, or from the end
+of a replay.
+
+| Function | Variable |
+|---|---|
+| `scan_main` | `GE_SCAN`, `GE_SCANINT`, `GE_SCANPAT`, `GE_SCANWATCH`: snapshots of MEM1 and MEM2 compared |
+| `poke_main` | `GE_POKE` |
+| `probe_main` | `GE_PROBE` |
+| `obj_main` | `GE_OBJ` |
+| `findptr_main` | `GE_FINDPTR` |
+| `setall_main` | `GE_SETALL` |
+| `watch_main`, `watch_segv`, `watch_trap` | `GE_WATCH`: the page goes read-only, a write is logged and single-stepped |
+| `tracew_main`, `peek_main` | `GE_TRACEW`, `GE_PEEK` |
+| `KeysMain` | `GE_KEYS` |
+| `look_trace` | `GE_TRACELOOK`, a hook on `ge_look_input` |
+| `debug_classic(s)` | `GE_BUTTONS`, `GE_STICK`, and the recording |
+| `debug_mouse(dx, dy)` | `GE_MOUSEMOVE`, and the recording |
+| `debug_setting`, `debug_setting_due` | what the hotkeys set, recorded and replayed |
+
+Recorded input (`GE_RECORD`, `GE_REPLAY`) is lines of text: `sens S I`, `c T buttons lx ly rx
+ry lt rt extra`, `m T dx dy`, `h T id value`, and `a` where the local player appeared or went
+(a level loaded or was left). Times count from the last `a`; loads never take the same time
+twice, so the replay waits for each `a` to happen.
+
+## 5. Environment variables
+
+Options (the launcher sets these from its settings):
+
+| Variable | What |
+|---|---|
+| `GE_FPS=N` or `auto` | the frame rate the engine may reach, 31..1000 (auto is 60) |
+| `GE_FOV=D`, `GE_ADS_FOV=D` | field of view, and aiming down the sight |
+| `GE_MOUSE=S` | mouse sensitivity, 0 leaves the mouse free |
+| `GE_MOUSE_MODE=auto\|direct\|stick` | how the mouse turns the view |
+| `GE_MOUSE_INVERT=1`, `GE_ADS_SENS=S`, `GE_AIM_LOCK=1` | |
+| `GE_SKIP_CUTSCENES=1`, `GE_SKIP_MOVIES=1`, `GE_AUTO_QTE=1`, `GE_AUTO_START=1`, `GE_NO_TUTORIALS=1` | enhancements |
+| `GE_LEVEL_TIMER=0`, `GE_AUTOSAVE=0` | on by default |
+| `GE_MOUSE_EVERYWHERE=1`, `GE_EXTRAS_MENU=1`, `GE_UNLOCK_ALL=1`, `GE_NOCLIP=1`, `GE_COLLISION=1` | cheats |
+| `GE_HOSTS=F`, `GE_NETLOG=1` | the hosts file, the network log |
+| `GE_GECKO=F`, `GE_GECKO_EXTRA=F[:F...]` | gecko code files |
+| `GE_SETTINGS=N` | start with the settings menu open on page N |
+| `GE_DMW=F`, `GE_OVERLAY=1`, `GE_STATE=1` | the debug overlay |
+
+Tuning and testing:
+
+| Variable | What |
+|---|---|
+| `GE_SKIP_RATE=N` | frames a second of game time while skipping (3, 1..30) |
+| `GE_ENTRANCE=N`, `GE_LEVEL=hash` | start every mission at that entrance, or load that level whatever the menu starts |
+| `GE_PORTAL_NEAR=N` | the portal fix's distance (1.5), 0 off |
+| `GE_NATIVE=0\|check` | the recompiled math routines, or both compared |
+| `GE_FILE_RACE=off\|force` | the file read fix off, or the race provoked |
+| `GE_NO_RATE_FIX=1`, `GE_HITCH=t,t,...` | the long-frame fix off; 60 ms stalls at those times |
+| `GE_CRASH_MEM=1`, `GE_CRASH_DIR=D`, `GE_NO_CRASHDUMP=1` | crash dumps |
+| `GE_CRASH_TEST=crash\|die\|stall\|overflow\|badstack[,seconds]` | make one happen |
+| `GE_PROFILE=F` | the sampling profiler |
+
+Traces:
+
+| Variable | What |
+|---|---|
+| `GE_TRACE=1` | `main`, the frame rate, player states, angles, checkpoints, qte, movies, tutorials, the body, noclip, the tank, weapon slots, the collision viewer, the skip |
+| `GE_TRACETEXT=1` | texts looked up, tags written out, prompts |
+| `GE_TRACEPOS=1` | the local body's position after every update |
+| `GE_TRACELOOK=1` | the look input vectors |
+| `GE_ZONELOG=F` | a line for every view's portal walk |
+
+Scripted input and memory tools (`debug.cpp`):
+
+| Variable | Form |
+|---|---|
+| `GE_STICK` | `"42-43:r1,0 45-46:l0,1"` hold a stick |
+| `GE_BUTTONS` | `"66-66.3:0004"` hold classic buttons (`10000` is Extra 1) |
+| `GE_KEYS` | `"5:F1 6:Down"` press keys, SDL's names with `_` for a space |
+| `GE_MOUSEMOVE` | `"66-67:300,0"` pixels a second |
+| `GE_SCAN`, `GE_SCANINT`, `GE_SCANPAT`, `GE_SCANWATCH` | snapshot times and the rule; results in `build/scan.txt` |
+| `GE_POKE` | `"50:80ABCDEF=f1.5 52:80ABCDEF+=x10"` |
+| `GE_PROBE` | `"64:816F0270:build/cands.txt"` |
+| `GE_OBJ` | `"806EB698:400:79,81.5"` into `build/obj.txt` |
+| `GE_FINDPTR` | `"66:80848000:808491A4"` |
+| `GE_SETALL` | `"62:49=80:80000000:94000000"` |
+| `GE_WATCH` | `"64:807807AC"` or `"64:*806EB698+FC"` who writes that word |
+| `GE_TRACEW`, `GE_PEEK` | addresses to log on change, or every half second |
+| `GE_RECORD=F`, `GE_REPLAY=F`, `GE_REPLAY_FPS=N`, `GE_REPLAY_FROM=N` | recorded input |
+
+## 6. Files read and written
+
+| File | By | What |
+|---|---|---|
+| `config/hooks.txt` | the recompiler | the functions the port may hook |
+| `config/names-manual.tsv` | `tools/merge_symbols.py` | address, name, evidence for every `ge_*` function |
+| `config/hosts.txt` | net | the game's server names |
+| `config/openings.txt` | cutscenes | level hash, the level time its opening ends at |
+| `config/cutscenes.txt` | cutscenes | level hash, timeline hash, seconds, option: cutscenes inside a level that are skipped too |
+| `build/patched/gecko.txt`, `config/gecko/*.txt` | gecko | codes run each frame |
+| `build/settings.env` | settings | the launcher's `LAUNCH_*` lines (`settings.env` in a package) |
+| `hotkeys.txt` beside it | hotkeys | `key = setting next\|previous\|set\|switch [value]` |
+| the runtime's key file (`video_keys_path()`) | settings, prompts | the `[Classic Controller]` bindings |
+| `*.dmw` in the project folder or `config/` | overlay | the watch list |
+| `build/crashes/` | crashdump | the dumps |
+| `build/scan.txt`, `build/scan-obj.txt`, `build/obj.txt` | debug | scan results |
