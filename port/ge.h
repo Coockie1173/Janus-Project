@@ -17,6 +17,7 @@
 //weapons.cpp a key for each weapon slot
 //prompts.cpp the bound key in the game's prompts, where it shows a controller button
 //collision.cpp the level's collision drawn in place of the world
+//body.cpp a blocked player moves in the console's steps, so vents can be got through at any frame rate
 //native.cpp the engine's hot math routines written for the host
 //net.cpp the hosts file for the game's servers
 //overlay.cpp the debug overlay (F3), memory watches from a .dmw file (dmw.cpp)
@@ -141,6 +142,7 @@ void set_noclip(bool on);
 void noclip_look(uint32_t controller); //before ge_look_apply, the game's own step is taken out
 void noclip_apply(uint32_t controller); //after the local controller's update
 void install_collision(); //collision.cpp
+void install_body(); //body.cpp
 bool collision_view(); //cheat, the level's collision is drawn in place of the world
 void set_collision_view(bool on);
 void collision_tick(); //every tick of the game's loop

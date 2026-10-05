@@ -12,7 +12,8 @@ Importance:
 
 ## Do first
 
-- [ ] **high** Vents at high fps (Dam, Facility, Nightclub, Bunker, Archives, Outpost), most likely one cause
+- [ ] **high** Vents at high fps (Dam, Facility, Nightclub, Bunker, Archives, Outpost), most likely one cause:
+      fixed where it was recorded (a vent's exit at 144)
 - [ ] **high** Carrier ladders at high fps
 - [ ] **high** The camera is locked while aiming in
 - [ ] **high** Doors break when the intro skip is used
@@ -26,6 +27,8 @@ Things that only break above 60 fps.
 
 ### Vents
 
+- [x] Getting stuck at a vent's frame: a blocked player moves in the console's steps now (out of the
+      recorded vent at 144, see docs/STATUS.md)
 - [ ] **high** Dam: the vent right after the boats dock can't be entered at 90 fps, however it is opened
 - [ ] **high** Facility labs vent: needs 75 or lower after the animation, 60 or lower if shot/hit
 - [ ] **high** Nightclub: side vent into the final area (the one going upstairs) breaks above 75 fps

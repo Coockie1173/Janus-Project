@@ -59,3 +59,4 @@ ge_text_tag            # the other tags (<menuSELECT>): the same
 ge_hud_prompt          # the hud's prompt, buttons and a text: the keys go in front of the text and no button is shown
 ge_hud_prompt_text     # the same with a text already made
 ge_string_set          # a hud or menu string is set: a button character in it becomes the bound key
+ge_body_update         # a blocked player moves in the console's steps (port/body.cpp)

@@ -32,6 +32,7 @@
 //set (noclip, the frame rate...) as played into F
 //GE_REPLAY=F plays F back in their place, then hands the controls back. with it every time
 //above counts from the replay's end (tools/record_run.sh, and REPLAY=name for scripted_run.sh)
+//GE_REPLAY_FPS=N the frame rate from the replay's end on (a recording only fits the rate it was made at)
 //GE_REPLAY_FROM=N leaves out the recording's first N parts (a part ends where a level loads or
 //is left), the controls are free until then. the menus before a level run at another pace
 //with other settings, so they're better driven by WIIKIT_PAD and the level by the recording
@@ -433,6 +434,7 @@ bool load_recording(const char* path) {
 void replay_done() {
     script_base = now_s();
     replaying = false;
+    if (const char* e = std::getenv("GE_REPLAY_FPS")) ge::set_fps_limit((uint32_t)std::atoi(e));
     rt_log("replay: done at %.1f s, the controls are free", now_s());
 }
 

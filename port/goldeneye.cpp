@@ -69,6 +69,7 @@ void install() {
     install_records();
     install_zones();
     install_tank();
+    install_body();
     install_noclip();
     install_collision();
     install_autosave();
