@@ -23,12 +23,16 @@
 //the clip worked from, for both views: each portal's 0x44 bytes, its link, the rectangle going
 //in, the answer (2: kept by the fix), and the two matrices at 806421E0 and 80642220 with the
 //screen's size and offset (the first 600 such views)
+//F9 while it logs writes a "mark" line (press it on seeing the level flash) and, of the 4 s of
+//views before it, the same for every one that walked another number of zones than the one before
 #include "ge.h"
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <deque>
 #include <string>
 #include <vector>
 
@@ -56,6 +60,18 @@ struct ClipCall
 std::vector<ClipCall> g_calls, g_callsBefore;
 std::string g_viewBefore;
 uint32_t g_dumps = 0, g_walkedBefore = 0;
+
+struct View
+{
+	uint32_t m_Frame, m_Walked;
+	double m_Seconds;
+	std::string m_State;
+	std::vector<ClipCall> m_Calls;
+};
+std::deque<View> g_views; //the last kMarkSeconds of them, for a mark
+const double kMarkSeconds = 4.0;
+std::atomic<uint32_t> g_marks{ 0 }; //asked for by the window's thread, written by the game's
+uint32_t g_marksDone = 0;
 
 std::string ViewState()
 {
@@ -88,6 +104,23 @@ void Dump(const char* what, const std::string& view, const std::vector<ClipCall>
 	}
 }
 
+//the views before a mark that walked another number of zones than the one before them
+void WriteMark(double seconds)
+{
+	g_marksDone = g_marks.load();
+	std::fprintf(g_log, "mark %u at frame %u %.4f\n", g_marksDone, ld32(kFrameCount), seconds);
+	for (size_t i = 1; i < g_views.size(); ++i)
+	{
+		const View& before{ g_views[i - 1] }, & now{ g_views[i] };
+		if (before.m_Walked == now.m_Walked) continue;
+		std::fprintf(g_log, " mark's view: frame %u %.4f walked %u -> %u\n", now.m_Frame, now.m_Seconds, before.m_Walked, now.m_Walked);
+		Dump("the view before", before.m_State, before.m_Calls);
+		Dump("this view", now.m_State, now.m_Calls);
+	}
+	std::fprintf(g_log, "mark %u ends\n", g_marksDone);
+	std::fflush(g_log);
+}
+
 //(world, position)
 void Root(PPCContext& c)
 {
@@ -114,6 +147,9 @@ void Root(PPCContext& c)
 	g_walkedBefore = g_walked;
 	g_callsBefore = g_calls;
 	g_viewBefore = view;
+	g_views.push_back({ ld32(kFrameCount), g_walked, seconds, view, g_calls });
+	while (g_views.front().m_Seconds < seconds - kMarkSeconds) g_views.pop_front();
+	if (g_marksDone != g_marks.load()) WriteMark(seconds);
 }
 
 //(tree, position) gives the zone's number
@@ -211,6 +247,13 @@ void Clip(PPCContext& c)
 }
 
 } //namespace
+
+bool zones_mark()
+{
+	if (!g_log) return false;
+	rt_log("goldeneye: mark %u in the portal walk's log, frame %u", ++g_marks, ld32(kFrameCount));
+	return true;
+}
 
 void install_zones()
 {

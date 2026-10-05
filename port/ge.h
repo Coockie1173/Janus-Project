@@ -114,6 +114,7 @@ void install_movies(); //movies.cpp
 void install_files(); //files.cpp
 void install_records(); //records.cpp
 void install_zones(); //zones.cpp
+bool zones_mark(); //F9 with GE_ZONELOG: a mark in the log, false when there is none
 bool skip_movies(); //a movie that plays once is over before it starts
 void set_skip_movies(bool on);
 void install_tweaks(); //tweaks.cpp

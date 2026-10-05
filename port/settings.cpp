@@ -1042,6 +1042,11 @@ bool settings_event(const SDL_Event* e) {
         if (!e->key.repeat) open(!g_open);
         return true;
     }
+    if (!g_open && e->type == SDL_EVENT_KEY_DOWN && e->key.scancode == SDL_SCANCODE_F9 && !e->key.repeat && zones_mark()) {
+        g_toast = "Marked";
+        g_toastUntil = Clock::now() + std::chrono::milliseconds(700);
+        return true;
+    }
     if (!g_open) return e->type == SDL_EVENT_KEY_DOWN && HotkeyDown(e->key);
     bool taken = menu_event(e);
     RefreshHotkeyPages();
