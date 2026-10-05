@@ -104,8 +104,6 @@ bool skip_cutscenes(); //a mission's opening cutscene is skipped
 void set_skip_cutscenes(bool on);
 void cutscenes_frame(); //once a frame, on the game's thread
 bool skipping_cutscene(); //an opening is being skipped right now
-void checkpoint_recorded(uint32_t entrance); //autosave.cpp tells: the first one after a skipped opening is loaded again
-void cutscenes_reload(PPCContext& c); //once a frame, on the game's thread, after autosave_frame
 bool cutscene_input_waiting(); //qte.cpp, a cutscene asked for a button in the last frames
 void install_qte(); //qte.cpp
 bool auto_qte(); //quick time events press their own buttons
@@ -134,7 +132,6 @@ void set_no_tutorials(bool on);
 void install_autosave(); //autosave.cpp
 void autosave_frame(PPCContext& c); //once a frame, on the game's thread
 bool autosave(); //a checkpoint saves the game
-bool autosave_busy(); //a checkpoint is recorded and its save isn't written yet
 void set_autosave(bool on);
 bool joined_game(); //input.cpp
 void install_noclip(); //noclip.cpp

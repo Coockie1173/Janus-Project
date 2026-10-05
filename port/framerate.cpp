@@ -84,7 +84,6 @@ void frame_tick(PPCContext& c) {
         frame = f;
         each_frame(f);
         autosave_frame(c);
-        cutscenes_reload(c);
     }
     collision_tick();
     //skipping a cutscene: long steps (g_skip_rate frames a second of the game's time) that
