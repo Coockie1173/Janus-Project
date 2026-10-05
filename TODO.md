@@ -18,7 +18,7 @@ Importance:
 - [ ] **high** The camera is locked while aiming in
 - [ ] **high** Doors break when the intro skip is used
 - [ ] **high** Tank: the cars are broken
-- [ ] **high** Flickering issue
+- [X] **high** Flickering issue
 - [ ] **high** Animated textures break above 60 fps
 
 ## High FPS
