@@ -60,6 +60,7 @@ const uint32_t kMissionStart = 1; //the entrance a mission begins at
 const uint32_t kCurrentLevel = 0x805D1804; //the hash of the level that is loaded
 const uint32_t kAppPtr = 0x806EB694, kAppEntrance = 0x338; //the entrance StartLevelChange loads the level at
 
+const uint32_t kNextMissionCall = 0x80009334; //where fn_800092F0 (the app's update) returns to from StartLevelChange(app, the level at app+0x35C, 0)
 const uint32_t kWaitFrames = 150; //a level that gives the player the controls for this long has no opening
 const uint32_t kCountingFrames = 3; //the level's time went up this many frames in a row: it runs
 const double kMaxSeconds = 600; //ten minutes of cutscene, then something is wrong
@@ -189,6 +190,12 @@ void MenuPending(PPCContext& c)
 	uint32_t menu = c.r[3];
 	bool acts = ld8(menu + kPendingReady) > 2;
 	g_restarting = acts && ld32(menu + kPendingAction) == kActionRestartLevel;
+	if (acts && g_trace)
+	{
+		uint32_t page = ld32(menu + kMenuPages + ld32(menu + kMenuPage) * 4);
+		rt_log("goldeneye: skip cutscenes: menu action %u, level %08X, entrance %u, item %04X, split %u", ld32(menu + kPendingAction),
+			ld32(menu + kPendingLevel), ld32(menu + kPendingEntrance), guest_ptr(page) ? ld16(page + 0xC) : 0xFFFF, ld8(menu + kPendingSplit));
+	}
 	if (acts && ld32(menu + kPendingAction) == kActionLoadLevel)
 	{
 		if (g_forced_level && StartsCampaignLevel(menu))
@@ -216,6 +223,9 @@ void MenuPending(PPCContext& c)
 void LevelChange(PPCContext& c)
 {
 	uint32_t app = ld32(kAppPtr), level = c.r[4];
+	if (g_trace)
+		rt_log("goldeneye: skip cutscenes: level change to %08X, entrance %u, %s, from %08X", level, guest_ptr(app) ? ld32(app + kAppEntrance) : 0,
+			g_restarting ? "a restart" : "not a restart", c.lr);
 	if (g_restarting)
 	{
 		if (guest_ptr(app) && ld32(app + kAppEntrance) <= kMissionStart)
@@ -229,6 +239,8 @@ void LevelChange(PPCContext& c)
 		}
 		else Stop("a level change");
 	}
+	//"Save and Continue": the next mission is loaded by the app's update, not by the menu
+	else if (c.lr == kNextMissionCall && guest_ptr(app) && ld32(app + kAppEntrance) == kMissionStart) Arm(level);
 	else if (g_state == Skip::Running) Stop("a level change");
 	orig_level_change(c);
 }
