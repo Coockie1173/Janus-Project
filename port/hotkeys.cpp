@@ -6,6 +6,7 @@
 //switch (set, and back to what it was on the next press), with the value for the last two
 //more than one hotkey can be on a key, they all go
 #include "hotkeys.h"
+#include "debug.h"
 #include "ge.h"
 #include <algorithm>
 #include <cstdio>
@@ -71,6 +72,7 @@ std::string Press(Hotkey& h)
 		break;
 	default: break;
 	}
+	debug_setting(s.id.c_str(), s.get()); //a recording keeps the value, the replay needn't have the key
 	return s.label + ": " + s.show(s.get());
 }
 

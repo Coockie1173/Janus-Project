@@ -5,6 +5,8 @@
 # played here is kept. Play to where the test should start, stand still, close the window.
 # Skip Intro Cutscenes is off while recording, whatever the settings say: the times in a
 # recording are the game's, so one made with the opening played replays with it skipped too.
+# Hotkeys (noclip, the frame rate... F1 > Hotkeys) are recorded as the values they set, so the
+# replay needs no hotkeys.txt; what is changed in the F1 menu itself is not recorded.
 # The input lands in build/rec/NAME.rec, the save it started from in build/rec/NAME.nand, the
 # launcher's settings it was played with in build/rec/NAME.env;
 # REPLAY=NAME tools/scripted_run.sh "" SECONDS plays it back.

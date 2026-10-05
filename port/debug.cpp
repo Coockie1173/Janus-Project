@@ -28,7 +28,8 @@
 //"64:*806EB698+FC" watches the word that far into what the pointer holds at that time
 //GE_TRACEW="80776B10" log that word whenever it changes (checked 200 times a second)
 //GE_PEEK="80ABCDEF,80ABCDF0" log those floats every half second
-//GE_RECORD=F writes the classic controller's state and the mouse's motion as played into F
+//GE_RECORD=F writes the classic controller's state, the mouse's motion and what the hotkeys
+//set (noclip, the frame rate...) as played into F
 //GE_REPLAY=F plays F back in their place, then hands the controls back. with it every time
 //above counts from the replay's end (tools/record_run.sh, and REPLAY=name for scripted_run.sh)
 //GE_REPLAY_FROM=N leaves out the recording's first N parts (a part ends where a level loads or
@@ -381,15 +382,18 @@ void peek_main(std::vector<uint32_t> addrs) {
 //"sens S I" the mouse's sensitivity and invert it was played with
 //"c T buttons lx ly rx ry lt rt" the classic controller from T on, written when it changes
 //"m T dx dy" mouse motion in pixels
+//"h T id value" a hotkey left the setting with that id (hotkeys.h) at that value
 //"a" the local player appeared or went (a level loaded or was left), the times after it count from there
 //loads never take the same time twice, so the replay waits for each "a" to happen
 struct RecPad { double t; uint32_t buttons; float lx, ly, rx, ry, lt, rt; uint32_t extra; }; //extra: the sprint key and its like, 0 in an old recording
 struct RecMove { double t; float dx, dy; };
+struct RecSet { size_t part; double t; std::string id; float value; };
 struct RecPart { std::vector<RecPad> pads; std::vector<RecMove> moves; };
 std::mutex rec_lock;
 FILE* rec_out = nullptr;
 std::vector<RecPart> rec_parts;
-size_t rec_part = 0, rec_pad = 0, rec_move = 0, rec_from = 0;
+std::vector<RecSet> rec_sets; //every part's, they go in order whatever part they were in
+size_t rec_part = 0, rec_pad = 0, rec_move = 0, rec_set = 0, rec_from = 0;
 double rec_start = 0; //when the current part began
 bool rec_player = false;
 float rec_sens = 1.0f;
@@ -408,11 +412,18 @@ bool load_recording(const char* path) {
     while (std::fgets(line, sizeof line, f)) {
         RecPad p{};
         RecMove m{};
+        RecSet h{};
+        char id[32];
         int inv = 0;
         if (line[0] == 'a') rec_parts.emplace_back();
         else if (std::sscanf(line, "c %lf %x %f %f %f %f %f %f %x", &p.t, &p.buttons, &p.lx, &p.ly, &p.rx, &p.ry, &p.lt, &p.rt, &p.extra) >= 8)
             rec_parts.back().pads.push_back(p);
         else if (std::sscanf(line, "m %lf %f %f", &m.t, &m.dx, &m.dy) == 3) rec_parts.back().moves.push_back(m);
+        else if (std::sscanf(line, "h %lf %31s %f", &h.t, id, &h.value) == 3) {
+            h.part = rec_parts.size() - 1;
+            h.id = id;
+            rec_sets.push_back(h);
+        }
         else if (std::sscanf(line, "sens %f %d", &rec_sens, &inv) == 2) rec_invert = inv != 0;
     }
     std::fclose(f);
@@ -455,7 +466,7 @@ void record_classic(ClassicState& s) {
     s.buttons = rec_now.buttons;
     s.extra = rec_now.extra;
     s.lx = rec_now.lx; s.ly = rec_now.ly; s.rx = rec_now.rx; s.ry = rec_now.ry; s.lt = rec_now.lt; s.rt = rec_now.rt;
-    if (rec_part + 1 == rec_parts.size() && rec_pad == part.pads.size() && rec_move == part.moves.size()) replay_done();
+    if (rec_part + 1 == rec_parts.size() && rec_pad == part.pads.size() && rec_move == part.moves.size() && rec_set == rec_sets.size()) replay_done();
 }
 
 void record_mouse(float& dx, float& dy) {
@@ -493,6 +504,25 @@ void debug_classic(ClassicState& s) {
             if (h.stick == 'r') { s.rx = h.x; s.ry = h.y; }
             else { s.lx = h.x; s.ly = h.y; }
         }
+}
+
+void debug_setting(const char* id, float value) {
+    std::lock_guard<std::mutex> lk(rec_lock);
+    if (!rec_out) return;
+    std::fprintf(rec_out, "h %.3f %s %g\n", now_s() - rec_start, id, value);
+    std::fflush(rec_out);
+}
+
+//a part left out (GE_REPLAY_FROM) or over still sets what it set, right away
+bool debug_setting_due(std::string& id, float& value) {
+    std::lock_guard<std::mutex> lk(rec_lock);
+    if (!replaying || rec_set == rec_sets.size()) return false;
+    const RecSet& h = rec_sets[rec_set];
+    if (h.part > rec_part || (h.part == rec_part && rec_part >= rec_from && h.t > now_s() - rec_start)) return false;
+    id = h.id;
+    value = h.value;
+    ++rec_set;
+    return true;
 }
 
 void debug_mouse(float& dx, float& dy) {

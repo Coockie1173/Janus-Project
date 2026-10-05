@@ -37,6 +37,7 @@ void settings_init(); //settings.cpp
 bool settings_event(const SDL_Event* e);
 void settings_draw();
 bool settings_toast(); //a hotkey's line is up
+void settings_replay(); //a recording's hotkeys, every frame
 #endif
 
 namespace {
@@ -211,6 +212,7 @@ void watches() {
 }
 
 void draw() {
+    settings_replay();
     if (!overlay_open() && !g_show_state && !skipping_cutscene() && !settings_toast()) return;
     //with only the state shown the cursor stays hidden over the picture
     ImGuiIO& io = ImGui::GetIO();

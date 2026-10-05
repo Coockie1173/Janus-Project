@@ -17,6 +17,7 @@
 //drawn by the overlay (overlay.cpp) on the renderer's thread
 //
 //GE_SETTINGS=N start with the menu up on page N, handy for screenshots
+#include "debug.h"
 #include "ge.h"
 #include "hotkeys.h"
 #include <algorithm>
@@ -905,6 +906,30 @@ bool HotkeyDown(const SDL_KeyboardEvent& k)
 	return true;
 }
 
+//what the hotkeys set in a recording (GE_REPLAY), said and logged like a press. the launcher's
+//file isn't the replay's to change
+void ReplayHotkeys()
+{
+	std::string id;
+	float value{};
+	while (debug_setting_due(id, value))
+	{
+		auto s = std::find_if(g_settings.begin(), g_settings.end(), [&id](const Setting& s) { return s.id == id; });
+		if (s == g_settings.end())
+		{
+			rt_log("goldeneye: replay: no setting \"%s\"", id.c_str());
+			continue;
+		}
+		bool dirty = g_dirty, fpsChanged = g_fps_changed;
+		s->set(value);
+		g_dirty = dirty;
+		g_fps_changed = fpsChanged;
+		g_toast = s->label + ": " + s->show(s->get());
+		g_toastUntil = Clock::now() + std::chrono::milliseconds(1800);
+		rt_log("goldeneye: replay: %s", g_toast.c_str());
+	}
+}
+
 void DrawToast(ImDrawList* dl, const Layout& L)
 {
 	float left = std::chrono::duration<float>(g_toastUntil - Clock::now()).count();
@@ -1065,6 +1090,7 @@ bool menu_event(const SDL_Event* e) {
 
 //runs inside the overlay's ImGui frame
 bool settings_toast() { return Clock::now() < g_toastUntil; }
+void settings_replay() { ReplayHotkeys(); }
 
 void settings_draw() {
     if (!g_open && !settings_toast()) return;
