@@ -20,7 +20,7 @@ SCRIPT=$1; [ "$SCRIPT" = dam ] && SCRIPT=$DAM
 [ "$SCRIPT" = training ] && { SCRIPT="8:A 12:U 13:A 16:A"; [ -n "$REPLAY" ] && { GE_REPLAY_FROM=1; export GE_REPLAY_FROM; }; }
 SECS=${2:-60}; EVERY=${3:-300}; shift 3 2>/dev/null
 rm -rf build/frames; mkdir -p build/frames
-NAND=build/nand
+NAND=${NAND:-build/nand}
 if [ -n "$REPLAY" ]; then
     [ -f "build/rec/$REPLAY.rec" ] || { echo "no recording build/rec/$REPLAY.rec"; exit 1; }
     rm -rf build/rec/run.nand; cp -a "build/rec/$REPLAY.nand" build/rec/run.nand

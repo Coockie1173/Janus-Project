@@ -10,6 +10,7 @@
 //files.cpp a finished file read is counted once
 //autosave.cpp a checkpoint saves the game
 //records.cpp tells who frees an animator's collision records while they are held
+//zones.cpp keeps the level behind a portal drawn while the camera is right at it, and logs the portal walk
 //tweaks.cpp the level timer, the unused extras menu, auto start, no tutorials
 //tank.cpp the tank: the mouse on its aim, its buttons, driving at higher frame rates
 //noclip.cpp fly through the level
@@ -112,6 +113,7 @@ void set_auto_qte(bool on);
 void install_movies(); //movies.cpp
 void install_files(); //files.cpp
 void install_records(); //records.cpp
+void install_zones(); //zones.cpp
 bool skip_movies(); //a movie that plays once is over before it starts
 void set_skip_movies(bool on);
 void install_tweaks(); //tweaks.cpp

@@ -49,3 +49,7 @@ ge_records_new         # an animator's collision records are made for a slot: re
 ge_records_release     # a slot gives its records back: forgotten
 ge_records_destroy     # a slot is destroyed with its records: forgotten
 ge_heap_free           # any block is freed: logged when it is a slot's records and the slot still holds them
+ge_zone_root           # a view's portal walk starts: GE_ZONELOG logs the camera's position and what the walk found
+ge_zone_at             # the zone a position lies in: the one the walk starts from is logged
+ge_zone_walk           # a zone is drawn and its portals gone through: counted
+ge_portal_clip         # a portal is cut to the screen: one the camera is right at is kept; kept and dropped ones counted
