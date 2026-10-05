@@ -53,7 +53,7 @@ const uint32_t kPendingSplit = 0x7E7; //a byte, split screen goes its own way
 const uint32_t kPendingLevel = 0x7D4; //the level's hash
 const uint32_t kPendingEntrance = 0x7DC; //where in the level the player starts
 const uint32_t kMenuPage = 0x220, kMenuPages = 0x2C8;
-const uint32_t kActionRestartLevel = 3, kActionLoadLevel = 5;
+const uint32_t kActionRestartLevel = 3, kActionLoadLevel = 5, kActionContinue = 6; //6: the main menu's Continue Game
 //the item picked on the page the level starts from, 0x13..0x16 are the campaign's difficulties
 const uint16_t kItemOperative = 0x13, kItemClassic = 0x16;
 const uint32_t kMissionStart = 1; //the entrance a mission begins at
@@ -78,7 +78,7 @@ std::atomic<bool> g_running{false};
 PPCFunc orig_menu_pending = nullptr;
 PPCFunc orig_level_change = nullptr;
 PPCFunc orig_frame_draw = nullptr;
-bool g_restarting = false; //the menu's restart action is running
+bool g_restarting = false; //the menu's restart action is running, or its Continue Game: both go straight to StartLevelChange
 bool g_trace = false;
 int g_forced_entrance = -1; //GE_ENTRANCE
 uint32_t g_forced_level = 0; //GE_LEVEL, a level's hash: whichever mission the menu starts, this one loads
@@ -189,7 +189,7 @@ void MenuPending(PPCContext& c)
 {
 	uint32_t menu = c.r[3];
 	bool acts = ld8(menu + kPendingReady) > 2;
-	g_restarting = acts && ld32(menu + kPendingAction) == kActionRestartLevel;
+	g_restarting = acts && (ld32(menu + kPendingAction) == kActionRestartLevel || ld32(menu + kPendingAction) == kActionContinue);
 	if (acts && g_trace)
 	{
 		uint32_t page = ld32(menu + kMenuPages + ld32(menu + kMenuPage) * 4);
