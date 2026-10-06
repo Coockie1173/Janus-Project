@@ -32,10 +32,10 @@ cp wiikit/disc.py wiikit/rvz.py wiikit/aes.py "$S/launcher/wiikit/"
 : > "$S/launcher/wiikit/__init__.py"
 cp -r build/deps/winpy/python "$S/python"
 cp "$S/python/LICENSE.txt" "$S/licenses/python.txt"
-# the mods folder goes along as it is: the .edb files and online.txt (README.md, Mods)
+# the mods folder goes along as it is: the .edb files, their .png pictures and online.txt (README.md, Mods)
 mkdir -p "$S/mods"
 if ls mods/*.edb mods/online.txt >/dev/null 2>&1; then
-    for f in mods/*.edb mods/online.txt; do [ -f "$f" ] && cp "$f" "$S/mods/"; done
+    for f in mods/*.edb mods/*.png mods/online.txt; do [ -f "$f" ] && cp "$f" "$S/mods/"; done
     echo "mods: $(ls "$S/mods" | tr '\n' ' ')"
 fi
 # Windows line ends for what Notepad and cmd read

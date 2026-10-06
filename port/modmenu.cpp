@@ -16,10 +16,11 @@
 //row: where kind 0xB was found
 //
 //the Mods page is one more entry in the array (a new block from the game's own allocator, so
-//the game can grow or free it as it would its own): a kind 0xB row for each level. Extras gets
-//rows made here, its items and "Mods". a layout draws all of its slots, filled or not, so each
-//list is given the layout of one of the game's pages with as many slots as it has items
-//(kLayouts). the texts are answered from here (prompts.cpp asks for every text the game looks
+//the game can grow or free it as it would its own): a level select (class 7D030007, the lit
+//level's picture beside the list, port/pictures.cpp) with the rows Conflict's has before its
+//maps and a kind 0xB row for each level. Extras gets rows made here, its items and "Mods". a
+//layout draws all of its slots, filled or not, so each list is given the layout of one of the
+//game's pages with as many slots as it has items (kLayouts). the texts are answered from here (prompts.cpp asks for every text the game looks
 //up)
 //the unused extras menu's items are in the same rows when that cheat is on. it used to be two
 //writes to where the array was on the heap, which is somewhere else when mods add files
@@ -76,14 +77,14 @@ const Layout kLayouts[] = {
 	{0x80580EF8, 25}}; //eight: 7D0000A2, whose own list is longer and scrolls
 const uint32_t kLayoutTop = 4, kMostSlots = 8;
 const uint32_t kTitleRow = 3;
-const uint32_t kPlainClass = 0x7D030000; //the class of a page that is a list
+const uint32_t kLevelSelectClass = 0x7D030007; //the class of a page that is a list of levels with the lit one's picture
 const uint32_t kUnusedItems = 10, kUnusedItemCount = 6; //Credits, Cheat Codes, then the four unused ones
 const uint32_t kGameItemCount = 2;
 const uint32_t kUnusedFoot = 16; //the footer's row there, then a row a item: the line that says what the item is
 const uint32_t kKindAbout = 0x00AB0000;
 const uint32_t kKindPage = 0x00010000, kKindLevel = 0x000B0000;
 const uint32_t kMissionStart = 1; //the entrance a level begins at
-const uint32_t kTextMods = 0x4300F0FF, kTextAbout = 0x4300F0FE, kTextAboutLevel = 0x4300F0FD, kTextLevel = 0x4300F000; //the game's own texts stop at 430017xx
+const uint32_t kTextMods = 0x4300F0FF, kTextAbout = 0x4300F0FE, kTextLevel = 0x4300F000; //the game's own texts stop at 430017xx
 const uint32_t kConflictMapsPage = 0x7D000045;
 const uint32_t kConflictRows = 0x805830C8, kConflictRowCount = 16; //the game's
 const uint32_t kConflictHead = 6; //the rows before the maps
@@ -182,19 +183,19 @@ bool Build(const PPCContext& c)
 {
 	g_texts[kTextMods] = Text(c, "Mods");
 	g_texts[kTextAbout] = Text(c, "Play the levels in the mods folder.");
-	g_texts[kTextAboutLevel] = Text(c, "Play this level.");
 	for (size_t i = 0; i < g_levels.size(); ++i) g_texts[kTextLevel + (uint32_t)i] = Text(c, Shown(g_levels[i].name));
 	for (const auto& text : g_texts)
 		if (!text.second) return false;
 
+	//a level select like Conflict's: its rows before the maps, then a level a row
 	const uint32_t levels = (uint32_t)g_levels.size();
-	uint32_t at = ListRows(c, levels, kTextMods, g_mods_rows, g_mods_row_count);
-	if (!at) return false;
-	for (uint32_t i = 0; i < levels; ++i)
-	{
-		Row(at + i * kRowSize, kTextLevel + i, g_levels[i].hash, kMissionStart, kKindLevel);
-		Row(at + (levels + 1 + i) * kRowSize, kTextAboutLevel, 0, 0, kKindAbout);
-	}
+	g_mods_row_count = kConflictHead + levels;
+	g_mods_rows = Alloc(c, g_mods_row_count * kRowSize);
+	if (!g_mods_rows) return false;
+	CopyRows(g_mods_rows, kConflictRows, kConflictHead);
+	st32(g_mods_rows + kTitleRow * kRowSize, kTextMods);
+	for (uint32_t i = 0; i < levels; ++i) Row(g_mods_rows + (kConflictHead + i) * kRowSize, kTextLevel + i, g_levels[i].hash, kMissionStart, kKindLevel);
+	uint32_t at = 0;
 
 	for (int unused = 0; unused < 2; ++unused)
 	{
@@ -343,6 +344,8 @@ void PickNextMaps(PPCContext& c)
 
 } //namespace
 
+std::string mod_shown_name(const std::string& file) { return Shown(file); }
+
 uint32_t mods_menu_text(uint32_t hash)
 {
 	//the line under the Multiplayer menu's list: which way online is lit
@@ -395,7 +398,7 @@ void mods_menu_frame(PPCContext& c)
 		st32(page, kModsPage);
 		st32(page + kPageRows, g_mods_rows);
 		st32(page + kPageRowCount, g_mods_row_count);
-		st32(page + kPageClass, kPlainClass);
+		st32(page + kPageClass, kLevelSelectClass);
 		st32(kPages + kPagesData, fresh);
 		st32(kPages + kPagesCount, count + 1);
 		st32(kPages + kPagesRoom, count + 1);

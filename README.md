@@ -54,7 +54,7 @@ system's Python, and `README.txt` (`port/linux/`). It needs glibc 2.38,
 OpenSSL 3 and OpenGL 4.5 where it runs; online and crash dumps work there.
 
 Both packages take the `mods/` folder along as it is when they are made
-(its `.edb` files and `online.txt`, see Mods below), so what is in it when
+(its `.edb` files, their `.png` pictures and `online.txt`, see Mods below), so what is in it when
 `make win` or `make linux` runs ships in the zip.
 
 The boot ROM fonts and the DSP's resampling table (`font_western.bin`,
@@ -102,7 +102,11 @@ file has its hash. The levels among them are listed in the game's menu
 under Extras > Mods. With an `online.txt` in the folder (a mod's file name or
 a file's hash a line) the Multiplayer menu has two ways online: Connect to
 Nintendo WFC with the game's own maps for Conflict, Connect to WFC Modded
-with the listed ones. A level is the hash of its file: `GE_LEVEL=01810201
+with the listed ones. A `.png` with a level's name next to it (`mt_yard.png`
+for `mt_yard.edb`) is its picture in the menus: beside the list in Extras >
+Mods and in Conflict's map list, and for the two maps a network game offers.
+Any size: its middle is cut to the panel's shape (0.85 times as wide as
+high) and shown at 256 x 256. A level is the hash of its file: `GE_LEVEL=01810201
 ./launch.sh` starts that level whichever mission is picked in the menu.
 New levels are made from glTF scenes with
 [eurochef-GE](https://github.com/Coockie1173/eurochef-GE), a fork of

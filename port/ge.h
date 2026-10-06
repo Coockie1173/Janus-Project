@@ -25,6 +25,7 @@
 //flipbooks.cpp animated textures (fire, screens) play at the console's speed at any frame rate
 //mods.cpp loose .edb files in place of the disc's, or on top of them
 //modmenu.cpp Extras > Mods in the game's menu, the levels among the mods
+//pictures.cpp a mod level's .png as its picture in the menus
 //native.cpp the engine's hot math routines written for the host
 //net.cpp the hosts file for the game's servers
 //overlay.cpp the debug overlay (F3), memory watches from a .dmw file (dmw.cpp)
@@ -106,6 +107,9 @@ const std::string& mods_folder(); //empty when there's none
 void install_mods_menu(); //modmenu.cpp, after install_mods
 void mods_menu_frame(PPCContext& c); //once a frame, on the game's thread
 uint32_t mods_menu_text(uint32_t hash); //the characters of one of the Mods menu's texts, 0 for any other
+std::string mod_shown_name(const std::string& file); //a mod level's name in the menus, from its file's
+void install_pictures(); //pictures.cpp, after install_mods
+void pictures_file(uint32_t hash, uint32_t file); //a file (the game's object for it) was given its memory
 void install_gecko(); //gecko.cpp
 void gecko_apply();
 void install_fov(); //fov.cpp

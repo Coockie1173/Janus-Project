@@ -8,6 +8,7 @@
 //
 //the levels among them can be picked in the game's menu: Extras > Mods (port/modmenu.cpp)
 //online.txt in the folder is a list of maps for multiplayer's Conflict (the same file)
+//a .png with a level's name is its picture in the menus (port/pictures.cpp)
 //
 //GE_MODS=DIR the folder, every .edb in it (mods in the game's folder by default)
 //GE_TRACEFILES=1 log every file the game gives memory to, with its size
@@ -136,7 +137,7 @@ bool ReadMod(const std::filesystem::path& path, Mod& mod)
 //a file that gets no memory is never loaded and the game says nothing: the level then has no
 //floor. ge_geofile_onload (802EBC10): the file's info at +0xC with the size at +0x30
 PPCFunc orig_onload = nullptr;
-const uint32_t kFileInfo = 0xC, kFileName = 0x10, kFileLoaded = 0x14, kInfoSize = 0x30, kInfoHash = 0x20;
+const uint32_t kFileInfo = 0xC, kFileName = 0x10, kFileLoaded = 0x14, kFileHash = 0x20, kInfoSize = 0x30, kInfoMemory = 0x3C;
 
 void OnLoad(PPCContext& c)
 {
@@ -146,8 +147,9 @@ void OnLoad(PPCContext& c)
 	const uint32_t size = pending && guest_ptr(info) ? ld32(info + kInfoSize) : 0;
 	const uint32_t name = guest_ptr(file) ? ld32(file + kFileName) : 0;
 	orig_onload(c);
+	if (guest_ptr(file)) pictures_file(ld32(file + kFileHash), file);
 	static const bool trace = std::getenv("GE_TRACEFILES") != nullptr;
-	if (trace) rt_log("goldeneye: file %s: %u bytes, loaded %u, memory %08X, returns %u", guest_ptr(name) ? (const char*)PPC_MEM(name) : "?", guest_ptr(info) ? ld32(info + kInfoSize) : 0, guest_ptr(file) ? ld32(file + kFileLoaded) : 0, guest_ptr(info) ? ld32(info + 0x3C) : 0, c.r[3]);
+	if (trace) rt_log("goldeneye: file %s: %u bytes, loaded %u, memory %08X, returns %u", guest_ptr(name) ? (const char*)PPC_MEM(name) : "?", guest_ptr(info) ? ld32(info + kInfoSize) : 0, guest_ptr(file) ? ld32(file + kFileLoaded) : 0, guest_ptr(info) ? ld32(info + kInfoMemory) : 0, c.r[3]);
 	if (pending && size && c.r[3] == 0)
 		rt_log("goldeneye: no memory for the file %s (%u bytes), it isn't loaded", guest_ptr(name) ? (const char*)PPC_MEM(name) : "?", size);
 }

@@ -68,6 +68,7 @@ void install() {
     install_hosts();
     install_mods();
     install_mods_menu();
+    install_pictures();
     install_fov();
     install_gecko();
     install_crash_handler();
