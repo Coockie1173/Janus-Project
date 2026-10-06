@@ -100,16 +100,21 @@ bool IsColourFilter(uint32_t mesh) {
 
 //for a level's picture (pictures.cpp) the hud and the player's own gun and body are left out
 //the hud's meshes have 0x40000000 in their flags and are drawn 28 ahead of the eye, the gun's
-//parts and the body are within a unit of it
-const uint32_t kMeshOnHud = 0x40000000;
-const float kHudAhead = 28.0f, kOwnReach = 1.0f;
+//parts are within a unit of it
+//the arms and the body are a character's skinned parts (3 in the flags), all drawn from the
+//body's own place: 0.86 from the eye at the game's frame rate, 1.53 at 144
+const uint32_t kMeshOnHud = 0x40000000, kMeshFollowsCamera = 0x1000, kMeshSkinned = 0x3;
+const float kHudAhead = 28.0f, kOwnReach = 1.0f, kBodyReach = 2.5f;
 bool OutOfPicture(uint32_t entry) {
     if (!guest_ptr(entry)) return false;
     uint32_t mtx = ld32(entry + kEntryDrawMtx), mesh = ld32(entry + kEntryMesh);
     if (!guest_ptr(mtx) || !guest_ptr(mesh)) return false;
     float x = ldf(mtx + 12), y = ldf(mtx + 28), z = ldf(mtx + 44);
-    if ((ld32(mesh + kMeshFlags) & kMeshOnHud) && std::fabs(z + kHudAhead) < 0.5f) return true;
-    return x * x + y * y + z * z < kOwnReach * kOwnReach;
+    uint32_t flags = ld32(mesh + kMeshFlags);
+    if ((flags & kMeshOnHud) && std::fabs(z + kHudAhead) < 0.5f) return true;
+    if (flags & kMeshFollowsCamera) return false; //the sky, a colour filter
+    float reach = (flags & kMeshSkinned) == kMeshSkinned ? kBodyReach : kOwnReach;
+    return x * x + y * y + z * z < reach * reach;
 }
 
 void DrawDelayed(PPCContext& c) {
