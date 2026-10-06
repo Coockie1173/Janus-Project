@@ -48,6 +48,7 @@ void each_frame(uint32_t frame) {
     fov_apply();
     cutscenes_frame();
     mouse_frame(frame);
+    heap_frame();
 }
 
 namespace {
@@ -68,7 +69,9 @@ void install() {
     install_tweaks();
     install_movies();
     install_files();
+    install_heap();
     install_records();
+    install_sweep();
     install_zones();
     install_tank();
     install_body();

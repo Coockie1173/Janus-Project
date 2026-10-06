@@ -33,6 +33,7 @@ const uint32_t kManagerState = 0x8, kManagerSlot = 0x18; //the slot of the profi
 const uint32_t kStateNone = 0, kStateIdle = 10;
 const uint32_t kSlots = 3;
 const uint32_t kCurrentLevel = 0x805D1804; //the hash of the level that is loaded
+const uint32_t kLevelKind = 0xFFFF0000, kMultiplayerLevel = 0x01A00000; //the campaign's are 0181xxxx
 const uint32_t kFrontEnd = 0x01080004; //the menus are a level too, with a restart point of their own
 const uint32_t kTimeChallenge = 0x805E05AB; //a byte, the screen saves without the checkpoint then
 const uint32_t kWriteQuiet = 1; //ge_save_write's flag: no "Saved" box
@@ -69,10 +70,13 @@ bool ManagerIdle()
 	return state == kStateNone || state == kStateIdle;
 }
 
-//no profile (continue without save), a time challenge and a joined game have nothing to save
+//no profile (continue without save), a time challenge and a multiplayer game have nothing to save
+//a hosted network game got past the joined one's test and wrote its map into the campaign's
+//save (run(7).log of 2026-10-06, level 01A00005), so it's any network game and any multiplayer map
 bool CanSave()
 {
-	return ld32(kSaveManager + kManagerSlot) < kSlots && ld8(kTimeChallenge) == 0 && !joined_game();
+	bool multiplayer = network_game() || (ld32(kCurrentLevel) & kLevelKind) == kMultiplayerLevel;
+	return ld32(kSaveManager + kManagerSlot) < kSlots && ld8(kTimeChallenge) == 0 && !multiplayer;
 }
 
 uint32_t Step(PPCContext& c)

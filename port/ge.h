@@ -10,6 +10,8 @@
 //files.cpp a finished file read is counted once
 //autosave.cpp a checkpoint saves the game
 //records.cpp tells who frees an animator's collision records while they are held
+//heap.cpp a free of something that isn't a block is logged and left out
+//sweep.cpp a moving shape's sweep is kept to a number of steps that ends
 //zones.cpp keeps the level behind a portal drawn while the camera is right at it, and logs the portal walk
 //tweaks.cpp the level timer, the unused extras menu, auto start, no tutorials
 //tank.cpp the tank: the mouse on its aim, its buttons, driving at higher frame rates
@@ -34,6 +36,7 @@
 #include "video.h"
 #include <cstdint>
 #include <cstring>
+#include <string>
 
 namespace ge {
 
@@ -120,6 +123,11 @@ void set_auto_qte(bool on);
 void install_movies(); //movies.cpp
 void install_files(); //files.cpp
 void install_records(); //records.cpp
+void records_freed(const PPCContext& c, uint32_t block); //a block is about to be freed
+void install_heap(); //heap.cpp
+void heap_frame(); //once a frame: the heaps are walked in a network game
+std::string call_chain(const PPCContext& c); //who called, from the guest's stack
+void install_sweep(); //sweep.cpp
 void install_zones(); //zones.cpp
 bool zones_mark(); //F9 with GE_ZONELOG: a mark in the log, false when there is none
 bool skip_movies(); //a movie that plays once is over before it starts
@@ -144,6 +152,7 @@ void autosave_frame(PPCContext& c); //once a frame, on the game's thread
 bool autosave(); //a checkpoint saves the game
 void set_autosave(bool on);
 bool joined_game(); //input.cpp
+bool network_game(); //hosted or joined
 void install_noclip(); //noclip.cpp
 bool noclip(); //cheat, the player flies through walls and doesn't fall
 void set_noclip(bool on);

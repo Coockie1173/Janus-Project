@@ -41,9 +41,12 @@ const float kPitchLimit = 1.35f;
 const uint32_t kNetState = 0x805D5460;
 std::atomic<int> g_mouse_mode{0}; //0 auto, 1 direct, 2 stick
 
-bool joined_game() {
+bool network_game() {
     uint32_t mode = ld32(kNetState + 0x30);
-    return (mode == 1 || mode == 2) && ld32(kNetState + 0x10) == 0;
+    return mode == 1 || mode == 2;
+}
+bool joined_game() {
+    return network_game() && ld32(kNetState + 0x10) == 0;
 }
 bool mouse_on_stick() {
     bool stick = g_mouse_mode == 2 || (g_mouse_mode == 0 && joined_game());

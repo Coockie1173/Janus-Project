@@ -48,7 +48,8 @@ ge_world_draw          # the level is drawn for a view: the collision viewer tak
 ge_records_new         # an animator's collision records are made for a slot: remembered with the slot
 ge_records_release     # a slot gives its records back: forgotten
 ge_records_destroy     # a slot is destroyed with its records: forgotten
-ge_heap_free           # any block is freed: logged when it is a slot's records and the slot still holds them
+ge_heap_free           # any block is freed: one that isn't a block in use is logged and left out (port/heap.cpp); a slot's records still held are logged
+ge_sweep_update        # a moving shape's sweep steps are counted: kept to a number that ends (port/sweep.cpp)
 ge_zone_root           # a view's portal walk starts: GE_ZONELOG logs the camera's position and what the walk found
 ge_zone_at             # the zone a position lies in: the one the walk starts from is logged
 ge_zone_walk           # a zone is drawn and its portals gone through: counted

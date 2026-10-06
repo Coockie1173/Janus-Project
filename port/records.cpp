@@ -11,7 +11,6 @@
 //so every array is remembered with its slot here, and a free or a release of one that its
 //slot still holds is logged with the call chain. nothing is changed, it only tells
 #include "ge.h"
-#include <string>
 #include <unordered_map>
 
 namespace ge
@@ -23,27 +22,13 @@ const int kMaxReports = 16;
 std::unordered_map<uint32_t, uint32_t> g_held; //an array and the slot it was made for
 int g_reports = 0;
 
-std::string Chain(const PPCContext& c)
-{
-	std::string chain = rt_name(c.lr);
-	uint32_t sp = c.r[1];
-	for (int depth = 0; depth < 14 && guest_ptr(sp); ++depth)
-	{
-		uint32_t up = ld32(sp);
-		if (!guest_ptr(up) || up <= sp) break;
-		chain += " < " + rt_name(ld32(up + 4));
-		sp = up;
-	}
-	return chain;
-}
-
 void Report(const PPCContext& c, const char* what, uint32_t array, uint32_t slot)
 {
 	if (g_reports++ >= kMaxReports) return;
-	rt_log("goldeneye: collision records %08X %s, the slot at %08X still holds them (frame %u): %s", array, what, slot, ld32(kFrameCount), Chain(c).c_str());
+	rt_log("goldeneye: collision records %08X %s, the slot at %08X still holds them (frame %u): %s", array, what, slot, ld32(kFrameCount), call_chain(c).c_str());
 }
 
-PPCFunc orig_new = nullptr, orig_release = nullptr, orig_destroy = nullptr, orig_free = nullptr;
+PPCFunc orig_new = nullptr, orig_release = nullptr, orig_destroy = nullptr;
 
 //(slot, parts)
 void New(PPCContext& c)
@@ -77,27 +62,23 @@ void Destroy(PPCContext& c)
 	orig_destroy(c);
 }
 
-//(block)
-void Free(PPCContext& c)
-{
-	auto found = g_held.find(c.r[3]);
-	if (found != g_held.end())
-	{
-		if (ld32(found->second) == found->first) Report(c, "were freed", found->first, found->second);
-		g_held.erase(found);
-	}
-	orig_free(c);
-}
-
 } //namespace
+
+//heap.cpp's hook, before a block is freed
+void records_freed(const PPCContext& c, uint32_t block)
+{
+	auto found = g_held.find(block);
+	if (found == g_held.end()) return;
+	if (ld32(found->second) == found->first) Report(c, "were freed", found->first, found->second);
+	g_held.erase(found);
+}
 
 void install_records()
 {
 	orig_new = ppc_hook("ge_records_new", New);
 	orig_release = ppc_hook("ge_records_release", Release);
 	orig_destroy = ppc_hook("ge_records_destroy", Destroy);
-	orig_free = ppc_hook("ge_heap_free", Free);
-	if (!orig_new || !orig_release || !orig_destroy || !orig_free) rt_die("goldeneye: the collision records are not hooked in this build");
+	if (!orig_new || !orig_release || !orig_destroy) rt_die("goldeneye: the collision records are not hooked in this build");
 }
 
 } //namespace ge
