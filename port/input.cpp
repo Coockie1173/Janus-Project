@@ -20,7 +20,8 @@ extern bool g_stick_took; //the mouse is on the stick this frame
 //ge_controller_update (80108A60, controller+4 is its player). the game decides itself which
 //controllers take this console's input: fn_8012A1D0 calls fn_80108D70(controller) before the
 //look update, which returns 0 for the console's own players
-//the mouse goes to the first controller of the frame that returns 0 for
+//the mouse goes to the first controller of the frame that returns 0 for (a host's own
+//players are told apart by the list behind that test, see controller_is_local)
 //(the globals 806EB698 and 805D43EC hold whichever player was made last, online that's someone else)
 //
 //the angles: the player's yaw is the float at +0xDC, radians, growing to the right
@@ -284,15 +285,55 @@ void action_update(PPCContext& c) {
     st32(ctrl + kActHeld, (ld32(ctrl + kActHeld) & ~kActSprint) | (held & kActSprint));
 }
 
+//is this controller played on this console: the game's own test, registers put back after
+//on the host of a network game that test says yes for every player (the word at 805D5470
+//is set: the host runs them all), and the first one of the frame is whoever joined first.
+//the rest of the test is what a joined console goes by, the list of this console's players at
+//805D62F0 (fn_801D0650 looks the controller, or its +0x98C, up in it). so for a host the
+//test is made with that word cleared for the call, interrupts off so no other thread sees it
+//if the list never names a controller of ours (60 frames without one) it's the game's
+//answer again, the first controller, as before
+const uint32_t kMsrEE = 0x8000, kListWait = 60;
+bool controller_is_local(PPCContext& c, uint32_t ctrl, uint32_t frame) {
+    static uint32_t host_since = ~0u, listed_frame = ~0u, said_ctrl = 0;
+    static int said_how = -1;
+    uint32_t host = network_game() ? ld32(kNetState + 0x10) : 0;
+    if (!host) host_since = ~0u;
+    else if (host_since == ~0u) host_since = listed_frame = frame;
+    PPCContext saved = c;
+    uint32_t msr = c.msr;
+    if (host) {
+        ppc_mtmsr(c, msr & ~kMsrEE);
+        st32(kNetState + 0x10, 0);
+    }
+    c.r[3] = ctrl;
+    controller_not_local(c);
+    bool local = (int8_t)c.r[3] == 0;
+    c = saved;
+    int how = 0; //0 the game's test, 1 the list on a host, 2 a host whose list names nobody
+    if (host) {
+        st32(kNetState + 0x10, host);
+        ppc_mtmsr(c, msr);
+        how = 1;
+        if (local) listed_frame = frame;
+        else if (frame - listed_frame > kListWait) { local = true; how = 2; }
+    }
+    if (local && network_game() && (ctrl != said_ctrl || how != said_how)) {
+        said_ctrl = ctrl;
+        said_how = how;
+        static const char* names[] = {"a joined game, the game's own test", "hosting, by the list of this console's players",
+                                      "hosting, the list names nobody: the first controller"};
+        rt_log("goldeneye: network game: this console's controller is %08X, player %08X (%s)", ctrl, ld32(ctrl + 4), names[how]);
+    }
+    return local;
+}
+
 void controller_update(PPCContext& c) {
     uint32_t ctrl = c.r[3], frame = ld32(kFrameCount);
     uint32_t player = guest_ptr(ctrl) ? ld32(ctrl + 4) : 0;
     bool forced = false;
     if (frame != g_local_frame && guest_ptr(player)) {
-        PPCContext saved = c; //the game's own test, registers put back after
-        controller_not_local(c);
-        bool local = (int8_t)c.r[3] == 0;
-        c = saved;
+        bool local = controller_is_local(c, ctrl, frame);
         if (local) {
             g_local_frame = frame;
             g_local_ctrl = ctrl;

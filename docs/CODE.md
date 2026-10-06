@@ -375,7 +375,7 @@ Hooked (replaced, the original called from inside) unless marked *called* (throu
 | `804BBE30` | `OSSleepTicks` | (64-bit ticks in r3:r4), *called* | framerate |
 | `802BBE70` | `ge_frame_draw` | (r3 = 1 leaves the scene out) | cutscenes |
 | `80108A60` | `ge_controller_update` | (controller, f1 time step) once a frame | input |
-| `80108D70` | `fn_80108D70` | (controller) -> 0 if this console plays it, *called* | input |
+| `80108D70` | `fn_80108D70` | (controller) -> 0 if this console plays it, *called*; 0 for every controller on a network game's host, so `controller_is_local` calls it with `805D5470` cleared there | input |
 | `80101DC0` | `ge_look_input` | (controller, pad) reads the look stick; traced with `GE_TRACELOOK` | debug |
 | `80101EC0` | `ge_look_apply` | (controller) rates times the time step into rotation | input |
 | `801CDC30` | `ge_look_sens` | reads the look sensitivities | input |
