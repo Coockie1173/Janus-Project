@@ -526,9 +526,11 @@ update: the game computes `view + (weapon's aimed angle - view) * blend` into `+
 weapon's angle is worked back out of that, scaled by the option over 22.5, and the result
 written to `+0x71C` and `+0x720`, never wider than the view.
 `DrawDelayed` (hook on `draw_delayed?`, every mesh's draw): with the view wider than 49 a mesh
-whose draw matrix (entry `+4`) has no rotation and no offset sits on the eye (Facility's colour
-filter); its x and y are stretched by `tan(view / 2) / tan(24.5)` for that draw. With Disable
-Colour Filter (`no_colour_filter`) such a mesh is left out, at any angle.
+whose draw matrix (entry `+4`) has no rotation and no offset sits on the eye (a level's colour
+filter; its own x and y scale can be anything, Tank and Solar size theirs there); its x and y are
+stretched by `tan(view / 2) / tan(24.5)` for that draw. With Disable Colour Filter
+(`no_colour_filter`) the filter is left out, at any angle: `IsColourFilter` knows it by the mesh
+(entry `+0x10`), flags `0x1004` and a box a unit wide from 0.397 behind to 0.48 or more ahead.
 
 ### gecko.cpp
 

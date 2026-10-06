@@ -409,7 +409,7 @@ def run_gui():
               foreground="gray", wraplength=520, justify="left").grid(row=15, column=0, sticky="w", padx=(30, 8))
     no_colour_filter = tk.BooleanVar(value=settings["nocolourfilter"] == "1")
     ttk.Checkbutton(en, text="Disable Colour Filter", variable=no_colour_filter).grid(row=16, column=0, sticky="w", **pad)
-    ttk.Label(en, text="The tint some levels lay over the picture (Facility's blue-green) isn't drawn.",
+    ttk.Label(en, text="The tint some levels lay over the picture (Facility's blue-green, Tank's, Solar's) isn't drawn.",
               foreground="gray", wraplength=520, justify="left").grid(row=17, column=0, sticky="w", padx=(30, 8))
 
     #cheats

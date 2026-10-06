@@ -374,7 +374,7 @@ void BuildSettings()
 	AddToggle(kEnhancements, "auto_start", "Auto Start Mission", "On: a loaded mission starts by itself, without Continue being pressed.", auto_start, set_auto_start);
 	AddToggle(kEnhancements, "autosave", "Save At Checkpoints", "On: reaching a checkpoint saves the game, as Save and Quit does. After a crash Continue Game starts there.", autosave, set_autosave);
 	AddToggle(kEnhancements, "no_tutorials", "Disable Tutorials", "On: the tutorial boxes in the missions aren't shown.", no_tutorials, set_no_tutorials);
-	AddToggle(kEnhancements, "no_colour_filter", "Disable Colour Filter", "On: the tint some levels lay over the picture (Facility's blue-green) isn't drawn.", no_colour_filter, set_no_colour_filter);
+	AddToggle(kEnhancements, "no_colour_filter", "Disable Colour Filter", "On: the tint some levels lay over the picture (Facility's blue-green, Tank's, Solar's) isn't drawn.", no_colour_filter, set_no_colour_filter);
 
 	AddToggle(kCheats, "mouse_everywhere", "Always Enable Mouse", "On: the mouse turns the view where the game locks it: cutscenes, melee, climbing, death.", mouse_everywhere, set_mouse_everywhere);
 	AddToggle(kCheats, "extras_menu", "Unused Extras Menu", "On: Extras also lists Mission Select, Character Viewer, Movies and the Calibration Menu.", extras_menu, set_extras_menu);
