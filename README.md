@@ -90,6 +90,15 @@ list (a `.dmw` file in the project's folder, or `GE_DMW=file`), read live
 from the running game, with a filter. It is drawn with Dear ImGui, fetched
 into `build/deps` by `make`.
 
+## Mods
+
+Every `.edb` file in `mods/` (or `GE_MODS=folder`) is loaded in place of the
+disc's file with the same hash, or comes on top of the disc's files when no
+file has its hash. A level is the hash of its file: `GE_LEVEL=01810201
+./launch.sh` starts that level whichever mission is picked in the menu.
+New levels can be made from glTF scenes with
+[eurochef](https://github.com/eurotools/eurochef).
+
 ## Layout
 
     config/symbols/          three symbol sources for SJBE52, none fully accurate
@@ -100,6 +109,7 @@ into `build/deps` by `make`.
     port/                    the game's own layer on the runtime (port/ge.h lists its files)
     wiikit/                  recompiler and runtime (submodule)
     docs/                    status and findings
+    mods/                    (not in git) loose .edb files, see Mods
     game/, build/            (not in git) your disc, everything derived from it
 
 ## How the names are mixed
