@@ -614,6 +614,7 @@ size of the block in front. The game's free (`fn_8033DD90`) trusts the header.
 | `Wrong(block)` | not a pointer, in none of the heaps, free already, longer than its heap, or the block behind it has another size for it |
 | `Remember`, `Before` | the last free of a block (frame, 8 callers) in a table of 65 536 by address |
 | `heap_frame()` | once a frame: `Walk`s every heap unless a thread holds the heap's mutex (`8060B3F0`, owner at `+8`); the first block that doesn't lead to the next is logged with the memory around it, once |
+| `NetworkLines` | a network game's start and end logged with the walks and the frees left out since, without being asked |
 | `call_chain(c)` | the guest's callers from the stack, by name |
 
 ### sweep.cpp
@@ -902,6 +903,7 @@ Traces:
 | `GE_SWEEPLOG=1` | the highest count of sweep steps so far |
 | `GE_HEAPCHECK=0` | no walk of the heaps each frame; `=1` logs that it walks |
 | `GE_HEAPTEST=1` | one block is freed twice in play, to see the second refused |
+| `GE_HEAPNET=1` | the first 600 frames in play count as a network game, to see the heap check's lines |
 
 Scripted input and memory tools (`debug.cpp`):
 

@@ -23,7 +23,10 @@
 //every heap is also walked once a frame, block by block (some 5000 in play): the first
 //block whose size the one behind it doesn't agree with is logged with the memory around it,
 //which tells the frame something wrote over the heap and what it wrote
+//a network game's start and end are logged with what the checks saw so far, without being
+//asked for: the launcher's run.log (the Windows package's too) then tells they were on
 //GE_HEAPCHECK=0 no walk, =1 says in the log that it walks
+//GE_HEAPNET=1 takes the first 600 frames in play for a network game, to see those lines
 //GE_HEAPTEST=1 frees one block twice, once in play, to see the second one refused
 #include "ge.h"
 #include <cstdio>
@@ -101,7 +104,8 @@ const char* Wrong(uint32_t block)
 	return nullptr;
 }
 
-bool g_walk = true, g_say = false, g_test = false;
+bool g_walk = true, g_say = false, g_test = false, g_fakeNetwork = false;
+uint64_t g_walked = 0, g_refused = 0; //frames walked, frees left out
 bool g_broken = false; //a walk found the heap broken: said once
 const uint32_t kHeapMutex = 0x8060B3F0, kMutexOwner = 8;
 const uint32_t kMaxBlocks = 4000000;
@@ -149,6 +153,7 @@ void Free(PPCContext& c)
 	if (!block) return orig_free(c);
 	if (const char* wrong = Wrong(block))
 	{
+		++g_refused;
 		if (g_reports++ < kMaxReports)
 		{
 			bool readable = guest_ptr(block - kHeader);
@@ -186,27 +191,55 @@ std::string call_chain(const PPCContext& c)
 	return chain;
 }
 
+//a network game's start and end, with what the checks saw: in the log without being asked,
+//so a run.log from anyone's network game says the checks were on and what they found
+void NetworkLines(uint32_t blocks)
+{
+	static bool wasOn = false;
+	static uint64_t walkedAtStart = 0, refusedAtStart = 0;
+	static uint32_t played = 0;
+	bool on = network_game();
+	if (g_fakeNetwork && in_play()) on = ++played <= 600;
+	if (on == wasOn || (on && !in_play())) return;
+	wasOn = on;
+	if (on)
+	{
+		walkedAtStart = g_walked;
+		refusedAtStart = g_refused;
+		rt_log("goldeneye: heap check: a network game starts in frame %u, frees are looked at%s (%u blocks now, %llu bad frees left out before it)",
+			ld32(kFrameCount), g_walk ? " and the heaps walked every frame" : ", the walk is off (GE_HEAPCHECK=0)", blocks, (unsigned long long)g_refused);
+		return;
+	}
+	rt_log("goldeneye: heap check: the network game is over in frame %u, %llu walks, %llu bad frees left out, the heap is %s",
+		ld32(kFrameCount), (unsigned long long)(g_walked - walkedAtStart), (unsigned long long)(g_refused - refusedAtStart), g_broken ? "broken" : "whole");
+}
+
 void heap_frame()
 {
-	if (g_broken || !g_walk) return;
-	if (ld32(kHeapMutex + kMutexOwner) != 0) return; //a thread is in the middle of the heap
 	uint32_t blocks = 0;
-	for (uint32_t i = 0; i < kHeapCount && !g_broken; ++i)
+	//not while a thread is in the middle of the heap
+	if (g_walk && !g_broken && ld32(kHeapMutex + kMutexOwner) == 0)
 	{
-		uint32_t heap = ld32(kHeaps + 4 * i);
-		if (guest_ptr(heap) && !Walk(i, heap, blocks)) g_broken = true;
+		for (uint32_t i = 0; i < kHeapCount && !g_broken; ++i)
+		{
+			uint32_t heap = ld32(kHeaps + 4 * i);
+			if (guest_ptr(heap) && !Walk(i, heap, blocks)) g_broken = true;
+		}
+		++g_walked;
+		if (g_say && !g_broken && in_play())
+		{
+			g_say = false;
+			rt_log("goldeneye: the heaps are walked every frame (%u blocks now)", blocks);
+		}
 	}
-	if (g_say && !g_broken && in_play())
-	{
-		g_say = false;
-		rt_log("goldeneye: the heaps are walked every frame (%u blocks now)", blocks);
-	}
+	NetworkLines(blocks);
 }
 
 void install_heap()
 {
 	if (const char* e = std::getenv("GE_HEAPCHECK")) g_walk = g_say = std::atoi(e) != 0;
 	g_test = std::getenv("GE_HEAPTEST") != nullptr;
+	g_fakeNetwork = std::getenv("GE_HEAPNET") != nullptr;
 	orig_free = ppc_hook("ge_heap_free", Free);
 	if (!orig_free) rt_die("goldeneye: ge_heap_free is not hooked in this build");
 }
