@@ -412,7 +412,8 @@ Hooked (replaced, the original called from inside) unless marked *called* (throu
 | `8029DA30` | `ge_records_new` | (slot, parts) | records |
 | `8029DAA0` | `ge_records_release` | (slot) | records |
 | `8029D900` | `ge_records_destroy` | (slot, delete it too) | records |
-| `80342A50` | `ge_heap_free` | (block) | records |
+| `80342A50` | `ge_heap_free` | (block) | heap, records |
+| `80351AD0` | `ge_sweep_update` | (shape) | sweep |
 | `8032EE20` | `ge_zone_root` | (world, position) a view's portal walk | zones |
 | `802F33C0` | `ge_zone_at` | (tree, position) -> the zone's number | zones |
 | `8032FAA0` | `ge_zone_walk` | (world, map, zone, rectangle, depth) | zones |
@@ -580,7 +581,7 @@ the same calls after every checkpoint.
 | `RecordRestart` | hook on `ge_record_restart`: a checkpoint was recorded, a save is pending (not in the front end) |
 | `autosave_frame(c)` | once a frame: waits for play and an idle manager, then steps the save until it answers or 1800 frames went by, and logs the result |
 | `Step(c)` | calls `ge_save_game(manager, the profile's slot, 0, 0, 1)` with the registers put back after |
-| `ManagerIdle()`, `CanSave()` | the manager's state is 0 or 10; there is a profile, no time challenge and no joined game |
+| `ManagerIdle()`, `CanSave()` | the manager's state is 0 or 10; there is a profile, no time challenge, no network game (`network_game()`) and no multiplayer map (level `01A0xxxx`) |
 | `SaveWrite` | hook on `ge_save_write`: flag bit 0 set for the port's own calls, so no "Saved" box waits for a button |
 
 ### files.cpp
@@ -595,9 +596,31 @@ the heap. `Atomic(c, orig)` runs both with interrupts off (MSR bit `0x8000` clea
 ### records.cpp
 
 A diagnostic, nothing is changed. Every array of collision records `ge_records_new` makes is
-remembered with its slot; a `ge_heap_free` or a release through another slot while the slot
-still holds the array is logged with the guest call chain (`Chain`, 14 frames deep), at most
-16 reports.
+remembered with its slot; a free (`records_freed`, called by heap.cpp's hook) or a release
+through another slot while the slot still holds the array is logged with the guest call chain
+(`call_chain`, 14 frames deep), at most 16 reports.
+
+### heap.cpp
+
+Keeps the game's heap whole and tells when it isn't. The heaps (pointers at `80643040`, four
+at most; `+4` the first block, `+8` the last) are blocks with a `0x10` header in front of what
+is handed out: `+0` the owner's pointer (free: the block before it in its free list), `+4` a
+tag record (free: the next one), `+8` the size, low bits 1 free, 4 tagged, 8 kept, `+0xC` the
+size of the block in front. The game's free (`fn_8033DD90`) trusts the header.
+
+| Function | What |
+|---|---|
+| `Free` | hook on `ge_heap_free`: a block that `Wrong` finds fault with is logged (header, call chain, the free before it) and not passed on; the others are remembered, shown to records.cpp and freed |
+| `Wrong(block)` | not a pointer, in none of the heaps, free already, longer than its heap, or the block behind it has another size for it |
+| `Remember`, `Before` | the last free of a block (frame, 8 callers) in a table of 65 536 by address |
+| `heap_frame()` | once a frame: `Walk`s every heap unless a thread holds the heap's mutex (`8060B3F0`, owner at `+8`); the first block that doesn't lead to the next is logged with the memory around it, once |
+| `call_chain(c)` | the guest's callers from the stack, by name |
+
+### sweep.cpp
+
+`SweepUpdate`, a hook on `ge_sweep_update` (`80351AD0`): the count of steps a moving physics
+shape is swept in (`+0x58`: the way its body went over 0.75 of the shape's size, unbounded in
+the game) is kept to 64, and a shape that asked for more is logged with its body's places.
 
 ### zones.cpp
 
@@ -876,6 +899,9 @@ Traces:
 | `GE_TRACEPOS=1` | the local body's position after every update |
 | `GE_TRACELOOK=1` | the look input vectors |
 | `GE_ZONELOG=F` | a line for every view's portal walk |
+| `GE_SWEEPLOG=1` | the highest count of sweep steps so far |
+| `GE_HEAPCHECK=0` | no walk of the heaps each frame; `=1` logs that it walks |
+| `GE_HEAPTEST=1` | one block is freed twice in play, to see the second refused |
 
 Scripted input and memory tools (`debug.cpp`):
 
