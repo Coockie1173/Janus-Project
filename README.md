@@ -42,8 +42,8 @@ SDL3 are fetched into `build/deps`) and packs it as
 `build/GoldenEye007-win64.zip`: the executable, `Play.bat` with the settings
 that opens the same settings window (a Python with Tk is in the package),
 and `README.txt` (`port/win/`). The disc's files are not in it; the player
-takes them out of their own image with the window's "Extract disc...". No online play there
-yet: the runtime's network devices are POSIX only.
+takes them out of their own image with the window's "Extract disc...". Online play works
+there as on Linux (Winsock in place of BSD sockets).
 
 ### Linux package
 
