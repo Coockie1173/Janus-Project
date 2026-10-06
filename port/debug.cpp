@@ -21,6 +21,7 @@
 //GE_OBJ="806EB698:400:79,81.5,84.5" dumps the object a pointer points to (hex byte count)
 //as words and floats at each time, into build/obj.txt
 //GE_FINDPTR="66:80848000:808491A4" every guest word holding an address in that range
+//GE_DUMP="66:80700000:80800000:build/heap.bin" the guest's memory in that range, into a file
 //GE_SETALL="62:49=80:80000000:94000000" every float equal to the first value in the range
 //becomes the second, to find which copy of a constant matters by halving the range
 //GE_WATCH="64:807807AC" who writes that guest word: the page goes read-only and a write logs
@@ -280,6 +281,20 @@ void obj_main(uint32_t ptr, uint32_t size, std::vector<double> times) {
     }
     std::fclose(out);
     rt_log("obj: build/obj.txt written");
+}
+
+//the guest's memory from lo to hi as it is at time t, into a file
+void dump_main(double t, uint32_t lo, uint32_t hi, std::string path) {
+    sleep_until_s(t);
+    FILE* f = std::fopen(path.c_str(), "wb");
+    if (!f) { rt_log("dump: can't write %s", path.c_str()); return; }
+    for (uint32_t a = lo; a < hi; a += 4) {
+        uint32_t v = ld32(a);
+        const uint8_t be[4] = {uint8_t(v >> 24), uint8_t(v >> 16), uint8_t(v >> 8), uint8_t(v)};
+        std::fwrite(be, 1, 4, f);
+    }
+    std::fclose(f);
+    rt_log("dump: %08X to %08X in %s", lo, hi, path.c_str());
 }
 
 void findptr_main(double t, uint32_t lo, uint32_t hi) {
@@ -669,6 +684,12 @@ void debug_install() {
         double t = std::strtod(e, &end);
         uint32_t lo = (uint32_t)std::strtoul(end + 1, &end, 16), hi = (uint32_t)std::strtoul(end + 1, &end, 16);
         std::thread(findptr_main, t, lo, hi).detach();
+    }
+    if (const char* e = std::getenv("GE_DUMP")) {
+        char* end;
+        double t = std::strtod(e, &end);
+        uint32_t lo = (uint32_t)std::strtoul(end + 1, &end, 16), hi = (uint32_t)std::strtoul(end + 1, &end, 16);
+        std::thread(dump_main, t, lo, hi, std::string(*end ? end + 1 : "dump.bin")).detach();
     }
     if (const char* e = std::getenv("GE_SETALL")) {
         char* end;

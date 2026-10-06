@@ -396,7 +396,15 @@ void StringSet(PPCContext& c)
 void TextMsg(PPCContext& c)
 {
 	uint32_t hash = c.r[3], out = c.r[4];
+	//the Mods menu's texts aren't the game's: characters, the hash, a word
+	if (uint32_t own = mods_menu_text(hash))
+	{
+		if (guest_ptr(out)) { st32(out, own); st32(out + 4, hash); st32(out + 8, 0); }
+		c.r[3] = 1;
+		return;
+	}
 	orig_text_msg(c);
+	if (!g_trace) return;
 	static std::set<uint32_t> seen;
 	if (!guest_ptr(out) || !guest_ptr(ld32(out)) || !seen.insert(hash).second) return;
 	rt_log("text: %08X \"%s\"", hash, Readable(ld32(out)).c_str());
@@ -407,7 +415,7 @@ void TextMsg(PPCContext& c)
 void install_prompts()
 {
 	g_trace = std::getenv("GE_TRACETEXT") != nullptr;
-	if (g_trace) orig_text_msg = ppc_hook("GetTextMsg_MENU_Text", TextMsg);
+	orig_text_msg = ppc_hook("GetTextMsg_MENU_Text", TextMsg);
 	orig_text_action = ppc_hook("ge_text_action", TextAction);
 	orig_text_tag = ppc_hook("ge_text_tag", TextTag);
 	orig_hud_prompt = ppc_hook("ge_hud_prompt", HudPrompt);

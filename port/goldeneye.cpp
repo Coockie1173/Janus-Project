@@ -67,6 +67,7 @@ PPCFunc orig_main = nullptr;
 void install() {
     install_hosts();
     install_mods();
+    install_mods_menu();
     install_fov();
     install_gecko();
     install_crash_handler();

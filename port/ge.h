@@ -24,6 +24,7 @@
 //timeline.cpp a timeline that waits at an event stays at its frame, so doors are shut after a skipped cutscene
 //flipbooks.cpp animated textures (fire, screens) play at the console's speed at any frame rate
 //mods.cpp loose .edb files in place of the disc's, or on top of them
+//modmenu.cpp Extras > Mods in the game's menu, the levels among the mods
 //native.cpp the engine's hot math routines written for the host
 //net.cpp the hosts file for the game's servers
 //overlay.cpp the debug overlay (F3), memory watches from a .dmw file (dmw.cpp)
@@ -38,6 +39,7 @@
 #include <cstdint>
 #include <cstring>
 #include <string>
+#include <vector>
 
 namespace ge {
 
@@ -97,6 +99,11 @@ bool mouse_everywhere(); //cheat, mouse look in every player state
 void set_mouse_everywhere(bool on);
 void install_hosts(); //net.cpp
 void install_mods(); //mods.cpp
+struct ModLevel { uint32_t hash; std::string name; }; //a level among the mods: its file's hash and name
+const std::vector<ModLevel>& mod_levels();
+void install_mods_menu(); //modmenu.cpp, after install_mods
+void mods_menu_frame(PPCContext& c); //once a frame, on the game's thread
+uint32_t mods_menu_text(uint32_t hash); //the characters of one of the Mods menu's texts, 0 for any other
 void install_gecko(); //gecko.cpp
 void gecko_apply();
 void install_fov(); //fov.cpp

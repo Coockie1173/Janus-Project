@@ -6,6 +6,8 @@
 //a mod goes behind the end of Filelist.000 and gets the row of the file with its hash, or a new
 //row at the end. a level is its mt_ file's hash: GE_LEVEL=hash starts a new one
 //
+//the levels among them can be picked in the game's menu: Extras > Mods (port/modmenu.cpp)
+//
 //GE_MODS=DIR the folder, every .edb in it (mods in the game's folder by default)
 //GE_TRACEFILES=1 log every file the game gives memory to, with its size
 #include "ge.h"
@@ -26,6 +28,7 @@ const uint32_t kListVersion = 7;
 const uint32_t kNameKey = 0x16; //a name's byte is its letter - 0x16 + its row + its place
 const uint64_t kSector = 0x800; //files start on one in Filelist.000
 const char* kNamePrefix = "x:\\bondx\\binary\\_bin_wii\\";
+const uint32_t kLevelFiles = 0x01810000; //a level's own file (mt_), the hash a level is started by
 
 struct Row
 {
@@ -144,7 +147,11 @@ void OnLoad(PPCContext& c)
 		rt_log("goldeneye: no memory for the file %s (%u bytes), it isn't loaded", guest_ptr(name) ? (const char*)PPC_MEM(name) : "?", size);
 }
 
+std::vector<ModLevel> g_levels;
+
 } //namespace
+
+const std::vector<ModLevel>& mod_levels() { return g_levels; }
 
 void install_mods()
 {
@@ -199,6 +206,7 @@ void install_mods()
 		row->size = mod.loaded; row->hash = mod.hash; row->version = mod.version; row->flags = mod.flags;
 		row->places = { { uint32_t(at), 0 } };
 		rt_log("goldeneye: mod %s: file %08X, %s", mod.name.c_str(), mod.hash, isNew ? "new" : "in place of the disc's");
+		if ((mod.hash & 0xFFFF0000u) == kLevelFiles) g_levels.push_back({ mod.hash, mod.name });
 	}
 	if (!disc_replace("Filelist.000", parts) || !disc_replace("Filelist.bin", { DiscPart{ {}, 0, 0, WriteList(rows, buildType, lists) } }))
 		rt_log("goldeneye: mods: the disc's file list couldn't be replaced");

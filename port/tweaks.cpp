@@ -7,7 +7,7 @@
 //the same thing: the flag set and a limit of twice the time (limit - time = time)
 //
 //unused extras menu (a cheat, off by default): Extras also lists Mission Select, Character
-//Viewer, Movies and the Calibration Menu. two writes into the menu's data, kept up each frame
+//Viewer, Movies and the Calibration Menu. the Extras page gets other rows (port/modmenu.cpp)
 //
 //unlock everything (a cheat, off by default): every mission and every difficulty can be picked
 //the two codes patch a menu callback (8024BB80) and the progress getter (80230154) to store
@@ -42,9 +42,9 @@ const uint32_t kDisplayLevelTimer = 0x805E05AB; //a byte, the hud shows the cloc
 const uint32_t kMaxTimeChallenge = 0x805E05AC; //a float, the challenge's limit. the clock shows this minus the time
 const uint32_t kLevelTimer = 0x805C963C; //a float, seconds played in the level
 
-//the code "Unused extras menu": 04774704 80580990, 0077470B 00000019
+//the code "Unused extras menu" (04774704 80580990, 0077470B 00000019) wrote the Extras page's
+//rows where the menu's pages were on the heap. modmenu.cpp finds the page and does it now
 struct MenuWrite { uint32_t addr, size, value, game; };
-MenuWrite g_extras_writes[] = {{0x80774704, 4, 0x80580990, 0}, {0x8077470B, 1, 0x19, 0}};
 
 //the codes "Unlock all difficulties" (C224BB80) and "Unlock all missions" (C2230154)
 const uint32_t kProgress = 0x805DE6A0; //the profile's progress
@@ -62,7 +62,6 @@ std::atomic<bool> g_no_tutorials{false};
 bool g_trace = false;
 const uint32_t kAppPtr = 0x806EB694, kLoadStep = 0x354; //the step the level's load is at
 const uint32_t kStepContinue = 0x1A; //waiting for a button under the mission's name
-bool g_extras_written = false; //the menu's data holds the code's values
 bool g_unlock_written = false; //the progress does
 PPCFunc orig_hud_update = nullptr;
 PPCFunc orig_pad_confirmed = nullptr;
@@ -150,7 +149,6 @@ void set_no_tutorials(bool on) { g_no_tutorials = on; }
 
 void tweaks_apply()
 {
-	Keep(g_extras_writes, g_extras_menu, g_extras_written);
 	Keep(g_unlock_writes, g_unlock_all, g_unlock_written);
 }
 
