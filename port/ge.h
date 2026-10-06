@@ -116,6 +116,8 @@ bool skip_zukovsky(); //Nightclub's meeting with Zukovsky is skipped (config/cut
 void set_skip_zukovsky(bool on);
 bool skip_briggs(); //Carrier's meeting with Sky Briggs is skipped (config/cutscenes.txt)
 void set_skip_briggs(bool on);
+bool skip_fade(); //a skip is behind a fade to black and back
+void set_skip_fade(bool on);
 void cutscenes_frame(); //once a frame, on the game's thread
 bool skipping_cutscene(); //an opening is being skipped right now
 float cutscene_fade(); //how black the picture is for it, 0 to 1

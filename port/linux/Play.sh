@@ -8,6 +8,7 @@
 #     ./Play.sh --skip-cutscenes       a mission's opening cutscene is skipped
 #     ./Play.sh --skip-zukovsky        the meeting with Zukovsky in Nightclub is skipped
 #     ./Play.sh --skip-briggs          the meeting with Sky Briggs in Carrier is skipped
+#     ./Play.sh --no-skip-fade         a skipped cutscene is fast forwarded in sight instead of behind a fade
 #     ./Play.sh --skip-movies          briefings, the movies between missions and the logos are skipped
 #     ./Play.sh --no-tutorials         the tutorial boxes in the missions aren't shown
 #     ./Play.sh --no-colour-filter     the tint some levels lay over the picture isn't drawn
