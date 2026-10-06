@@ -12,13 +12,15 @@
 //1 goes to another page (the second hash), 0xB loads a level (the second hash, then the entrance)
 //Extras is page 7D0000D2 (rows 805808B4, 11 of them: Credits and Cheat Codes in two slots).
 //the rows the code "Unused extras menu" points it at (80580990) have six slots and four more
-//items. 7D000008 is the debug Mission Select nothing leads to without that code: eight
-//slots and a level a row, which is what the Mods page is made like
+//items. 7D000008 is a debug Mission Select nothing leads to without that code, with a level a
+//row: where kind 0xB was found
 //
 //the Mods page is one more entry in the array (a new block from the game's own allocator, so
-//the game can grow or free it as it would its own) and Extras gets rows made here: the six
-//slots, its items and "Mods". the texts are answered from here (prompts.cpp asks for every
-//text the game looks up)
+//the game can grow or free it as it would its own): a kind 0xB row for each level. Extras gets
+//rows made here, its items and "Mods". a layout draws all of its slots, filled or not, so each
+//list is given the layout of one of the game's pages with as many slots as it has items
+//(kLayouts). the texts are answered from here (prompts.cpp asks for every text the game looks
+//up)
 //the unused extras menu's items are in the same rows when that cheat is on. it used to be two
 //writes to where the array was on the heap, which is somewhere else when mods add files
 //
@@ -54,20 +56,34 @@ const uint32_t kPages = 0x805E0590; //the array object
 const uint32_t kPagesRoom = 0x0, kPagesCount = 0x8, kPagesData = 0xC;
 const uint32_t kPageSize = 0x10, kPageRows = 0x4, kPageRowCount = 0x8, kPageClass = 0xC;
 const uint32_t kRowSize = 20, kRowHash = 0x4, kRowKind = 0xC;
-const uint32_t kExtrasPage = 0x7D0000D2, kDebugMissionsPage = 0x7D000008;
+const uint32_t kExtrasPage = 0x7D0000D2;
 const uint32_t kModsPage = 0x7D000DFF; //the game's own stop at 7D00010A
 const uint32_t kExtrasRows = 0x805808B4, kExtrasRowCount = 11; //the game's
 const uint32_t kUnusedRows = 0x80580990, kUnusedRowCount = 0x19; //the code's, as it set them
-const uint32_t kUnusedHead = 10; //the layout, the title and six slots
+//a layout draws all its slots, with an item in them or not, so a list takes the layout of one
+//of the game's pages that has as many slots as it has items: the rows of that page up to its
+//last slot (layout, two of dressing, title, the slots) and its footer row. past eight the list
+//scrolls
+struct Layout { uint32_t rows, foot; }; //a page's rows, and which of them is the footer (kind AA)
+const Layout kLayouts[] = {
+	{0x8057F5D8, 6}, //one slot: 7D000016
+	{0x805808B4, 8}, //two: Extras as the game has it
+	{0x8057E798, 10}, //three: Options
+	{0x80580CF0, 12}, //four: 7D00009E
+	{0x80580B60, 14}, //five: 7D00009D
+	{0x80580990, 16}, //six: the unused extras menu
+	{0x8057EDA0, 18}, //seven: 7D000082
+	{0x80580EF8, 25}}; //eight: 7D0000A2, whose own list is longer and scrolls
+const uint32_t kLayoutTop = 4, kMostSlots = 8;
+const uint32_t kTitleRow = 3;
+const uint32_t kPlainClass = 0x7D030000; //the class of a page that is a list
 const uint32_t kUnusedItems = 10, kUnusedItemCount = 6; //Credits, Cheat Codes, then the four unused ones
 const uint32_t kGameItemCount = 2;
-const uint32_t kUnusedFoot = 16; //the footer's row, then a row a item: the line that says what the item is
+const uint32_t kUnusedFoot = 16; //the footer's row there, then a row a item: the line that says what the item is
 const uint32_t kKindAbout = 0x00AB0000;
-const uint32_t kDebugHead = 13; //the debug Mission Select's rows before its levels: layout, title, eight slots
-const uint32_t kDebugTitleRow = 3;
 const uint32_t kKindPage = 0x00010000, kKindLevel = 0x000B0000;
 const uint32_t kMissionStart = 1; //the entrance a level begins at
-const uint32_t kTextMods = 0x4300F0FF, kTextAbout = 0x4300F0FE, kTextLevel = 0x4300F000; //the game's own texts stop at 430017xx
+const uint32_t kTextMods = 0x4300F0FF, kTextAbout = 0x4300F0FE, kTextAboutLevel = 0x4300F0FD, kTextLevel = 0x4300F000; //the game's own texts stop at 430017xx
 const uint32_t kConflictMapsPage = 0x7D000045;
 const uint32_t kConflictRows = 0x805830C8, kConflictRowCount = 16; //the game's
 const uint32_t kConflictHead = 6; //the rows before the maps
@@ -145,35 +161,51 @@ std::string Shown(const std::string& file)
 	return name.empty() ? file : name;
 }
 
+//room for a list of items in the layout that fits it: the rows before the items are filled in,
+//the items, the footer and a line an item are the caller's. where the items go
+uint32_t ListRows(const PPCContext& c, uint32_t items, uint32_t title, uint32_t& rows, uint32_t& count)
+{
+	const uint32_t slots = std::min(std::max(items, 1u), kMostSlots);
+	const Layout& layout = kLayouts[slots - 1];
+	const uint32_t head = kLayoutTop + slots;
+	count = head + items * 2 + 1;
+	rows = Alloc(c, count * kRowSize);
+	if (!rows) return 0;
+	CopyRows(rows, layout.rows, head);
+	st32(rows + kTitleRow * kRowSize, title);
+	CopyRows(rows + (head + items) * kRowSize, layout.rows + layout.foot * kRowSize, 1);
+	return rows + head * kRowSize;
+}
+
 //the rows and the texts, made once
-bool Build(const PPCContext& c, uint32_t debugRows)
+bool Build(const PPCContext& c)
 {
 	g_texts[kTextMods] = Text(c, "Mods");
 	g_texts[kTextAbout] = Text(c, "Play the levels in the mods folder.");
+	g_texts[kTextAboutLevel] = Text(c, "Play this level.");
 	for (size_t i = 0; i < g_levels.size(); ++i) g_texts[kTextLevel + (uint32_t)i] = Text(c, Shown(g_levels[i].name));
 	for (const auto& text : g_texts)
 		if (!text.second) return false;
 
-	g_mods_row_count = kDebugHead + (uint32_t)g_levels.size();
-	g_mods_rows = Alloc(c, g_mods_row_count * kRowSize);
-	if (!g_mods_rows) return false;
-	CopyRows(g_mods_rows, debugRows, kDebugHead);
-	st32(g_mods_rows + kDebugTitleRow * kRowSize, kTextMods);
-	for (size_t i = 0; i < g_levels.size(); ++i)
-		Row(g_mods_rows + (kDebugHead + (uint32_t)i) * kRowSize, kTextLevel + (uint32_t)i, g_levels[i].hash, kMissionStart, kKindLevel);
+	const uint32_t levels = (uint32_t)g_levels.size();
+	uint32_t at = ListRows(c, levels, kTextMods, g_mods_rows, g_mods_row_count);
+	if (!at) return false;
+	for (uint32_t i = 0; i < levels; ++i)
+	{
+		Row(at + i * kRowSize, kTextLevel + i, g_levels[i].hash, kMissionStart, kKindLevel);
+		Row(at + (levels + 1 + i) * kRowSize, kTextAboutLevel, 0, 0, kKindAbout);
+	}
 
 	for (int unused = 0; unused < 2; ++unused)
 	{
-		const uint32_t items = unused ? kUnusedItemCount : kGameItemCount;
-		g_extras_row_count[unused] = kUnusedHead + (items + 1) * 2 + 1;
-		uint32_t rows = g_extras_rows[unused] = Alloc(c, g_extras_row_count[unused] * kRowSize);
-		if (!rows) return false;
-		CopyRows(rows, kUnusedRows, kUnusedHead);
-		CopyRows(rows + kUnusedHead * kRowSize, kUnusedRows + kUnusedItems * kRowSize, items);
-		Row(rows + (kUnusedHead + items) * kRowSize, kTextMods, g_mods_target, 0, kKindPage);
-		const uint32_t foot = rows + (kUnusedHead + items + 1) * kRowSize;
-		CopyRows(foot, kUnusedRows + kUnusedFoot * kRowSize, 1 + items);
-		Row(foot + (1 + items) * kRowSize, kTextAbout, 0, 0, kKindAbout);
+		const uint32_t items = (unused ? kUnusedItemCount : kGameItemCount) + 1;
+		at = ListRows(c, items, ld32(kUnusedRows + kTitleRow * kRowSize), g_extras_rows[unused], g_extras_row_count[unused]);
+		if (!at) return false;
+		CopyRows(at, kUnusedRows + kUnusedItems * kRowSize, items - 1);
+		Row(at + (items - 1) * kRowSize, kTextMods, g_mods_target, 0, kKindPage);
+		const uint32_t about = at + (items + 1) * kRowSize;
+		CopyRows(about, kUnusedRows + (kUnusedFoot + 1) * kRowSize, items - 1);
+		Row(about + (items - 1) * kRowSize, kTextAbout, 0, 0, kKindAbout);
 	}
 	return true;
 }
@@ -217,26 +249,21 @@ void MultiplayerFrame(const PPCContext& c, uint32_t data, uint32_t count)
 	if (!page || g_pool.empty() || g_pool_failed || !game_alloc) return;
 	if (!g_multiplayer_rows)
 	{
-		//the unused extras menu's layout has the slots for three items, the game's own has two
-		const uint32_t items = 3;
-		g_multiplayer_row_count = kUnusedHead + items * 2 + 1;
-		const uint32_t rows = Alloc(c, g_multiplayer_row_count * kRowSize);
 		g_texts[kTextWfc] = Text(c, "Connect to Nintendo WFC");
 		g_texts[kTextWfcModded] = Text(c, "Connect to WFC Modded");
 		g_texts[kTextAboutWfc] = Text(c, "Connect to Nintendo WFC.");
 		g_texts[kTextAboutModded] = Text(c, "Connect to Nintendo WFC with the maps of the mods folder.");
-		if (!rows || !g_texts[kTextWfc] || !g_texts[kTextWfcModded] || !g_texts[kTextAboutWfc] || !g_texts[kTextAboutModded]) { g_pool_failed = true; return; }
-		CopyRows(rows, kUnusedRows, kUnusedHead);
-		st32(rows + kDebugTitleRow * kRowSize, kTextMultiplayer);
-		uint32_t at = rows + kUnusedHead * kRowSize;
+		const uint32_t items = 3;
+		uint32_t rows = 0;
+		const uint32_t at = ListRows(c, items, kTextMultiplayer, rows, g_multiplayer_row_count);
+		if (!at || !g_texts[kTextWfc] || !g_texts[kTextWfcModded] || !g_texts[kTextAboutWfc] || !g_texts[kTextAboutModded]) { g_pool_failed = true; return; }
 		CopyRows(at, kMultiplayerRows + kSplitScreenRow * kRowSize, 1);
 		Row(at + kRowSize, kTextWfc, kOnlinePage, 0, kKindPage);
 		Row(at + 2 * kRowSize, kTextWfcModded, kOnlinePage, 0, kKindPage);
-		at += items * kRowSize;
-		CopyRows(at, kUnusedRows + kUnusedFoot * kRowSize, 1);
-		CopyRows(at + kRowSize, kMultiplayerRows + kSplitScreenAboutRow * kRowSize, 1);
-		Row(at + 2 * kRowSize, kTextAboutWfc, 0, 0, kKindAbout);
-		Row(at + 3 * kRowSize, kTextAboutModded, 0, 0, kKindAbout);
+		const uint32_t about = at + (items + 1) * kRowSize;
+		CopyRows(about, kMultiplayerRows + kSplitScreenAboutRow * kRowSize, 1);
+		Row(about + kRowSize, kTextAboutWfc, 0, 0, kKindAbout);
+		Row(about + 2 * kRowSize, kTextAboutModded, 0, 0, kKindAbout);
 		g_multiplayer_rows = rows;
 	}
 	if (ld32(page + kPageRows) != kMultiplayerRows) return;
@@ -351,29 +378,24 @@ void mods_menu_frame(PPCContext& c)
 		return;
 	}
 
-	if (!g_mods_rows)
+	if (!g_mods_rows && (!game_alloc || !Build(c)))
 	{
-		const uint32_t debug = FindPage(data, count, kDebugMissionsPage);
-		if (!debug || ld32(debug + kPageRowCount) < kDebugHead || !game_alloc || !Build(c, ld32(debug + kPageRows)))
-		{
-			g_failed = true;
-			rt_log("goldeneye: the Mods menu couldn't be made");
-			return;
-		}
+		g_failed = true;
+		rt_log("goldeneye: the Mods menu couldn't be made");
+		return;
 	}
 
 	if (!FindPage(data, count, kModsPage))
 	{
 		//one more page: the array in a new block, the game's old one is left as it is
-		const uint32_t debug = FindPage(data, count, kDebugMissionsPage);
 		const uint32_t fresh = Alloc(c, (count + 1) * kPageSize);
-		if (!fresh || !debug) return;
+		if (!fresh) return;
 		for (uint32_t i = 0; i < count * kPageSize; i += 4) st32(fresh + i, ld32(data + i));
 		const uint32_t page = fresh + count * kPageSize;
 		st32(page, kModsPage);
 		st32(page + kPageRows, g_mods_rows);
 		st32(page + kPageRowCount, g_mods_row_count);
-		st32(page + kPageClass, ld32(debug + kPageClass));
+		st32(page + kPageClass, kPlainClass);
 		st32(kPages + kPagesData, fresh);
 		st32(kPages + kPagesCount, count + 1);
 		st32(kPages + kPagesRoom, count + 1);
