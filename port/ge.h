@@ -23,6 +23,7 @@
 //unload.cpp a file that's let go stays loaded as long as on the console, so cutscenes end at any frame rate
 //timeline.cpp a timeline that waits at an event stays at its frame, so doors are shut after a skipped cutscene
 //flipbooks.cpp animated textures (fire, screens) play at the console's speed at any frame rate
+//mods.cpp loose .edb files in place of the disc's, or on top of them
 //native.cpp the engine's hot math routines written for the host
 //net.cpp the hosts file for the game's servers
 //overlay.cpp the debug overlay (F3), memory watches from a .dmw file (dmw.cpp)
@@ -95,6 +96,7 @@ const char* local_look_name(); //what the mouse does in that state, "view", "aim
 bool mouse_everywhere(); //cheat, mouse look in every player state
 void set_mouse_everywhere(bool on);
 void install_hosts(); //net.cpp
+void install_mods(); //mods.cpp
 void install_gecko(); //gecko.cpp
 void gecko_apply();
 void install_fov(); //fov.cpp
