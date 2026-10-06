@@ -68,6 +68,11 @@ const char* state_name(uint32_t st) { //the Ghidra project's PlayerStates
     return "Unknown";
 }
 
+//the black a cutscene is skipped behind
+void cutscene_black(float fade) {
+    ImGui::GetBackgroundDrawList()->AddRectFilled(ImVec2(0, 0), ImGui::GetIO().DisplaySize, IM_COL32(0, 0, 0, (int)(fade * 255 + 0.5f)));
+}
+
 //while a cutscene is fast-forwarded, in the bottom right corner
 void skipping_label() {
     const char* text = "Skipping cutscene...";
@@ -213,7 +218,8 @@ void watches() {
 
 void draw() {
     settings_replay();
-    if (!overlay_open() && !g_show_state && !skipping_cutscene() && !settings_toast()) return;
+    float fade = cutscene_fade();
+    if (!overlay_open() && !g_show_state && !skipping_cutscene() && fade <= 0 && !settings_toast()) return;
     //with only the state shown the cursor stays hidden over the picture
     ImGuiIO& io = ImGui::GetIO();
     if (overlay_open()) io.ConfigFlags &= ~ImGuiConfigFlags_NoMouseCursorChange;
@@ -221,6 +227,7 @@ void draw() {
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
+    if (fade > 0) cutscene_black(fade);
     if (g_show_state) player_state();
     if (skipping_cutscene()) skipping_label();
     if (g_open) watches();

@@ -118,6 +118,7 @@ bool skip_briggs(); //Carrier's meeting with Sky Briggs is skipped (config/cutsc
 void set_skip_briggs(bool on);
 void cutscenes_frame(); //once a frame, on the game's thread
 bool skipping_cutscene(); //an opening is being skipped right now
+float cutscene_fade(); //how black the picture is for it, 0 to 1
 bool cutscene_input_waiting(); //qte.cpp, a cutscene asked for a button in the last frames
 void install_qte(); //qte.cpp
 bool auto_qte(); //quick time events press their own buttons

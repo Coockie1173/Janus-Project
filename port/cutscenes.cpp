@@ -16,10 +16,11 @@
 //the first cutscene that takes the player (state 0x22 with the view and the aim locked) and
 //runs until the player gets anything back: the view, the aim, a button to press
 //
-//the last second isn't skipped but eased into: config/openings.txt has the level time each
-//opening ends at, and from a second before it the steps shrink from a third of a second to a
-//frame of the engine's rate, each one shown, so it slows down to normal speed instead of
-//cutting to it. the sound fades back in after. a level that isn't in there just cuts
+//the skip is behind a fade: the picture and the sound go out over half a second with the game
+//at its normal speed, the long steps run under the black, and the fade back in is at normal
+//speed again. config/openings.txt has the level time each opening ends at, so the long steps
+//stop half a second before it and the picture is back when the cutscene ends. a level that
+//isn't in there fades in after its cutscene
 //
 //GE_SKIP_CUTSCENES=1 on
 //GE_SKIP_ZUKOVSKY=1, GE_SKIP_BRIGGS=1 the cutscenes of config/cutscenes.txt are skipped the same
@@ -66,15 +67,14 @@ const uint32_t kNextMissionCall = 0x80009334; //where fn_800092F0 (the app's upd
 const uint32_t kWaitFrames = 150; //a level that gives the player the controls for this long has no opening
 const uint32_t kCountingFrames = 3; //the level's time went up this many frames in a row: it runs
 const double kMaxSeconds = 600; //ten minutes of cutscene, then something is wrong
-const float kEaseSeconds = 1.0f; //of the opening's end, slowing down to normal speed
-const double kFadeSeconds = 1.0; //the sound coming back
+const float kFadeSeconds = 0.5f; //the picture and the sound going out, and coming back
 const uint32_t kShowEvery = 4; //one frame in this many is drawn, so it's seen to be moving
 const uint32_t kLevelTimer = 0x805C963C; //a float, seconds played in the level
 const uint32_t kTimelineHash = 0x20; //of a cutscene's timeline, the hash that names it
 
 using Clock = std::chrono::steady_clock;
 
-enum class Skip { Idle, Waiting, Running };
+enum class Skip { Idle, Waiting, FadingOut, Running };
 
 std::atomic<bool> g_skip_cutscenes{false};
 std::atomic<bool> g_skip_zukovsky{false};
@@ -132,6 +132,24 @@ void LoadCutscenes(const std::string& path)
 }
 Clock::time_point g_started, g_started_guest;
 
+//the black over the picture, read by the renderer's thread
+std::atomic<float> g_fade_from{0.0f}, g_fade_to{0.0f};
+std::atomic<double> g_fade_started{0.0}; //in seconds of the steady clock
+std::atomic<bool> g_fade_hidden{false}; //the pause menu is up, it has to be seen
+
+double Now() { return std::chrono::duration<double>(Clock::now().time_since_epoch()).count(); }
+float FadeNow()
+{
+	float along = std::clamp((float)(Now() - g_fade_started) / kFadeSeconds, 0.0f, 1.0f);
+	return g_fade_from + (g_fade_to - g_fade_from) * along;
+}
+void FadeTo(float to)
+{
+	g_fade_from = FadeNow(); //a fade that is turned round goes on from where it is
+	g_fade_to = to;
+	g_fade_started = Now();
+}
+
 bool StartsCampaignLevel(uint32_t menu)
 {
 	if (ld8(menu + kPendingReady) <= 2 || ld32(menu + kPendingAction) != kActionLoadLevel) return false;
@@ -147,15 +165,20 @@ void Stop(const char* why)
 	if (g_state == Skip::Running)
 	{
 		g_gx_skip_frames = false;
-		audio_mute(false, kFadeSeconds);
 		set_fast_forward(false);
-		g_running = false;
 		double took = std::chrono::duration<double>(Clock::now() - g_started).count();
 		double skipped = std::chrono::duration<double>(rt_now() - g_started_guest).count();
-		rt_log("goldeneye: skip cutscenes: %s, %.1f s of cutscene (%u frames) in %.1f s, level %08X's cutscene ends at %.2f",
+		rt_log("goldeneye: skip cutscenes: %s, %.1f s of cutscene (%u frames) in %.1f s, level %08X's cutscene left at %.2f",
 			why, skipped, g_frames, took, ld32(kCurrentLevel), ldf(kLevelTimer));
 	}
+	else if (g_state == Skip::FadingOut) rt_log("goldeneye: skip cutscenes: not skipped, %s", why);
 	else if (g_state == Skip::Waiting && g_trace) rt_log("goldeneye: skip cutscenes: not waiting any more, %s", why);
+	if (g_state == Skip::Running || g_state == Skip::FadingOut)
+	{
+		audio_mute(false, kFadeSeconds);
+		FadeTo(0.0f);
+		g_running = false;
+	}
 	g_state = Skip::Idle;
 }
 
@@ -185,17 +208,42 @@ void ArmCutscene(uint32_t cutscene)
 	if (g_trace) rt_log("goldeneye: skip cutscenes: cutscene %08X of level %08X starts", cutscene, ld32(kCurrentLevel));
 }
 
-void Start()
+//the cutscene has the player: the picture and the sound go out first, at normal speed
+void StartFade()
 {
+	g_ends = g_armed_ends;
+	if (g_ends > 0 && g_ends - ldf(kLevelTimer) < kFadeSeconds * 3)
+	{
+		g_state = Skip::Idle; //too short to fade out of and back into
+		return;
+	}
+	g_state = Skip::FadingOut;
+	g_running = true;
+	FadeTo(1.0f);
+	audio_mute(true, kFadeSeconds);
+	rt_log("goldeneye: skip cutscenes: skipping a cutscene of level %08X", ld32(kCurrentLevel));
+}
+
+//what ends a skip whenever it happens
+bool Over()
+{
+	uint32_t state;
+	if (!*g_option) Stop("turned off");
+	else if (cutscene_input_waiting()) Stop("a button is wanted");
+	else if (!local_player_state(state)) Stop("the player is gone");
+	else if (!local_cutscene_locked()) Stop("done");
+	return g_state == Skip::Idle;
+}
+
+void FadeOut()
+{
+	if (Over() || FadeNow() < 1.0f) return;
 	g_state = Skip::Running;
 	g_frames = g_drawn = 0;
 	g_started = Clock::now();
 	g_started_guest = rt_now();
-	g_ends = g_armed_ends;
-	g_running = true;
 	set_fast_forward(true);
 	audio_mute(true);
-	rt_log("goldeneye: skip cutscenes: skipping a cutscene of level %08X", ld32(kCurrentLevel));
 }
 
 void Run()
@@ -209,18 +257,16 @@ void Run()
 		return;
 	}
 	++g_frames;
-	if (!*g_option) { Stop("turned off"); return; }
 	if (std::chrono::duration<double>(rt_now() - g_started_guest).count() > kMaxSeconds) { Stop("given up"); return; }
-	if (cutscene_input_waiting()) { Stop("a button is wanted"); return; }
-	uint32_t state;
-	if (!local_player_state(state)) { Stop("the player is gone"); return; }
-	if (!local_cutscene_locked()) { Stop("done"); return; }
+	if (Over()) return;
 	float left = g_ends - ldf(kLevelTimer);
-	if (g_ends > 0 && left < kEaseSeconds)
+	if (g_ends > 0 && left <= kFadeSeconds) { Stop("the fade in"); return; }
+	if (g_ends > 0 && left < kFadeSeconds + 2.0f / skip_rate())
 	{
-		//the rate goes from the long steps' to the engine's own, by equal factors over the second
-		float along = std::clamp(1.0f - left / kEaseSeconds, 0.0f, 1.0f), from = skip_rate(), to = (float)engine_top_rate();
-		set_fast_forward(true, from * std::pow(std::max(1.0f, to / from), along));
+		//long steps would go past where the fade in starts: the engine's own steps up to there,
+		//still as a fast forward so the last long one isn't waited for. the rate only counts
+		//from the step after the next, so that one is still long
+		set_fast_forward(true, (float)engine_top_rate());
 		g_gx_skip_frames = false;
 		return;
 	}
@@ -285,7 +331,7 @@ void LevelChange(PPCContext& c)
 	}
 	//"Save and Continue": the next mission is loaded by the app's update, not by the menu
 	else if (c.lr == kNextMissionCall && guest_ptr(app) && ld32(app + kAppEntrance) == kMissionStart) Arm(level);
-	else if (g_state == Skip::Running) Stop("a level change");
+	else if (g_state == Skip::Running || g_state == Skip::FadingOut) Stop("a level change");
 	orig_level_change(c);
 }
 
@@ -305,8 +351,9 @@ void set_skip_zukovsky(bool on) { g_skip_zukovsky = on; }
 bool skip_briggs() { return g_skip_briggs; }
 void set_skip_briggs(bool on) { g_skip_briggs = on; }
 bool skipping_cutscene() { return g_running; }
+float cutscene_fade() { return g_fade_hidden ? 0.0f : FadeNow(); }
 
-//GE_TRACE: how long each frame took from the easing on to a while after the skip
+//GE_TRACE: how long each frame took from the last long steps on to a while after the skip
 void TraceFrames()
 {
 	static Clock::time_point last = Clock::now();
@@ -315,8 +362,8 @@ void TraceFrames()
 	auto now = Clock::now();
 	double ms = std::chrono::duration<double, std::milli>(now - last).count();
 	last = now;
-	bool easing = g_state == Skip::Running && g_ends > 0 && g_ends - ldf(kLevelTimer) < kEaseSeconds;
-	if (easing) { after = 90; line += "e"; }
+	bool ending = g_state == Skip::Running && g_ends > 0 && g_ends - ldf(kLevelTimer) < kFadeSeconds * 2;
+	if (ending) { after = 90; line += "e"; }
 	else if (after <= 0) return;
 	else --after;
 	char text[32];
@@ -328,7 +375,9 @@ void TraceFrames()
 void cutscenes_frame()
 {
 	if (g_trace) TraceFrames();
+	g_fade_hidden = ld8(kPaused) != 0;
 	if (g_state == Skip::Running) { Run(); return; }
+	if (g_state == Skip::FadingOut) { FadeOut(); return; }
 	if (g_state != Skip::Waiting) return;
 	uint32_t state;
 	if (!local_player_state(state)) return; //still loading
@@ -338,7 +387,7 @@ void cutscenes_frame()
 	g_counting = played > g_played ? g_counting + 1 : 0;
 	g_played = played;
 	if (g_counting < kCountingFrames) return;
-	if (local_cutscene_locked()) Start();
+	if (local_cutscene_locked()) StartFade();
 	else if (++g_frames > kWaitFrames)
 	{
 		g_state = Skip::Idle;

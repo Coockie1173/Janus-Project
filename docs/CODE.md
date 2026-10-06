@@ -551,9 +551,11 @@ State machine (`Skip::Idle`, `Waiting`, `Running`):
 |---|---|
 | `MenuPending` | hook: action 5 with a campaign level (a difficulty or Time Trial picked) at entrance 1 arms the skip; `GE_LEVEL` and `GE_ENTRANCE` replace the level or entrance |
 | `LevelChange` | hook on `StartLevelChange`: Restart Mission and Continue Game (action 6) arm it too, and so does the app's update loading the next mission after "Save and Continue" (the call returning to `80009334`); any other change stops it. `GE_TRACE` logs each one |
-| `Arm(level)`, `Start()`, `Stop(why)` | `Start` mutes and fast forwards, `Stop` fades the sound back in over a second and logs how long the opening was |
+| `Arm(level)`, `Start()`, `Stop(why)` | `Stop` ends the fast forward, fades the picture and the sound back in over half a second and logs how long the opening was |
+| `StartFade()`, `FadeOut()`, `Over()` | the picture and the sound go out over half a second at normal speed (`FadeTo`, `audio_mute`), then the long steps start; `Over` is what ends a skip in either state |
+| `cutscene_fade()` | how black the picture is, for the overlay; 0 while the pause menu is up |
 | `cutscenes_frame()` | waiting: the level's time has to count 3 frames in a row, then a locked cutscene starts the skip; 150 frames with the controls means no opening |
-| `Run()` | stops when the option is turned off, after 600 s, when a button is wanted, the player is gone or has anything back; eases over the last second when the opening's end is known |
+| `Run()` | stops when the option is turned off, after 600 s, when a button is wanted, the player is gone or has anything back; with the opening's end known it stops half a second before it, the last long steps before that at the engine's own rate |
 | `FrameDraw` | hook: `r3 = 1` for the frames the skip does not show |
 | `LoadOpenings` | `config/openings.txt`: level hash, the level time its opening ends at |
 | `LoadCutscenes`, `ArmCutscene` | `config/cutscenes.txt`: level hash, timeline hash, seconds; level hash, timeline hash, seconds, option (`zukovsky`: `skip_zukovsky`, `GE_SKIP_ZUKOVSKY`; `briggs`: `skip_briggs`, `GE_SKIP_BRIGGS`); with its option on a cutscene of it that takes the player is skipped like an opening; `g_option` is the option the running skip belongs to |
