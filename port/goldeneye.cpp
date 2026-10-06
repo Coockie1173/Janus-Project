@@ -42,7 +42,14 @@
 
 namespace ge {
 
+#ifdef GE_IMGUI
+void settings_replay_headless(); //settings.cpp
+#endif
+
 void each_frame(uint32_t frame) {
+#ifdef GE_IMGUI
+    if (!video_enabled()) settings_replay_headless();
+#endif
     crash_test();
     gecko_apply();
     tweaks_apply();

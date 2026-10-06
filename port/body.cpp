@@ -17,12 +17,16 @@
 //
 //the game has nothing that says vent or ladder before it's on one, and neither crouching, a
 //ceiling nor a lift is common to the three. what is: the console's step gets somewhere
-//so a body that's pushed at something and gets nowhere tries the console's steps: it stays put
-//until a 30th of a second's moves have added up and takes them as one, the drop that keeps it
-//on the floor (6 a second) included. that goes on while they get it somewhere, until it's
-//clear of the walls, isn't pushed any more or has slid along one for half a second
-//at a real wall they get nowhere either: after four of them it's back to a step a frame, and
-//tries again a quarter of a second later if it's still pushed. the body doesn't move there
+//so a body that's pushed at something and gets nowhere tries the console's steps, and first
+//only as a rehearsal: ten of them in a row from where it stands, the body and its place put
+//back after. ge_body_collide keeps its contacts on the stack and writes nothing but the body
+//and the entity's place, so a rehearsal leaves no trace, and at a plain wall that's all there is
+//only when the rehearsal ends clear of the walls (through the vent, up on the lip, in the air
+//at the ladder) does the body take them for real: it stays put until a 30th of a second's
+//moves have added up and takes them as one, the drop that keeps it on the floor (6 a second)
+//included. that goes on until it's clear of the walls, isn't pushed any more, has slid along
+//one for half a second or four in a row got nowhere
+//a rehearsal that fails is tried again a quarter of a second later if the body is still pushed
 //only walking and sprinting: a cutscene (state 0x22) and every other state has the body to itself
 //and not with noclip on: nothing is in the way then, and holding the body back would hold the flight back
 #include "ge.h"
@@ -35,7 +39,8 @@ namespace ge
 namespace
 {
 
-const uint32_t kBodyEntity = 4, kEntityPos = 0xF8;
+const uint32_t kBodyEntity = 4, kEntityPos = 0xF8, kEntityMoved = 0x8E;
+const uint32_t kBodySize = 0x200; //what ge_body_update and ge_body_collide write is inside this
 const uint32_t kBodyFlags = 0xA, kBodyAtWall = 0xA; //a wall (2) or a ceiling (8) pushed it
 const uint32_t kCtrlEntity = 4, kCtrlTimeStep = 0x578;
 const uint32_t kStateMoving = 2, kStateSprinting = 3;
@@ -46,9 +51,10 @@ const float kMoved = 0.5f; //a console step that got this much of its way moved
 const int kMovedSteps = 15; //that many in a row is sliding along a wall, not being stuck
 const int kWallSteps = 4; //and that many stuck ones in a row is a wall
 const float kWallWait = 0.25f; //seconds before a wall is tried again
+const int kTrySteps = 10; //console steps in a rehearsal, a third of a second
 const float kPushing = 1e-4f; //a frame's move that counts as pushing
 PPCFunc orig_body_update = nullptr;
-bool g_trace = false;
+bool g_trace = false, g_off = false;
 
 struct Vec3
 {
@@ -78,6 +84,8 @@ struct Stuck
 	uint32_t m_Entity{};
 	Vec3 m_Last{}; //where the last step left the body
 	float m_Wanted{}, m_Got{}; //over the window
+	Vec3 m_Pushed{}; //the window's moves added up
+	float m_PushedTime{};
 	int m_Frames{};
 	float m_Wait{}; //seconds until a wall is tried again
 	bool m_Console{}; //taking the console's steps
@@ -94,13 +102,42 @@ struct Stuck
 	void NewWindow()
 	{
 		m_Wanted = m_Got = 0;
+		m_Pushed = {};
+		m_PushedTime = 0;
 		m_Frames = 0;
 	}
 };
 Stuck g_body;
 
+//the console's steps from here with nothing kept: true when they'd end clear of the walls
+bool Rehearse(PPCContext& c, uint32_t body, uint32_t entity, const Vec3& move)
+{
+	PPCContext saved = c;
+	uint8_t bodyWas[kBodySize];
+	uint32_t placeWas[4]; //the place and the word after it, ge_body_update writes all four
+	for (uint32_t i = 0; i < kBodySize; ++i) bodyWas[i] = ld8(body + i);
+	for (uint32_t i = 0; i < 4; ++i) placeWas[i] = ld32(entity + kEntityPos + 4 * i);
+	uint8_t movedWas = ld8(entity + kEntityMoved);
+
+	bool clear = false;
+	for (int i = 0; i < kTrySteps && !clear; ++i)
+	{
+		Vec3 from = ReadPos(entity);
+		WritePos(entity, {from.x + move.x, from.y + move.y, from.z + move.z});
+		c.r[3] = body;
+		orig_body_update(c);
+		clear = !(ld16(body + kBodyFlags) & kBodyAtWall);
+	}
+
+	for (uint32_t i = 0; i < kBodySize; ++i) st8(body + i, bodyWas[i]);
+	for (uint32_t i = 0; i < 4; ++i) st32(entity + kEntityPos + 4 * i, placeWas[i]);
+	st8(entity + kEntityMoved, movedWas);
+	c = saved;
+	return clear;
+}
+
 //a step a frame, and a look at whether the pushing gets anywhere
-void FrameStep(PPCContext& c, uint32_t entity, const Vec3& move, float step)
+void FrameStep(PPCContext& c, uint32_t body, uint32_t entity, const Vec3& move, float step)
 {
 	orig_body_update(c);
 	Vec3 now = ReadPos(entity);
@@ -115,14 +152,25 @@ void FrameStep(PPCContext& c, uint32_t entity, const Vec3& move, float step)
 	}
 	g_body.m_Wanted += length;
 	g_body.m_Got += Progress(last, now, move, length);
+	g_body.m_Pushed = {g_body.m_Pushed.x + move.x, g_body.m_Pushed.y + move.y, g_body.m_Pushed.z + move.z};
+	g_body.m_PushedTime += step;
 	if (++g_body.m_Frames < kWindow) return;
 	if (g_body.m_Got < g_body.m_Wanted * kStuck && g_body.m_Wait <= 0)
 	{
-		g_body.m_Console = true;
-		g_body.m_Move = {};
-		g_body.m_Time = 0;
-		g_body.m_Moved = g_body.m_Failed = 0;
-		if (g_trace) rt_log("goldeneye: body: stuck at %.2f %.2f %.2f, the console's steps from here", now.x, now.y, now.z);
+		float k = kConsoleStep / g_body.m_PushedTime;
+		if (Rehearse(c, body, entity, {g_body.m_Pushed.x * k, g_body.m_Pushed.y * k, g_body.m_Pushed.z * k}))
+		{
+			g_body.m_Console = true;
+			g_body.m_Move = {};
+			g_body.m_Time = 0;
+			g_body.m_Moved = g_body.m_Failed = 0;
+			if (g_trace) rt_log("goldeneye: body: stuck at %.2f %.2f %.2f, the console's steps from here", now.x, now.y, now.z);
+		}
+		else
+		{
+			g_body.m_Wait = kWallWait;
+			if (g_trace) rt_log("goldeneye: body: pushed at %.2f %.2f %.2f, the console's steps wouldn't get it clear", now.x, now.y, now.z);
+		}
 	}
 	g_body.NewWindow();
 }
@@ -190,17 +238,23 @@ void BodyUpdate(PPCContext& c)
 	Vec3 pos = ReadPos(entity);
 	Vec3 move{pos.x - g_body.m_Last.x, pos.y - g_body.m_Last.y, pos.z - g_body.m_Last.z};
 	if (g_body.m_Console) ConsoleStep(c, body, entity, move, step);
-	else FrameStep(c, entity, move, step);
+	else FrameStep(c, body, entity, move, step);
 }
 
-//GE_TRACEPOS=1: where the local player's body is after each update
+//GE_TRACEPOS=1: where the local player's body is after each update and where its move wanted it
+//GE_BODY_OFF=1 with it: the game's own steps at any frame rate, to see where they leave it
 void BodyUpdateTraced(PPCContext& c)
 {
 	uint32_t body = c.r[3], entity = ld32(body + kBodyEntity), ctrl = local_controller();
-	BodyUpdate(c);
-	if (!ctrl || ld32(ctrl + kCtrlEntity) != entity) return;
+	bool ours = ctrl && guest_ptr(entity) && ld32(ctrl + kCtrlEntity) == entity;
+	Vec3 want = ours ? ReadPos(entity) : Vec3{};
+	if (g_off) orig_body_update(c);
+	else BodyUpdate(c);
+	if (!ours) return;
 	Vec3 pos = ReadPos(entity);
-	rt_log("pos: %.3f %.3f %.3f step %.4f flags %X%s", pos.x, pos.y, pos.z, ldf(ctrl + kCtrlTimeStep), ld16(body + kBodyFlags), g_body.m_Console ? " console" : "");
+	uint32_t state = 0;
+	local_player_state(state);
+	rt_log("pos: %.4f %.4f %.4f want %.4f %.4f %.4f step %.4f flags %X state %X%s", pos.x, pos.y, pos.z, want.x, want.y, want.z, ldf(ctrl + kCtrlTimeStep), ld16(body + kBodyFlags), state, g_body.m_Console ? " console" : "");
 }
 
 } //namespace
@@ -208,6 +262,7 @@ void BodyUpdateTraced(PPCContext& c)
 void install_body()
 {
 	g_trace = std::getenv("GE_TRACE") != nullptr;
+	g_off = std::getenv("GE_BODY_OFF") != nullptr;
 	orig_body_update = ppc_hook("ge_body_update", std::getenv("GE_TRACEPOS") ? BodyUpdateTraced : BodyUpdate);
 	if (!orig_body_update) rt_log("goldeneye: ge_body_update is not hooked in this build, a stuck player keeps the frame rate's steps");
 }

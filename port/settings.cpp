@@ -1246,6 +1246,13 @@ bool menu_event(const SDL_Event* e) {
 //runs inside the overlay's ImGui frame
 bool settings_toast() { return Clock::now() < g_toastUntil; }
 void settings_replay() { ReplayHotkeys(); }
+//with --no-video the overlay never draws, so the game's frame sets a recording's hotkeys
+void settings_replay_headless() {
+    static bool built = false;
+    if (!built) build_pages();
+    built = true;
+    ReplayHotkeys();
+}
 
 void settings_draw() {
     if (!g_open && !settings_toast()) return;
