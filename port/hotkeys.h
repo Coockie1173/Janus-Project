@@ -23,7 +23,6 @@ struct Setting
 	std::function<std::string(float)> show;
 	std::function<float(float)> frac, at; //a range's slider: where a value is on the track (0..1) and the value there
 	int count{}; //a choice: how many it has
-	std::function<bool()> visible; //none: always. it's in the menu only while this says so
 };
 const std::vector<Setting>& Settings(); //settings.cpp, the menu's own list
 

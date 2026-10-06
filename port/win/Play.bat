@@ -7,7 +7,6 @@ rem     Play.bat --always-mouse         the cheat "Always Enable Mouse": mouse l
 rem     Play.bat --skip-cutscenes       a mission's opening cutscene is skipped
 rem     Play.bat --skip-zukovsky        the meeting with Zukovsky in Nightclub is skipped
 rem     Play.bat --skip-briggs          the meeting with Sky Briggs in Carrier is skipped
-rem     Play.bat --no-skip-fade         a skipped cutscene is fast forwarded in sight instead of behind a fade
 rem     Play.bat --skip-movies          briefings, the movies between missions and the logos are skipped
 rem     Play.bat --no-tutorials         the tutorial boxes in the missions aren't shown
 rem     Play.bat --no-colour-filter     the tint some levels lay over the picture isn't drawn

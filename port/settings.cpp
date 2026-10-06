@@ -93,7 +93,7 @@ void save_launch_settings() {
         {"LAUNCH_MOUSEMODE", modes[mouse_mode()]}, {"LAUNCH_MOUSEINVERT", mouse_invert() ? "1" : "0"},
         {"LAUNCH_ADSFOV", ads_fov_text}, {"LAUNCH_ADSSENS", ads_sens_text}, {"LAUNCH_AIMLOCK", aim_lock() ? "1" : "0"},
         {"LAUNCH_MOUSEEVERYWHERE", mouse_everywhere() ? "1" : "0"},
-        {"LAUNCH_SKIPCUTSCENES", skip_cutscenes() ? "1" : "0"}, {"LAUNCH_SKIPZUKOVSKY", skip_zukovsky() ? "1" : "0"}, {"LAUNCH_SKIPBRIGGS", skip_briggs() ? "1" : "0"}, {"LAUNCH_SKIPFADE", skip_fade() ? "1" : "0"}, {"LAUNCH_SKIPMOVIES", skip_movies() ? "1" : "0"}, {"LAUNCH_NOTUTORIALS", no_tutorials() ? "1" : "0"}, {"LAUNCH_NOCOLOURFILTER", no_colour_filter() ? "1" : "0"},
+        {"LAUNCH_SKIPCUTSCENES", skip_cutscenes() ? "1" : "0"}, {"LAUNCH_SKIPZUKOVSKY", skip_zukovsky() ? "1" : "0"}, {"LAUNCH_SKIPBRIGGS", skip_briggs() ? "1" : "0"}, {"LAUNCH_SKIPMOVIES", skip_movies() ? "1" : "0"}, {"LAUNCH_NOTUTORIALS", no_tutorials() ? "1" : "0"}, {"LAUNCH_NOCOLOURFILTER", no_colour_filter() ? "1" : "0"},
         {"LAUNCH_LEVELTIMER", level_timer() ? "1" : "0"}, {"LAUNCH_AUTOQTE", auto_qte() ? "1" : "0"}, {"LAUNCH_AUTOSTART", auto_start() ? "1" : "0"}, {"LAUNCH_AUTOSAVE", autosave() ? "1" : "0"}, {"LAUNCH_EXTRASMENU", extras_menu() ? "1" : "0"}, {"LAUNCH_UNLOCKALL", unlock_all() ? "1" : "0"}};
     if (g_fps_changed) values.push_back({"LAUNCH_FPS", std::to_string(fps_limit())}); //"auto" stays until it's changed
     auto lines = read_lines(GE_SETTINGS_FILE);
@@ -368,8 +368,6 @@ void BuildSettings()
 	AddToggle(kEnhancements, "skip_cutscenes", "Skip Intro Cutscenes (Experimental)", "On: a mission's opening cutscene is skipped.", skip_cutscenes, set_skip_cutscenes);
 	AddToggle(kEnhancements, "skip_zukovsky", "Skip Zukovsky (Experimental)", "On: the meeting with Zukovsky in Nightclub is skipped.", skip_zukovsky, set_skip_zukovsky);
 	AddToggle(kEnhancements, "skip_briggs", "Skip Sky Briggs (Experimental)", "On: the meeting with Sky Briggs in Carrier is skipped.", skip_briggs, set_skip_briggs);
-	AddToggle(kEnhancements, "skip_fade", "Fade Cutscene Skips", "On: a skipped cutscene fades to black and back. Off: it is fast forwarded in sight.", skip_fade, set_skip_fade);
-	g_settings.back().visible = [] { return skip_cutscenes() || skip_zukovsky() || skip_briggs(); };
 	AddToggle(kEnhancements, "skip_movies", "Skip Movies", "On: briefings, the movies between missions and the logos are skipped.", skip_movies, set_skip_movies);
 	AddToggle(kEnhancements, "level_timer", "Level Timer", "On: the hud shows the time played in the level.", level_timer, set_level_timer);
 	AddToggle(kEnhancements, "auto_qte", "Auto Quick Time Events", "On: quick time events press their own buttons.", auto_qte, set_auto_qte);
@@ -555,33 +553,12 @@ void BuildHotkeyPages()
 	}});
 }
 
-//the rows of a page that only has settings, without the ones that aren't to be seen now
-std::vector<char> g_settingShown;
-void BuildSettingRows(int page)
-{
-	g_settingShown.resize(g_settings.size(), 1);
-	g_pages[page].rows.clear();
-	for (size_t i = 0; i < g_settings.size(); ++i)
-	{
-		if (g_settings[i].page != page) continue;
-		g_settingShown[i] = !g_settings[i].visible || g_settings[i].visible();
-		if (g_settingShown[i]) g_pages[page].rows.push_back(SettingRow((int)i));
-	}
-}
-
 //after an event or before the picture, when no row is running
 void RefreshHotkeyPages()
 {
-	bool changed = g_hotkeysChanged;
-	for (size_t i = 0; i < g_settings.size(); ++i)
-	{
-		if (!g_settings[i].visible || g_settings[i].visible() == (g_settingShown[i] != 0)) continue;
-		BuildSettingRows(g_settings[i].page);
-		changed = true;
-	}
-	if (!changed) return;
-	if (g_hotkeysChanged) BuildHotkeyPages();
+	if (!g_hotkeysChanged) return;
 	g_hotkeysChanged = false;
+	BuildHotkeyPages();
 	g_row = std::clamp(g_row, 0, (int)g_pages[g_page].rows.size() - 1);
 	if (g_listening >= (int)g_pages[g_page].rows.size()) g_listening = -1;
 	g_drop = -1; //its row may be another one now
@@ -600,7 +577,7 @@ void build_pages() {
     root.rows.push_back({"Cheats", "Things the game itself would not let you do.", {}, {}, [] { go(kCheats); }});
 
     BuildSettings();
-    for (int page = 0; page < kPageCount; ++page) BuildSettingRows(page);
+    for (size_t i = 0; i < g_settings.size(); ++i) g_pages[g_settings[i].page].rows.push_back(SettingRow((int)i));
 
     Page& screen = g_pages[kScreen];
     screen.title = "Screen Settings";

@@ -22,14 +22,9 @@
 //stop half a second before it and the picture is back when the cutscene ends. a level that
 //isn't in there fades in after its cutscene
 //
-//with the fade off (GE_SKIP_FADE=0) the fast forward is seen, one frame in four, and the last
-//second is eased into: from a second before the end the steps shrink from a third of a second
-//to a frame of the engine's rate, each one shown. a level that isn't in the list just cuts
-//
 //GE_SKIP_CUTSCENES=1 on
 //GE_SKIP_ZUKOVSKY=1, GE_SKIP_BRIGGS=1 the cutscenes of config/cutscenes.txt are skipped the same
 //way (Nightclub's meeting with Zukovsky, Carrier's with Sky Briggs), each an option of its own
-//GE_SKIP_FADE=0 no fade
 //GE_SKIP_RATE=N the frames a second of game time while skipping (3)
 //GE_ENTRANCE=N start every mission at entrance N instead of 1, for trying out a level's
 //entrances (0 is one too). nothing is skipped then
@@ -73,7 +68,6 @@ const uint32_t kWaitFrames = 150; //a level that gives the player the controls f
 const uint32_t kCountingFrames = 3; //the level's time went up this many frames in a row: it runs
 const double kMaxSeconds = 600; //ten minutes of cutscene, then something is wrong
 const float kFadeSeconds = 0.5f; //the picture and the sound going out, and coming back
-const float kEaseSeconds = 1.0f; //of the cutscene's end, slowing down to normal speed when nothing fades
 const uint32_t kShowEvery = 4; //one frame in this many is drawn, so it's seen to be moving
 const uint32_t kLevelTimer = 0x805C963C; //a float, seconds played in the level
 const uint32_t kTimelineHash = 0x20; //of a cutscene's timeline, the hash that names it
@@ -85,8 +79,6 @@ enum class Skip { Idle, Waiting, FadingOut, Running };
 std::atomic<bool> g_skip_cutscenes{false};
 std::atomic<bool> g_skip_zukovsky{false};
 std::atomic<bool> g_skip_briggs{false};
-std::atomic<bool> g_skip_fade{true};
-bool g_fading = false; //this skip is behind the fade
 std::atomic<bool>* g_option = &g_skip_cutscenes; //the option what is waited for or skipped belongs to
 std::atomic<bool> g_running{false};
 PPCFunc orig_menu_pending = nullptr;
@@ -216,32 +208,20 @@ void ArmCutscene(uint32_t cutscene)
 	if (g_trace) rt_log("goldeneye: skip cutscenes: cutscene %08X of level %08X starts", cutscene, ld32(kCurrentLevel));
 }
 
-void StartSteps()
-{
-	g_state = Skip::Running;
-	g_frames = g_drawn = 0;
-	g_started = Clock::now();
-	g_started_guest = rt_now();
-	set_fast_forward(true);
-	audio_mute(true);
-}
-
 //the cutscene has the player: the picture and the sound go out first, at normal speed
 void StartFade()
 {
 	g_ends = g_armed_ends;
-	g_fading = g_skip_fade;
-	if (g_fading && g_ends > 0 && g_ends - ldf(kLevelTimer) < kFadeSeconds * 3)
+	if (g_ends > 0 && g_ends - ldf(kLevelTimer) < kFadeSeconds * 3)
 	{
 		g_state = Skip::Idle; //too short to fade out of and back into
 		return;
 	}
-	g_running = true;
-	rt_log("goldeneye: skip cutscenes: skipping a cutscene of level %08X", ld32(kCurrentLevel));
-	if (!g_fading) { StartSteps(); return; }
 	g_state = Skip::FadingOut;
+	g_running = true;
 	FadeTo(1.0f);
 	audio_mute(true, kFadeSeconds);
+	rt_log("goldeneye: skip cutscenes: skipping a cutscene of level %08X", ld32(kCurrentLevel));
 }
 
 //what ends a skip whenever it happens
@@ -257,7 +237,13 @@ bool Over()
 
 void FadeOut()
 {
-	if (!Over() && FadeNow() >= 1.0f) StartSteps();
+	if (Over() || FadeNow() < 1.0f) return;
+	g_state = Skip::Running;
+	g_frames = g_drawn = 0;
+	g_started = Clock::now();
+	g_started_guest = rt_now();
+	set_fast_forward(true);
+	audio_mute(true);
 }
 
 void Run()
@@ -274,16 +260,8 @@ void Run()
 	if (std::chrono::duration<double>(rt_now() - g_started_guest).count() > kMaxSeconds) { Stop("given up"); return; }
 	if (Over()) return;
 	float left = g_ends - ldf(kLevelTimer);
-	if (!g_fading && g_ends > 0 && left < kEaseSeconds)
-	{
-		//the rate goes from the long steps' to the engine's own, by equal factors over the second
-		float along = std::clamp(1.0f - left / kEaseSeconds, 0.0f, 1.0f), from = skip_rate(), to = (float)engine_top_rate();
-		set_fast_forward(true, from * std::pow(std::max(1.0f, to / from), along));
-		g_gx_skip_frames = false;
-		return;
-	}
-	if (g_fading && g_ends > 0 && left <= kFadeSeconds) { Stop("the fade in"); return; }
-	if (g_fading && g_ends > 0 && left < kFadeSeconds + 2.0f / skip_rate())
+	if (g_ends > 0 && left <= kFadeSeconds) { Stop("the fade in"); return; }
+	if (g_ends > 0 && left < kFadeSeconds + 2.0f / skip_rate())
 	{
 		//long steps would go past where the fade in starts: the engine's own steps up to there,
 		//still as a fast forward so the last long one isn't waited for. the rate only counts
@@ -372,8 +350,6 @@ bool skip_zukovsky() { return g_skip_zukovsky; }
 void set_skip_zukovsky(bool on) { g_skip_zukovsky = on; }
 bool skip_briggs() { return g_skip_briggs; }
 void set_skip_briggs(bool on) { g_skip_briggs = on; }
-bool skip_fade() { return g_skip_fade; }
-void set_skip_fade(bool on) { g_skip_fade = on; }
 bool skipping_cutscene() { return g_running; }
 float cutscene_fade() { return g_fade_hidden ? 0.0f : FadeNow(); }
 
@@ -386,7 +362,7 @@ void TraceFrames()
 	auto now = Clock::now();
 	double ms = std::chrono::duration<double, std::milli>(now - last).count();
 	last = now;
-	bool ending = g_state == Skip::Running && g_ends > 0 && g_ends - ldf(kLevelTimer) < kEaseSeconds;
+	bool ending = g_state == Skip::Running && g_ends > 0 && g_ends - ldf(kLevelTimer) < kFadeSeconds * 2;
 	if (ending) { after = 90; line += "e"; }
 	else if (after <= 0) return;
 	else --after;
@@ -452,7 +428,6 @@ void install_cutscenes()
 	if (const char* e = std::getenv("GE_SKIP_CUTSCENES")) g_skip_cutscenes = std::atoi(e) != 0;
 	if (const char* e = std::getenv("GE_SKIP_ZUKOVSKY")) g_skip_zukovsky = std::atoi(e) != 0;
 	if (const char* e = std::getenv("GE_SKIP_BRIGGS")) g_skip_briggs = std::atoi(e) != 0;
-	if (const char* e = std::getenv("GE_SKIP_FADE")) g_skip_fade = std::atoi(e) != 0;
 	if (const char* e = std::getenv("GE_ENTRANCE")) g_forced_entrance = std::atoi(e);
 	if (const char* e = std::getenv("GE_LEVEL")) g_forced_level = (uint32_t)std::strtoul(e, nullptr, 16);
 	g_trace = std::getenv("GE_TRACE") != nullptr;

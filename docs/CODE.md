@@ -554,7 +554,6 @@ State machine (`Skip::Idle`, `Waiting`, `Running`):
 | `Arm(level)`, `Start()`, `Stop(why)` | `Stop` ends the fast forward, fades the picture and the sound back in over half a second and logs how long the opening was |
 | `StartFade()`, `FadeOut()`, `Over()` | the picture and the sound go out over half a second at normal speed (`FadeTo`, `audio_mute`), then the long steps start; `Over` is what ends a skip in either state |
 | `cutscene_fade()` | how black the picture is, for the overlay; 0 while the pause menu is up |
-| `skip_fade`, `set_skip_fade` | the fade's option (`GE_SKIP_FADE`); off, `StartFade` goes straight to the long steps and `Run` eases over the last second instead |
 | `cutscenes_frame()` | waiting: the level's time has to count 3 frames in a row, then a locked cutscene starts the skip; 150 frames with the controls means no opening |
 | `Run()` | stops when the option is turned off, after 600 s, when a button is wanted, the player is gone or has anything back; with the opening's end known it stops half a second before it, the last long steps before that at the engine's own rate |
 | `FrameDraw` | hook: `r3 = 1` for the frames the skip does not show |
