@@ -69,3 +69,4 @@ ge_timeline_event      # a timeline's type 0xB event: one that waits stays at th
 ge_texture_animate     # a texture's animator: it counts the whole frame's length at any rate (port/flipbooks.cpp)
 draw_delayed?          # a mesh glued to the eye is widened with the field of view
 ge_geofile_onload      # a file is given its memory: one that gets none is logged (port/mods.cpp)
+ge_pick_next_maps      # a network game picks its next two maps: with a short map list it gives up on them being new ones (port/modmenu.cpp)

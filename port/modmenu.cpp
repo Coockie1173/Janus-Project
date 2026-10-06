@@ -233,6 +233,41 @@ void PoolFrame(const PPCContext& c, uint32_t data, uint32_t count)
 	st32(page + kPageRowCount, on ? g_pool_row_count : kConflictRowCount);
 }
 
+//ge_pick_next_maps (801E5860): a network game's next two maps, each drawn at random from the
+//mode's page until the first is neither of the two before and the second neither of those nor
+//the first. the game's lists have ten maps, with a list of two or three that never ends
+//the same here, but after a number of draws a map that was there before is taken, and with
+//one map both are that one
+const uint32_t kMatchMode = 0x2C, kMatchFirst = 0x48, kMatchSecond = 0x4C;
+const uint32_t kRandomMap = 0x8023CD50; //(the pages, a mode) -> a map of that mode's page
+const int kDraws = 64;
+PPCFunc random_map = nullptr;
+
+uint32_t RandomMap(const PPCContext& c, uint32_t mode)
+{
+	PPCContext call = c;
+	uint32_t stack = c.r[1], frame = stack - 0x40;
+	st32(frame, stack);
+	call.r[1] = frame;
+	call.r[3] = kPages;
+	call.r[4] = mode;
+	random_map(call);
+	return call.r[3];
+}
+
+void PickNextMaps(PPCContext& c)
+{
+	const uint32_t match = c.r[3], mode = ld32(match + kMatchMode);
+	const uint32_t before[2] = { ld32(match + kMatchFirst), ld32(match + kMatchSecond) };
+	uint32_t first = before[0];
+	for (int i = 0; i < kDraws && (first == before[0] || first == before[1]); ++i) first = RandomMap(c, mode);
+	uint32_t second = first;
+	for (int i = 0; i < kDraws && (second == first || second == before[0] || second == before[1]); ++i) second = RandomMap(c, mode);
+	for (int i = 0; i < kDraws && second == first; ++i) second = RandomMap(c, mode); //not a new one then, but another
+	st32(match + kMatchFirst, first);
+	st32(match + kMatchSecond, second);
+}
+
 } //namespace
 
 bool mod_map_pool() { return g_map_pool; }
@@ -312,6 +347,8 @@ void install_mods_menu()
 	if (const char* e = std::getenv("GE_MOD_MAPS")) g_map_pool = std::atoi(e) != 0;
 	if (const char* e = std::getenv("GE_MODS_PAGE")) g_mods_target = (uint32_t)std::strtoul(e, nullptr, 16);
 	ReadPool();
+	random_map = ppc_lookup(kRandomMap);
+	if (random_map) ppc_hook("ge_pick_next_maps", PickNextMaps);
 	if (!g_levels.empty() && !game_alloc) rt_log("goldeneye: the game's allocator isn't in this build, no Mods menu");
 }
 
