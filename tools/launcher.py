@@ -377,10 +377,6 @@ def run_gui():
     ttk.Checkbutton(en, text="Level Timer", variable=level_timer).grid(row=2, column=0, sticky="w", **pad)
     ttk.Label(en, text="The hud shows the time played in the level.",
               foreground="gray", wraplength=520, justify="left").grid(row=3, column=0, sticky="w", padx=(30, 8))
-    unlock_all = tk.BooleanVar(value=settings["unlockall"] == "1")
-    ttk.Checkbutton(ch, text="Unlock Everything", variable=unlock_all).grid(row=4, column=0, sticky="w", **pad)
-    ttk.Label(ch, text="Every mission and every difficulty can be picked. A save made with it on may keep them.",
-              foreground="gray", wraplength=520, justify="left").grid(row=5, column=0, sticky="w", padx=(30, 8))
     auto_qte = tk.BooleanVar(value=settings["autoqte"] == "1")
     ttk.Checkbutton(en, text="Auto Quick Time Events", variable=auto_qte).grid(row=4, column=0, sticky="w", **pad)
     ttk.Label(en, text="Quick time events press their own buttons.",
@@ -428,6 +424,10 @@ def run_gui():
     ttk.Checkbutton(ch, text="Unused Extras Menu", variable=extras_menu).grid(row=2, column=0, sticky="w", **pad)
     ttk.Label(ch, text="Extras also lists Mission Select, Character Viewer, Movies and the Calibration Menu.",
               foreground="gray", wraplength=520, justify="left").grid(row=3, column=0, sticky="w", padx=(30, 8))
+    unlock_all = tk.BooleanVar(value=settings["unlockall"] == "1")
+    ttk.Checkbutton(ch, text="Unlock Everything", variable=unlock_all).grid(row=4, column=0, sticky="w", **pad)
+    ttk.Label(ch, text="Every mission and every difficulty can be picked. A save made with it on may keep them.",
+              foreground="gray", wraplength=520, justify="left").grid(row=5, column=0, sticky="w", padx=(30, 8))
     ttk.Label(ch, text="Gecko codes from config/gecko/cheats.txt. They apply the next time the game starts.",
               justify="left").grid(row=6, column=0, sticky="w", **pad)
     for i, (name, code, notes) in enumerate(cheats):
