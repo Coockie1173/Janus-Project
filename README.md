@@ -103,9 +103,9 @@ under Extras > Mods. With Mod Map Pool on (F1 > Enhancements) multiplayer's
 Conflict has the maps listed in `mods/online.txt`, a mod's file name or a
 file's hash a line. A level is the hash of its file: `GE_LEVEL=01810201
 ./launch.sh` starts that level whichever mission is picked in the menu.
-New levels were made from glTF scenes with a changed
-[eurochef](https://github.com/eurotools/eurochef); those changes aren't
-published.
+New levels are made from glTF scenes with
+[eurochef-GE](https://github.com/Coockie1173/eurochef-GE), a fork of
+[eurochef](https://github.com/eurotools/eurochef).
 
 ## Layout
 
