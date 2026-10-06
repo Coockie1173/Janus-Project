@@ -12,6 +12,7 @@
 //while it's up the game gets no input, and a game in play gets paused first (a press of +)
 //Esc outside the menu is + as well (the game's own pause), it never gets to the runtime's pause box
 //keys: arrows or WASD, Return, Esc or Backspace to go back, Delete to clear a binding
+//a hotkey's setting, action and choice are dropdowns: Return opens the list, Return again picks
 //the mouse and a gamepad's D-pad, A and B work too
 //
 //drawn by the overlay (overlay.cpp) on the renderer's thread
@@ -189,6 +190,9 @@ struct Row {
     bool wide = false; //the value goes against the right edge in the room the label leaves
     const char* does = nullptr; //what Enter and Delete are called at the foot, when it's not the usual
     const char* clears = nullptr;
+    std::function<std::vector<std::string>()> options; //a dropdown: Enter opens the list of these
+    std::function<int()> chosen; //the one it's on
+    std::function<void(int)> choose;
 };
 struct Page { std::string title; std::vector<Row> rows; };
 
@@ -198,6 +202,9 @@ int g_page = kRoot, g_row = 0, g_scroll = 0;
 int g_root_row = 0; //where the cursor was on the first page
 int g_listening = -1; //the binding row waiting for a key
 int g_dragging = -1; //the slider row the mouse has by the knob
+int g_drop = -1; //the row with its dropdown open
+int g_dropAt = 0, g_dropScroll = 0; //the cursor in its list
+std::vector<std::string> g_dropOptions;
 bool g_dirty = false; //the launcher's file needs writing
 std::vector<Setting> g_settings;
 int g_edit = -1; //the hotkey on the edit page
@@ -277,6 +284,7 @@ void AddChoice(int page, const char* id, const char* label, const char* hint, st
 	s.set = [set, count](float v) { set(std::clamp((int)std::lround(v), 0, count - 1)); };
 	s.step = [count](float v, int d) { return (float)(((int)std::lround(v) + d + count) % count); };
 	s.show = [names, count](float v) { return std::string(names[std::clamp((int)std::lround(v), 0, count - 1)]); };
+	s.count = count;
 }
 
 //from lo to hi in steps of by, shown with that many decimals
@@ -396,7 +404,7 @@ void go(int page, int row = 0) {
     g_page = page;
     g_row = row;
     g_scroll = 0;
-    g_listening = g_dragging = -1;
+    g_listening = g_dragging = g_drop = -1;
 }
 
 Hotkey* EditedHotkey() { return g_edit >= 0 && g_edit < (int)Hotkeys().size() ? &Hotkeys()[g_edit] : nullptr; }
@@ -469,15 +477,21 @@ void BuildHotkeyPages()
 	Row setting;
 	setting.label = "Setting";
 	setting.hint = "What the key changes: " + s.hint;
-	setting.wide = true;
 	setting.value = [] { Hotkey* h = EditedHotkey(); return h ? g_settings[h->setting].label : std::string(); };
-	setting.adjust = [](int d)
+	setting.options = []
 	{
-		ChangeHotkey([d](Hotkey& h)
+		std::vector<std::string> labels;
+		for (const Setting& s : g_settings) labels.push_back(s.label);
+		return labels;
+	};
+	setting.chosen = [] { Hotkey* h = EditedHotkey(); return h ? h->setting : 0; };
+	setting.choose = [](int i)
+	{
+		ChangeHotkey([i](Hotkey& h)
 		{
-			int count = (int)g_settings.size();
+			if (i == h.setting) return;
 			std::string key = h.key;
-			h = NewHotkey((h.setting + d + count) % count);
+			h = NewHotkey(i);
 			h.key = key;
 		});
 	};
@@ -488,7 +502,9 @@ void BuildHotkeyPages()
 	action.hint = h->action == Hotkey::kSwitch ? "Switch To: the key goes to the value, and back to what it was on the next press."
 		: "What a press of the key does to it.";
 	action.value = [] { Hotkey* h = EditedHotkey(); return h ? ActionName(*h) : std::string(); };
-	action.adjust = [](int d) { ChangeHotkey([d](Hotkey& h) { CycleAction(h, d); }); };
+	action.options = [] { Hotkey* h = EditedHotkey(); return h ? ActionNames(h->setting) : std::vector<std::string>(); };
+	action.chosen = [] { Hotkey* h = EditedHotkey(); return h ? ActionIndex(*h) : 0; };
+	action.choose = [](int i) { ChangeHotkey([i](Hotkey& h) { SetAction(h, i); }); };
 	edit.rows.push_back(action);
 
 	if (HasValue(*h) && s.kind != Setting::kToggle)
@@ -497,7 +513,21 @@ void BuildHotkeyPages()
 		value.label = "Value";
 		value.hint = "What the key sets it to.";
 		value.value = [] { Hotkey* h = EditedHotkey(); return h ? g_settings[h->setting].show(h->value) : std::string(); };
-		value.adjust = [](int d) { ChangeHotkey([d](Hotkey& h) { h.value = g_settings[h.setting].step(h.value, d); }); };
+		if (s.kind == Setting::kChoice)
+		{
+			value.options = []
+			{
+				std::vector<std::string> names;
+				if (Hotkey* h = EditedHotkey())
+				{
+					for (int v = 0; v < g_settings[h->setting].count; ++v) names.push_back(g_settings[h->setting].show((float)v));
+				}
+				return names;
+			};
+			value.chosen = [] { Hotkey* h = EditedHotkey(); return h ? (int)std::lround(h->value) : 0; };
+			value.choose = [](int i) { ChangeHotkey([i](Hotkey& h) { h.value = (float)i; }); };
+		}
+		else value.adjust = [](int d) { ChangeHotkey([d](Hotkey& h) { h.value = g_settings[h.setting].step(h.value, d); }); };
 		if (s.frac)
 		{
 			value.slider = [] { Hotkey* h = EditedHotkey(); return h ? g_settings[h->setting].frac(h->value) : 0.0f; };
@@ -531,6 +561,7 @@ void RefreshHotkeyPages()
 	BuildHotkeyPages();
 	g_row = std::clamp(g_row, 0, (int)g_pages[g_page].rows.size() - 1);
 	if (g_listening >= (int)g_pages[g_page].rows.size()) g_listening = -1;
+	g_drop = -1; //its row may be another one now
 	if (g_dragging >= 0 && !g_pages[g_page].rows[std::min(g_dragging, (int)g_pages[g_page].rows.size() - 1)].slide) g_dragging = -1;
 }
 
@@ -669,7 +700,7 @@ void open(bool on) {
         load_keys();
         g_page = kRoot;
         g_row = g_scroll = 0;
-        g_listening = g_dragging = -1;
+        g_listening = g_dragging = g_drop = -1;
         if (in_play()) //the game's own pause, before the menu takes the input away
             g_pause_until = (Clock::now() + std::chrono::milliseconds(150)).time_since_epoch().count();
     } else if (g_dirty) {
@@ -680,7 +711,8 @@ void open(bool on) {
 }
 
 void back() {
-    if (g_listening >= 0) g_listening = -1;
+    if (g_drop >= 0) g_drop = -1;
+    else if (g_listening >= 0) g_listening = -1;
     else if (g_page == kRoot) open(false);
     else if (g_page == kHotkeyEdit) go(kHotkeys, std::max(0, g_edit));
     else go(kRoot, g_root_row);
@@ -696,9 +728,35 @@ void adjust(int d) {
     if (r.adjust) r.adjust(d);
 }
 
+//the list opens on the one the row has now
+void OpenDrop(int row)
+{
+	const Row& r = g_pages[g_page].rows[row];
+	g_dropOptions = r.options();
+	if (g_dropOptions.empty()) return;
+	g_drop = row;
+	g_dropAt = std::clamp(r.chosen(), 0, (int)g_dropOptions.size() - 1);
+	g_dropScroll = g_dropAt;
+}
+
+void MoveDrop(int d, bool wrap)
+{
+	int n = (int)g_dropOptions.size();
+	g_dropAt = wrap ? (g_dropAt + d + n) % n : std::clamp(g_dropAt + d, 0, n - 1);
+}
+
+void ChooseDrop()
+{
+	Row& r = g_pages[g_page].rows[g_drop];
+	int at = g_dropAt;
+	g_drop = -1;
+	r.choose(at);
+}
+
 void select() {
     Row& r = g_pages[g_page].rows[g_row];
-    if (r.select) r.select();
+    if (r.options) OpenDrop(g_row);
+    else if (r.select) r.select();
     else if (r.adjust) r.adjust(1);
 }
 
@@ -749,8 +807,17 @@ struct Layout { //the game's 1280 x 720 menu screen, centred in the window
 const float kRowLeft = 340, kRowRight = 940, kRowHeight = 38, kRowPitch = 41, kValueWidth = 230;
 const float kSliderLeft = kRowRight - 262, kSliderRight = kRowRight - 66; //a slider's track, its number after it
 const int kVisible = 8;
+const float kDropLeft = 560, kDropPitch = 34, kDropPad = 5, kDropFloor = 538; //a dropdown's list, it stays above the foot
+const int kDropVisible = 8;
 Layout g_layout;
 float rows_top() { return g_pages[g_page].rows.size() > 4 ? 178.0f : 276.0f; }
+int DropShown() { return std::min(kDropVisible, (int)g_dropOptions.size()); }
+float DropHeight() { return kDropPitch * (float)DropShown() + 2 * kDropPad; }
+float DropTop() //under its row
+{
+	float under = rows_top() + kRowPitch * (float)(g_drop - g_scroll) + kRowHeight + 3;
+	return std::min(under, kDropFloor - DropHeight());
+}
 
 //a key's cap and what it does, like the game's "(b) Back"
 float key_hint(ImDrawList* dl, const Layout& L, float x, float y, const char* key, const char* what, bool right) {
@@ -802,7 +869,7 @@ void draw_frame(ImDrawList* dl, const Layout& L, const Page& page) {
     float left = L.x(210);
     left += key_hint(dl, L, left, L.y(625), "Esc", g_page == kRoot ? "Close" : "Back", false) + 28 * u;
     if (row.clear && g_listening < 0) key_hint(dl, L, left, L.y(625), "Del", row.clears ? row.clears : "Clear", false);
-    const char* does = row.does ? row.does : row.binding ? "Add Key" : row.select || !row.adjust ? "Select" : "Change";
+    const char* does = row.does ? row.does : row.options ? "Choose" : row.binding ? "Add Key" : row.select || !row.adjust ? "Select" : "Change";
     if (g_listening < 0) key_hint(dl, L, L.x(1070), L.y(625), row.select || !row.adjust ? "Enter" : "< >", does, true);
 }
 
@@ -823,6 +890,13 @@ void draw_rows(ImDrawList* dl, const Layout& L, const Page& page) {
         text(dl, ImVec2(x0 + 14 * u, ty + (size - ls) * 0.55f), ls, colour, r.label, !sel);
         if (!r.value) continue;
         std::string v = r.value();
+        if (r.options) { //what it's on and the arrow that says there's a list
+            float a = 7 * u, ax = x1 - 14 * u - a, ay = (y0 + y1) / 2 - a * 0.5f;
+            dl->AddTriangleFilled(ImVec2(ax - a, ay), ImVec2(ax + a, ay), ImVec2(ax, ay + a), colour);
+            float room = ax - a - 12 * u - (x0 + 44 * u + text_width(r.label, ls)), vs = fit(v, 26 * u, room);
+            text(dl, ImVec2(ax - a - 12 * u - text_width(v, vs), ty + (size - vs) * 0.55f), vs, colour, v, !sel);
+            continue;
+        }
         if (r.binding || r.wide) { //the keys, against the right edge
             if (g_listening == i) v = std::fmod(ImGui::GetTime(), 1.0) < 0.6 ? "Press a key..." : "";
             float room = x1 - x0 - 44 * u - text_width(r.label, ls), vs = fit(v, 26 * u, room);
@@ -859,6 +933,43 @@ void draw_rows(ImDrawList* dl, const Layout& L, const Page& page) {
     }
 }
 
+//the open dropdown's list, over the rows under it
+void DrawDrop(ImDrawList* dl, const Layout& L)
+{
+	float u = L.u;
+	int n = (int)g_dropOptions.size(), shown = DropShown();
+	g_dropScroll = std::clamp(g_dropScroll, std::max(0, g_dropAt - shown + 1), g_dropAt);
+	g_dropScroll = std::clamp(g_dropScroll, 0, n - shown);
+	float x0 = L.x(kDropLeft), x1 = L.x(kRowRight), top = L.y(DropTop()), bottom = top + DropHeight() * u;
+	dl->AddRectFilled(ImVec2(x0, top), ImVec2(x1, bottom), kDark);
+	dl->AddRect(ImVec2(x0, top), ImVec2(x1, bottom), kCream, 0, 0, 2 * u);
+	int chosen = g_pages[g_page].rows[g_drop].chosen();
+	for (int i = g_dropScroll; i < g_dropScroll + shown; ++i)
+	{
+		bool sel = i == g_dropAt;
+		float y0 = top + (kDropPad + kDropPitch * (float)(i - g_dropScroll)) * u, y1 = y0 + (kDropPitch - 2) * u;
+		if (sel) dl->AddRectFilled(ImVec2(x0 + kDropPad * u, y0), ImVec2(x1 - kDropPad * u, y1), kSelected);
+		ImU32 colour = sel ? kSelectedText : kCream;
+		if (i == chosen) dl->AddCircleFilled(ImVec2(x0 + 20 * u, (y0 + y1) / 2), 4 * u, colour, 12);
+		float size = fit(g_dropOptions[i], 26 * u, x1 - x0 - 50 * u);
+		text(dl, ImVec2(x0 + 34 * u, y0 + 3 * u + (26 * u - size) * 0.55f), size, colour, g_dropOptions[i], !sel);
+	}
+	//more above, more below
+	float ax = x1 - 18 * u, a = 6 * u;
+	if (g_dropScroll > 0) dl->AddTriangleFilled(ImVec2(ax, top - a - 3 * u), ImVec2(ax - a, top - 3 * u), ImVec2(ax + a, top - 3 * u), kCream);
+	if (g_dropScroll + shown < n) dl->AddTriangleFilled(ImVec2(ax, bottom + a + 3 * u), ImVec2(ax - a, bottom + 3 * u), ImVec2(ax + a, bottom + 3 * u), kCream);
+}
+
+//the one in the list under a point of the window, -1 for none
+int DropAt(float x, float y)
+{
+	const Layout& L = g_layout;
+	if (L.u <= 0 || x < L.x(kDropLeft) || x > L.x(kRowRight)) return -1;
+	float r = (y - L.y(DropTop() + kDropPad)) / (kDropPitch * L.u);
+	int i = (int)std::floor(r);
+	return r < 0 || i >= DropShown() ? -1 : i + g_dropScroll;
+}
+
 //the row under a point of the window, -1 for none
 int row_at(float x, float y) {
     const Layout& L = g_layout;
@@ -881,7 +992,7 @@ void click(float x, float y) {
     if (i < 0) return;
     g_row = i;
     Row& r = g_pages[g_page].rows[i];
-    if (r.select || !r.adjust) { select(); return; }
+    if (r.options || r.select || !r.adjust) { select(); return; }
     if (r.slide) { //on the track the knob jumps to the mouse and follows it
         if (x >= g_layout.x(kSliderLeft) - 12 * g_layout.u && x <= g_layout.x(kSliderRight) + 12 * g_layout.u) {
             g_dragging = i;
@@ -967,6 +1078,22 @@ void key_down(const SDL_KeyboardEvent& k) {
         } else bind(name);
         return;
     }
+    if (g_drop >= 0) {
+        switch (k.scancode) {
+            case SDL_SCANCODE_UP: case SDL_SCANCODE_W: MoveDrop(-1, true); break;
+            case SDL_SCANCODE_DOWN: case SDL_SCANCODE_S: MoveDrop(1, true); break;
+            case SDL_SCANCODE_PAGEUP: MoveDrop(-kDropVisible, false); break;
+            case SDL_SCANCODE_PAGEDOWN: MoveDrop(kDropVisible, false); break;
+            case SDL_SCANCODE_RETURN: case SDL_SCANCODE_KP_ENTER: case SDL_SCANCODE_SPACE:
+                if (!k.repeat) ChooseDrop();
+                break;
+            case SDL_SCANCODE_ESCAPE: case SDL_SCANCODE_BACKSPACE:
+                if (!k.repeat) back();
+                break;
+            default: break;
+        }
+        return;
+    }
     switch (k.scancode) {
         case SDL_SCANCODE_UP: case SDL_SCANCODE_W: move(-1); break;
         case SDL_SCANCODE_DOWN: case SDL_SCANCODE_S: move(1); break;
@@ -990,6 +1117,17 @@ void key_down(const SDL_KeyboardEvent& k) {
 void pad_down(int button) {
     if (g_listening >= 0) { //pad buttons aren't bound here, B just leaves
         if (button == SDL_GAMEPAD_BUTTON_EAST) g_listening = -1;
+        return;
+    }
+    if (g_drop >= 0) {
+        switch (button) {
+            case SDL_GAMEPAD_BUTTON_DPAD_UP: MoveDrop(-1, true); break;
+            case SDL_GAMEPAD_BUTTON_DPAD_DOWN: MoveDrop(1, true); break;
+            case SDL_GAMEPAD_BUTTON_SOUTH: ChooseDrop(); break;
+            case SDL_GAMEPAD_BUTTON_EAST: back(); break;
+            case SDL_GAMEPAD_BUTTON_START: open(false); break;
+            default: break;
+        }
         return;
     }
     switch (button) {
@@ -1068,11 +1206,18 @@ bool menu_event(const SDL_Event* e) {
             return true;
         case SDL_EVENT_MOUSE_MOTION:
             if (!(e->motion.state & SDL_BUTTON_LMASK)) g_dragging = -1; //let go where the window didn't see it
-            if (g_dragging >= 0) drag(e->motion.x);
+            if (g_drop >= 0) {
+                if (int i = DropAt(e->motion.x, e->motion.y); i >= 0) g_dropAt = i;
+            } else if (g_dragging >= 0) drag(e->motion.x);
             else if (int i = row_at(e->motion.x, e->motion.y); i >= 0 && g_listening < 0) g_row = i;
             return true;
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
-            if (g_listening >= 0) { //a hotkey is a key, the mouse's buttons stay the game's
+            if (g_drop >= 0) { //a click outside the list shuts it
+                if (int i = DropAt(e->button.x, e->button.y); i >= 0 && e->button.button == SDL_BUTTON_LEFT) {
+                    g_dropAt = i;
+                    ChooseDrop();
+                } else g_drop = -1;
+            } else if (g_listening >= 0) { //a hotkey is a key, the mouse's buttons stay the game's
                 if (const char* name = mouse_name(e->button.button); name && g_page != kHotkeyEdit) bind(name);
             } else if (e->button.button == SDL_BUTTON_LEFT) click(e->button.x, e->button.y);
             else if (e->button.button == SDL_BUTTON_RIGHT) back();
@@ -1081,7 +1226,9 @@ bool menu_event(const SDL_Event* e) {
             g_dragging = -1;
             return true;
         case SDL_EVENT_MOUSE_WHEEL:
-            if (g_listening < 0 && e->wheel.y != 0) {
+            if (g_drop >= 0) {
+                if (e->wheel.y != 0) MoveDrop(e->wheel.y > 0 ? -1 : 1, false);
+            } else if (g_listening < 0 && e->wheel.y != 0) {
                 int n = (int)g_pages[g_page].rows.size();
                 g_row = std::clamp(g_row + (e->wheel.y > 0 ? -1 : 1), 0, n - 1);
             }
@@ -1116,6 +1263,7 @@ void settings_draw() {
         const Page& page = g_pages[g_page];
         draw_frame(dl, L, page);
         draw_rows(dl, L, page);
+        if (g_drop >= 0) DrawDrop(dl, L);
     } else DrawToast(dl, L);
     dl->PopTextureID();
 }

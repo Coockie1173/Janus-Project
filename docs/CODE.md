@@ -798,13 +798,15 @@ Other parts: `save_launch_settings` (the launcher's `LAUNCH_*` lines), `build_pa
 `BuildHotkeyPages` / `RefreshHotkeyPages`, `bind`, `open`/`back`/`move`/`adjust`/`select`,
 the drawing (`Layout` is the game's 1280 × 720 menu screen centred in the window,
 `draw_frame`, `draw_rows`, `key_hint`, `DrawToast`), the input (`key_down`, `pad_down`,
-`click`, `drag`, `row_at`), and what the overlay calls: `settings_init`, `settings_event`,
+`click`, `drag`, `row_at`), the dropdowns (a `Row` with `options`/`chosen`/`choose`: `OpenDrop`,
+`MoveDrop`, `ChooseDrop`, `DrawDrop`, `DropAt`; `g_drop` is the row whose list is open), and what the overlay calls: `settings_init`, `settings_event`,
 `settings_draw`, `settings_toast`, `settings_replay`. `settings_buttons()` is the + the
 classic's filter adds.
 
 `hotkeys.cpp`: a hotkey is a key on one setting with an action (`next`, `previous`, `set`,
 `switch`: set, and back on the next press). `LoadHotkeys`, `SaveHotkeys`, `NewHotkey`,
-`HasValue`, `ActionName`, `Describe`, `CycleAction`, `PressHotkeys(scancode, said)`. A press
+`HasValue`, `ActionNames` / `ActionIndex` / `SetAction` (a toggle has three: toggle, on, off),
+`ActionName`, `Describe`, `PressHotkeys(scancode, said)`. A press
 is handed to `debug_setting` so a recording keeps the value.
 
 ### crashdump.cpp

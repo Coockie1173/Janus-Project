@@ -22,6 +22,7 @@ struct Setting
 	std::function<float(float, int)> step; //the value a step down (-1) or up from this one
 	std::function<std::string(float)> show;
 	std::function<float(float)> frac, at; //a range's slider: where a value is on the track (0..1) and the value there
+	int count{}; //a choice: how many it has
 };
 const std::vector<Setting>& Settings(); //settings.cpp, the menu's own list
 
@@ -39,9 +40,11 @@ void LoadHotkeys();
 void SaveHotkeys();
 Hotkey NewHotkey(int setting); //the first action, the value the setting has now
 bool HasValue(const Hotkey& h); //the action goes to a value of the player's choice
+std::vector<std::string> ActionNames(int setting); //what a key can do to that setting, a toggle has three
+int ActionIndex(const Hotkey& h); //which of them the hotkey does
+void SetAction(Hotkey& h, int index);
 std::string ActionName(const Hotkey& h);
 std::string Describe(const Hotkey& h); //"Max Frame Rate: Set To 120"
-void CycleAction(Hotkey& h, int d);
 bool PressHotkeys(int scancode, std::string& said); //false when no hotkey is on that key
 
 } //namespace ge

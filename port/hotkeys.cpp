@@ -134,17 +134,36 @@ Hotkey NewHotkey(int setting)
 
 bool HasValue(const Hotkey& h) { return h.action == Hotkey::kSet || h.action == Hotkey::kSwitch; }
 
-std::string ActionName(const Hotkey& h)
+std::vector<std::string> ActionNames(int setting)
 {
-	static const char* const kRange[] = {"Increase", "Decrease", "Set To", "Switch To"};
-	static const char* const kChoice[] = {"Next", "Previous", "Set To", "Switch To"};
-	switch (Settings()[h.setting].kind)
+	switch (Settings()[setting].kind)
 	{
-	case Setting::kToggle: return h.action == Hotkey::kNext ? "Toggle" : h.value > 0.5f ? "Turn On" : "Turn Off";
-	case Setting::kChoice: return kChoice[h.action];
-	default: return kRange[h.action];
+	case Setting::kToggle: return {"Toggle", "Turn On", "Turn Off"};
+	case Setting::kChoice: return {"Next", "Previous", "Set To", "Switch To"};
+	default: return {"Increase", "Decrease", "Set To", "Switch To"};
 	}
 }
+
+//a toggle's three are next, set to on and set to off
+int ActionIndex(const Hotkey& h)
+{
+	if (Settings()[h.setting].kind != Setting::kToggle) return h.action;
+	return h.action == Hotkey::kNext ? 0 : h.value > 0.5f ? 1 : 2;
+}
+
+void SetAction(Hotkey& h, int index)
+{
+	h.back = NAN;
+	if (Settings()[h.setting].kind != Setting::kToggle)
+	{
+		h.action = (Hotkey::Action)std::clamp(index, 0, Hotkey::kActionCount - 1);
+		return;
+	}
+	h.action = index == 0 ? Hotkey::kNext : Hotkey::kSet;
+	h.value = index == 1 ? 1.0f : 0.0f;
+}
+
+std::string ActionName(const Hotkey& h) { return ActionNames(h.setting)[ActionIndex(h)]; }
 
 std::string Describe(const Hotkey& h)
 {
@@ -152,21 +171,6 @@ std::string Describe(const Hotkey& h)
 	std::string text = s.label + ": " + ActionName(h);
 	if (HasValue(h) && s.kind != Setting::kToggle) text += " " + s.show(h.value);
 	return text;
-}
-
-//a toggle has three: toggle, on and off
-void CycleAction(Hotkey& h, int d)
-{
-	h.back = NAN;
-	if (Settings()[h.setting].kind != Setting::kToggle)
-	{
-		h.action = (Hotkey::Action)((h.action + d + Hotkey::kActionCount) % Hotkey::kActionCount);
-		return;
-	}
-	int at = h.action == Hotkey::kNext ? 0 : h.value > 0.5f ? 1 : 2;
-	at = (at + d + 3) % 3;
-	h.action = at == 0 ? Hotkey::kNext : Hotkey::kSet;
-	h.value = at == 1 ? 1.0f : 0.0f;
 }
 
 bool PressHotkeys(int scancode, std::string& said)
