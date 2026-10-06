@@ -66,8 +66,10 @@ void set_ads_fov(float degrees) { g_ads_fov = degrees == kGameAdsFov ? 0 : std::
 //the view times the mesh's own, with z turned round. where that has no rotation and no offset
 //the mesh sits on the eye, and for that draw its x and y are stretched by the tangents' ratio, so it
 //covers the part of the screen it covered at 49
+//GE_NO_COLOUR_FILTER=1 (Disable Colour Filter) leaves such a mesh out instead, at any angle
 const uint32_t kEntryDrawMtx = 0x4;
 PPCFunc orig_draw_delayed = nullptr;
+std::atomic<bool> g_no_colour_filter{false};
 
 bool OnTheEye(uint32_t mtx) {
     for (int r = 0; r < 3; ++r)
@@ -81,9 +83,11 @@ bool OnTheEye(uint32_t mtx) {
 void DrawDelayed(PPCContext& c) {
     uint32_t settings = ld32(kViewSettingsPtr), entry = c.r[3];
     float angle = guest_ptr(settings) ? ldf(settings + 0x328) : 0;
-    if (!(angle > kGameFov) || angle > kFovMax || !guest_ptr(entry)) { orig_draw_delayed(c); return; }
+    bool wide = angle > kGameFov && angle <= kFovMax, hidden = g_no_colour_filter;
+    if ((!wide && !hidden) || !guest_ptr(entry)) { orig_draw_delayed(c); return; }
     uint32_t mtx = ld32(entry + kEntryDrawMtx);
     if (!guest_ptr(mtx) || !OnTheEye(mtx)) { orig_draw_delayed(c); return; }
+    if (hidden) return;
     const float kHalf = 3.14159265f / 360;
     float wider = std::tan(angle * kHalf) / std::tan(kGameFov * kHalf);
     stf(mtx, wider);
@@ -93,7 +97,11 @@ void DrawDelayed(PPCContext& c) {
     stf(mtx + 16 + 4, 1);
 }
 
+bool no_colour_filter() { return g_no_colour_filter; }
+void set_no_colour_filter(bool on) { g_no_colour_filter = on; }
+
 void install_fov() {
+    if (const char* e = std::getenv("GE_NO_COLOUR_FILTER")) g_no_colour_filter = std::atoi(e) != 0;
     orig_draw_delayed = ppc_hook("draw_delayed?", DrawDelayed);
     if (!orig_draw_delayed) rt_die("goldeneye: the mesh draw is not hooked in this build");
     if (const char* a = std::getenv("GE_ADS_FOV")) {

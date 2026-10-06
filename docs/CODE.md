@@ -527,7 +527,8 @@ weapon's angle is worked back out of that, scaled by the option over 22.5, and t
 written to `+0x71C` and `+0x720`, never wider than the view.
 `DrawDelayed` (hook on `draw_delayed?`, every mesh's draw): with the view wider than 49 a mesh
 whose draw matrix (entry `+4`) has no rotation and no offset sits on the eye (Facility's colour
-filter); its x and y are stretched by `tan(view / 2) / tan(24.5)` for that draw.
+filter); its x and y are stretched by `tan(view / 2) / tan(24.5)` for that draw. With Disable
+Colour Filter (`no_colour_filter`) such a mesh is left out, at any angle.
 
 ### gecko.cpp
 
@@ -784,7 +785,7 @@ Everything the pages change is one list of `Setting` (`hotkeys.h`: id, label, hi
 |---|---|
 | Screen | `fov`, `ads_fov`, `fps` (stops 30 to 275) |
 | Controls | `mouse_sens`, `ads_sens`, `aim_lock`, `mouse_invert`, `mouse_mode`, `input`, `face_buttons`, `dead_zone` |
-| Enhancements | `skip_cutscenes`, `skip_movies`, `level_timer`, `auto_qte`, `auto_start`, `autosave`, `no_tutorials` |
+| Enhancements | `skip_cutscenes`, `skip_movies`, `level_timer`, `auto_qte`, `auto_start`, `autosave`, `no_tutorials`, `no_colour_filter` |
 | Cheats | `mouse_everywhere`, `extras_menu`, `unlock_all`, `noclip`, `collision_view` |
 
 Key bindings (`kActions`): Fire ZR, Aim ZL, Melee L, Throw Grenade R, Reload Y, Crouch A,
@@ -872,7 +873,7 @@ Options (the launcher sets these from its settings):
 | `GE_MOUSE=S` | mouse sensitivity, 0 leaves the mouse free |
 | `GE_MOUSE_MODE=auto\|direct\|stick` | how the mouse turns the view |
 | `GE_MOUSE_INVERT=1`, `GE_ADS_SENS=S`, `GE_AIM_LOCK=1` | |
-| `GE_SKIP_CUTSCENES=1`, `GE_SKIP_MOVIES=1`, `GE_AUTO_QTE=1`, `GE_AUTO_START=1`, `GE_NO_TUTORIALS=1` | enhancements |
+| `GE_SKIP_CUTSCENES=1`, `GE_SKIP_MOVIES=1`, `GE_AUTO_QTE=1`, `GE_AUTO_START=1`, `GE_NO_TUTORIALS=1`, `GE_NO_COLOUR_FILTER=1` | enhancements |
 | `GE_LEVEL_TIMER=0`, `GE_AUTOSAVE=0` | on by default |
 | `GE_MOUSE_EVERYWHERE=1`, `GE_EXTRAS_MENU=1`, `GE_UNLOCK_ALL=1`, `GE_NOCLIP=1`, `GE_COLLISION=1` | cheats |
 | `GE_HOSTS=F`, `GE_NETLOG=1` | the hosts file, the network log |

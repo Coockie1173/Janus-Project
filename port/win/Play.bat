@@ -9,6 +9,7 @@ rem     Play.bat --skip-zukovsky        the meeting with Zukovsky in Nightclub i
 rem     Play.bat --skip-briggs          the meeting with Sky Briggs in Carrier is skipped
 rem     Play.bat --skip-movies          briefings, the movies between missions and the logos are skipped
 rem     Play.bat --no-tutorials         the tutorial boxes in the missions aren't shown
+rem     Play.bat --no-colour-filter     the tint some levels lay over the picture isn't drawn
 rem     Play.bat --no-level-timer       the hud without the level's time (it is on by default)
 rem     Play.bat --auto-qte             quick time events press their own buttons
 rem     Play.bat --auto-start           a loaded mission starts without "Continue" being pressed

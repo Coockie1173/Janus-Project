@@ -10,6 +10,7 @@
 #     ./Play.sh --skip-briggs          the meeting with Sky Briggs in Carrier is skipped
 #     ./Play.sh --skip-movies          briefings, the movies between missions and the logos are skipped
 #     ./Play.sh --no-tutorials         the tutorial boxes in the missions aren't shown
+#     ./Play.sh --no-colour-filter     the tint some levels lay over the picture isn't drawn
 #     ./Play.sh --no-level-timer       the hud without the level's time (it is on by default)
 #     ./Play.sh --auto-qte             quick time events press their own buttons
 #     ./Play.sh --auto-start           a loaded mission starts without "Continue" being pressed
