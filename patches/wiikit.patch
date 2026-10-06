@@ -3950,7 +3950,7 @@ index 8a4e097..8b1b1a8 100644
  void ppc_mmio_write(uint32_t addr, uint32_t, int) { rt_die("mmio write %08X", addr); }
  uint64_t ppc_timebase() { return 0; }
 diff --git a/runtime/video.cpp b/runtime/video.cpp
-index 5726093..7a694ad 100644
+index 5726093..773f958 100644
 --- a/runtime/video.cpp
 +++ b/runtime/video.cpp
 @@ -67,7 +67,8 @@ ClassicState classic[4];
@@ -4379,7 +4379,10 @@ index 5726093..7a694ad 100644
 +    bind_textures();
 +    return true;
 +}
-+
+ 
+-    int offx = s10(bp[0x59]) * 2, offy = s10(bp[0x59] >> 10) * 2;
+-    float wd = std::fabs(fx(0x101A)), ht = std::fabs(fx(0x101B));
+-    glViewportIndexedf(0, (fx(0x101D) - wd - (float)offx) * (float)S, (fx(0x101E) - ht - (float)offy) * (float)S,
 +std::vector<GLint> firsts;
 +std::vector<GLsizei> counts;
 +// A draw's pieces are thousands of short strips a frame, and to the GPU each
@@ -4585,10 +4588,7 @@ index 5726093..7a694ad 100644
 +    glNamedBufferData(dbg_vbo, (GLsizeiptr)n * 16, vtx, GL_STATIC_DRAW);
 +    dbg_count = n;
 +}
- 
--    int offx = s10(bp[0x59]) * 2, offy = s10(bp[0x59] >> 10) * 2;
--    float wd = std::fabs(fx(0x101A)), ht = std::fabs(fx(0x101B));
--    glViewportIndexedf(0, (fx(0x101D) - wd - (float)offx) * (float)S, (fx(0x101E) - ht - (float)offy) * (float)S,
++
 +void dbg_draw() {
 +    dbg_waiting = false;
 +    if (dbg_drawn) return;
@@ -5068,7 +5068,7 @@ index 5726093..7a694ad 100644
      ++cnt.presents;
      int ww = 0, wh = 0;
      SDL_GetWindowSizeInPixels(win, &ww, &wh);
-@@ -1275,17 +1820,116 @@ void present() {
+@@ -1275,22 +1820,119 @@ void present() {
      glColorMask(1, 1, 1, 1);
      glClearColor(0, 0, 0, 1);
      glClear(GL_COLOR_BUFFER_BIT);
@@ -5186,9 +5186,16 @@ index 5726093..7a694ad 100644
 +    }
 +    if (overlay_cb.draw) overlay_cb.draw();
      if (opt.dump_dir && cnt.presents % (uint64_t)opt.dump_every == 0 && ww > 0 && wh > 0) {
-         std::vector<uint8_t> px((size_t)ww * wh * 4), flip(px.size());   // the window, as shown
-         glReadPixels(0, 0, ww, wh, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
-@@ -1317,7 +1961,6 @@ void setup() {
+-        std::vector<uint8_t> px((size_t)ww * wh * 4), flip(px.size());   // the window, as shown
+-        glReadPixels(0, 0, ww, wh, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+-        for (int y = 0; y < wh; ++y)
+-            std::memcpy(&flip[(size_t)y * ww * 4], &px[(size_t)(wh - 1 - y) * ww * 4], (size_t)ww * 4);
++        std::vector<uint8_t> flip;                                        // the window, as shown
++        video_read_window(flip, ww, wh);
+         char name[64];
+         std::snprintf(name, sizeof name, "/frame_%06llu.png", (unsigned long long)cnt.presents);
+         write_png(std::string(opt.dump_dir) + name, ww, wh, flip.data());
+@@ -1317,7 +1959,6 @@ void setup() {
      glNamedFramebufferTexture(efb_fbo, GL_DEPTH_ATTACHMENT, efb_dep, 0);
      if (glCheckNamedFramebufferStatus(efb_fbo, GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
          rt_die("video: the EFB framebuffer is incomplete");
@@ -5196,7 +5203,7 @@ index 5726093..7a694ad 100644
      glBindFramebuffer(GL_FRAMEBUFFER, efb_fbo);
      glClearColor(0, 0, 0, 1);
      glClearDepth(1.0);
-@@ -1327,45 +1970,25 @@ void setup() {
+@@ -1327,45 +1968,25 @@ void setup() {
      const GLbitfield map = GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT;
      glNamedBufferStorage(vbo, VBO_CAP, nullptr, map);
      vbo_ptr = static_cast<uint8_t*>(glMapNamedBufferRange(vbo, 0, VBO_CAP, map));
@@ -5259,11 +5266,32 @@ index 5726093..7a694ad 100644
  
      copy_prog = link(FULLSCREEN_VS, COPY_FS);
      if (!copy_prog) rt_die("video: the EFB copy program does not build");
-@@ -1462,6 +2085,13 @@ std::atomic<bool> want_relative{false};
+@@ -1462,6 +2083,34 @@ std::atomic<bool> want_relative{false};
  std::mutex motion_mx;
  float motion_x = 0, motion_y = 0;
  void video_set_relative_mouse(bool on) { want_relative = on; }
 +void video_set_overlay(const VideoOverlay& o) { overlay_cb = o; }
++bool video_read_window(std::vector<uint8_t>& rgba, int& w, int& h, bool picture_only) {
++    w = h = 0;
++    if (!win) return false;
++    int ww = 0, wh = 0;
++    SDL_GetWindowSizeInPixels(win, &ww, &wh);
++    if (ww <= 0 || wh <= 0) return false;
++    int x = 0, y = 0;
++    w = ww; h = wh;
++    if (picture_only) {                                   // without the bars around the game's picture
++        Rect r = picture_rect((float)ww, (float)wh);
++        x = std::clamp((int)std::lround(r.x), 0, ww - 1); y = std::clamp((int)std::lround(r.y), 0, wh - 1);
++        w = std::clamp((int)std::lround(r.w), 1, ww - x); h = std::clamp((int)std::lround(r.h), 1, wh - y);
++    }
++    std::vector<uint8_t> px((size_t)w * h * 4);
++    rgba.resize(px.size());
++    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
++    glReadPixels(x, wh - y - h, w, h, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
++    for (int row = 0; row < h; ++row)
++        std::memcpy(&rgba[(size_t)row * w * 4], &px[(size_t)(h - 1 - row) * w * 4], (size_t)w * 4);
++    return true;
++}
 +void video_block_input(bool on) { input_blocked = on; }
 +const std::string& video_keys_path() { return keys_path; }
 +void video_reload_keys() { if (!keys_path.empty()) load_keys(keys_path); }
@@ -5273,7 +5301,7 @@ index 5726093..7a694ad 100644
  void video_take_mouse_motion(float& dx, float& dy) {
      std::lock_guard<std::mutex> lk(motion_mx);
      dx = motion_x; dy = motion_y;
-@@ -1473,12 +2103,18 @@ PadState video_pad() {
+@@ -1473,12 +2122,18 @@ PadState video_pad() {
      return pad;
  }
  ClassicState video_classic(int chan) {
@@ -5292,7 +5320,7 @@ index 5726093..7a694ad 100644
  void video_retrace() {
      retraces.fetch_add(1);
      if (wake) SDL_SignalSemaphore(wake);
-@@ -1499,6 +2135,7 @@ void video_run(const char* title) {
+@@ -1499,6 +2154,7 @@ void video_run(const char* title) {
      int w0 = opt.window_w ? opt.window_w : (opt.widescreen ? 1280 : 960), h0 = opt.window_h ? opt.window_h : 720;
      SDL_WindowFlags wflags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE;
      if (opt.fullscreen) wflags |= SDL_WINDOW_FULLSCREEN;
@@ -5300,7 +5328,7 @@ index 5726093..7a694ad 100644
      win = SDL_CreateWindow(title, w0, h0, wflags);
      if (!win) rt_die("video: SDL_CreateWindow: %s", SDL_GetError());
      SDL_GLContext ctx = SDL_GL_CreateContext(win);
-@@ -1506,6 +2143,7 @@ void video_run(const char* title) {
+@@ -1506,6 +2162,7 @@ void video_run(const char* title) {
      SDL_GL_MakeCurrent(win, ctx);
      SDL_GL_SetSwapInterval(0);                   // VI paces the presents
      if (!gl_load()) rt_die("video: OpenGL functions missing");
@@ -5308,7 +5336,7 @@ index 5726093..7a694ad 100644
      rt_log("video: %s, %s", (const char*)glGetString(GL_RENDERER), (const char*)glGetString(GL_VERSION));
      if (debug) {
          glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
-@@ -1529,11 +2167,15 @@ void video_run(const char* title) {
+@@ -1529,11 +2186,15 @@ void video_run(const char* title) {
      uint64_t frames_then = 0;
      uint32_t seen = retraces.load();
      std::string base_title = title;
@@ -5324,7 +5352,7 @@ index 5726093..7a694ad 100644
              if (e.type == SDL_EVENT_GAMEPAD_ADDED) pad_added(e.gdevice.which);
              if (e.type == SDL_EVENT_GAMEPAD_REMOVED) pad_removed(e.gdevice.which);
              // F11 or Alt+Enter: fullscreen and back
-@@ -1592,7 +2234,14 @@ void video_run(const char* title) {
+@@ -1592,7 +2253,14 @@ void video_run(const char* title) {
                  double vtx = ms(g_vperf.vtx), tex = ms(g_vperf.tex), wait = ms(g_vperf.wait), draw = ms(g_vperf.draw),
                         pres = ms(g_vperf.present);
                  rt_log("perf: %.1f fps; frame %.1f ms; game thread: vertices %.1f, textures %.1f, waiting for the renderer %.1f; "
@@ -5340,7 +5368,7 @@ index 5726093..7a694ad 100644
              }
              frames_then = cnt.frames;
              t_title = now;
-@@ -1608,6 +2257,8 @@ void video_run(const char* title) {
+@@ -1608,6 +2276,8 @@ void video_run(const char* title) {
              }
              if (c.readback) { if (c.copy) copy_readback(c.copy); else efb_readback(); busy = true; continue; }
              auto te = Clock::now();
@@ -5349,7 +5377,7 @@ index 5726093..7a694ad 100644
              exec(c.data);
              if (g_vperf_on) g_vperf.draw += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - te).count();
              {
-@@ -1621,6 +2272,17 @@ void video_run(const char* title) {
+@@ -1621,6 +2291,17 @@ void video_run(const char* title) {
              if (retraces.load() != seen) break;
          }
          uint32_t r = retraces.load();
@@ -5368,7 +5396,7 @@ index 5726093..7a694ad 100644
              seen = r;
              auto tp = Clock::now();
 diff --git a/runtime/video.h b/runtime/video.h
-index ecfb499..d1a8cf0 100644
+index ecfb499..60c41aa 100644
 --- a/runtime/video.h
 +++ b/runtime/video.h
 @@ -3,7 +3,7 @@
@@ -5466,7 +5494,7 @@ index ecfb499..d1a8cf0 100644
  ClassicState video_classic(int chan);
  // The Remote's motor on a channel: its pad rumbles (the Remote's own on
  // channel 1 when a pad is there).
-@@ -98,6 +134,31 @@ void video_set_rumble(int chan, bool on);
+@@ -98,6 +134,35 @@ void video_set_rumble(int chan, bool on);
  void video_set_relative_mouse(bool on);
  void video_take_mouse_motion(float& dx, float& dy);
  
@@ -5483,6 +5511,10 @@ index ecfb499..d1a8cf0 100644
 +    void (*draw)() = nullptr;
 +};
 +void video_set_overlay(const VideoOverlay& o);
++// The window's picture as it is right now (RGBA8, top row first), for an
++// overlay's draw: called there it has the game's picture without the overlay.
++// picture_only leaves out the bars around the game's picture.
++bool video_read_window(std::vector<uint8_t>& rgba, int& w, int& h, bool picture_only = false);
 +// For an overlay that has the keyboard and the mouse to itself (a menu):
 +// while blocked the game sees no button, no stick and no pointer.
 +void video_block_input(bool on);

@@ -106,7 +106,9 @@ with the listed ones. A `.png` with a level's name next to it (`mt_yard.png`
 for `mt_yard.edb`) is its picture in the menus: beside the list in Extras >
 Mods and in Conflict's map list, and for the two maps a network game offers.
 Any size: its middle is cut to the panel's shape (0.85 times as wide as
-high) and shown at 256 x 256. A level is the hash of its file: `GE_LEVEL=01810201
+high) and shown at 256 x 256. F12 in a mod's level makes that `.png` from
+what is on screen: black and white, without the HUD, the crosshair and the
+gun. A level is the hash of its file: `GE_LEVEL=01810201
 ./launch.sh` starts that level whichever mission is picked in the menu.
 New levels are made from glTF scenes with
 [eurochef-GE](https://github.com/Coockie1173/eurochef-GE), a fork of

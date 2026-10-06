@@ -109,6 +109,10 @@ void mods_menu_frame(PPCContext& c); //once a frame, on the game's thread
 uint32_t mods_menu_text(uint32_t hash); //the characters of one of the Mods menu's texts, 0 for any other
 std::string mod_shown_name(const std::string& file); //a mod level's name in the menus, from its file's
 void install_pictures(); //pictures.cpp, after install_mods
+void pictures_shoot(); //F12: the picture on screen becomes the loaded mod level's .png
+bool pictures_hiding(); //the hud and the gun are left out for a picture
+void pictures_frame(); //once a frame on the game's thread
+std::string pictures_draw(); //on the renderer's thread before the overlay, what to say when a picture was made
 void pictures_file(uint32_t hash, uint32_t file); //a file (the game's object for it) was given its memory
 void install_gecko(); //gecko.cpp
 void gecko_apply();

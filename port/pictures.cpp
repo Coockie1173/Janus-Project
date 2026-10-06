@@ -15,9 +15,15 @@
 //
 //the .png is cut to the panel's shape around its middle (it is shown 0.85 times as wide as
 //high) and made 256 x 256
+//
+//F12 in a mod's level makes the .png: the game's picture in the window as it is (the overlay
+//isn't in it yet), its middle in the panel's shape, black and white. the hud, the gun and the
+//player's own body are left out for it. the pictures are read again then
+//GE_PICTURE_WHOLE=file.png the whole picture it was cut from, as taken
 #include "ge.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
@@ -67,6 +73,13 @@ Loan g_loans[kLenderCount];
 uint32_t g_front_end = 0; //the game's object for the file
 PPCFunc orig_level_picture = nullptr, orig_lobby_picture = nullptr, set_frame = nullptr;
 bool g_trace = false;
+std::atomic<bool> g_wanted{false}, g_shoot{false}, g_again{false}; //F12 was pressed, the picture is ready to be taken, a .png was written
+//for the picture the hud's meshes, the gun and the player's own body are left out of the mesh
+//draw for some frames (fov.cpp). the hud's texts (the timer, the ammunition) are drawn
+//another way and stay: they are at the sides, outside the part that is kept
+const int kHideFrames = 14, kShootAfter = 9; //how long they stay out, and when in that the picture is taken
+int g_hiding = 0;
+const uint32_t kCurrentLevel = 0x805D1804; //the hash of the level that is loaded
 
 //a 4 x 4 block of CMPR: the two colours furthest apart along the block's widest channel, and
 //for each pixel the nearest of them and the two between
@@ -238,10 +251,42 @@ uint32_t Lend(const Picture& picture)
 	return kLenders[pick].number;
 }
 
+std::string PngOf(const std::string& mod)
+{
+	return (std::filesystem::path(mods_folder()) / std::filesystem::path(mod).replace_extension(".png")).string();
+}
+
+//every mod's .png. the lenders show their own pictures first, what they held is gone
+void ReadPictures()
+{
+	for (size_t i = 0; i < kLenderCount; ++i)
+	{
+		Loan& loan = g_loans[i];
+		if (!loan.pPicture) continue;
+		const uint32_t pixels = PixelsOf(kLenders[i]);
+		if (pixels && Holds(pixels, loan.pPicture->pixels)) std::memcpy(PPC_MEM(pixels), loan.own.data(), kBytes);
+		loan.pPicture = nullptr;
+	}
+	g_pictures.clear();
+	for (const ModLevel& mod : mod_files())
+	{
+		const std::string path = PngOf(mod.name);
+		std::error_code error;
+		if (!std::filesystem::exists(path, error)) continue;
+		std::vector<uint8_t> rgba;
+		if (!ReadPng(path, rgba)) { rt_log("goldeneye: mods: %s isn't a .png that can be read, %s has no picture", path.c_str(), mod.name.c_str()); continue; }
+		std::string shown = mod_shown_name(mod.name);
+		std::transform(shown.begin(), shown.end(), shown.begin(), [](unsigned char ch) { return char(std::tolower(ch)); });
+		g_pictures.push_back({ mod.hash, mod.name, shown, Cmpr(rgba) });
+		rt_log("goldeneye: mod %s has a picture", mod.name.c_str());
+	}
+}
+
 void LevelPicture(PPCContext& c)
 {
 	const uint32_t menu = c.r[4];
 	orig_level_picture(c);
+	if (g_again.exchange(false)) ReadPictures();
 	if (g_pictures.empty() || !guest_ptr(menu)) return;
 	const uint32_t lit = ld32(menu + kMenuLit);
 	const uint32_t row = lit < 4096 ? ld32(menu + kMenuRows + lit * 4) : 0;
@@ -270,6 +315,7 @@ void LobbyPicture(PPCContext& c)
 {
 	const uint32_t text = guest_ptr(c.r[4]) ? ld32(c.r[4]) : 0;
 	orig_lobby_picture(c);
+	if (g_again.exchange(false)) ReadPictures();
 	if (g_pictures.empty()) return;
 	//the name's characters, their count in the short four before them
 	std::string name;
@@ -288,22 +334,58 @@ void pictures_file(uint32_t hash, uint32_t file)
 	if (hash == kFrontEnd) g_front_end = file;
 }
 
+void pictures_shoot() { g_wanted = true; }
+bool pictures_hiding() { return g_hiding > 0; }
+
+//once a frame on the game's thread
+void pictures_frame()
+{
+	if (g_hiding == 0)
+	{
+		if (!g_wanted.exchange(false)) return;
+		if (!guest_ptr(ld32(kPlayerPtr))) { g_shoot = true; return; } //it says why not
+		g_hiding = kHideFrames;
+	}
+	if (--g_hiding == kHideFrames - kShootAfter) g_shoot = true;
+}
+
+//on the renderer's thread, before the overlay is drawn. what to say about it, empty when F12 wasn't pressed
+std::string pictures_draw()
+{
+	if (!g_shoot.exchange(false)) return {};
+	const uint32_t level = guest_ptr(ld32(kPlayerPtr)) ? ld32(kCurrentLevel) : 0;
+	const auto& mods = mod_files();
+	auto mod = std::find_if(mods.begin(), mods.end(), [&](const ModLevel& m) { return m.hash == level; });
+	if (mod == mods.end()) return level ? "Picture: this level isn't one of the mods" : "Picture: not in a level";
+	std::vector<uint8_t> rgba;
+	int w = 0, h = 0;
+	if (!video_read_window(rgba, w, h, true)) return "Picture: the window couldn't be read";
+	if (const char* whole = std::getenv("GE_PICTURE_WHOLE")) write_png(whole, w, h, rgba.data());
+	int left = 0, top = 0;
+	const int right = w, bottom = h;
+	int cw = right - left, ch = bottom - top;
+	if (cw > ch * kShownAspect) cw = int(ch * kShownAspect); else ch = int(cw / kShownAspect);
+	left += (right - left - cw) / 2; top += (bottom - top - ch) / 2;
+	std::vector<uint8_t> cut(size_t(cw) * ch * 4);
+	for (int y = 0; y < ch; ++y) std::memcpy(&cut[size_t(y) * cw * 4], &rgba[(size_t(top + y) * w + left) * 4], size_t(cw) * 4);
+	for (size_t i = 0; i < cut.size(); i += 4) //black and white
+	{
+		const uint8_t grey = uint8_t((cut[i] * 77 + cut[i + 1] * 150 + cut[i + 2] * 29) >> 8);
+		cut[i] = cut[i + 1] = cut[i + 2] = grey;
+		cut[i + 3] = 255;
+	}
+	const std::string path = PngOf(mod->name);
+	write_png(path, cw, ch, cut.data());
+	g_again = true;
+	rt_log("goldeneye: picture of %s written to %s (%d x %d)", mod->name.c_str(), path.c_str(), cw, ch);
+	return "Picture saved: " + std::filesystem::path(path).filename().string();
+}
+
 void install_pictures()
 {
 	g_trace = std::getenv("GE_TRACE") != nullptr;
-	for (const ModLevel& mod : mod_files())
-	{
-		const std::string path = (std::filesystem::path(mods_folder()) / std::filesystem::path(mod.name).replace_extension(".png")).string();
-		std::error_code error;
-		if (!std::filesystem::exists(path, error)) continue;
-		std::vector<uint8_t> rgba;
-		if (!ReadPng(path, rgba)) { rt_log("goldeneye: mods: %s isn't a .png that can be read, %s has no picture", path.c_str(), mod.name.c_str()); continue; }
-		std::string shown = mod_shown_name(mod.name);
-		std::transform(shown.begin(), shown.end(), shown.begin(), [](unsigned char ch) { return char(std::tolower(ch)); });
-		g_pictures.push_back({ mod.hash, mod.name, shown, Cmpr(rgba) });
-		rt_log("goldeneye: mod %s has a picture", mod.name.c_str());
-	}
-	if (g_pictures.empty()) return;
+	if (mod_files().empty()) return;
+	ReadPictures();
 	orig_level_picture = ppc_hook("ge_level_picture", LevelPicture);
 	orig_lobby_picture = ppc_hook("ge_lobby_picture", LobbyPicture);
 	set_frame = ppc_lookup(kSetFrame);

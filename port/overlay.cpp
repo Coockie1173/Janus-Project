@@ -37,6 +37,7 @@ void settings_init(); //settings.cpp
 bool settings_event(const SDL_Event* e);
 void settings_draw();
 bool settings_toast(); //a hotkey's line is up
+void settings_say(const std::string& text); //a line at the top for a moment
 void settings_replay(); //a recording's hotkeys, every frame
 #endif
 
@@ -181,6 +182,11 @@ void init(SDL_Window* win, void* gl) {
 }
 
 bool event(const SDL_Event* e) {
+    //F12: a mod level's picture for the menus (pictures.cpp), in place of the runtime's GX trace
+    if (e->type == SDL_EVENT_KEY_DOWN && e->key.scancode == SDL_SCANCODE_F12) {
+        if (!e->key.repeat) pictures_shoot();
+        return true;
+    }
     if (settings_event(e)) return true;
     if (g_have && e->type == SDL_EVENT_KEY_DOWN && e->key.scancode == SDL_SCANCODE_F3 && !e->key.repeat) {
         g_open = !g_open;
@@ -218,6 +224,7 @@ void watches() {
 
 void draw() {
     settings_replay();
+    if (std::string said = pictures_draw(); !said.empty()) settings_say(said);
     float fade = cutscene_fade();
     if (!overlay_open() && !g_show_state && !skipping_cutscene() && fade <= 0 && !settings_toast()) return;
     //with only the state shown the cursor stays hidden over the picture

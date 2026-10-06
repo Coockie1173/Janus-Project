@@ -1145,6 +1145,12 @@ void pad_down(int button) {
 
 } //namespace
 
+void settings_say(const std::string& text)
+{
+	g_toast = text;
+	g_toastUntil = Clock::now() + std::chrono::milliseconds(1800);
+}
+
 bool settings_open() { return g_open; }
 
 uint32_t settings_buttons() {

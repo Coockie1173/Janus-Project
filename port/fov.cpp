@@ -98,7 +98,22 @@ bool IsColourFilter(uint32_t mesh) {
     return ldf(mesh + kMeshBoxMin + 8) < -0.3f && ldf(mesh + kMeshBoxMax + 8) > 0.4f;
 }
 
+//for a level's picture (pictures.cpp) the hud and the player's own gun and body are left out
+//the hud's meshes have 0x40000000 in their flags and are drawn 28 ahead of the eye, the gun's
+//parts and the body are within a unit of it
+const uint32_t kMeshOnHud = 0x40000000;
+const float kHudAhead = 28.0f, kOwnReach = 1.0f;
+bool OutOfPicture(uint32_t entry) {
+    if (!guest_ptr(entry)) return false;
+    uint32_t mtx = ld32(entry + kEntryDrawMtx), mesh = ld32(entry + kEntryMesh);
+    if (!guest_ptr(mtx) || !guest_ptr(mesh)) return false;
+    float x = ldf(mtx + 12), y = ldf(mtx + 28), z = ldf(mtx + 44);
+    if ((ld32(mesh + kMeshFlags) & kMeshOnHud) && std::fabs(z + kHudAhead) < 0.5f) return true;
+    return x * x + y * y + z * z < kOwnReach * kOwnReach;
+}
+
 void DrawDelayed(PPCContext& c) {
+    if (pictures_hiding() && OutOfPicture(c.r[3])) return;
     uint32_t settings = ld32(kViewSettingsPtr), entry = c.r[3];
     float angle = guest_ptr(settings) ? ldf(settings + 0x328) : 0;
     bool wide = angle > kGameFov && angle <= kFovMax, hidden = g_no_colour_filter;
