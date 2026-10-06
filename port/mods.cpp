@@ -7,6 +7,7 @@
 //row at the end. a level is its mt_ file's hash: GE_LEVEL=hash starts a new one
 //
 //the levels among them can be picked in the game's menu: Extras > Mods (port/modmenu.cpp)
+//online.txt in the folder is a list of maps for multiplayer's Conflict (the same file)
 //
 //GE_MODS=DIR the folder, every .edb in it (mods in the game's folder by default)
 //GE_TRACEFILES=1 log every file the game gives memory to, with its size
@@ -147,11 +148,14 @@ void OnLoad(PPCContext& c)
 		rt_log("goldeneye: no memory for the file %s (%u bytes), it isn't loaded", guest_ptr(name) ? (const char*)PPC_MEM(name) : "?", size);
 }
 
-std::vector<ModLevel> g_levels;
+std::vector<ModLevel> g_levels, g_files;
+std::string g_folder;
 
 } //namespace
 
 const std::vector<ModLevel>& mod_levels() { return g_levels; }
+const std::vector<ModLevel>& mod_files() { return g_files; }
+const std::string& mods_folder() { return g_folder; }
 
 void install_mods()
 {
@@ -161,6 +165,7 @@ void install_mods()
 	const std::string dir = env ? env : std::string(GE_ROOT) + "/mods";
 	std::error_code error;
 	if (dir.empty() || !std::filesystem::is_directory(dir, error)) return;
+	g_folder = dir;
 	std::vector<Mod> mods;
 	for (const auto& entry : std::filesystem::directory_iterator(dir, error))
 	{
@@ -206,6 +211,7 @@ void install_mods()
 		row->size = mod.loaded; row->hash = mod.hash; row->version = mod.version; row->flags = mod.flags;
 		row->places = { { uint32_t(at), 0 } };
 		rt_log("goldeneye: mod %s: file %08X, %s", mod.name.c_str(), mod.hash, isNew ? "new" : "in place of the disc's");
+		g_files.push_back({ mod.hash, mod.name });
 		if ((mod.hash & 0xFFFF0000u) == kLevelFiles) g_levels.push_back({ mod.hash, mod.name });
 	}
 	if (!disc_replace("Filelist.000", parts) || !disc_replace("Filelist.bin", { DiscPart{ {}, 0, 0, WriteList(rows, buildType, lists) } }))

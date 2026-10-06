@@ -26,6 +26,7 @@
 //GE_SKIP_MOVIES=1 movies are skipped
 //GE_NO_TUTORIALS=1 no tutorial boxes
 //GE_NO_COLOUR_FILTER=1 a level's colour filter over the picture isn't drawn
+//GE_MOD_MAPS=1 multiplayer's Conflict has the maps of the mods folder's online.txt
 //GE_AUTOSAVE=0 a checkpoint doesn't save the game
 //GE_EXTRAS_MENU=1 cheat, the menu's unused extras page
 //GE_UNLOCK_ALL=1 cheat, every mission and difficulty unlocked

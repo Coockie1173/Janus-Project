@@ -21,8 +21,22 @@
 //text the game looks up)
 //the unused extras menu's items are in the same rows when that cheat is on. it used to be two
 //writes to where the array was on the heap, which is somewhere else when mods add files
+//
+//the maps of multiplayer's Conflict are a page of the same kind (7D000045, rows 805830C8: six
+//of dressing with one list widget, then a kind 0xB row for each of its ten maps). with the
+//setting Mod Map Pool on it gets rows made here, a map for every line of online.txt in the
+//mods folder, as many as there are: a mod's file name (mt_yard.edb, or just mt_yard) or a
+//file's hash in hex (01A00003, one of the disc's). the code this replaces wrote other hashes
+//into the game's ten rows
+//
+//GE_MOD_MAPS=1 the setting
+//GE_MODS_PAGE=7D000045 Extras > Mods opens that page instead (to look at a page without going
+//through the menus that lead to it)
 #include "ge.h"
 #include <algorithm>
+#include <atomic>
+#include <cstdlib>
+#include <fstream>
 #include <map>
 #include <string>
 #include <vector>
@@ -50,6 +64,10 @@ const uint32_t kDebugTitleRow = 3;
 const uint32_t kKindPage = 0x00010000, kKindLevel = 0x000B0000;
 const uint32_t kMissionStart = 1; //the entrance a level begins at
 const uint32_t kTextMods = 0x4300F0FF, kTextAbout = 0x4300F0FE, kTextLevel = 0x4300F000; //the game's own texts stop at 430017xx
+const uint32_t kConflictMapsPage = 0x7D000045;
+const uint32_t kConflictRows = 0x805830C8, kConflictRowCount = 16; //the game's
+const uint32_t kConflictHead = 6; //the rows before the maps
+const uint32_t kTextMap = 0x4300F100; //a text for each map of the pool that isn't one of the game's ten
 const uint32_t kAlloc = 0x803428C0; //(bytes, flags) -> a block of the game's heap
 const uint32_t kMostPages = 4096;
 
@@ -59,6 +77,13 @@ std::map<uint32_t, uint32_t> g_texts; //a text's hash, its characters in the gam
 uint32_t g_mods_rows = 0, g_mods_row_count = 0;
 uint32_t g_extras_rows[2] = {}, g_extras_row_count[2] = {}; //without and with the unused items
 bool g_failed = false;
+
+struct PoolMap { uint32_t hash; std::string name; };
+std::vector<PoolMap> g_pool; //online.txt
+std::atomic<bool> g_map_pool{false};
+uint32_t g_pool_rows = 0, g_pool_row_count = 0;
+bool g_pool_failed = false;
+uint32_t g_mods_target = kModsPage; //GE_MODS_PAGE
 
 uint32_t Alloc(const PPCContext& c, uint32_t bytes)
 {
@@ -133,7 +158,7 @@ bool Build(const PPCContext& c, uint32_t debugRows)
 		if (!rows) return false;
 		CopyRows(rows, kUnusedRows, kUnusedHead);
 		CopyRows(rows + kUnusedHead * kRowSize, kUnusedRows + kUnusedItems * kRowSize, items);
-		Row(rows + (kUnusedHead + items) * kRowSize, kTextMods, kModsPage, 0, kKindPage);
+		Row(rows + (kUnusedHead + items) * kRowSize, kTextMods, g_mods_target, 0, kKindPage);
 		const uint32_t foot = rows + (kUnusedHead + items + 1) * kRowSize;
 		CopyRows(foot, kUnusedRows + kUnusedFoot * kRowSize, 1 + items);
 		Row(foot + (1 + items) * kRowSize, kTextAbout, 0, 0, kKindAbout);
@@ -141,7 +166,77 @@ bool Build(const PPCContext& c, uint32_t debugRows)
 	return true;
 }
 
+std::string Lower(std::string text)
+{
+	std::transform(text.begin(), text.end(), text.begin(), [](unsigned char ch) { return (char)std::tolower(ch); });
+	return text;
+}
+
+//online.txt: a map a line, anything behind a # is a note
+void ReadPool()
+{
+	if (mods_folder().empty()) return;
+	const std::string path = mods_folder() + "/online.txt";
+	std::ifstream file(path);
+	if (!file) return;
+	std::string line;
+	while (std::getline(file, line))
+	{
+		line = line.substr(0, line.find('#'));
+		const size_t first = line.find_first_not_of(" \t\r"), last = line.find_last_not_of(" \t\r");
+		if (first == std::string::npos) continue;
+		line = line.substr(first, last - first + 1);
+		const std::string wanted = Lower(line);
+		const auto& files = mod_files();
+		auto mod = std::find_if(files.begin(), files.end(), [&](const ModLevel& m) { return m.name == wanted || m.name == wanted + ".edb"; });
+		if (mod != files.end()) { g_pool.push_back({ mod->hash, Shown(mod->name) }); continue; }
+		char* end = nullptr;
+		const unsigned long hash = std::strtoul(line.c_str(), &end, 16);
+		if (end != line.c_str() && *end == 0 && line.size() >= 7 && line.size() <= 10) { g_pool.push_back({ (uint32_t)hash, line }); continue; }
+		rt_log("goldeneye: %s: \"%s\" is neither a mod's file nor a file's hash, left out", path.c_str(), line.c_str());
+	}
+	rt_log("goldeneye: %zu map(s) for Conflict in %s", g_pool.size(), path.c_str());
+}
+
+//Conflict's page gets the pool's rows while the setting is on, the game's own otherwise
+void PoolFrame(const PPCContext& c, uint32_t data, uint32_t count)
+{
+	const uint32_t page = FindPage(data, count, kConflictMapsPage);
+	if (!page) return;
+	const bool on = g_map_pool && !g_pool.empty() && !g_pool_failed && game_alloc;
+	if (on && !g_pool_rows)
+	{
+		g_pool_row_count = kConflictHead + (uint32_t)g_pool.size();
+		const uint32_t rows = Alloc(c, g_pool_row_count * kRowSize);
+		if (!rows) { g_pool_failed = true; return; }
+		CopyRows(rows, kConflictRows, kConflictHead);
+		for (size_t i = 0; i < g_pool.size(); ++i)
+		{
+			//one of the game's ten keeps the game's name for it
+			uint32_t text = 0;
+			for (uint32_t k = kConflictHead; k < kConflictRowCount && !text; ++k)
+				if (ld32(kConflictRows + k * kRowSize + kRowHash) == g_pool[i].hash) text = ld32(kConflictRows + k * kRowSize);
+			if (!text)
+			{
+				text = kTextMap + (uint32_t)i;
+				g_texts[text] = Text(c, g_pool[i].name);
+				if (!g_texts[text]) { g_pool_failed = true; return; }
+			}
+			Row(rows + (kConflictHead + (uint32_t)i) * kRowSize, text, g_pool[i].hash, kMissionStart, kKindLevel);
+		}
+		g_pool_rows = rows;
+		rt_log("goldeneye: Conflict's maps are the %zu of online.txt", g_pool.size());
+	}
+	const uint32_t rows = on ? g_pool_rows : kConflictRows, have = ld32(page + kPageRows);
+	if (have == rows || (have != kConflictRows && have != g_pool_rows)) return;
+	st32(page + kPageRows, rows);
+	st32(page + kPageRowCount, on ? g_pool_row_count : kConflictRowCount);
+}
+
 } //namespace
+
+bool mod_map_pool() { return g_map_pool; }
+void set_mod_map_pool(bool on) { g_map_pool = on; }
 
 uint32_t mods_menu_text(uint32_t hash)
 {
@@ -155,6 +250,7 @@ void mods_menu_frame(PPCContext& c)
 	const uint32_t count = ld32(kPages + kPagesCount);
 	uint32_t data = ld32(kPages + kPagesData);
 	if (!guest_ptr(data) || count == 0 || count > kMostPages) return;
+	PoolFrame(c, data, count);
 	const uint32_t extras = FindPage(data, count, kExtrasPage);
 	if (!extras) return;
 
@@ -213,6 +309,9 @@ void install_mods_menu()
 {
 	g_levels = mod_levels();
 	game_alloc = ppc_lookup(kAlloc);
+	if (const char* e = std::getenv("GE_MOD_MAPS")) g_map_pool = std::atoi(e) != 0;
+	if (const char* e = std::getenv("GE_MODS_PAGE")) g_mods_target = (uint32_t)std::strtoul(e, nullptr, 16);
+	ReadPool();
 	if (!g_levels.empty() && !game_alloc) rt_log("goldeneye: the game's allocator isn't in this build, no Mods menu");
 }
 

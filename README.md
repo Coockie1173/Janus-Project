@@ -95,7 +95,9 @@ into `build/deps` by `make`.
 Every `.edb` file in `mods/` (or `GE_MODS=folder`) is loaded in place of the
 disc's file with the same hash, or comes on top of the disc's files when no
 file has its hash. The levels among them are listed in the game's menu
-under Extras > Mods. A level is the hash of its file: `GE_LEVEL=01810201
+under Extras > Mods. With Mod Map Pool on (F1 > Enhancements) multiplayer's
+Conflict has the maps listed in `mods/online.txt`, a mod's file name or a
+file's hash a line. A level is the hash of its file: `GE_LEVEL=01810201
 ./launch.sh` starts that level whichever mission is picked in the menu.
 New levels were made from glTF scenes with a changed
 [eurochef](https://github.com/eurotools/eurochef); those changes aren't

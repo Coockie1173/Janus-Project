@@ -55,7 +55,7 @@ ACTIONS = [
     ("Move left", "Left Stick Left"), ("Move right", "Left Stick Right"),
 ]
 DEFAULTS = {"fps": "auto", "fov": "49", "mouse": "1.0", "online": "1", "fullscreen": "0", "faststart": "0", "mousemode": "auto",
-            "mouseinvert": "0", "adsfov": "22.5", "adssens": "0.5", "aimlock": "0", "mouseeverywhere": "0", "skipcutscenes": "0", "skipzukovsky": "0", "skipbriggs": "0", "skipmovies": "0", "notutorials": "0", "nocolourfilter": "0", "autosave": "1", "leveltimer": "1", "autoqte": "0", "autostart": "0", "extrasmenu": "0", "unlockall": "0",
+            "mouseinvert": "0", "adsfov": "22.5", "adssens": "0.5", "aimlock": "0", "mouseeverywhere": "0", "skipcutscenes": "0", "skipzukovsky": "0", "skipbriggs": "0", "skipmovies": "0", "notutorials": "0", "nocolourfilter": "0", "modmaps": "0", "autosave": "1", "leveltimer": "1", "autoqte": "0", "autostart": "0", "extrasmenu": "0", "unlockall": "0",
             "crashdump": "1", "crashmem": "0"}
 
 #Tk's key names -> SDL's (the key file's)
@@ -411,6 +411,10 @@ def run_gui():
     ttk.Checkbutton(en, text="Disable Colour Filter", variable=no_colour_filter).grid(row=16, column=0, sticky="w", **pad)
     ttk.Label(en, text="The tint some levels lay over the picture (Facility's blue-green, Tank's, Solar's) isn't drawn.",
               foreground="gray", wraplength=520, justify="left").grid(row=17, column=0, sticky="w", padx=(30, 8))
+    mod_maps = tk.BooleanVar(value=settings["modmaps"] == "1")
+    ttk.Checkbutton(en, text="Mod Map Pool", variable=mod_maps).grid(row=18, column=0, sticky="w", **pad)
+    ttk.Label(en, text="Multiplayer's Conflict has the maps listed in mods/online.txt in place of its own ten.",
+              foreground="gray", wraplength=520, justify="left").grid(row=19, column=0, sticky="w", padx=(30, 8))
 
     #cheats
     #the tab just lists whatever is in config/gecko/cheats.txt, so adding a cheat is adding it to that file
@@ -460,6 +464,7 @@ def run_gui():
         settings["skipmovies"] = "1" if skip_movies.get() else "0"
         settings["notutorials"] = "1" if no_tutorials.get() else "0"
         settings["nocolourfilter"] = "1" if no_colour_filter.get() else "0"
+        settings["modmaps"] = "1" if mod_maps.get() else "0"
         settings["extrasmenu"] = "1" if extras_menu.get() else "0"
         settings["unlockall"] = "1" if unlock_all.get() else "0"
         settings["mousemode"] = next((k for k, v in modes.items() if v == mousemode.get()), "auto")
@@ -598,6 +603,8 @@ def run_game(args):
             s["notutorials"] = "1"
         elif a == "--no-colour-filter":
             s["nocolourfilter"] = "1"
+        elif a == "--mod-maps":
+            s["modmaps"] = "1"
         elif a == "--extras-menu":
             s["extrasmenu"] = "1"
         elif a == "--unlock-all":
@@ -628,7 +635,7 @@ def run_game(args):
     for var, key in (("GE_FPS", "fps"), ("GE_FOV", "fov"), ("GE_MOUSE", "mouse"), ("GE_MOUSE_MODE", "mousemode"),
                      ("GE_MOUSE_INVERT", "mouseinvert"), ("GE_ADS_FOV", "adsfov"),
                      ("GE_ADS_SENS", "adssens"), ("GE_AIM_LOCK", "aimlock"), ("GE_MOUSE_EVERYWHERE", "mouseeverywhere"),
-                     ("GE_SKIP_CUTSCENES", "skipcutscenes"), ("GE_SKIP_ZUKOVSKY", "skipzukovsky"), ("GE_SKIP_BRIGGS", "skipbriggs"), ("GE_LEVEL_TIMER", "leveltimer"), ("GE_AUTO_QTE", "autoqte"), ("GE_AUTO_START", "autostart"), ("GE_SKIP_MOVIES", "skipmovies"), ("GE_NO_TUTORIALS", "notutorials"), ("GE_NO_COLOUR_FILTER", "nocolourfilter"), ("GE_AUTOSAVE", "autosave"),
+                     ("GE_SKIP_CUTSCENES", "skipcutscenes"), ("GE_SKIP_ZUKOVSKY", "skipzukovsky"), ("GE_SKIP_BRIGGS", "skipbriggs"), ("GE_LEVEL_TIMER", "leveltimer"), ("GE_AUTO_QTE", "autoqte"), ("GE_AUTO_START", "autostart"), ("GE_SKIP_MOVIES", "skipmovies"), ("GE_NO_TUTORIALS", "notutorials"), ("GE_NO_COLOUR_FILTER", "nocolourfilter"), ("GE_MOD_MAPS", "modmaps"), ("GE_AUTOSAVE", "autosave"),
                      ("GE_EXTRAS_MENU", "extrasmenu"), ("GE_UNLOCK_ALL", "unlockall")):
         env.setdefault(var, s[key])
     if s["online"] == "0":
