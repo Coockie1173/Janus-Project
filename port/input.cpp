@@ -10,6 +10,7 @@
 namespace ge {
 
 extern bool g_stick_took; //the mouse is on the stick this frame
+void aim_lock_frame(uint32_t ctrl); //once a frame for the local controller, after its update
 
 //the game plays with the classic controller: left stick moves (WASD in the key file),
 //right stick looks. the mouse doesn't go through the stick, its motion gets added to the
@@ -242,8 +243,12 @@ void sprint_buttons(ClassicState& s) {
     if (g_sprint_key && joined_game()) s.buttons |= kClB;
 }
 
+//the sprint key let go of the aim lock: the game takes the press once the gun is down, not before
+std::atomic<bool> g_sprint_waits{false};
 void sprint_frame() {
     bool down = g_sprint_key;
+    if (!down || aim_blend(g_local_ctrl) == 0) g_sprint_waits = false;
+    if (g_sprint_waits) down = false;
     g_sprint_pressed = down && !g_sprint_held;
     g_sprint_held = down;
 }
@@ -356,6 +361,7 @@ void controller_update(PPCContext& c) {
     orig_controller_update(c);
     if (ctrl == g_local_ctrl && frame == g_local_frame && !is_tank(ctrl)) { //a tank has other things where the aim's blend is
         ads_fov_apply(ctrl);
+        aim_lock_frame(ctrl);
         noclip_apply(ctrl);
     }
     //the cheat, in a state whose update never got to ge_look_apply: turn the player's yaw directly
@@ -420,16 +426,57 @@ void wheel_buttons(ClassicState& s) {
 
 
 //aim lock: a press of aim stays aimed until the next one, to the game it's held all along
-//a menu, a pause or a state the game has the view in (death, a cutscene) lets go of it
+//a menu, a pause or a state the game has the view in (death, a cutscene, a vault) lets go of it
+//and so does whatever takes the gun down with aim still held: the game lowers it for a change of
+//weapon (+0xC97, the item being changed to, isn't +0xC96, the one in the hand) and for anything
+//else the blend at +0xD10 falls after it had gone up. held, the gun would come back up after
+//GE_TRACEAIM=1 logs the state, the blend and the two items whenever they change
+const uint32_t kItemInHand = 0xC96, kItemNext = 0xC97;
 std::atomic<bool> g_aim_lock{false};
+std::atomic<bool> g_aim_locked{false}, g_aim_broken{false}; //the lock holds aim down, the game took the gun down
+void aim_lock_frame(uint32_t ctrl) {
+    static bool was_locked = false, rose = false;
+    static float last = 0;
+    static const bool trace = std::getenv("GE_TRACEAIM") != nullptr;
+    bool locked = g_aim_locked;
+    float blend = aim_blend(ctrl);
+    uint32_t hand = ld8(ctrl + kItemInHand), next = ld8(ctrl + kItemNext);
+    if (trace) {
+        static uint32_t said[5] = {~0u};
+        uint32_t now[5] = {ld32(ctrl + kPlayerState), ld32(ctrl + kAimBlend), hand, next, locked};
+        if (std::memcmp(now, said, sizeof now)) {
+            std::memcpy(said, now, sizeof now);
+            rt_log("aim: frame %u state %X blend %.3f hand %02X next %02X held %d lock %d items %u", ld32(kFrameCount), now[0], blend, hand, next,
+                   ld8(ctrl + 0xD00), (int)locked, ld32(ctrl + 0xC48));
+        }
+    }
+    if (!locked || !was_locked) rose = false;
+    else if (blend > last) rose = true;
+    const char* why = !locked ? nullptr : hand != next ? "a change of weapon" : rose && blend < last ? "the game took the gun down" : nullptr;
+    if (why) {
+        g_aim_broken = true;
+        rose = false;
+        if (trace || std::getenv("GE_TRACE")) rt_log("goldeneye: aim lock let go: %s", why);
+    }
+    was_locked = locked;
+    last = blend;
+}
+
 void aim_lock_buttons(ClassicState& s) {
     static bool locked = false, was_down = false;
     bool down = (s.buttons & kClZL) != 0, pressed = down && !was_down;
     was_down = down;
     uint32_t state = 0;
     bool free = local_player_state(state) && (state == 0 || state == 2 || state == 3 || state == 4);
-    if (!g_aim_lock || !in_play() || !free) { locked = false; return; }
-    if (pressed) locked = !locked;
+    static bool was_sprint = false;
+    bool sprint = g_sprint_key && !was_sprint; //the game won't sprint with aim held, so the sprint key lets go too
+    was_sprint = g_sprint_key;
+    bool broken = g_aim_broken.exchange(false);
+    if (locked && sprint) g_sprint_waits = true;
+    if (!g_aim_lock || !in_play() || !free || broken || sprint) locked = false;
+    else if (pressed) locked = !locked;
+    g_aim_locked = locked;
+    if (!g_aim_lock || !in_play() || !free) return;
     if (locked) s.buttons |= kClZL;
     else s.buttons &= ~kClZL;
 }
