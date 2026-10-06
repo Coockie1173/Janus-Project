@@ -4,7 +4,7 @@
 //of the part that stays loaded (the .edb header's +0x18), its hash (+4), version (+8), flags (+0xC)
 //and where it starts in Filelist.000, then the names, scrambled by row and place
 //a mod goes behind the end of Filelist.000 and gets the row of the file with its hash, or a new
-//row at the end. a level is its mt_ file's hash: GE_LEVEL=hash starts a new one
+//row at the end. two mods with the same hash: the second gets another one. a level is its mt_ file's hash: GE_LEVEL=hash starts a new one
 //
 //the levels among them can be picked in the game's menu: Extras > Mods (port/modmenu.cpp)
 //online.txt in the folder is a list of maps for multiplayer's Conflict (the same file)
@@ -18,6 +18,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <memory>
+#include <set>
 #include <vector>
 
 namespace ge
@@ -29,6 +30,8 @@ const uint32_t kListVersion = 7;
 const uint32_t kNameKey = 0x16; //a name's byte is its letter - 0x16 + its row + its place
 const uint64_t kSector = 0x800; //files start on one in Filelist.000
 const char* kNamePrefix = "x:\\bondx\\binary\\_bin_wii\\";
+const uint32_t kGeom = 0x47454F4D, kHeadSize = 8; //an .edb starts with GEOM and its hash
+const uint32_t kFirstFree = 0x0200; //the low half of the hashes eurochef gives the files it makes, from here up
 const uint32_t kLevelFiles = 0x01810000; //a level's own file (mt_), the hash a level is started by
 
 struct Row
@@ -42,6 +45,7 @@ struct Mod
 {
 	std::string path, name;
 	uint32_t hash{}, version{}, flags{}, size{}, loaded{};
+	uint32_t ownHash{}; //the hash in the file itself, when it had to get another one
 };
 
 uint32_t Be32(const uint8_t* p) { return (uint32_t)p[0] << 24 | p[1] << 16 | p[2] << 8 | p[3]; }
@@ -117,7 +121,7 @@ bool ReadMod(const std::filesystem::path& path, Mod& mod)
 	FILE* f = std::fopen(path.string().c_str(), "rb");
 	if (!f) return false;
 	uint8_t head[0x1C];
-	const bool ok = std::fread(head, 1, sizeof head, f) == sizeof head && Be32(head) == 0x47454F4D; //GEOM
+	const bool ok = std::fread(head, 1, sizeof head, f) == sizeof head && Be32(head) == kGeom;
 	std::fclose(f);
 	if (!ok) return false;
 	mod.path = path.string();
@@ -290,6 +294,27 @@ void install_mods()
 		return;
 	}
 
+	//two mods with the same hash (two levels made with the same number): the second by name gets
+	//the first free hash of its kind, counted up from where the made ones start. the file is
+	//served with that hash in its header. one that has the hash of a file of the disc is meant
+	//to take that file's place and keeps it
+	std::set<uint32_t> taken;
+	for (const Row& row : rows) taken.insert(row.hash);
+	std::set<uint32_t> ofMods;
+	for (const Mod& mod : mods) taken.insert(mod.hash);
+	for (Mod& mod : mods)
+	{
+		if (ofMods.insert(mod.hash).second) continue;
+		uint32_t fresh = (mod.hash & 0xFFFF0000u) | kFirstFree;
+		while (taken.count(fresh) && (fresh & 0xFFFF) != 0xFFFF) ++fresh;
+		if (taken.count(fresh)) { rt_log("goldeneye: mods: no hash left for %s", mod.name.c_str()); continue; }
+		rt_log("goldeneye: mod %s has the hash of another mod (%08X): it is %08X here", mod.name.c_str(), mod.hash, fresh);
+		mod.ownHash = mod.hash;
+		mod.hash = fresh;
+		taken.insert(fresh);
+		ofMods.insert(fresh);
+	}
+
 	std::vector<DiscPart> parts;
 	DiscPart original; original.original = true;
 	parts.push_back(original);
@@ -300,7 +325,17 @@ void install_mods()
 		if (at + mod.size > 0xFFFFFFFFull) { rt_log("goldeneye: mods: no room left for %s", mod.name.c_str()); continue; }
 		DiscPart gap; gap.size = at - end;
 		DiscPart file; file.path = mod.path; file.size = mod.size;
-		parts.push_back(gap); parts.push_back(file);
+		parts.push_back(gap);
+		if (mod.ownHash && mod.size > kHeadSize)
+		{
+			//the first eight bytes from here: GEOM and the new hash, the rest from the file
+			DiscPart head;
+			head.data = std::make_shared<std::vector<uint8_t>>();
+			Put32(*head.data, kGeom); Put32(*head.data, mod.hash);
+			parts.push_back(head);
+			file.off = kHeadSize; file.size = mod.size - kHeadSize;
+		}
+		parts.push_back(file);
 		end = at + mod.size;
 		auto row = std::find_if(rows.begin(), rows.end(), [&](const Row& r) { return r.hash == mod.hash; });
 		const bool isNew = row == rows.end();
