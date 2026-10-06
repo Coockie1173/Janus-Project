@@ -525,6 +525,9 @@ it wrote last, so a cutscene keeps its own. `ads_fov_apply(ctrl)` runs after the
 update: the game computes `view + (weapon's aimed angle - view) * blend` into `+0x71C`; the
 weapon's angle is worked back out of that, scaled by the option over 22.5, and the result
 written to `+0x71C` and `+0x720`, never wider than the view.
+`DrawDelayed` (hook on `draw_delayed?`, every mesh's draw): with the view wider than 49 a mesh
+whose draw matrix (entry `+4`) has no rotation and no offset sits on the eye (Facility's colour
+filter); its x and y are stretched by `tan(view / 2) / tan(24.5)` for that draw.
 
 ### gecko.cpp
 

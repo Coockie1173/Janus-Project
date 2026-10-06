@@ -58,7 +58,44 @@ void ads_fov_apply(uint32_t ctrl) {
 float ads_fov() { return g_ads_fov > 0 ? g_ads_fov.load() : kGameAdsFov; }
 void set_ads_fov(float degrees) { g_ads_fov = degrees == kGameAdsFov ? 0 : std::clamp(degrees, kAdsFovMin, kFovMax); }
 
+//a mesh a level glues to the eye is made for the game's 49 degrees
+//Facility's colour filter is one: a dish half a unit wide and half a unit ahead, drawn over the
+//picture with a multiply blend. it reaches 45 degrees from the middle, so past a view of about 59
+//the screen's sides look past it and keep their own colours
+//draw_delayed(entry, ...) draws a mesh, entry +4 points to the matrix it's drawn with (3 rows of 4):
+//the view times the mesh's own, with z turned round. where that has no rotation and no offset
+//the mesh sits on the eye, and for that draw its x and y are stretched by the tangents' ratio, so it
+//covers the part of the screen it covered at 49
+const uint32_t kEntryDrawMtx = 0x4;
+PPCFunc orig_draw_delayed = nullptr;
+
+bool OnTheEye(uint32_t mtx) {
+    for (int r = 0; r < 3; ++r)
+        for (int c = 0; c < 4; ++c) {
+            float want = r != c ? 0.0f : r == 2 ? -1.0f : 1.0f;
+            if (!(std::fabs(ldf(mtx + r * 16 + c * 4) - want) < 0.01f)) return false;
+        }
+    return true;
+}
+
+void DrawDelayed(PPCContext& c) {
+    uint32_t settings = ld32(kViewSettingsPtr), entry = c.r[3];
+    float angle = guest_ptr(settings) ? ldf(settings + 0x328) : 0;
+    if (!(angle > kGameFov) || angle > kFovMax || !guest_ptr(entry)) { orig_draw_delayed(c); return; }
+    uint32_t mtx = ld32(entry + kEntryDrawMtx);
+    if (!guest_ptr(mtx) || !OnTheEye(mtx)) { orig_draw_delayed(c); return; }
+    const float kHalf = 3.14159265f / 360;
+    float wider = std::tan(angle * kHalf) / std::tan(kGameFov * kHalf);
+    stf(mtx, wider);
+    stf(mtx + 16 + 4, wider);
+    orig_draw_delayed(c);
+    stf(mtx, 1);
+    stf(mtx + 16 + 4, 1);
+}
+
 void install_fov() {
+    orig_draw_delayed = ppc_hook("draw_delayed?", DrawDelayed);
+    if (!orig_draw_delayed) rt_die("goldeneye: the mesh draw is not hooked in this build");
     if (const char* a = std::getenv("GE_ADS_FOV")) {
         float f = (float)std::atof(a);
         if (f >= kAdsFovMin && f <= kFovMax) set_ads_fov(f);

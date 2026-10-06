@@ -67,3 +67,4 @@ ge_cutscene_release    # and lets go: GE_TRACECUT logs it
 ge_file_update         # a file of the file manager is updated: one being unloaded waits the console's time (port/unload.cpp)
 ge_timeline_event      # a timeline's type 0xB event: one that waits stays at the event's frame (port/timeline.cpp)
 ge_texture_animate     # a texture's animator: it counts the whole frame's length at any rate (port/flipbooks.cpp)
+draw_delayed?          # a mesh glued to the eye is widened with the field of view

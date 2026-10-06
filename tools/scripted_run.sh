@@ -14,6 +14,7 @@
 # skips, auto start... the menus only replay at the pace they were recorded at); GE_STICK, GE_BUTTONS, GE_MOUSEMOVE and the other aids then count from its end.
 # "training" as the script goes New Game, Operative; with REPLAY the recording then takes over
 # where the level starts (GE_REPLAY_FROM=1), its own menu part is left out.
+# The window stays hidden (WIIKIT_HIDDEN), frames are drawn and dumped all the same; SHOW=1 shows it.
 cd "$(dirname "$0")/.." || exit 1
 DAM="8:A 11:D 12:D $(seq 14 2 600 | sed 's/$/:A/' | tr '\n' ' ')"
 SCRIPT=$1; [ "$SCRIPT" = dam ] && SCRIPT=$DAM
@@ -38,6 +39,7 @@ if [ -n "$REPLAY" ]; then
     fi
 fi
 [ -n "$INTRO" ] || { GE_GECKO_EXTRA="$PWD/config/gecko/faststart.txt${GE_GECKO_EXTRA:+:$GE_GECKO_EXTRA}"; export GE_GECKO_EXTRA; }
+[ -n "$SHOW" ] || { WIIKIT_HIDDEN=1; export WIIKIT_HIDDEN; }
 FONTS=/usr/share/dolphin-emu/Sys/GC
 WIIKIT_PAD="$SCRIPT" timeout $((SECS + 40)) ${GE_BIN:-build/out/wiiboot} game --nand $NAND --keys build/keys.txt \
     --symbols build/recomp/symbols.tsv $( [ -d $FONTS ] && echo --fonts $FONTS ) $( [ -n "$AUDIO" ] || echo --no-audio ) --input keyboard \
