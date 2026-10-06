@@ -1,6 +1,7 @@
 #!/bin/sh
 # The Windows package: the cross-built game (make win), what it needs beside it, the
-# instructions, zipped. Nothing of the disc goes in: game/ is left for the player to fill.
+# instructions and the mods folder, zipped. Nothing of the disc goes in: game/ is left for the
+# player to fill.
 #     sh tools/package_win.sh [FONTS_DIR]      -> build/GoldenEye007-win64.zip
 set -e
 cd "$(dirname "$0")/.."
@@ -31,6 +32,12 @@ cp wiikit/disc.py wiikit/rvz.py wiikit/aes.py "$S/launcher/wiikit/"
 : > "$S/launcher/wiikit/__init__.py"
 cp -r build/deps/winpy/python "$S/python"
 cp "$S/python/LICENSE.txt" "$S/licenses/python.txt"
+# the mods folder goes along as it is: the .edb files and online.txt (README.md, Mods)
+mkdir -p "$S/mods"
+if ls mods/*.edb mods/online.txt >/dev/null 2>&1; then
+    for f in mods/*.edb mods/online.txt; do [ -f "$f" ] && cp "$f" "$S/mods/"; done
+    echo "mods: $(ls "$S/mods" | tr '\n' ' ')"
+fi
 # Windows line ends for what Notepad and cmd read
 for f in Play.bat README.txt; do sed 's/$/\r/' "port/win/$f" > "$S/$f"; done
 printf 'The game goes here: Play.bat, then "Extract disc..." and pick your GoldenEye 007 (SJBE52) image.\r\nWhen it is done this folder holds sys\\main.dol and files\\. See README.txt.\r\n' > "$S/game/PUT YOUR DISC HERE.txt"

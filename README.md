@@ -53,6 +53,10 @@ SDL3 beside it in `lib/`), `Play.sh` that opens the settings window with the
 system's Python, and `README.txt` (`port/linux/`). It needs glibc 2.38,
 OpenSSL 3 and OpenGL 4.5 where it runs; online and crash dumps work there.
 
+Both packages take the `mods/` folder along as it is when they are made
+(its `.edb` files and `online.txt`, see Mods below), so what is in it when
+`make win` or `make linux` runs ships in the zip.
+
 The boot ROM fonts and the DSP's resampling table (`font_western.bin`,
 `font_japanese.bin`, `dsp_coef.bin`) are taken from Dolphin's free
 replacements in `Sys/GC` when Dolphin is installed (`FONTS=dir` otherwise).

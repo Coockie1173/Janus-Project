@@ -91,6 +91,9 @@ Where things are
     nand/           your saves and profiles (made on the first start). Back this up.
     keys.txt        key bindings
     settings.env    what the settings window saved
+    mods/           levels that aren't the game's own (.edb files): Extras > Mods in the
+                    game's menu lists them. online.txt in it lists the maps multiplayer's
+                    Conflict has when Mod Map Pool is on (F1 > Enhancements)
     run.log         the log of the last run
     crashes/        a folder for each crash or stall, with what the game was doing
     shadercache/    compiled shaders; safe to delete

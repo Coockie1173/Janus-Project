@@ -1,6 +1,7 @@
 #!/bin/sh
 # The Linux package: the portable build (make linux), what it needs beside it, the
-# instructions, zipped. Nothing of the disc goes in: game/ is left for the player to fill.
+# instructions and the mods folder, zipped. Nothing of the disc goes in: game/ is left for the
+# player to fill.
 #     sh tools/package_linux.sh [FONTS_DIR]      -> build/GoldenEye007-linux64.zip
 set -e
 cd "$(dirname "$0")/.."
@@ -30,6 +31,12 @@ mkdir -p "$S/launcher/wiikit"
 cp tools/launcher.py tools/extract_disc.py "$S/launcher/"
 cp wiikit/disc.py wiikit/rvz.py wiikit/aes.py "$S/launcher/wiikit/"
 : > "$S/launcher/wiikit/__init__.py"
+# the mods folder goes along as it is: the .edb files and online.txt (README.md, Mods)
+mkdir -p "$S/mods"
+if ls mods/*.edb mods/online.txt >/dev/null 2>&1; then
+    for f in mods/*.edb mods/online.txt; do [ -f "$f" ] && cp "$f" "$S/mods/"; done
+    echo "mods: $(ls "$S/mods" | tr '\n' ' ')"
+fi
 cp port/linux/Play.sh port/linux/README.txt "$S/"
 chmod 755 "$S/Play.sh" "$S/GoldenEye"
 printf 'The game goes here: ./Play.sh, then "Extract disc..." and pick your GoldenEye 007 (SJBE52) image.\nWhen it is done this folder holds sys/main.dol and files/. See README.txt.\n' > "$S/game/PUT YOUR DISC HERE.txt"
