@@ -23,13 +23,17 @@
 //writes to where the array was on the heap, which is somewhere else when mods add files
 //
 //the maps of multiplayer's Conflict are a page of the same kind (7D000045, rows 805830C8: six
-//of dressing with one list widget, then a kind 0xB row for each of its ten maps). with the
-//setting Mod Map Pool on it gets rows made here, a map for every line of online.txt in the
-//mods folder, as many as there are: a mod's file name (mt_yard.edb, or just mt_yard) or a
-//file's hash in hex (01A00003, one of the disc's). the code this replaces wrote other hashes
-//into the game's ten rows
+//of dressing with one list widget, then a kind 0xB row for each of its ten maps). it can get
+//rows made here, a map for every line of online.txt in the mods folder, as many as there
+//are: a mod's file name (mt_yard.edb, or just mt_yard) or a file's hash in hex (01A00003, one
+//of the disc's). the code this replaces wrote other hashes into the game's ten rows
+//which of the two it has is picked in the Multiplayer menu (7D000061, rows 8057E5A0: Split
+//Screen and Nintendo Wi-Fi Connection, which goes to page 7D000049). with an online.txt that
+//page gets rows made here too: Split Screen, "Connect to Nintendo WFC" and "Connect to WFC
+//Modded", both to 7D000049. the line under the list that says what the lit item is gets
+//looked up as the item is lit, and each of the two has a text of its own for it: the one
+//asked for last says which maps Conflict has
 //
-//GE_MOD_MAPS=1 the setting
 //GE_MODS_PAGE=7D000045 Extras > Mods opens that page instead (to look at a page without going
 //through the menus that lead to it)
 #include "ge.h"
@@ -68,6 +72,12 @@ const uint32_t kConflictMapsPage = 0x7D000045;
 const uint32_t kConflictRows = 0x805830C8, kConflictRowCount = 16; //the game's
 const uint32_t kConflictHead = 6; //the rows before the maps
 const uint32_t kTextMap = 0x4300F100; //a text for each map of the pool that isn't one of the game's ten
+const uint32_t kMultiplayerPage = 0x7D000061;
+const uint32_t kMultiplayerRows = 0x8057E5A0, kMultiplayerRowCount = 11; //the game's
+const uint32_t kSplitScreenRow = 6, kSplitScreenAboutRow = 9;
+const uint32_t kTextMultiplayer = 0x43000C88; //the page's title, the game's
+const uint32_t kOnlinePage = 0x7D000049; //Nintendo Wi-Fi Connection
+const uint32_t kTextWfc = 0x4300F0F0, kTextWfcModded = 0x4300F0F1, kTextAboutWfc = 0x4300F0F2, kTextAboutModded = 0x4300F0F3;
 const uint32_t kAlloc = 0x803428C0; //(bytes, flags) -> a block of the game's heap
 const uint32_t kMostPages = 4096;
 
@@ -80,9 +90,11 @@ bool g_failed = false;
 
 struct PoolMap { uint32_t hash; std::string name; };
 std::vector<PoolMap> g_pool; //online.txt
-std::atomic<bool> g_map_pool{false};
+std::atomic<bool> g_map_pool{false}; //Connect to WFC Modded was the item lit last
 uint32_t g_pool_rows = 0, g_pool_row_count = 0;
+uint32_t g_multiplayer_rows = 0, g_multiplayer_row_count = 0;
 bool g_pool_failed = false;
+bool g_trace = false;
 uint32_t g_mods_target = kModsPage; //GE_MODS_PAGE
 
 uint32_t Alloc(const PPCContext& c, uint32_t bytes)
@@ -198,7 +210,41 @@ void ReadPool()
 	rt_log("goldeneye: %zu map(s) for Conflict in %s", g_pool.size(), path.c_str());
 }
 
-//Conflict's page gets the pool's rows while the setting is on, the game's own otherwise
+//the Multiplayer menu with the two ways online, when there is a pool to pick
+void MultiplayerFrame(const PPCContext& c, uint32_t data, uint32_t count)
+{
+	const uint32_t page = FindPage(data, count, kMultiplayerPage);
+	if (!page || g_pool.empty() || g_pool_failed || !game_alloc) return;
+	if (!g_multiplayer_rows)
+	{
+		//the unused extras menu's layout has the slots for three items, the game's own has two
+		const uint32_t items = 3;
+		g_multiplayer_row_count = kUnusedHead + items * 2 + 1;
+		const uint32_t rows = Alloc(c, g_multiplayer_row_count * kRowSize);
+		g_texts[kTextWfc] = Text(c, "Connect to Nintendo WFC");
+		g_texts[kTextWfcModded] = Text(c, "Connect to WFC Modded");
+		g_texts[kTextAboutWfc] = Text(c, "Connect to Nintendo WFC.");
+		g_texts[kTextAboutModded] = Text(c, "Connect to Nintendo WFC with the maps of the mods folder.");
+		if (!rows || !g_texts[kTextWfc] || !g_texts[kTextWfcModded] || !g_texts[kTextAboutWfc] || !g_texts[kTextAboutModded]) { g_pool_failed = true; return; }
+		CopyRows(rows, kUnusedRows, kUnusedHead);
+		st32(rows + kDebugTitleRow * kRowSize, kTextMultiplayer);
+		uint32_t at = rows + kUnusedHead * kRowSize;
+		CopyRows(at, kMultiplayerRows + kSplitScreenRow * kRowSize, 1);
+		Row(at + kRowSize, kTextWfc, kOnlinePage, 0, kKindPage);
+		Row(at + 2 * kRowSize, kTextWfcModded, kOnlinePage, 0, kKindPage);
+		at += items * kRowSize;
+		CopyRows(at, kUnusedRows + kUnusedFoot * kRowSize, 1);
+		CopyRows(at + kRowSize, kMultiplayerRows + kSplitScreenAboutRow * kRowSize, 1);
+		Row(at + 2 * kRowSize, kTextAboutWfc, 0, 0, kKindAbout);
+		Row(at + 3 * kRowSize, kTextAboutModded, 0, 0, kKindAbout);
+		g_multiplayer_rows = rows;
+	}
+	if (ld32(page + kPageRows) != kMultiplayerRows) return;
+	st32(page + kPageRows, g_multiplayer_rows);
+	st32(page + kPageRowCount, g_multiplayer_row_count);
+}
+
+//Conflict's page gets the pool's rows after Connect to WFC Modded, the game's own otherwise
 void PoolFrame(const PPCContext& c, uint32_t data, uint32_t count)
 {
 	const uint32_t page = FindPage(data, count, kConflictMapsPage);
@@ -270,11 +316,14 @@ void PickNextMaps(PPCContext& c)
 
 } //namespace
 
-bool mod_map_pool() { return g_map_pool; }
-void set_mod_map_pool(bool on) { g_map_pool = on; }
-
 uint32_t mods_menu_text(uint32_t hash)
 {
+	//the line under the Multiplayer menu's list: which way online is lit
+	if (hash == kTextAboutModded || hash == kTextAboutWfc)
+	{
+		const bool modded = hash == kTextAboutModded;
+		if (g_map_pool.exchange(modded) != modded && g_trace) rt_log("goldeneye: Multiplayer: %s is lit", modded ? "Connect to WFC Modded" : "Connect to Nintendo WFC");
+	}
 	auto found = g_texts.find(hash);
 	return found == g_texts.end() ? 0 : found->second;
 }
@@ -285,6 +334,7 @@ void mods_menu_frame(PPCContext& c)
 	const uint32_t count = ld32(kPages + kPagesCount);
 	uint32_t data = ld32(kPages + kPagesData);
 	if (!guest_ptr(data) || count == 0 || count > kMostPages) return;
+	MultiplayerFrame(c, data, count);
 	PoolFrame(c, data, count);
 	const uint32_t extras = FindPage(data, count, kExtrasPage);
 	if (!extras) return;
@@ -344,7 +394,7 @@ void install_mods_menu()
 {
 	g_levels = mod_levels();
 	game_alloc = ppc_lookup(kAlloc);
-	if (const char* e = std::getenv("GE_MOD_MAPS")) g_map_pool = std::atoi(e) != 0;
+	g_trace = std::getenv("GE_TRACE") != nullptr;
 	if (const char* e = std::getenv("GE_MODS_PAGE")) g_mods_target = (uint32_t)std::strtoul(e, nullptr, 16);
 	ReadPool();
 	random_map = ppc_lookup(kRandomMap);

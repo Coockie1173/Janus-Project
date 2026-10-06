@@ -103,8 +103,6 @@ struct ModLevel { uint32_t hash; std::string name; }; //a level among the mods: 
 const std::vector<ModLevel>& mod_levels();
 const std::vector<ModLevel>& mod_files(); //every mod
 const std::string& mods_folder(); //empty when there's none
-bool mod_map_pool(); //Conflict's maps are the ones listed in the mods folder's online.txt
-void set_mod_map_pool(bool on);
 void install_mods_menu(); //modmenu.cpp, after install_mods
 void mods_menu_frame(PPCContext& c); //once a frame, on the game's thread
 uint32_t mods_menu_text(uint32_t hash); //the characters of one of the Mods menu's texts, 0 for any other
