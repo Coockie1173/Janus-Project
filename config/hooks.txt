@@ -68,3 +68,4 @@ ge_file_update         # a file of the file manager is updated: one being unload
 ge_timeline_event      # a timeline's type 0xB event: one that waits stays at the event's frame (port/timeline.cpp)
 ge_texture_animate     # a texture's animator: it counts the whole frame's length at any rate (port/flipbooks.cpp)
 draw_delayed?          # a mesh glued to the eye is widened with the field of view
+ge_geofile_onload      # a file is given its memory: one that gets none is logged (port/mods.cpp)

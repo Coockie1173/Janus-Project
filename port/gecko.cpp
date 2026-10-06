@@ -11,6 +11,9 @@ namespace ge {
 //codes that patch the game's code are applied to the dol before recompiling (tools/gecko.py)
 //the rest runs here once a frame like a code handler would: RAM writes (00, 02, 04, 08),
 //conditions (20-2E), the on/off switch (CC), E0 and E2
+//48 loads the pointer from an address, and a write or a condition with 0x10 in its type (10-18,
+//30-3E) counts from that pointer: for things on the heap, which aren't at the same place when
+//mods add files
 //files are in Dolphin's notation, the launcher picks extra ones from config/gecko/*.txt
 #ifndef GE_GECKO_DEFAULT
 #define GE_GECKO_DEFAULT "build/patched/gecko.txt"
@@ -32,9 +35,15 @@ void gecko_store(uint32_t addr, uint32_t size, uint32_t v) {
 void gecko_apply() {
     for (auto& code : g_gecko) {
         int skip = 0; //how many failed conditions we're inside of
+        uint32_t pointer = 0; //48 loads it, 0: nothing there yet
         for (size_t i = 0; i < code.size(); ++i) {
             GeckoLine& l = code[i];
             uint32_t type = l.a >> 24 & 0xFE, addr = 0x80000000u | (l.a & 0x01FFFFFFu);
+            if (type == 0x48) { pointer = gecko_ok(l.b, 4) ? ld32(l.b) : 0; continue; }
+            if ((type & 0x10) && type < 0x40) { //from the pointer
+                type &= ~0x10u;
+                addr = pointer ? pointer + (l.a & 0x01FFFFFFu) : 0;
+            }
             if (type >= 0x20 && type <= 0x2E) { //if, 32-bit (20-26) or 16-bit with a mask (28-2E)
                 if (l.a & 1) { skip = std::max(0, skip - 1); addr &= ~1u; } //an endif first
                 if (skip) { ++skip; continue; }
@@ -53,7 +62,7 @@ void gecko_apply() {
                 if (now && !l.was) l.on = !l.on;
                 l.was = now;
                 skip = l.on ? 0 : 1;
-            } else if (type == 0xE0) skip = 0;
+            } else if (type == 0xE0) { skip = 0; pointer = 0; }
             else if (type == 0xE2) skip = std::max(0, skip - (int)(l.b & 0xFF));
             else if (type == 0x08) { //serial write, takes this line and the next
                 if (i + 1 >= code.size()) break;
@@ -80,7 +89,8 @@ void gecko_load(const char* path) {
         if (line[0] == '$') g_gecko.emplace_back();
         else if (line[0] != '#' && line[0] != '*' && std::sscanf(line, "%8x %8x", &a, &b) == 2 && !g_gecko.empty()) {
             uint32_t type = a >> 24 & 0xFE;
-            bool known = type <= 0x08 || (type >= 0x20 && type <= 0x2E) || type == 0xCC || type == 0xE0 || type == 0xE2;
+            uint32_t plain = type < 0x40 ? type & ~0x10u : type;
+            bool known = plain <= 0x08 || (plain >= 0x20 && plain <= 0x2E) || type == 0x48 || type == 0xCC || type == 0xE0 || type == 0xE2;
             if (!known) rt_log("goldeneye: Gecko line %08X %08X in %s is not supported, skipped", a, b, path);
             else g_gecko.back().push_back({a, b});
         }

@@ -4,11 +4,13 @@
 $Quicker start
 08573504 806EE7A8
 2002000C 00000000
-20776B10 00000007
+48000000 805F4C60
+30000000 00000007
 046F1D08 3F800000
 CC000000 00000000
 046F1D08 44FA0000
 E0000000 80008000
 *three pointers at 80573504 (0xC apart) point at the float at 806EE7A8; the float at 806F1D08
-*is 2000.0 from the start, until the word at 80776B10 (the boot's state) becomes 7, after the
-*logos: the switch turns that off, and 1.0 is written back
+*is 2000.0 from the start, until the boot's state becomes 7, after the logos: the switch turns
+*that off, and 1.0 is written back. the state is a word on the heap (80776B10 without mods) that
+*805F4C60 points to: it is somewhere else when mods add files, so it is read through the pointer

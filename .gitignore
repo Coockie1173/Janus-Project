@@ -44,3 +44,6 @@ compile_commands.json
 *.gzf
 /game.extracting/
 /game.old*/
+
+# loose .edb files that take the place of the disc's or come on top (port/mods.cpp)
+/mods/
