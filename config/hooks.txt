@@ -70,3 +70,5 @@ ge_texture_animate     # a texture's animator: it counts the whole frame's lengt
 draw_delayed?          # a mesh glued to the eye is widened with the field of view
 ge_geofile_onload      # a file is given its memory: one that gets none is logged (port/mods.cpp)
 ge_pick_next_maps      # a network game picks its next two maps: with a short map list it gives up on them being new ones (port/modmenu.cpp)
+ge_level_set           # the level manager is told its level: a mod level gets a level row to stand in, in a multiplayer game (port/mods.cpp)
+ge_spawn_points_setup  # a level spawn points are gathered: one too far above the floor is put on it, one with no floor is logged (port/mods.cpp)

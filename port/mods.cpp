@@ -151,6 +151,98 @@ void OnLoad(PPCContext& c)
 std::vector<ModLevel> g_levels, g_files;
 std::string g_folder;
 
+//a level of the mods folder isn't in the game's level table. a single player game does without
+//the row, a multiplayer game reads the players' characters out of it without asking (fn_8000F8E0,
+//a crash at 000000A4). there the row of one of the game's own multiplayer maps stands in
+PPCFunc orig_level_set = nullptr, is_multiplayer = nullptr;
+const uint32_t kLevelRow = 0x1C, kLevelRowCount = 0x10, kLevelRows = 0x14, kLevelRowSize = 0xB4;
+const uint32_t kLevelRow2 = 0x34, kLevelRow2Count = 0x28, kLevelRows2 = 0x2C, kLevelRow2Size = 0x74;
+const uint32_t kStandIn = 0x01A00003; //Archives, Conflict
+const uint32_t kIsMultiplayer = 0x800C0B20;
+
+uint32_t RowOf(uint32_t rows, uint32_t count, uint32_t size, uint32_t hash)
+{
+	if (!guest_ptr(rows) || count > 4096) return 0;
+	for (uint32_t i = 0; i < count; ++i)
+		if (ld32(rows + i * size) == hash) return rows + i * size;
+	return 0;
+}
+
+void LevelSet(PPCContext& c)
+{
+	const uint32_t levels = c.r[3], hash = c.r[4];
+	orig_level_set(c);
+	if (!guest_ptr(levels) || ld32(levels + kLevelRow) != 0) return;
+	if (std::none_of(g_files.begin(), g_files.end(), [&](const ModLevel& m) { return m.hash == hash; })) return;
+	PPCContext call = c;
+	uint32_t stack = c.r[1], frame = stack - 0x40;
+	st32(frame, stack);
+	call.r[1] = frame;
+	if (!is_multiplayer) return;
+	is_multiplayer(call);
+	if ((call.r[3] & 0xFF) == 0) return;
+	const uint32_t row = RowOf(ld32(levels + kLevelRows), ld32(levels + kLevelRowCount), kLevelRowSize, kStandIn);
+	if (!row) return;
+	st32(levels + kLevelRow, row);
+	st32(levels + kLevelRow2, RowOf(ld32(levels + kLevelRows2), ld32(levels + kLevelRow2Count), kLevelRow2Size, kStandIn));
+	rt_log("goldeneye: mod level %08X in a multiplayer game: it has no row in the game's level table, %08X's stands in", hash, kStandIn);
+}
+
+//a multiplayer spawn point has to have floor within a metre below it: ge_spawn_points_setup
+//traces from 0.3 above each 1.3 down and, when one hits nothing, stops the game in an endless
+//loop at its end ("SpawnPoint @ ... is not in the map", which the release build doesn't print).
+//before it runs, a spawn point that hangs higher is put on the floor below it, and one with no
+//floor at all is logged, so the level's maker knows why the game stands still
+PPCFunc orig_spawn_setup = nullptr, make_ray = nullptr, trace_ray = nullptr;
+const uint32_t kObjects = 0x805F4D94, kObjectNext = 0x4, kObjectPlace = 0x10, kObjectClass = 0x5C, kObjectKind = 0x60;
+const uint32_t kSpawnClass = 0x1E000003, kMultiplayerSpawn = 0x1F000098;
+const uint32_t kWorld = 0x805F4CCC, kMakeRay = 0x802D0250, kTraceRay = 0x8032E700;
+const uint32_t kRayHit = 0xD4, kRayFraction = 0xA0; //of the ray: a byte, and how far along it
+const float kTraceAbove = 0.3f, kTraceDown = 1.3f; //the game's own
+const float kFarDown = 200.0f, kOnFloor = 0.05f;
+
+//how far below (x, y, z) the world is hit going straight down by reach, negative when it isn't
+float FloorBelow(const PPCContext& c, float x, float y, float z, float reach)
+{
+	PPCContext call = c;
+	const uint32_t stack = c.r[1], frame = stack - 0x200, ray = frame + 0x40, start = frame + 0x10, way = frame + 0x20;
+	st32(frame, stack);
+	stf(start, x); stf(start + 4, y); stf(start + 8, z); stf(start + 12, 0.0f);
+	stf(way, 0.0f); stf(way + 4, -reach); stf(way + 8, 0.0f); stf(way + 12, 0.0f);
+	call.r[1] = frame;
+	call.r[3] = ray; call.r[4] = start; call.r[5] = way;
+	call.r[6] = call.r[7] = call.r[8] = call.r[9] = 0;
+	make_ray(call);
+	call.r[1] = frame;
+	call.r[3] = kWorld; call.r[4] = ray; call.r[5] = 0;
+	trace_ray(call);
+	return ld8(ray + kRayHit) ? ldf(ray + kRayFraction) * reach : -1.0f;
+}
+
+void SpawnPointsSetup(PPCContext& c)
+{
+	if (make_ray && trace_ray)
+	{
+		int guard = 0;
+		for (uint32_t object = ld32(kObjects); guest_ptr(object) && guard < 100000; object = ld32(object + kObjectNext), ++guard)
+		{
+			if (ld32(object + kObjectClass) != kSpawnClass || ld32(object + kObjectKind) != kMultiplayerSpawn) continue;
+			const float x = ldf(object + kObjectPlace), y = ldf(object + kObjectPlace + 4), z = ldf(object + kObjectPlace + 8);
+			if (FloorBelow(c, x, y + kTraceAbove, z, kTraceDown) >= 0.0f) continue;
+			const float far = FloorBelow(c, x, y + kTraceAbove, z, kFarDown);
+			if (far < 0.0f)
+			{
+				rt_log("goldeneye: the multiplayer spawn point at %.2f %.2f %.2f has no floor below it: the game stops on such a level, on purpose", x, y, z);
+				continue;
+			}
+			const float floor = y + kTraceAbove - far;
+			stf(object + kObjectPlace + 4, floor + kOnFloor);
+			rt_log("goldeneye: the multiplayer spawn point at %.2f %.2f %.2f is %.2f above the floor (the game wants less than 1): put on it", x, y, z, y - floor);
+		}
+	}
+	orig_spawn_setup(c);
+}
+
 } //namespace
 
 const std::vector<ModLevel>& mod_levels() { return g_levels; }
@@ -160,6 +252,11 @@ const std::string& mods_folder() { return g_folder; }
 void install_mods()
 {
 	orig_onload = ppc_hook("ge_geofile_onload", OnLoad);
+	orig_level_set = ppc_hook("ge_level_set", LevelSet);
+	is_multiplayer = ppc_lookup(kIsMultiplayer);
+	orig_spawn_setup = ppc_hook("ge_spawn_points_setup", SpawnPointsSetup);
+	make_ray = ppc_lookup(kMakeRay);
+	trace_ray = ppc_lookup(kTraceRay);
 
 	const char* env = std::getenv("GE_MODS");
 	const std::string dir = env ? env : std::string(GE_ROOT) + "/mods";
