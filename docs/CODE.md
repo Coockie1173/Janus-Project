@@ -816,7 +816,7 @@ is handed to `debug_setting` so a recording keeps the value.
 ### crashdump.cpp
 
 Crash, die and stall dumps into `build/crashes/<date>-<time>-<kind>/report.txt` (POSIX only):
-what happened, the host's faulting instruction and call stack, every guest thread with its
+what happened, the host's faulting instruction and call stack (a stall: every host thread's), every guest thread with its
 call chain, the crashing thread's stack from r1, the `GE_*` / `WIIKIT_*` settings, the last
 log lines; `mem1.bin` and `mem2.bin` with `GE_CRASH_MEM`.
 
@@ -827,7 +827,8 @@ log lines; `mem1.bin` and `mem2.bin` with `GE_CRASH_MEM`.
 | `WriteGameState`, `WriteSettings`, `WriteGuestStack`, `WriteMemory`, `WriteDump` | the parts |
 | `OnCrash` | SIGSEGV, SIGBUS, SIGFPE, SIGILL, SIGABRT on its own stack; lets the runtime's watched pages through (`mem_watch_fault`); a 10 s alarm ends a stuck dump (`OnStuck`) |
 | `OnDie` | `g_rt_on_die`: the runtime gave up (`rt_die`) |
-| `WatchForStalls` | a thread: no new frame for 20 s writes a stall dump, once |
+| `WatchForStalls` | a thread: 20 s without a new game frame, or without a picture drawn (`video_frames`, the title's fps), writes a stall dump, once a stall |
+| `Listed`, `OnWhere`, `WriteHostThreads` | the stall dump's host threads: each one with a handler stack is sent SIGUSR1 and notes its pc, call stack and guest r1 (no stdio, no malloc: it goes on) |
 | `crash_test()` | `GE_CRASH_TEST`, once a frame |
 | `crash_thread_stack()` | a signal stack for the calling thread (`g_rt_on_thread`) |
 

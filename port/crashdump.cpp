@@ -4,7 +4,9 @@
 //abort) everything worth knowing gets written to build/crashes/<date>-<time>-<kind>/report.txt
 //before the process goes: what happened, where the host was, every guest thread with its call
 //chain, the crashing thread's registers and stack, the settings and the last log lines.
-//a stall (no new frame for 20 s) gets one too, without killing anything.
+//a stall gets one too, without killing anything: 20 s without a new game frame, or 20 s of
+//0 fps (nothing drawn, the number in the window's title) while the game's own count goes on.
+//nobody crashed there, so the dump asks every host thread where it is (SIGUSR1, OnWhere).
 //
 //GE_CRASH_MEM=1   also write the guest's memory (mem1.bin, mem2.bin: 88 MB a dump)
 //GE_CRASH_DIR=D   somewhere else than build/crashes
@@ -21,12 +23,15 @@
 //afterwards (launch.sh runs it when a run leaves a new dump).
 #include "ge.h"
 #include "mem.h"
+#include <algorithm>
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <mutex>
 #include <string>
 #include <thread>
 #ifndef _WIN32
@@ -34,6 +39,7 @@
 #include <csignal>
 #include <dlfcn.h>
 #include <execinfo.h>
+#include <pthread.h>
 #include <sys/stat.h>
 #include <ucontext.h>
 #include <unistd.h>
@@ -58,6 +64,35 @@ namespace
 	const size_t g_SignalStackSize{ 256u << 10 };
 	thread_local bool t_Dumping{ false }; //this thread is the one writing the dump
 	thread_local sigjmp_buf* t_Recover{ nullptr }; //where a fault inside a guarded part goes back to
+	const int g_StallSeconds{ 20 };
+
+	//where a host thread was when a stall dump asked it: filled in by the thread itself (OnWhere)
+	struct Caught
+	{
+		void* m_Frames[32];
+		int m_Count;
+		uintptr_t m_Pc;
+		uint32_t m_GuestStack; //its r1, 0 for a thread without guest code
+	};
+	Caught g_Caught{};
+	std::atomic<bool> g_CaughtDone{ false };
+
+	//the host threads a stall dump asks: every one that got a stack for the handler
+	std::mutex g_ThreadsLock;
+	std::vector<pthread_t> g_Threads{};
+	struct Listed
+	{
+		Listed()
+		{
+			const std::lock_guard Lock{ g_ThreadsLock };
+			g_Threads.push_back(pthread_self());
+		}
+		~Listed()
+		{
+			const std::lock_guard Lock{ g_ThreadsLock };
+			g_Threads.erase(std::remove(g_Threads.begin(), g_Threads.end(), pthread_self()), g_Threads.end());
+		}
+	};
 
 	//one part of a dump. what it reads may be the very thing that's broken (a stack pointer
 	//into nowhere, a thread table half written): a fault in it comes back here through OnCrash
@@ -171,14 +206,8 @@ namespace
 		}
 	}
 
-	void WriteGuestStack(FILE* Out)
+	void WriteGuestStack(FILE* Out, uint32_t Sp)
 	{
-		if (t_ppc == nullptr)
-		{
-			std::fprintf(Out, "this host thread runs no guest code\n");
-			return;
-		}
-		const uint32_t Sp{ t_ppc->r[1] };
 		if (!guest_ptr(Sp) || !guest_ptr(Sp + 0x200))
 		{
 			std::fprintf(Out, "r1 (%08X) is not a stack\n", Sp);
@@ -209,9 +238,70 @@ namespace
 		}
 	}
 
+	//SIGUSR1 from a stall dump: where this thread is. it goes on afterwards, so nothing in
+	//here may take a lock it could be holding itself (no stdio, no malloc)
+	void OnWhere(int, siginfo_t*, void* Context)
+	{
+		const int Errno{ errno };
+		g_Caught.m_Pc = (uintptr_t)((ucontext_t*)Context)->uc_mcontext.gregs[REG_RIP];
+		g_Caught.m_GuestStack = t_ppc != nullptr ? t_ppc->r[1] : 0;
+		g_Caught.m_Count = 0;
+		sigjmp_buf Recover;
+		if (sigsetjmp(Recover, 1) == 0)
+		{
+			t_Recover = &Recover;
+			g_Caught.m_Count = backtrace(g_Caught.m_Frames, 32);
+		}
+		t_Recover = nullptr;
+		errno = Errno;
+		g_CaughtDone = true;
+	}
+
+	//every listed host thread asked in turn. the guest threads' r1 go into Stacks
+	void WriteHostThreads(FILE* Out, std::vector<uint32_t>& Stacks)
+	{
+		const std::lock_guard Lock{ g_ThreadsLock };
+		int Number{ 0 };
+		for (const pthread_t Thread : g_Threads)
+		{
+			g_CaughtDone = false;
+			if (pthread_kill(Thread, SIGUSR1) != 0)
+			{
+				continue;
+			}
+			for (int Waited = 0; !g_CaughtDone && Waited < 1000; ++Waited)
+			{
+				std::this_thread::sleep_for(std::chrono::milliseconds(1));
+			}
+			if (!g_CaughtDone)
+			{
+				//its answer may still come and would land in the next one's: no more asking
+				std::fprintf(Out, "host thread %d didn't answer within a second, the others weren't asked\n", ++Number);
+				return;
+			}
+			if (g_Caught.m_GuestStack != 0)
+			{
+				std::fprintf(Out, "host thread %d, a guest thread with r1 %08X, was at:\n", ++Number, g_Caught.m_GuestStack);
+				Stacks.push_back(g_Caught.m_GuestStack);
+			}
+			else
+			{
+				std::fprintf(Out, "host thread %d, no guest code, was at:\n", ++Number);
+			}
+			WriteHostFrame(Out, g_Caught.m_Pc);
+			std::fprintf(Out, " call stack (innermost first, the two on top are the asking):\n");
+			for (int i = 0; i < g_Caught.m_Count; ++i)
+			{
+				WriteHostFrame(Out, (uintptr_t)g_Caught.m_Frames[i]);
+			}
+		}
+	}
+
 	//Kind names the folder (crash, die, stall), What is the one line saying what happened
 	std::string WriteDump(const char* Kind, const char* What, const siginfo_t* Signal, void* Context)
 	{
+		const bool Stalled{ std::strcmp(Kind, "stall") == 0 };
+		std::vector<uint32_t> Stacks{};
 		char Stamp[64];
 		const std::time_t Now{ std::time(nullptr) };
 		std::strftime(Stamp, sizeof Stamp, "%Y%m%d-%H%M%S", std::localtime(&Now));
@@ -239,22 +329,41 @@ namespace
 				(unsigned long long)Regs[REG_RSP], (unsigned long long)Regs[REG_RBP]);
 			WriteHostFrame(Out, (uintptr_t)Regs[REG_RIP]);
 		}
-		std::fprintf(Out, "call stack (innermost first, the dump's own frames on top):\n");
-		Guarded(Out, "the host call stack", [Out]
-			{
-				void* Frames[48];
-				const int Count{ backtrace(Frames, 48) };
-				for (int i = 0; i < Count; ++i)
+		if (Stalled)
+		{
+			Guarded(Out, "the host threads", [Out, &Stacks] { WriteHostThreads(Out, Stacks); });
+		}
+		else
+		{
+			std::fprintf(Out, "call stack (innermost first, the dump's own frames on top):\n");
+			Guarded(Out, "the host call stack", [Out]
 				{
-					WriteHostFrame(Out, (uintptr_t)Frames[i]);
-				}
-			});
+					void* Frames[48];
+					const int Count{ backtrace(Frames, 48) };
+					for (int i = 0; i < Count; ++i)
+					{
+						WriteHostFrame(Out, (uintptr_t)Frames[i]);
+					}
+				});
+			if (t_ppc != nullptr)
+			{
+				Stacks.push_back(t_ppc->r[1]);
+			}
+		}
 
 		std::fprintf(Out, "\n== guest threads ==\n");
 		Guarded(Out, "the guest threads", [Out] { os_report_threads(Out, 32); });
 
-		std::fprintf(Out, "\n== the crashing thread's stack (from r1) ==\n");
-		Guarded(Out, "the guest stack", [Out] { WriteGuestStack(Out); });
+		std::fprintf(Out, Stalled ? "\n== the guest threads' stacks (from each r1) ==\n" : "\n== the crashing thread's stack (from r1) ==\n");
+		if (Stacks.empty())
+		{
+			std::fprintf(Out, "this host thread runs no guest code\n");
+		}
+		for (const uint32_t Sp : Stacks)
+		{
+			Guarded(Out, "the guest stack", [Out, Sp] { WriteGuestStack(Out, Sp); });
+			std::fputc('\n', Out);
+		}
 
 		std::fprintf(Out, "\n== settings ==\n");
 		Guarded(Out, "the settings", [Out] { WriteSettings(Out); });
@@ -351,26 +460,59 @@ namespace
 		WriteDump("die", (std::string("the runtime stopped the game: ") + Message).c_str(), nullptr, nullptr);
 	}
 
-	//no new frame for a while: not dead yet, but something is waiting for something that
-	//doesn't come. one dump per stall. pausing with Esc looks the same from in here
+	//the game stands still: not dead yet, but something is waiting for something that doesn't
+	//come. two counts are watched, the game's frames and the pictures drawn (the fps in the
+	//title is that one), either standing still for 20 s is a stall. one dump per stall.
+	//pausing with Esc looks the same from in here
 	void WatchForStalls()
 	{
-		uint32_t LastFrame{ 0 };
-		int Still{ 0 };
+		uint32_t LastFrame{ 0 }, FrameAtLastDraw{ 0 };
+		uint64_t LastDrawn{ 0 };
+		int GameStill{ 0 }, DrawStill{ 0 }, Stalled{ 0 };
 		for (;;)
 		{
 			std::this_thread::sleep_for(std::chrono::seconds(1));
 			const uint32_t Frame{ ld32r(kFrameCount) };
-			if (Frame != LastFrame || Frame == 0)
+			const uint64_t Drawn{ video_frames() }; //stays 0 without the window: never a stall then
+			GameStill = (Frame != LastFrame || Frame == 0) ? 0 : GameStill + 1;
+			DrawStill = (Drawn != LastDrawn || Drawn == 0) ? 0 : DrawStill + 1;
+			if (DrawStill == 0)
 			{
-				LastFrame = Frame;
-				Still = 0;
+				FrameAtLastDraw = Frame;
+			}
+			LastFrame = Frame;
+			LastDrawn = Drawn;
+			if (GameStill < g_StallSeconds && DrawStill < g_StallSeconds)
+			{
+				if (Stalled != 0)
+				{
+					rt_log("goldeneye: the stall is over, it took %d s", Stalled + g_StallSeconds);
+				}
+				Stalled = 0;
 				continue;
 			}
-			if (++Still == 20 && !g_Dumping.load())
+			if (Stalled++ != 0 || g_Dumping.load())
 			{
-				WriteDump("stall", "stall: no new game frame for 20 s (the Esc pause looks like this too)", nullptr, nullptr);
+				continue;
 			}
+			char What[200];
+			if (GameStill < g_StallSeconds)
+			{
+				std::snprintf(What, sizeof What, "stall: 0 fps, nothing drawn for %d s while the game ran on (%u game frames since)",
+					DrawStill, Frame - FrameAtLastDraw);
+			}
+			else if (DrawStill >= g_StallSeconds)
+			{
+				std::snprintf(What, sizeof What, "stall: 0 fps, no new game frame for %d s and nothing drawn for %d s (the Esc pause looks like this too)",
+					GameStill, DrawStill);
+			}
+			else
+			{
+				std::snprintf(What, sizeof What, "stall: no new game frame for %d s, %s (the Esc pause looks like this too)", GameStill,
+					Drawn == 0 ? "no window to draw in" : "the picture is still drawn");
+			}
+			rt_log("goldeneye: %s", What);
+			WriteDump("stall", What, nullptr, nullptr);
 		}
 	}
 }
@@ -425,6 +567,7 @@ void crash_thread_stack()
 	{
 		sigaltstack(&Stack, nullptr);
 	}
+	thread_local const Listed Me{}; //a stall dump asks this thread too, for as long as it lives
 }
 
 void install_crash_handler()
@@ -453,6 +596,10 @@ void install_crash_handler()
 	sigaction(SIGALRM, &Stuck, nullptr);
 	if (g_WriteDumps)
 	{
+		struct sigaction Where = {};
+		Where.sa_sigaction = OnWhere;
+		Where.sa_flags = SA_SIGINFO | SA_ONSTACK | SA_RESTART; //the thread goes on: what it was waiting in starts again
+		sigaction(SIGUSR1, &Where, nullptr);
 		g_rt_on_die = OnDie;
 		std::thread(WatchForStalls).detach();
 	}

@@ -50,8 +50,11 @@ def main():
     syms, base = load_symbols()
     addrs = [s[0] for s in syms]
     out.append("host call stack:")
-    for m in re.finditer(r"^  wiiboot\+0x([0-9a-f]+)", report, re.M):
-        off = int(m.group(1), 16)
+    for m in re.finditer(r"^(host thread .*)|^  wiiboot\+0x([0-9a-f]+)", report, re.M):
+        if m.group(1): #a stall dump has one stack for every host thread
+            out.append(m.group(1))
+            continue
+        off = int(m.group(2), 16)
         i = bisect.bisect_right(addrs, base + off) - 1
         name = syms[i][1] if i >= 0 else "?"
         out.append(f"  wiiboot+0x{off:x}  {name}+0x{base + off - syms[i][0]:x}" if i >= 0 else f"  wiiboot+0x{off:x}  ?")

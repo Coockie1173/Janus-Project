@@ -37,7 +37,7 @@
 # the wheel changes weapon, R reloads, Ctrl crouches, Shift sprints, E acts, G grenade, V melee;
 # in menus the left button selects and the right one goes back. Esc frees the mouse. F1: the settings menu.
 # The window goes through X11 (XWayland) when DISPLAY is set: SDL_VIDEODRIVER=wayland for Wayland's own.
-# The log of the run is kept in build/run.log. A crash, the runtime giving up or a 20 s stall leaves
+# The log of the run is kept in build/run.log. A crash, the runtime giving up or 20 s of standing still (0 fps) leaves
 # a dump in build/crashes/<date>-<time>-<kind>/ (send that folder along with a report).
 cd "$(dirname "$0")" || exit 1
 mkdir -p build

@@ -3950,7 +3950,7 @@ index 8a4e097..8b1b1a8 100644
  void ppc_mmio_write(uint32_t addr, uint32_t, int) { rt_die("mmio write %08X", addr); }
  uint64_t ppc_timebase() { return 0; }
 diff --git a/runtime/video.cpp b/runtime/video.cpp
-index 5726093..773f958 100644
+index 5726093..16d25ee 100644
 --- a/runtime/video.cpp
 +++ b/runtime/video.cpp
 @@ -67,7 +67,8 @@ ClassicState classic[4];
@@ -5266,7 +5266,15 @@ index 5726093..773f958 100644
  
      copy_prog = link(FULLSCREEN_VS, COPY_FS);
      if (!copy_prog) rt_die("video: the EFB copy program does not build");
-@@ -1462,6 +2083,34 @@ std::atomic<bool> want_relative{false};
+@@ -1377,6 +1998,7 @@ void setup() {
+ 
+ // ---- the game's side ------------------------------------------------------------------------------
+ bool video_enabled() { return opt.enabled; }
++uint64_t video_frames() { return cnt.frames; }
+ void video_configure(const VideoOptions& o) { opt = o; S = std::max(1, o.scale); }
+ 
+ VideoPerf g_vperf;
+@@ -1462,6 +2084,34 @@ std::atomic<bool> want_relative{false};
  std::mutex motion_mx;
  float motion_x = 0, motion_y = 0;
  void video_set_relative_mouse(bool on) { want_relative = on; }
@@ -5301,7 +5309,7 @@ index 5726093..773f958 100644
  void video_take_mouse_motion(float& dx, float& dy) {
      std::lock_guard<std::mutex> lk(motion_mx);
      dx = motion_x; dy = motion_y;
-@@ -1473,12 +2122,18 @@ PadState video_pad() {
+@@ -1473,12 +2123,18 @@ PadState video_pad() {
      return pad;
  }
  ClassicState video_classic(int chan) {
@@ -5320,7 +5328,7 @@ index 5726093..773f958 100644
  void video_retrace() {
      retraces.fetch_add(1);
      if (wake) SDL_SignalSemaphore(wake);
-@@ -1499,6 +2154,7 @@ void video_run(const char* title) {
+@@ -1499,6 +2155,7 @@ void video_run(const char* title) {
      int w0 = opt.window_w ? opt.window_w : (opt.widescreen ? 1280 : 960), h0 = opt.window_h ? opt.window_h : 720;
      SDL_WindowFlags wflags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE;
      if (opt.fullscreen) wflags |= SDL_WINDOW_FULLSCREEN;
@@ -5328,7 +5336,7 @@ index 5726093..773f958 100644
      win = SDL_CreateWindow(title, w0, h0, wflags);
      if (!win) rt_die("video: SDL_CreateWindow: %s", SDL_GetError());
      SDL_GLContext ctx = SDL_GL_CreateContext(win);
-@@ -1506,6 +2162,7 @@ void video_run(const char* title) {
+@@ -1506,6 +2163,7 @@ void video_run(const char* title) {
      SDL_GL_MakeCurrent(win, ctx);
      SDL_GL_SetSwapInterval(0);                   // VI paces the presents
      if (!gl_load()) rt_die("video: OpenGL functions missing");
@@ -5336,7 +5344,7 @@ index 5726093..773f958 100644
      rt_log("video: %s, %s", (const char*)glGetString(GL_RENDERER), (const char*)glGetString(GL_VERSION));
      if (debug) {
          glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
-@@ -1529,11 +2186,15 @@ void video_run(const char* title) {
+@@ -1529,11 +2187,15 @@ void video_run(const char* title) {
      uint64_t frames_then = 0;
      uint32_t seen = retraces.load();
      std::string base_title = title;
@@ -5352,7 +5360,7 @@ index 5726093..773f958 100644
              if (e.type == SDL_EVENT_GAMEPAD_ADDED) pad_added(e.gdevice.which);
              if (e.type == SDL_EVENT_GAMEPAD_REMOVED) pad_removed(e.gdevice.which);
              // F11 or Alt+Enter: fullscreen and back
-@@ -1592,7 +2253,14 @@ void video_run(const char* title) {
+@@ -1592,7 +2254,14 @@ void video_run(const char* title) {
                  double vtx = ms(g_vperf.vtx), tex = ms(g_vperf.tex), wait = ms(g_vperf.wait), draw = ms(g_vperf.draw),
                         pres = ms(g_vperf.present);
                  rt_log("perf: %.1f fps; frame %.1f ms; game thread: vertices %.1f, textures %.1f, waiting for the renderer %.1f; "
@@ -5368,7 +5376,7 @@ index 5726093..773f958 100644
              }
              frames_then = cnt.frames;
              t_title = now;
-@@ -1608,6 +2276,8 @@ void video_run(const char* title) {
+@@ -1608,6 +2277,8 @@ void video_run(const char* title) {
              }
              if (c.readback) { if (c.copy) copy_readback(c.copy); else efb_readback(); busy = true; continue; }
              auto te = Clock::now();
@@ -5377,7 +5385,7 @@ index 5726093..773f958 100644
              exec(c.data);
              if (g_vperf_on) g_vperf.draw += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - te).count();
              {
-@@ -1621,6 +2291,17 @@ void video_run(const char* title) {
+@@ -1621,6 +2292,17 @@ void video_run(const char* title) {
              if (retraces.load() != seen) break;
          }
          uint32_t r = retraces.load();
@@ -5396,7 +5404,7 @@ index 5726093..773f958 100644
              seen = r;
              auto tp = Clock::now();
 diff --git a/runtime/video.h b/runtime/video.h
-index ecfb499..60c41aa 100644
+index ecfb499..3f6cb43 100644
 --- a/runtime/video.h
 +++ b/runtime/video.h
 @@ -3,7 +3,7 @@
@@ -5408,7 +5416,7 @@ index ecfb499..60c41aa 100644
  // loaded from indexed arrays, textures are decoded to RGBA through TMEM's
  // palettes. What it records reads no guest memory any more: the renderer can
  // run behind the game on its own thread, and the game may reuse its buffers
-@@ -12,30 +12,63 @@
+@@ -12,33 +12,67 @@
  // The record is a byte stream of commands:
  //   BP      u32 (reg << 24 | value): a BP register after its mask
  //   XF      u16 addr, u16 n, n x u32
@@ -5482,7 +5490,11 @@ index ecfb499..60c41aa 100644
  
  // video.cpp
  bool video_enabled();                       // false with --no-video: the stream is parsed only
-@@ -87,7 +120,10 @@ PadState video_pad();
++uint64_t video_frames();                    // pictures drawn so far (what the fps in the title counts)
+ // Takes the record and leaves it empty; waits while the renderer has
+ // frames_ahead frames queued, at most wait_ms (-1: as long as it takes).
+ // False if the time ran out: the record is left as it was.
+@@ -87,7 +121,10 @@ PadState video_pad();
  // the mouse buttons (the key file's [Classic Controller]), merged with its
  // pad: buttons OR'd, each stick from whichever source is deflected more.
  // Buttons are KPAD's Classic bits; sticks -1..1, y up; triggers 0..1.
@@ -5494,7 +5506,7 @@ index ecfb499..60c41aa 100644
  ClassicState video_classic(int chan);
  // The Remote's motor on a channel: its pad rumbles (the Remote's own on
  // channel 1 when a pad is there).
-@@ -98,6 +134,35 @@ void video_set_rumble(int chan, bool on);
+@@ -98,6 +135,35 @@ void video_set_rumble(int chan, bool on);
  void video_set_relative_mouse(bool on);
  void video_take_mouse_motion(float& dx, float& dy);
  
