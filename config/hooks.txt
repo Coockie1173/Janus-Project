@@ -79,3 +79,4 @@ ge_session_export      # a host's session goes into the record it is advertised 
 ge_find_query          # a search's query for the server is made: the same version is asked for (port/modmenu.cpp)
 ge_object_step         # a physics object's step: one whose place isn't a number is left out (port/sweep.cpp)
 ge_halt                # the game's halt, a loop on itself: the game ends with a report (port/sweep.cpp)
+ge_camera_sway         # the camera's sway is two sines of the frame count: above 30 of the time in console frames (port/shake.cpp)

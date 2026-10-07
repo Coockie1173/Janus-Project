@@ -23,6 +23,7 @@
 //unload.cpp a file that's let go stays loaded as long as on the console, so cutscenes end at any frame rate
 //timeline.cpp a timeline that waits at an event stays at its frame, so doors are shut after a skipped cutscene
 //flipbooks.cpp animated textures (fire, screens) play at the console's speed at any frame rate
+//shake.cpp the camera's sway (Nightclub's dance floor) goes by time, not by frames
 //mods.cpp loose .edb files in place of the disc's, or on top of them
 //modmenu.cpp Extras > Mods in the game's menu, the levels among the mods
 //pictures.cpp a mod level's .png as its picture in the menus
@@ -186,6 +187,7 @@ void install_body(); //body.cpp
 void install_unload(); //unload.cpp
 void install_timeline(); //timeline.cpp
 void install_flipbooks(); //flipbooks.cpp
+void install_shake(); //shake.cpp
 bool collision_view(); //cheat, the level's collision is drawn in place of the world
 void set_collision_view(bool on);
 void collision_tick(); //every tick of the game's loop
