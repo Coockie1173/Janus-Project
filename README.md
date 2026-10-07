@@ -133,6 +133,18 @@ A source only counts if its name is a real one (so not `fn_…` or `FUN_…`). E
 # Status
 Work in progress! It boots, the campaign and online are playable, but it's not what I'd call stable just yet. [TODO.md](TODO.md) has the list of what's still broken.
 
+# License
+Copyright (c) 2026 Mars
+
+This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0. If a copy of the MPL was not distributed with this file, You can obtain one at https://mozilla.org/MPL/2.0/. The full text is in [LICENSE](LICENSE).
+
+In short: do what you want with it, but if you change my files and hand them out, those changes stay open.
+
+A couple of things in here aren't mine to license though:
+- The game. None of it is in this repo, and this license says nothing about it. GoldenEye 007 belongs to its owners, you bring your own copy.
+- `patches/wiikit.patch` and `tools/sigmatch.py` are MIT, same as the [wiikit](https://github.com/vs-sr-dev/wiikit) code they come from (Copyright (c) 2026 Samuele Voltan). That way the patch can go back upstream.
+- `config/symbols/` are symbol lists other people made, kept as they were given to me.
+
 # Credits
 - [wiikit](https://github.com/vs-sr-dev/wiikit) and its ports ([pc-conduit2](https://github.com/vs-sr-dev/pc-conduit2), [pc-dragonquestswords](https://github.com/vs-sr-dev/pc-dragonquestswords)) by Samuele Voltan, MIT: the recompiler, the runtime, `tools/sigmatch.py`, and the method.
 - [Dolphin](https://dolphin-emu.org) for the signature database and as the reference for how the console behaves.
