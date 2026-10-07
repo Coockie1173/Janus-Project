@@ -118,6 +118,8 @@ If there's an `online.txt` in the folder (a mod's file name or a file's hash per
 - Connect to Nintendo WFC, with the game's own maps for Conflict
 - Connect to WFC Modded, with the listed ones
 
+Modded games are kept apart from everyone else's: the game's version number for matchmaking is made from the listed maps and their files, so you only find players who have the exact same ones (the log prints it at start, `a network game with them is version ...`). Got a friend who can't find your lobby? Compare that number.
+
 A `.png` with the level's name next to it (so `mt_yard.png` for `mt_yard.edb`) is its picture in the menus: beside the list in Extras > Mods, in Conflict's map list, and for the two maps a network game offers. Any size works, the middle gets cut to the panel's shape (0.85 times as wide as high) and shown at 256 x 256. Can't be bothered making one? Press F12 while in a mod's level and it'll make that `.png` from whatever is on screen: black and white, without the HUD, the crosshair and the gun.
 
 A level is just the hash of its file, so

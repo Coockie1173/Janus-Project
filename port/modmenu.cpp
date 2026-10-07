@@ -37,12 +37,19 @@
 //looked up as the item is lit, and each of the two has a text of its own for it: the one
 //asked for last says which maps Conflict has
 //
+//a console doesn't have those maps and stops on one, and so does someone with other files in
+//their mods folder. a network game has a version, 0x4F: the host's session is advertised with
+//it and a search asks the server for it (the queries are called ..._VERSIONPROTOCOL...). after
+//Connect to WFC Modded both get a number made here from the maps of online.txt and the mods'
+//bytes, so only those with the same maps find each other
+//
 //GE_MODS_PAGE=7D000045 Extras > Mods opens that page instead (to look at a page without going
 //through the menus that lead to it)
 #include "ge.h"
 #include <algorithm>
 #include <atomic>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <map>
 #include <string>
@@ -105,12 +112,13 @@ uint32_t g_mods_rows = 0, g_mods_row_count = 0;
 uint32_t g_extras_rows[2] = {}, g_extras_row_count[2] = {}; //without and with the unused items
 bool g_failed = false;
 
-struct PoolMap { uint32_t hash; std::string name; };
+struct PoolMap { uint32_t hash; std::string name; std::string file; }; //the file's name for a mod, none for one of the disc's
 std::vector<PoolMap> g_pool; //online.txt
 std::atomic<bool> g_map_pool{false}; //Connect to WFC Modded was the item lit last
 uint32_t g_pool_rows = 0, g_pool_row_count = 0;
 uint32_t g_multiplayer_rows = 0, g_multiplayer_row_count = 0;
 bool g_pool_failed = false;
+uint32_t g_pool_version = 0; //a network game's version with those maps
 bool g_trace = false;
 uint32_t g_mods_target = kModsPage; //GE_MODS_PAGE
 
@@ -217,6 +225,43 @@ std::string Lower(std::string text)
 	return text;
 }
 
+//FNV-1a
+const uint32_t kFnvStart = 0x811C9DC5, kFnvPrime = 0x01000193;
+void Mix(uint32_t& sum, const uint8_t* bytes, size_t count)
+{
+	for (size_t i = 0; i < count; ++i) sum = (sum ^ bytes[i]) * kFnvPrime;
+}
+
+//a number for the pool: each map's hash and, for a mod, every byte of its file, in the order
+//of the hashes (the order of the lines doesn't count). the hash a mod has here goes in too, two
+//with the same one get theirs by what else is in the folder
+const uint32_t kGameVersion = 0x4F;
+const uint32_t kModdedVersions = 0x40000000; //where the numbers made here are, the game's own never is
+uint32_t PoolVersion()
+{
+	std::vector<const PoolMap*> maps;
+	for (const PoolMap& map : g_pool) maps.push_back(&map);
+	std::sort(maps.begin(), maps.end(), [](const PoolMap* a, const PoolMap* b) { return a->hash < b->hash; });
+	uint32_t sum = kFnvStart;
+	std::vector<uint8_t> bytes(1 << 16);
+	for (const PoolMap* map : maps)
+	{
+		const uint8_t hash[4] = { uint8_t(map->hash >> 24), uint8_t(map->hash >> 16), uint8_t(map->hash >> 8), uint8_t(map->hash) };
+		Mix(sum, hash, sizeof hash);
+		if (map->file.empty()) continue;
+		//the mod's name is in lower case, the file's may not be
+		std::error_code error;
+		std::filesystem::path found;
+		for (const auto& entry : std::filesystem::directory_iterator(mods_folder(), error))
+			if (Lower(entry.path().filename().string()) == map->file) { found = entry.path(); break; }
+		std::ifstream file(found, std::ios::binary);
+		if (!file) { rt_log("goldeneye: %s couldn't be read for the network game's version", map->file.c_str()); continue; }
+		while (file.read((char*)bytes.data(), (std::streamsize)bytes.size()) || file.gcount() > 0)
+			Mix(sum, bytes.data(), (size_t)file.gcount());
+	}
+	return kModdedVersions | (sum & (kModdedVersions - 1));
+}
+
 //online.txt: a map a line, anything behind a # is a note
 void ReadPool()
 {
@@ -234,13 +279,18 @@ void ReadPool()
 		const std::string wanted = Lower(line);
 		const auto& files = mod_files();
 		auto mod = std::find_if(files.begin(), files.end(), [&](const ModLevel& m) { return m.name == wanted || m.name == wanted + ".edb"; });
-		if (mod != files.end()) { g_pool.push_back({ mod->hash, Shown(mod->name) }); continue; }
+		if (mod != files.end()) { g_pool.push_back({ mod->hash, Shown(mod->name), mod->name }); continue; }
 		char* end = nullptr;
 		const unsigned long hash = std::strtoul(line.c_str(), &end, 16);
-		if (end != line.c_str() && *end == 0 && line.size() >= 7 && line.size() <= 10) { g_pool.push_back({ (uint32_t)hash, line }); continue; }
+		if (end != line.c_str() && *end == 0 && line.size() >= 7 && line.size() <= 10) { g_pool.push_back({ (uint32_t)hash, line, {} }); continue; }
 		rt_log("goldeneye: %s: \"%s\" is neither a mod's file nor a file's hash, left out", path.c_str(), line.c_str());
 	}
 	rt_log("goldeneye: %zu map(s) for Conflict in %s", g_pool.size(), path.c_str());
+	if (!g_pool.empty())
+	{
+		g_pool_version = PoolVersion();
+		rt_log("goldeneye: a network game with them is version %08X (the game's own: %X)", g_pool_version, kGameVersion);
+	}
 }
 
 //the Multiplayer menu with the two ways online, when there is a pool to pick
@@ -342,6 +392,36 @@ void PickNextMaps(PPCContext& c)
 	st32(match + kMatchSecond, second);
 }
 
+//the version of a network game, where it goes to the server
+//ge_session_export (801F6A50): the host's session into the record it is advertised with (the
+//object's +4): the version at +0x154, always 0x4F
+//ge_find_query (8021E2D0): a search's task into the query the server gets: the version from
+//the task's +0x44, which the function before it (fn_8021DC00) has just set to 0x4F
+//the session's own version (+0x20, fn_801E5610) stays: a LAN game compares it with 0x4F itself
+const uint32_t kExportRecord = 0x4, kRecordVersion = 0x154, kTaskVersion = 0x44;
+PPCFunc orig_session_export = nullptr, orig_find_query = nullptr;
+
+bool Modded() { return g_map_pool && !g_pool.empty() && !g_pool_failed; }
+
+void SessionExport(PPCContext& c)
+{
+	const uint32_t record = ld32(c.r[3] + kExportRecord);
+	orig_session_export(c);
+	if (!Modded() || !guest_ptr(record)) return;
+	st32(record + kRecordVersion, g_pool_version);
+	if (g_trace) rt_log("goldeneye: online: the session is advertised as version %08X", g_pool_version);
+}
+
+void FindQuery(PPCContext& c)
+{
+	if (Modded())
+	{
+		st32(c.r[3] + kTaskVersion, g_pool_version);
+		if (g_trace) rt_log("goldeneye: online: searching for games of version %08X", g_pool_version);
+	}
+	orig_find_query(c);
+}
+
 } //namespace
 
 std::string mod_shown_name(const std::string& file) { return Shown(file); }
@@ -424,6 +504,11 @@ void install_mods_menu()
 	ReadPool();
 	random_map = ppc_lookup(kRandomMap);
 	if (random_map) ppc_hook("ge_pick_next_maps", PickNextMaps);
+	if (!g_pool.empty())
+	{
+		orig_session_export = ppc_hook("ge_session_export", SessionExport);
+		orig_find_query = ppc_hook("ge_find_query", FindQuery);
+	}
 	if (!g_levels.empty() && !game_alloc) rt_log("goldeneye: the game's allocator isn't in this build, no Mods menu");
 }
 
