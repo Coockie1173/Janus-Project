@@ -41,6 +41,7 @@ addr	name	evidence
 801CDC30	ge_look_sens	reads the look sensitivities (805DE7A4 across, 805DE7A8 up and down; 0x104 and 0x108 of the settings at 805DE6A0) for the stick's turning rate
 8013D130	ge_pitch_min	(controller): returns the float at 806EEEB0 (-0.7854), the lowest pitch; every clamp of controller+0xC64 calls it after ge_pitch_max (fn_8010C880, fn_80163B20). Seen: the stick held up stops at -0.7854
 8013D140	ge_pitch_max	its twin, 806EEEAC (0.7854)
+8013AA00	ge_player_modifiers	(controller): the multiplayer modifiers' timers (the Singularity and Move Your Feet flags at 805DE6BD, 805DE6BE); compares the move stick's |x| (+0x560) with the float at 806EEEAC, the one the pitch clamps use
 801CDE70	ge_look_sens_ads	its twin for aiming down the sight (805DE7CC, 805DE7D0)
 803AB100	ge_box_clip_codes	(4x4 matrix, box, out[2]): hand-written paired-single; the box's 8 corners through the matrix, per corner six bits from ps_cmpu against |w| and -|w| gathered with mfcr, a byte a corner. 1.7% of the game thread on Dam (GE_PROFILE)
 803A9FA0	ge_skin1	(n, 3x4 matrix, in, out): hand-written paired-single loop over 16-byte vertices: position floats, normal through GQR7 (psq_lu ..., 7), stored the same way

@@ -15,8 +15,7 @@ ge_tank_drive          # the throttle's step is per call too
 ge_tank_look           # the tank's look rates into its aim: the mouse is added to them for that call
 ge_look_sens           # the mouse on the stick: a very high sensitivity while the game reads it
 ge_look_sens_ads
-ge_pitch_min           # how far the view looks down and up: further than the game's 45 degrees
-ge_pitch_max
+ge_player_modifiers    # the view looks further up and down: this one still sees the game's 45 degrees, it has them for the move stick
 ge_sprint_update       # the sprint's three readers of the action button: the sprint key in its place
 ge_sprint_end
 PlayerSprint

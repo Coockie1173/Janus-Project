@@ -33,17 +33,24 @@ const float kPi = 3.14159265f;
 std::atomic<float> g_mouse_sens{1.0f}; //1 is 0.0022 radians a pixel
 std::atomic<bool> g_mouse_invert{false}; //pushing the mouse forward looks down
 
-//how far up and down the view goes: the game keeps the pitch within a quarter turn's half
-//(0.7854 either way, floats at 806EEEB0 and 806EEEAC). every place that limits it (the look
-//update fn_8010C880, fn_80163B20 while aiming, fn_80152720, fn_800F86B0) asks
-//ge_pitch_min (8013D130) and ge_pitch_max (8013D140) for them, so those two answer with ours
-//and the stick goes as far as the mouse does
-const float kPitchLimit = 1.48f;
-PPCFunc orig_pitch_limit[2];
-template <int I> void pitch_limit(PPCContext& c) {
-    double v = I ? kPitchLimit : -kPitchLimit;
-    c.f[1] = v;
-    c.ps1[1] = v;
+//how far up and down the view goes: the game keeps the pitch within 45 degrees, the floats
+//at 806EEEAC (0.7854) and 806EEEB0. the wanted pitch (controller+0xC64) is kept there through
+//two getters (8013D130, 8013D140: fn_8010C880, fn_80163B20...), and what the view is drawn
+//with (+0xC5C, the pitch less the recoil) once more by PlayerMovement and fn_801374F0, which
+//read the floats themselves. so the two floats are ours, stick and mouse go as far
+//ge_player_modifiers (8013AA00) is the one other reader: it has the 0.7854 for how far
+//sideways the move stick may be, and sees the game's for its call
+const float kPitchLimit = 1.48f, kGamePitchLimit = 0.78539819f;
+const uint32_t kPitchMax = 0x806EEEAC, kPitchMin = 0x806EEEB0;
+PPCFunc orig_player_modifiers = nullptr;
+void set_pitch_limit(float limit) {
+    stf(kPitchMax, limit);
+    stf(kPitchMin, -limit);
+}
+void player_modifiers(PPCContext& c) {
+    set_pitch_limit(kGamePitchLimit);
+    orig_player_modifiers(c);
+    set_pitch_limit(kPitchLimit);
 }
 
 
@@ -349,6 +356,7 @@ void controller_update(PPCContext& c) {
     uint32_t ctrl = c.r[3], frame = ld32(kFrameCount);
     uint32_t player = guest_ptr(ctrl) ? ld32(ctrl + 4) : 0;
     bool forced = false;
+    set_pitch_limit(kPitchLimit);
     if (frame != g_local_frame && guest_ptr(player)) {
         bool local = controller_is_local(c, ctrl, frame);
         if (local) {
@@ -390,8 +398,8 @@ void controller_update(PPCContext& c) {
         if (now - last >= std::chrono::milliseconds(500)) {
             last = now;
             uint32_t v = ld32(player + 0x16C);
-            rt_log("goldeneye: yaw %.4f pitch %.4f; aim %.4f across, %.4f up and down", ldf(player + 0xDC),
-                   guest_ptr(v) ? ldf(v + 0x768) : 0.0f, ldf(ctrl + kAimYaw), ldf(ctrl + kAimPitch));
+            rt_log("goldeneye: yaw %.4f pitch %.4f, drawn with %.4f; aim %.4f across, %.4f up and down", ldf(player + 0xDC),
+                   guest_ptr(v) ? ldf(v + 0x768) : 0.0f, ldf(ctrl + 0xC5C), ldf(ctrl + kAimYaw), ldf(ctrl + kAimPitch));
         }
     }
     static const bool trace = std::getenv("GE_TRACELOOK") != nullptr;
@@ -591,9 +599,8 @@ void install_mouse() {
     orig_look_sens[0] = ppc_hook("ge_look_sens", look_sens<0>);
     orig_look_sens[1] = ppc_hook("ge_look_sens_ads", look_sens<1>);
     if (!orig_look_sens[0] || !orig_look_sens[1]) rt_die("goldeneye: the sensitivity readers are not hooked in this build");
-    orig_pitch_limit[0] = ppc_hook("ge_pitch_min", pitch_limit<0>);
-    orig_pitch_limit[1] = ppc_hook("ge_pitch_max", pitch_limit<1>);
-    if (!orig_pitch_limit[0] || !orig_pitch_limit[1]) rt_die("goldeneye: the pitch limits are not hooked in this build");
+    orig_player_modifiers = ppc_hook("ge_player_modifiers", player_modifiers);
+    if (!orig_player_modifiers) rt_die("goldeneye: the pitch limit's other reader is not hooked in this build");
     orig_sprint[0] = ppc_hook("ge_sprint_update", sprint_read<0>);
     orig_sprint[1] = ppc_hook("ge_sprint_end", sprint_read<1>);
     orig_sprint[2] = ppc_hook("PlayerSprint", sprint_read<2>);
