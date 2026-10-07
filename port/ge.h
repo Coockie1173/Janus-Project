@@ -101,6 +101,9 @@ bool mouse_everywhere(); //cheat, mouse look in every player state
 void set_mouse_everywhere(bool on);
 void install_hosts(); //net.cpp
 void install_live_patch(); //the server's patch of the game's code is left out
+void net_frame(); //once a frame: the range a player's pitch is sent in
+float net_pitch_range(); //how far up and down it goes to the others, radians
+bool modded_lobby(); //modmenu.cpp: network games are the ones of Connect to WFC Modded
 void install_mods(); //mods.cpp
 struct ModLevel { uint32_t hash; std::string name; }; //a level among the mods: its file's hash and name
 const std::vector<ModLevel>& mod_levels();

@@ -57,6 +57,7 @@ void each_frame(uint32_t frame) {
     fov_apply();
     cutscenes_frame();
     mouse_frame(frame);
+    net_frame();
     heap_frame();
 }
 

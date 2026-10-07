@@ -237,12 +237,16 @@ void Mix(uint32_t& sum, const uint8_t* bytes, size_t count)
 //with the same one get theirs by what else is in the folder
 const uint32_t kGameVersion = 0x4F;
 const uint32_t kModdedVersions = 0x40000000; //where the numbers made here are, the game's own never is
+//what this build sends differently from the game in such a game goes in as well, so builds
+//that don't read each other's packets don't find each other: 1 the pitch's range (net.cpp)
+const uint8_t kPortProtocol = 1;
 uint32_t PoolVersion()
 {
 	std::vector<const PoolMap*> maps;
 	for (const PoolMap& map : g_pool) maps.push_back(&map);
 	std::sort(maps.begin(), maps.end(), [](const PoolMap* a, const PoolMap* b) { return a->hash < b->hash; });
 	uint32_t sum = kFnvStart;
+	Mix(sum, &kPortProtocol, 1);
 	std::vector<uint8_t> bytes(1 << 16);
 	for (const PoolMap* map : maps)
 	{
@@ -425,6 +429,7 @@ void FindQuery(PPCContext& c)
 } //namespace
 
 std::string mod_shown_name(const std::string& file) { return Shown(file); }
+bool modded_lobby() { return Modded(); }
 
 uint32_t mods_menu_text(uint32_t hash)
 {

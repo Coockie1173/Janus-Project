@@ -1,4 +1,5 @@
-//online: the hosts file for the game's servers, and the live patch that isn't applied
+//online: the hosts file for the game's servers, the live patch that isn't applied, how far
+//up and down a player's pitch goes to the others
 #include "ge.h"
 #include <cstdio>
 #include <cstdlib>
@@ -39,6 +40,39 @@ void ApplyPatch(PPCContext& c)
 }
 
 } //namespace
+
+//a player's state goes out in parts (fn_801266A0 gathers them, fn_80126FC0 writes, fn_80128300
+//reads, fn_80127A20 puts them into the controller). the pitch is one: bdBitBuffer's ranged
+//float from the float at 806EEDB4 to the one at 806EEDB8 in steps of 0.00077, the game's
+//45 degrees up and down, 11 bits. the writer keeps a number within the range, so what's past
+//45 degrees never arrives: the others see 45, and a joined player's own view is drawn back to
+//what the host has (input.cpp)
+//writer and reader both read the two floats, so with ours in them the pitch goes as far as
+//the view does (12 bits then). every player in the game has to do the same: only between
+//players who came through Connect to WFC Modded, whose games have a version of their own
+//that this is part of (modmenu.cpp, kPortProtocol). a game over Nintendo WFC stays the game's
+const uint32_t kNetPitchMin = 0x806EEDB4, kNetPitchMax = 0x806EEDB8;
+const float kGamePitchRange = 0.78539819f, kPortPitchRange = 1.48f;
+
+float net_pitch_range()
+{
+	return modded_lobby() ? kPortPitchRange : kGamePitchRange;
+}
+
+//once a frame
+void net_frame()
+{
+	static float said = 0;
+	const float range = net_pitch_range();
+	if (ldf(kNetPitchMax) != range)
+	{
+		stf(kNetPitchMin, -range);
+		stf(kNetPitchMax, range);
+	}
+	if (range != said && std::getenv("GE_TRACE"))
+		rt_log("goldeneye: online: a player's pitch goes to the others within %.0f degrees", range * 57.29578f);
+	said = range;
+}
 
 void install_live_patch()
 {

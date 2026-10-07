@@ -47,16 +47,26 @@ void set_pitch_limit(float limit) {
     stf(kPitchMax, limit);
     stf(kPitchMin, -limit);
 }
+bool joined_game();
+//in a network game the pitch goes to the others as a number within a range (net.cpp): the
+//game's 45 degrees, ours between players who came through Connect to WFC Modded. a joined
+//player's own pitch comes back from the host through it (see controller_update), so past the
+//range the view got pulled back all the time. there it stops at the range's end instead
+float pitch_limit() {
+    return joined_game() ? net_pitch_range() : kPitchLimit;
+}
 void player_modifiers(PPCContext& c) {
     set_pitch_limit(kGamePitchLimit);
     orig_player_modifiers(c);
-    set_pitch_limit(kPitchLimit);
+    set_pitch_limit(pitch_limit());
 }
 
 
 //in a network game someone else hosts, the host turns the players from what each console
-//sends, so a view turned here gets ignored. there the mouse goes on the right stick instead,
-//with the stick's sensitivity raised out of the way (mouse_stick)
+//sends (the turning rate, +0x97C, within 9.426 radians a second, and the pitch), and what it
+//has comes back and the view is drawn to it: a view turned here gets pulled back. there the
+//mouse goes on the right stick instead, with the stick's sensitivity raised out of the way
+//(mouse_stick)
 //"a joined game" is what fn_80108D70 tests: the word at 805D5490 is 1 or 2 in a network game
 //and the one at 805D5470 is non-zero on the host. GE_MOUSE_MODE=direct or stick forces one
 const uint32_t kNetState = 0x805D5460;
@@ -217,7 +227,7 @@ void mouse_look(uint32_t ctrl, uint32_t player) {
     if (guest_ptr(view)) {
         float pitch = ldf(view + 0x768);
         if (std::isfinite(pitch) && std::fabs(pitch) < 2.0f)
-            stf(view + 0x768, std::clamp(pitch + dy * kRadPerPixel * sens, -kPitchLimit, kPitchLimit));
+            stf(view + 0x768, std::clamp(pitch + dy * kRadPerPixel * sens, -pitch_limit(), pitch_limit()));
     }
 }
 
@@ -318,6 +328,7 @@ void action_update(PPCContext& c) {
 //if the list never names a controller of ours (60 frames without one) it's the game's
 //answer again, the first controller, as before
 const uint32_t kMsrEE = 0x8000, kListWait = 60;
+const uint32_t kCtrlHostCopyOf = 0x98C, kCtrlHostCopy = 0x988; //a joined game's second controller, see controller_update
 bool controller_is_local(PPCContext& c, uint32_t ctrl, uint32_t frame) {
     static uint32_t host_since = ~0u, listed_frame = ~0u, said_ctrl = 0;
     static int said_how = -1;
@@ -347,17 +358,31 @@ bool controller_is_local(PPCContext& c, uint32_t ctrl, uint32_t frame) {
         said_how = how;
         static const char* names[] = {"a joined game, the game's own test", "hosting, by the list of this console's players",
                                       "hosting, the list names nobody: the first controller"};
-        rt_log("goldeneye: network game: this console's controller is %08X, player %08X (%s)", ctrl, ld32(ctrl + 4), names[how]);
+        rt_log("goldeneye: network game: this console's controller is %08X, player %08X (%s), the host's copy of it %08X", ctrl, ld32(ctrl + 4),
+               names[how], ld32(ctrl + kCtrlHostCopy));
     }
     return local;
 }
 
+//a joined game has two controllers for this console's player. the one the net code made
+//(fn_801B8B10: a copy of the player, linked by fn_801081F0 with +0x98C to the first and the
+//first's +0x988 back to it) is the host's word on the player: what the host sends is put into
+//it (fn_80127A20), it's stepped with this console's input from where the host had it
+//(fn_80129AF0, which keeps 64 states of +0xC74..+0xFDC to go back to), and the one on screen
+//is drawn towards it every frame (fn_8012AD60: the place, the yaw, the pitch). the game's
+//test says "this console's" for both, and whichever was updated first in a frame was ours:
+//the aim's field of view, the aim sensitivity and the aim lock went by the hidden one in
+//some frames and by the one on screen in others
+//the game tells them apart itself: an update of a controller with +0x98C, or one asked for
+//with r4 set (a step done again), runs with the byte at 806EBA7C set, and with it the camera,
+//the sounds and the hud are left out. those are never ours
 void controller_update(PPCContext& c) {
     uint32_t ctrl = c.r[3], frame = ld32(kFrameCount);
     uint32_t player = guest_ptr(ctrl) ? ld32(ctrl + 4) : 0;
     bool forced = false;
-    set_pitch_limit(kPitchLimit);
-    if (frame != g_local_frame && guest_ptr(player)) {
+    bool again = (uint8_t)c.r[4] != 0 || (guest_ptr(ctrl) && ld32(ctrl + kCtrlHostCopyOf) != 0);
+    set_pitch_limit(pitch_limit());
+    if (frame != g_local_frame && guest_ptr(player) && !again) {
         bool local = controller_is_local(c, ctrl, frame);
         if (local) {
             g_local_frame = frame;
@@ -379,7 +404,7 @@ void controller_update(PPCContext& c) {
         }
     }
     orig_controller_update(c);
-    if (ctrl == g_local_ctrl && frame == g_local_frame && !is_tank(ctrl)) { //a tank has other things where the aim's blend is
+    if (ctrl == g_local_ctrl && frame == g_local_frame && !again && !is_tank(ctrl)) { //a tank has other things where the aim's blend is
         ads_fov_apply(ctrl);
         aim_lock_frame(ctrl);
         noclip_apply(ctrl);
@@ -400,6 +425,10 @@ void controller_update(PPCContext& c) {
             uint32_t v = ld32(player + 0x16C);
             rt_log("goldeneye: yaw %.4f pitch %.4f, drawn with %.4f; aim %.4f across, %.4f up and down", ldf(player + 0xDC),
                    guest_ptr(v) ? ldf(v + 0x768) : 0.0f, ldf(ctrl + 0xC5C), ldf(ctrl + kAimYaw), ldf(ctrl + kAimPitch));
+            uint32_t copy = ld32(ctrl + kCtrlHostCopy), theirs = guest_ptr(copy) ? ld32(copy + 4) : 0;
+            if (guest_ptr(theirs)) //a joined game: how far the view is from where the host has it
+                rt_log("goldeneye: the host's copy %08X: yaw %.4f pitch %.4f, aim blend %.2f (ours %.2f)", copy, ldf(theirs + 0xDC),
+                       ldf(copy + 0xC64), ldf(copy + kAimBlend), ldf(ctrl + kAimBlend));
         }
     }
     static const bool trace = std::getenv("GE_TRACELOOK") != nullptr;
@@ -466,8 +495,8 @@ void aim_lock_frame(uint32_t ctrl) {
         uint32_t now[5] = {ld32(ctrl + kPlayerState), ld32(ctrl + kAimBlend), hand, next, locked};
         if (std::memcmp(now, said, sizeof now)) {
             std::memcpy(said, now, sizeof now);
-            rt_log("aim: frame %u state %X blend %.3f hand %02X next %02X held %d lock %d items %u", ld32(kFrameCount), now[0], blend, hand, next,
-                   ld8(ctrl + 0xD00), (int)locked, ld32(ctrl + 0xC48));
+            rt_log("aim: frame %u state %X blend %.3f hand %02X next %02X held %d lock %d items %u, drawn at %.1f degrees", ld32(kFrameCount), now[0], blend, hand, next,
+                   ld8(ctrl + 0xD00), (int)locked, ld32(ctrl + 0xC48), ldf(ctrl + 0x71C));
         }
     }
     if (!locked || !was_locked) rose = false;
