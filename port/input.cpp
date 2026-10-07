@@ -32,7 +32,19 @@ const uint32_t kControllerNotLocal = 0x80108D70; //(controller) -> 0 if this con
 const float kPi = 3.14159265f;
 std::atomic<float> g_mouse_sens{1.0f}; //1 is 0.0022 radians a pixel
 std::atomic<bool> g_mouse_invert{false}; //pushing the mouse forward looks down
-const float kPitchLimit = 1.35f;
+
+//how far up and down the view goes: the game keeps the pitch within a quarter turn's half
+//(0.7854 either way, floats at 806EEEB0 and 806EEEAC). every place that limits it (the look
+//update fn_8010C880, fn_80163B20 while aiming, fn_80152720, fn_800F86B0) asks
+//ge_pitch_min (8013D130) and ge_pitch_max (8013D140) for them, so those two answer with ours
+//and the stick goes as far as the mouse does
+const float kPitchLimit = 1.48f;
+PPCFunc orig_pitch_limit[2];
+template <int I> void pitch_limit(PPCContext& c) {
+    double v = I ? kPitchLimit : -kPitchLimit;
+    c.f[1] = v;
+    c.ps1[1] = v;
+}
 
 
 //in a network game someone else hosts, the host turns the players from what each console
@@ -579,6 +591,9 @@ void install_mouse() {
     orig_look_sens[0] = ppc_hook("ge_look_sens", look_sens<0>);
     orig_look_sens[1] = ppc_hook("ge_look_sens_ads", look_sens<1>);
     if (!orig_look_sens[0] || !orig_look_sens[1]) rt_die("goldeneye: the sensitivity readers are not hooked in this build");
+    orig_pitch_limit[0] = ppc_hook("ge_pitch_min", pitch_limit<0>);
+    orig_pitch_limit[1] = ppc_hook("ge_pitch_max", pitch_limit<1>);
+    if (!orig_pitch_limit[0] || !orig_pitch_limit[1]) rt_die("goldeneye: the pitch limits are not hooked in this build");
     orig_sprint[0] = ppc_hook("ge_sprint_update", sprint_read<0>);
     orig_sprint[1] = ppc_hook("ge_sprint_end", sprint_read<1>);
     orig_sprint[2] = ppc_hook("PlayerSprint", sprint_read<2>);

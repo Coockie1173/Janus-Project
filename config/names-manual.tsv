@@ -39,6 +39,8 @@ addr	name	evidence
 80101DC0	ge_look_input	(controller, pad component): reads the look stick through fn_80307AA0 into the vectors at controller+0x968 and +0x978, which fn_80101EC0 turns into rotation; called by fn_8012A1D0
 80101EC0	ge_look_apply	(controller): turns the controller's angular velocity (the vector at +0x978, radians a second; +0x97C the yaw's) times its time step (+0x578) into the player's rotation; called by fn_8012A1D0 after the optional ge_look_input
 801CDC30	ge_look_sens	reads the look sensitivities (805DE7A4 across, 805DE7A8 up and down; 0x104 and 0x108 of the settings at 805DE6A0) for the stick's turning rate
+8013D130	ge_pitch_min	(controller): returns the float at 806EEEB0 (-0.7854), the lowest pitch; every clamp of controller+0xC64 calls it after ge_pitch_max (fn_8010C880, fn_80163B20). Seen: the stick held up stops at -0.7854
+8013D140	ge_pitch_max	its twin, 806EEEAC (0.7854)
 801CDE70	ge_look_sens_ads	its twin for aiming down the sight (805DE7CC, 805DE7D0)
 803AB100	ge_box_clip_codes	(4x4 matrix, box, out[2]): hand-written paired-single; the box's 8 corners through the matrix, per corner six bits from ps_cmpu against |w| and -|w| gathered with mfcr, a byte a corner. 1.7% of the game thread on Dam (GE_PROFILE)
 803A9FA0	ge_skin1	(n, 3x4 matrix, in, out): hand-written paired-single loop over 16-byte vertices: position floats, normal through GQR7 (psq_lu ..., 7), stored the same way
