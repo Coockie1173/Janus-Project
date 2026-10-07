@@ -32,10 +32,22 @@
 //the throttle: ge_tank_drive (801478C0, the controller in r3) moves the throttle at +0xA64
 //towards the stick's (+0xA5C) by a fixed step a call, 806E96E8 with the byte at 806E96D8 set
 //and 806E96F8 without. the wheels' drive comes from it
+//
+//the cars (every vehicle but the tank, vtable 805925F8) sink into the road above 30:
+//a wheel that's in the ground is drawn up by its travel (+0x44, at most +0x7C). a contact
+//(ge_car_contact, 8036C060) adds how deep the wheel is in * (1 - stiffness) / (60 * time step),
+//and ge_vehicle_step takes (+0x80 + travel squared) * 60 * time step off again. at 30 that's
+//more than the travel can be, so every frame starts from none and the travel is just under
+//half the depth. at 144 five times as much goes on and a fifth comes off: the travel stays at
+//its limit, the stiffness (0.1 below 0.05 of travel, 0.05 * its root above) at a quarter, and
+//the car rides 0.85 lower, falling all the while
+//so for a shorter step all the travel comes off in the step, and a contact adds what it would at 30
 #include "ge.h"
 #include "debug.h"
+#include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 
 namespace ge
@@ -56,7 +68,13 @@ const uint32_t kMaxWheels = 32; //the tank has 18
 const uint32_t kBodyFlags = 0x58, kBodyDampsByTime = 0x100, kBodyKeep = 0x130, kBodySpinKeep = 0x1E0;
 const uint32_t kTankThrottleStep[2] = {0x806E96E8, 0x806E96F8};
 const uint32_t kCtrlTimeStep = 0x578;
+const uint32_t kCarVtable = 0x805925F8; //every vehicle that isn't the tank
+const uint32_t kBodyPos = 0x68, kBodySpeed = 0x88, kBodyShapes = 0x118, kShapePlaces = 0x4C, kShapePlaceSize = 0x40;
+const uint32_t kWheelTravel = 0x44, kWheelTravelMax = 0x7C, kWheelGive = 0x80, kWheelShape = 0x8C;
+const uint32_t kContactShape = 0x24;
+const float kGiveAll = 100.0f, kNoLimit = 1e9f;
 PPCFunc orig_vehicle_step = nullptr;
+PPCFunc orig_car_contact = nullptr;
 PPCFunc orig_tank_drive = nullptr;
 
 //the aim and where the tank is, twice a second
@@ -108,6 +126,21 @@ bool ShortStep(float seconds, float& frames)
 	return frames > 0.01f && frames < 0.999f;
 }
 
+//GE_VEHTRACE=1: a car's height and its wheels' travel, every eighth step
+void TraceCar(uint32_t car, float step)
+{
+	static uint32_t calls = 0;
+	if (++calls & 7) return;
+	uint32_t wheels = ld32(car + kVehicleWheels), count = ld32(car + kVehicleWheelCount);
+	char travel[128];
+	int at = 0;
+	travel[0] = 0;
+	for (uint32_t i = 0; i < count && i < 8; ++i)
+		at += snprintf(travel + at, sizeof travel - at, " %.3f", ldf(wheels + i * kWheelSize + kWheelTravel));
+	rt_log("goldeneye: car %08X step %.5f at %.2f %.4f %.2f falling %.3f, wheels%s", car, step, ldf(car + kBodyPos), ldf(car + kBodyPos + 4),
+		ldf(car + kBodyPos + 8), -ldf(car + kBodySpeed + 4), travel);
+}
+
 void VehicleStep(PPCContext& c)
 {
 	uint32_t vehicle = c.r[3], wheels = guest_ptr(vehicle) ? ld32(vehicle + kVehicleWheels) : 0;
@@ -118,13 +151,18 @@ void VehicleStep(PPCContext& c)
 		orig_vehicle_step(c);
 		return;
 	}
-	uint32_t drags[kMaxWheels];
+	bool car = ld32(vehicle) == kCarVtable;
+	static const bool trace = std::getenv("GE_VEHTRACE") != nullptr;
+	if (trace && car) TraceCar(vehicle, (float)c.f[1]);
+	uint32_t drags[kMaxWheels], gives[kMaxWheels];
 	for (uint32_t i = 0; i < count; ++i)
 	{
-		uint32_t at = wheels + i * kWheelSize + kWheelDrag;
+		uint32_t wheel = wheels + i * kWheelSize, at = wheel + kWheelDrag;
 		drags[i] = ld32(at);
 		float keep = 1.0f - ldf(at);
 		if (keep > 0.0f && keep < 1.0f) stf(at, 1.0f - std::pow(keep, frames));
+		gives[i] = ld32(wheel + kWheelGive);
+		if (car) stf(wheel + kWheelGive, kGiveAll);
 	}
 	const uint32_t keeps[4] = {vehicle + kBodyKeep, vehicle + kBodySpinKeep, vehicle + kBodySpinKeep + 4, vehicle + kBodySpinKeep + 8};
 	uint32_t kept[4];
@@ -136,8 +174,49 @@ void VehicleStep(PPCContext& c)
 		if (keep > 0.0f && keep < 1.0f) stf(keeps[i], std::pow(keep, frames));
 	}
 	orig_vehicle_step(c);
-	for (uint32_t i = 0; i < count; ++i) st32(wheels + i * kWheelSize + kWheelDrag, drags[i]);
+	for (uint32_t i = 0; i < count; ++i)
+	{
+		st32(wheels + i * kWheelSize + kWheelDrag, drags[i]);
+		st32(wheels + i * kWheelSize + kWheelGive, gives[i]);
+	}
 	for (int i = 0; body && i < 4; ++i) st32(keeps[i], kept[i]);
+}
+
+//a contact of a car with the level. the wheel it's for gets its travel from how deep it's in,
+//divided by the time step: the limit is lifted for the call and the travel made what a 30th's gives
+void CarContact(PPCContext& c)
+{
+	uint32_t car = c.r[3], contact = c.r[4], wheels = guest_ptr(car) ? ld32(car + kVehicleWheels) : 0;
+	uint32_t count = wheels ? ld32(car + kVehicleWheelCount) : 0;
+	float frames;
+	if (!guest_ptr(wheels) || !guest_ptr(contact) || count > kMaxWheels || !ShortStep((float)c.f[1], frames))
+	{
+		orig_car_contact(c);
+		return;
+	}
+	float travels[kMaxWheels];
+	uint32_t limits[kMaxWheels];
+	for (uint32_t i = 0; i < count; ++i)
+	{
+		uint32_t wheel = wheels + i * kWheelSize;
+		travels[i] = ldf(wheel + kWheelTravel);
+		limits[i] = ld32(wheel + kWheelTravelMax);
+		if (travels[i] < ldf(wheel + kWheelTravelMax)) stf(wheel + kWheelTravelMax, kNoLimit);
+	}
+	uint32_t shape = ld32(contact + kContactShape);
+	orig_car_contact(c);
+	for (uint32_t i = 0; i < count; ++i)
+	{
+		uint32_t wheel = wheels + i * kWheelSize;
+		st32(wheel + kWheelTravelMax, limits[i]);
+		float travel = ldf(wheel + kWheelTravel);
+		if (travel == travels[i]) continue;
+		travel = std::min(travels[i] + (travel - travels[i]) * frames, ldf(wheel + kWheelTravelMax));
+		stf(wheel + kWheelTravel, travel);
+		//the wheel's shape was put where the travel had it
+		uint32_t shapes = ld32(car + kBodyShapes), places = guest_ptr(shapes) ? ld32(shapes + kShapePlaces) : 0;
+		if (ld32(wheel + kWheelShape) == shape && guest_ptr(places)) stf(places + shape * kShapePlaceSize + 4, ldf(wheel + 4) + travel);
+	}
 }
 
 void TankDrive(PPCContext& c)
@@ -180,6 +259,8 @@ void install_tank()
 	if (!orig_tank_look) rt_die("goldeneye: the tank's look is not hooked in this build");
 	orig_vehicle_step = ppc_hook("ge_vehicle_step", VehicleStep);
 	if (!orig_vehicle_step) rt_die("goldeneye: the vehicles' step is not hooked in this build");
+	orig_car_contact = ppc_hook("ge_car_contact", CarContact);
+	if (!orig_car_contact) rt_die("goldeneye: the cars' contact is not hooked in this build");
 	orig_tank_drive = ppc_hook("ge_tank_drive", TankDrive);
 	if (!orig_tank_drive) rt_die("goldeneye: the tank's drive is not hooked in this build");
 }

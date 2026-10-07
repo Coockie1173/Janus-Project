@@ -11,6 +11,7 @@ ge_controller_update   # mouse look is applied to the controller the game itself
 ge_look_input          # the look input: the mouse is added to what the stick gives
 ge_look_apply          # the mouse, as angular velocity for one frame
 ge_vehicle_step        # a wheel's drag is per call: made per second for higher frame rates
+ge_car_contact         # a wheel's travel is divided by the time step: what a 30th gives at any rate
 ge_tank_drive          # the throttle's step is per call too
 ge_tank_look           # the tank's look rates into its aim: the mouse is added to them for that call
 ge_look_sens           # the mouse on the stick: a very high sensitivity while the game reads it
