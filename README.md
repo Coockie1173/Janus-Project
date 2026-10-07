@@ -56,6 +56,12 @@ make            # mix the symbols, recompile main.dol, build build/out/wiiboot
 make smoke      # 30 s headless boot, log in build/run.log
 ```
 
+Cloning on its own gives you a clean wiikit, without my changes to it. You don't have to do anything about that: `make` (and so `./launch.sh`, `make win` and `make linux`) applies `patches/wiikit.patch` to the submodule before it builds, as long as the submodule is still untouched. Should you ever want to do it by hand:
+```sh
+git -C wiikit apply ../patches/wiikit.patch
+```
+And if you change wiikit yourself, `make wiikit-save` writes your changes back into the patch.
+
 The boot ROM fonts and the DSP's resampling table (`font_western.bin`, `font_japanese.bin`, `dsp_coef.bin`) are taken from Dolphin's free replacements in `Sys/GC` if you have Dolphin installed (pass `FONTS=dir` otherwise). If Dolphin's `Sys/totaldb.dsy` is around (`DSY=file`) it'll name some more SDK functions by signature.
 
 ## Windows
