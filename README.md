@@ -72,6 +72,11 @@ The boot ROM fonts and the DSP's resampling table (`font_western.bin`, `font_jap
 
 Both packages take the `mods/` folder along exactly as it is when they're made (the `.edb` files, their `.png` pictures and `online.txt`), so whatever is in there when you run `make win` or `make linux` ships in the zip.
 
+## Releases
+Every push to `main` builds both packages and puts them up as the `latest` release, and pushing a tag like `v1.0` gives that one its own release. Since the build needs the disc, GitHub's own machines can't do it: `.github/workflows/release.yml` runs on a self-hosted runner, which is just my own PC. If it's off, the release simply waits.
+
+Want the same on your fork? Add a self-hosted runner (Settings > Actions > Runners), and give it an `.env` file with `GE_GAME=/path/to/your/extracted/disc` (and `GE_MODS=/path/to/mods` if you want mods in the zips).
+
 # Playing
 `./launch.sh` opens a small window first. In there you can set the frame rate (60 by default, 30 is what the console does), the field of view, the mouse sensitivity, online on or off, and the key bindings (click Set, press a key or a mouse button). Then hit Play.
 

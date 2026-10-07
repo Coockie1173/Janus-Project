@@ -1,0 +1,42 @@
+name: release
+
+# A push to main replaces the "latest" release, a pushed tag (v1.0) gets its own.
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # the build needs the disc, so it runs on a machine that has one (README, Releases)
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          clean: false    # build/ stays between runs: only what changed is rebuilt
+
+      - name: wiikit, pristine for the patch
+        run: |
+          git submodule update --init --force
+          git -C wiikit clean -q -fdx
+
+      - name: disc and mods
+        run: |
+          test -f "$GE_GAME/sys/main.dol" || { echo "GE_GAME in the runner's .env has to be an extracted disc"; exit 1; }
+          ln -sfn "$GE_GAME" game
+          if [ -n "$GE_MODS" ]; then ln -sfn "$GE_MODS" mods; fi
+
+      - run: make linux
+      - run: make win
+
+      - name: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: sh tools/publish_release.sh build/GoldenEye007-linux64.zip build/GoldenEye007-win64.zip
