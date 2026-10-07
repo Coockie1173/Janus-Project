@@ -130,6 +130,7 @@ do several things.
 - [ ] **medium** Interactable things show a red cursor, NPC models don't
 - [ ] **low** Facility: a guard in the Atrium got stuck once
 - [ ] **low** Enemies seem a bit more likely to throw grenades (needs checking)
+- [ ] **high** ADS broken on online
 
 ## Performance
 
