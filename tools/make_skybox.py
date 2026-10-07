@@ -6,6 +6,8 @@ panorama on it. eurochef takes a node named sky... as the level's sky.
     tools/make_skybox.py sky.glb                              a sky of its own, to import in Blender
     tools/make_skybox.py --into level.glb                     put into the level's file (a copy is kept)
     tools/make_skybox.py --into level.glb -o level_sky.glb    or into a new file
+    tools/make_skybox.py --gui [--into level.glb]             try it out in a window, then save
+    tools/make_skybox.py --preview sky.png --preset dusk      a picture of it, nothing else
     tools/make_skybox.py --list                               the presets
 
     --preset night --clouds 0.5 --seed 7 --horizon '#402030' --texture pano.png ...
@@ -16,6 +18,7 @@ around the whole level: with --into its middle and size come from the level, els
 wants them. The node is named sky_made: making it again replaces the one made before.
 """
 import argparse
+import copy
 import json
 import math
 import os
@@ -115,17 +118,21 @@ def sky_colour(direction, options, noise):
     return colour
 
 
+def sphere_direction(row, column, across, down):
+    """Where the vertex in a row (0: the top) and a column of the sphere is from its middle"""
+    latitude = math.pi / 2 - math.pi * row / down
+    longitude = 2 * math.pi * column / across
+    return [math.cos(latitude) * math.cos(longitude), math.sin(latitude), math.cos(latitude) * math.sin(longitude)]
+
+
 def make_sphere(options):
     """Positions, colours, texture coordinates and indices of a sphere seen from inside"""
     noise = Noise(options.seed)
     across, down = options.segments, max(options.segments // 2, 4)
     positions, colours, uvs, indices = [], [], [], []
     for row in range(down + 1):
-        latitude = math.pi / 2 - math.pi * row / down
         for column in range(across + 1):
-            longitude = 2 * math.pi * column / across
-            direction = [math.cos(latitude) * math.cos(longitude), math.sin(latitude),
-                         math.cos(latitude) * math.sin(longitude)]
+            direction = sphere_direction(row, column, across, down)
             positions.append([options.centre[i] + direction[i] * options.radius for i in range(3)])
             colour = [1.0, 1.0, 1.0] if options.texture else sky_colour(direction, options, noise)
             colours.append([to_linear(min(1.0, max(0.0, c))) for c in colour] + [1.0])
@@ -287,12 +294,312 @@ def add_sky(doc, binary, options):
     return len(indices) // 3
 
 
+def hex_of(colour):
+    return '#%02x%02x%02x' % tuple(round(min(1.0, max(0.0, c)) * 255) for c in colour)
+
+
+def apply_preset(options, name, keep=()):
+    """Sets the colours and the clouds of a preset, but for the ones named in `keep`"""
+    zenith, horizon, ground, cloud, share = PRESETS[name]
+    options.preset = name
+    for key, value in (('zenith', colour_of(zenith)), ('horizon', colour_of(horizon)), ('ground', colour_of(ground)),
+                       ('cloud_colour', colour_of(cloud)), ('clouds', share)):
+        if key not in keep:
+            setattr(options, key, value)
+
+
+def command_for(options):
+    """The command line that makes the sky the options describe"""
+    words = ['tools/make_skybox.py']
+    if options.into:
+        words += ['--into', options.into]
+        if options.into_output:
+            words += ['-o', options.into_output]
+    elif options.output:
+        words.append(options.output)
+    if options.texture:
+        words += ['--texture', options.texture]
+    else:
+        words += ['--preset', options.preset, '--zenith', f"'{hex_of(options.zenith)}'",
+                  '--horizon', f"'{hex_of(options.horizon)}'", '--ground', f"'{hex_of(options.ground)}'",
+                  '--falloff', f'{options.falloff:.2f}', '--clouds', f'{options.clouds:.2f}']
+        if options.clouds > 0:
+            words += ['--cloud-colour', f"'{hex_of(options.cloud_colour)}'", '--cloud-scale',
+                      f'{options.cloud_scale:.2f}', '--cloud-softness', f'{options.cloud_softness:.2f}',
+                      '--cloud-opacity', f'{options.cloud_opacity:.2f}', '--seed', str(options.seed)]
+    words += ['--segments', str(options.segments)]
+    if options.radius:
+        words += ['--radius', f'{options.radius:g}']
+    if options.centre:
+        words += ['--centre', ','.join(f'{v:g}' for v in options.centre)]
+    return ' '.join(words)
+
+
+def write_sky(options):
+    """Writes the sky the options describe, into the level or on its own. Returns what to say"""
+    options = copy.copy(options)
+    said = []
+    if options.into:
+        doc, binary = read_glb(options.into)
+        bounds = scene_bounds(doc)
+        if bounds and not options.centre:
+            options.centre = [(bounds[0][k] + bounds[1][k]) / 2 for k in range(3)]
+        if bounds and not options.radius:
+            options.radius = max(math.dist(bounds[0], bounds[1]) / 2 * options.margin, 50.0)
+        target = options.into_output or options.output or options.into
+    else:
+        doc, binary, target = {'asset': {'version': '2.0', 'generator': 'make_skybox.py'}}, bytearray(), options.output
+    options.centre = options.centre or [0.0, 0.0, 0.0]
+    options.radius = options.radius or 300.0
+
+    triangles = add_sky(doc, binary, options)
+    if options.into and os.path.abspath(target) == os.path.abspath(options.into):
+        kept = os.path.splitext(options.into)[0] + '.before_sky.glb'
+        if not os.path.exists(kept):
+            shutil.copyfile(options.into, kept)
+            said.append(f'the level as it was: {kept}')
+    write_glb(target, doc, binary)
+    said.append(f'{target}: a sky of {triangles} triangles, radius {options.radius:.0f} around '
+                f'{options.centre[0]:.1f} {options.centre[1]:.1f} {options.centre[2]:.1f}')
+    return '\n'.join(said)
+
+
+PANORAMA_SIZE = (1024, 512)
+
+
+def panorama_of(options):
+    """The sky unrolled, 2:1: what the sphere's vertices are painted with, blended between them
+    as the game does between a triangle's corners"""
+    from PIL import Image
+    if options.texture:
+        return Image.open(options.texture).convert('RGB').resize(PANORAMA_SIZE, Image.BILINEAR)
+    noise = Noise(options.seed)
+    across, down = options.segments, max(options.segments // 2, 4)
+    pixels = []
+    for row in range(down + 1):
+        for column in range(across + 1):
+            colour = sky_colour(sphere_direction(row, column, across, down), options, noise)
+            pixels.append(tuple(round(min(1.0, max(0.0, c)) * 255) for c in colour))
+    grid = Image.new('RGB', (across + 1, down + 1))
+    grid.putdata(pixels)
+    return grid.resize(PANORAMA_SIZE, Image.BILINEAR)
+
+
+def view_of(panorama, size, yaw, pitch, fov=75.0):
+    """What a player sees of the sky looking `yaw` around and `pitch` up (degrees): the game's
+    picture, which is the mirror image of the scene's"""
+    from PIL import Image
+    width, height = panorama.size
+    wide = Image.new('RGB', (width * 3, height))
+    for k in range(3):
+        wide.paste(panorama, (width * k, 0))
+    across, down = 48, 27
+    reach = math.tan(math.radians(fov) / 2)
+    cos_p, sin_p = math.cos(math.radians(pitch)), math.sin(math.radians(pitch))
+    cos_y, sin_y = math.cos(math.radians(yaw)), math.sin(math.radians(yaw))
+
+    def source(i, j):
+        x = (i / across * 2 - 1) * reach
+        y = (1 - j / down * 2) * reach * size[1] / size[0]
+        y, z = y * cos_p + sin_p, cos_p - y * sin_p
+        x, z = x * cos_y + z * sin_y, z * cos_y - x * sin_y
+        length = math.sqrt(x * x + y * y + z * z)
+        # the game's x is the scene's turned around
+        longitude = math.atan2(z, -x) % (2 * math.pi)
+        return longitude / (2 * math.pi), (math.pi / 2 - math.asin(y / length)) / math.pi
+
+    corners = [[source(i, j) for i in range(across + 1)] for j in range(down + 1)]
+    mesh = []
+    for j in range(down):
+        for i in range(across):
+            quad = [corners[j][i], corners[j + 1][i], corners[j + 1][i + 1], corners[j][i + 1]]
+            # the four corners on the same turn of the panorama as the first
+            first = quad[0][0]
+            flat = []
+            for u, v in quad:
+                u += round(first - u)
+                flat += [(u + 1) * width, v * (height - 1)]
+            box = (i * size[0] // across, j * size[1] // down, (i + 1) * size[0] // across, (j + 1) * size[1] // down)
+            mesh.append((box, flat))
+    return wide.transform(size, Image.MESH, mesh, Image.BILINEAR)
+
+
+class SkyWindow:
+    """A window to try a sky out in: the picture a player has of it, dragged to look around,
+    and everything that can be set. `shown` False builds it without putting it on the screen"""
+
+    SLIDERS = [
+        ('clouds', 'Clouds', 0.0, 1.0, 0.01),
+        ('cloud_scale', 'Cloud size (larger: smaller)', 0.5, 10.0, 0.1),
+        ('cloud_softness', 'Cloud softness', 0.02, 0.6, 0.01),
+        ('cloud_opacity', 'Cloud opacity', 0.0, 1.0, 0.01),
+        ('falloff', 'Horizon falloff', 0.2, 3.0, 0.05),
+        ('seed', 'Seed', 1, 500, 1),
+        ('segments', 'Segments', 16, 128, 4),
+    ]
+    COLOURS = [('zenith', 'Zenith'), ('horizon', 'Horizon'), ('ground', 'Ground'), ('cloud_colour', 'Clouds')]
+    VIEW = (640, 360)
+
+    def __init__(self, options, shown=True):
+        import tkinter as tk
+        from tkinter import ttk
+        self.tk, self.options = tk, options
+        self.yaw, self.pitch = 0.0, 20.0
+        self.panorama = self.picture = self.pending = self.drag = None
+        self.root = tk.Tk()
+        self.root.title('make_skybox')
+        if not shown:
+            self.root.withdraw()
+
+        left = ttk.Frame(self.root, padding=6)
+        left.grid(row=0, column=0, sticky='n')
+        self.view = tk.Label(left, cursor='fleur')
+        self.view.grid(row=0, column=0)
+        self.view.bind('<ButtonPress-1>', self.drag_start)
+        self.view.bind('<B1-Motion>', self.drag_move)
+        ttk.Label(left, text='Drag to look around. Below: the whole sky, unrolled.').grid(row=1, column=0, sticky='w')
+        self.strip = tk.Label(left)
+        self.strip.grid(row=2, column=0)
+
+        right = ttk.Frame(self.root, padding=6)
+        right.grid(row=0, column=1, sticky='n')
+        row = 0
+        ttk.Label(right, text='Preset').grid(row=row, column=0, sticky='w')
+        self.preset = tk.StringVar(value=options.preset)
+        ttk.OptionMenu(right, self.preset, options.preset, *sorted(PRESETS), command=self.preset_chosen).grid(
+            row=row, column=1, sticky='ew')
+        self.swatches = {}
+        for key, label in self.COLOURS:
+            row += 1
+            ttk.Label(right, text=label).grid(row=row, column=0, sticky='w')
+            swatch = tk.Button(right, width=12, relief='groove', command=lambda key=key: self.colour_chosen(key))
+            swatch.grid(row=row, column=1, sticky='ew', pady=1)
+            self.swatches[key] = swatch
+        self.scales = {}
+        for key, label, low, high, step in self.SLIDERS:
+            row += 1
+            ttk.Label(right, text=label).grid(row=row, column=0, sticky='w')
+            scale = tk.Scale(right, from_=low, to=high, resolution=step, orient='horizontal', length=220,
+                             command=lambda value, key=key: self.slider_moved(key, value))
+            scale.set(getattr(options, key))
+            scale.grid(row=row, column=1, sticky='ew')
+            self.scales[key] = scale
+        row += 1
+        into = f'Put into {os.path.basename(options.into)}' if options.into else 'Put into a level...'
+        ttk.Button(right, text=into, command=self.save_into).grid(row=row, column=0, columnspan=2, sticky='ew', pady=(8, 1))
+        row += 1
+        ttk.Button(right, text='Save as a sky of its own...', command=self.save_alone).grid(
+            row=row, column=0, columnspan=2, sticky='ew')
+        row += 1
+        ttk.Label(right, text='The same from the command line:').grid(row=row, column=0, columnspan=2, sticky='w', pady=(8, 0))
+        row += 1
+        self.command = tk.Text(right, width=44, height=6, wrap='word')
+        self.command.grid(row=row, column=0, columnspan=2)
+        row += 1
+        self.status = ttk.Label(right, text='', wraplength=330, justify='left')
+        self.status.grid(row=row, column=0, columnspan=2, sticky='w')
+        if options.texture:
+            self.status.config(text=f'The sky is the panorama {options.texture}: the colours and the clouds do nothing.')
+        self.show_colours()
+        self.repaint()
+
+    def show_colours(self):
+        for key, swatch in self.swatches.items():
+            colour = getattr(self.options, key)
+            dark = sum(colour) < 1.5
+            swatch.config(bg=hex_of(colour), activebackground=hex_of(colour), text=hex_of(colour),
+                          fg='white' if dark else 'black')
+
+    def preset_chosen(self, name):
+        apply_preset(self.options, name)
+        self.scales['clouds'].set(self.options.clouds)
+        self.show_colours()
+        self.repaint_soon()
+
+    def colour_chosen(self, key):
+        from tkinter import colorchooser
+        picked = colorchooser.askcolor(color=hex_of(getattr(self.options, key)), parent=self.root)[1]
+        if picked:
+            setattr(self.options, key, colour_of(picked))
+            self.show_colours()
+            self.repaint_soon()
+
+    def slider_moved(self, key, value):
+        value = int(float(value)) if key in ('seed', 'segments') else float(value)
+        if getattr(self.options, key) != value:
+            setattr(self.options, key, value)
+            self.repaint_soon()
+
+    def repaint_soon(self):
+        # not on every step of a slider that is being dragged
+        if self.pending:
+            self.root.after_cancel(self.pending)
+        self.pending = self.root.after(80, self.repaint)
+
+    def repaint(self):
+        self.pending = None
+        self.panorama = panorama_of(self.options)
+        self.show_view()
+        from PIL import ImageTk
+        self.strip_picture = ImageTk.PhotoImage(self.panorama.resize((self.VIEW[0], self.VIEW[0] // 4)))
+        self.strip.config(image=self.strip_picture)
+        self.command.delete('1.0', 'end')
+        self.command.insert('1.0', command_for(self.options))
+
+    def show_view(self):
+        from PIL import ImageTk
+        self.picture = ImageTk.PhotoImage(view_of(self.panorama, self.VIEW, self.yaw, self.pitch))
+        self.view.config(image=self.picture)
+
+    def drag_start(self, event):
+        self.drag = (event.x, event.y, self.yaw, self.pitch)
+
+    def drag_move(self, event):
+        if self.drag:
+            x, y, yaw, pitch = self.drag
+            self.yaw = (yaw - (event.x - x) * 0.25) % 360
+            self.pitch = min(89.0, max(-89.0, pitch + (event.y - y) * 0.25))
+            self.show_view()
+
+    def save(self, options):
+        try:
+            said = write_sky(options)
+        except (OSError, SystemExit, ValueError, KeyError) as error:
+            said = f'Not written: {error}'
+        print(said)
+        self.status.config(text=said)
+
+    def save_into(self):
+        from tkinter import filedialog
+        options = copy.copy(self.options)
+        if not options.into:
+            options.into = filedialog.askopenfilename(parent=self.root, title='The level to put the sky into',
+                                                      filetypes=[('binary glTF', '*.glb')])
+            if not options.into:
+                return
+            options.into_output = options.output = None
+        self.save(options)
+
+    def save_alone(self):
+        from tkinter import filedialog
+        options = copy.copy(self.options)
+        options.into = options.into_output = None
+        options.output = filedialog.asksaveasfilename(parent=self.root, title='Save the sky as', defaultextension='.glb',
+                                                      filetypes=[('binary glTF', '*.glb')])
+        if options.output:
+            self.save(options)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('output', nargs='?', help='the .glb to write (with --into: the level with the sky in it)')
     parser.add_argument('--into', metavar='LEVEL.glb', help='a level to put the sky into and around')
     parser.add_argument('-o', dest='into_output', metavar='OUT.glb', help='with --into: write here, not over the level')
     parser.add_argument('--list', action='store_true', help='list the presets')
+    parser.add_argument('--gui', action='store_true', help='a window to try the sky out in before it is saved')
+    parser.add_argument('--preview', metavar='PICTURE.png', help='write a picture of the sky, and no sky')
+    parser.add_argument('--look', type=float, nargs=2, default=[0.0, 20.0], metavar=('AROUND', 'UP'),
+                        help='with --preview: where the picture looks, in degrees (0 20)')
     parser.add_argument('--preset', choices=sorted(PRESETS), default='day')
     parser.add_argument('--zenith', type=colour_of, help='the colour straight up, #RRGGBB')
     parser.add_argument('--horizon', type=colour_of, help='the colour at the horizon')
@@ -316,38 +623,26 @@ def main():
         for name, (zenith, horizon, ground, cloud, share) in PRESETS.items():
             print(f'{name:9} zenith {zenith} horizon {horizon} ground {ground} clouds {cloud} over {share}')
         return
-    zenith, horizon, ground, cloud, share = PRESETS[options.preset]
-    options.zenith = options.zenith or colour_of(zenith)
-    options.horizon = options.horizon or colour_of(horizon)
-    options.ground = options.ground or colour_of(ground)
-    options.cloud_colour = options.cloud_colour or colour_of(cloud)
-    options.clouds = share if options.clouds is None else min(1.0, max(0.0, options.clouds))
+    given = [key for key in ('zenith', 'horizon', 'ground', 'cloud_colour', 'clouds') if getattr(options, key) is not None]
+    apply_preset(options, options.preset, keep=given)
+    options.clouds = min(1.0, max(0.0, options.clouds))
     options.segments = min(max(options.segments, 8), 250)
 
-    if options.into:
-        doc, binary = read_glb(options.into)
-        bounds = scene_bounds(doc)
-        if bounds and not options.centre:
-            options.centre = [(bounds[0][k] + bounds[1][k]) / 2 for k in range(3)]
-        if bounds and not options.radius:
-            options.radius = max(math.dist(bounds[0], bounds[1]) / 2 * options.margin, 50.0)
-        target = options.into_output or options.output or options.into
-    else:
-        if not options.output:
-            parser.error('name the .glb to write, or a level with --into')
-        doc, binary, target = {'asset': {'version': '2.0', 'generator': 'make_skybox.py'}}, bytearray(), options.output
-    options.centre = options.centre or [0.0, 0.0, 0.0]
-    options.radius = options.radius or 300.0
-
-    triangles = add_sky(doc, binary, options)
-    if options.into and os.path.abspath(target) == os.path.abspath(options.into):
-        kept = os.path.splitext(options.into)[0] + '.before_sky.glb'
-        if not os.path.exists(kept):
-            shutil.copyfile(options.into, kept)
-            print(f'the level as it was: {kept}')
-    write_glb(target, doc, binary)
-    print(f'{target}: a sky of {triangles} triangles, radius {options.radius:.0f} around '
-          f'{options.centre[0]:.1f} {options.centre[1]:.1f} {options.centre[2]:.1f}')
+    if options.gui or options.preview:
+        try:
+            import PIL  # noqa: F401
+        except ImportError:
+            sys.exit('the preview needs Pillow (pip install pillow)')
+    if options.preview:
+        view_of(panorama_of(options), (960, 540), options.look[0], options.look[1]).save(options.preview)
+        print(f'{options.preview}: the sky as a player sees it')
+        return
+    if options.gui:
+        SkyWindow(options).root.mainloop()
+        return
+    if not options.into and not options.output:
+        parser.error('name the .glb to write, or a level with --into, or try --gui')
+    print(write_sky(options))
 
 
 if __name__ == '__main__':
