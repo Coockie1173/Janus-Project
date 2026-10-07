@@ -100,6 +100,7 @@ const char* local_look_name(); //what the mouse does in that state, "view", "aim
 bool mouse_everywhere(); //cheat, mouse look in every player state
 void set_mouse_everywhere(bool on);
 void install_hosts(); //net.cpp
+void install_live_patch(); //the server's patch of the game's code is left out
 void install_mods(); //mods.cpp
 struct ModLevel { uint32_t hash; std::string name; }; //a level among the mods: its file's hash and name
 const std::vector<ModLevel>& mod_levels();

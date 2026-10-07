@@ -66,6 +66,7 @@ PPCFunc orig_main = nullptr;
 
 void install() {
     install_hosts();
+    install_live_patch();
     install_mods();
     install_mods_menu();
     install_pictures();
