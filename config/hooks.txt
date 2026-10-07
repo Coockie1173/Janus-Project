@@ -77,3 +77,5 @@ ge_level_picture       # a level select's picture is set: a mod level shows its 
 ge_lobby_picture       # a network game's map picture is looked up by name: a mod level has its own (port/pictures.cpp)
 ge_session_export      # a host's session goes into the record it is advertised with: after Connect to WFC Modded its version is the map pool's (port/modmenu.cpp)
 ge_find_query          # a search's query for the server is made: the same version is asked for (port/modmenu.cpp)
+ge_object_step         # a physics object's step: one whose place isn't a number is left out (port/sweep.cpp)
+ge_halt                # the game's halt, a loop on itself: the game ends with a report (port/sweep.cpp)
