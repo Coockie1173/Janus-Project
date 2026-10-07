@@ -134,11 +134,11 @@ def make_sphere(options):
         for column in range(across):
             a = row * (across + 1) + column
             b, c, d = a + 1, a + across + 1, a + across + 2
-            # counter clockwise from inside
+            # counter clockwise from inside: the game draws a triangle from its front only
             if row > 0:
-                indices += [a, b, c]
+                indices += [a, c, b]
             if row < down - 1:
-                indices += [b, d, c]
+                indices += [b, c, d]
     return positions, colours, uvs, indices
 
 
@@ -259,7 +259,7 @@ def add_sky(doc, binary, options):
     index_data = struct.pack('<%d%s' % (len(indices), 'I' if wide else 'H'), *indices)
     index_accessor = accessor(index_data, 34963, 5125 if wide else 5123, 'SCALAR', len(indices))
 
-    material = {'name': 'sky_nocollide', 'doubleSided': True,
+    material = {'name': 'sky_nocollide', 'doubleSided': False,
                 'pbrMetallicRoughness': {'baseColorFactor': [1, 1, 1, 1], 'metallicFactor': 0, 'roughnessFactor': 1}}
     if options.texture:
         kind = {'.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg'}.get(
