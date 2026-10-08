@@ -73,6 +73,8 @@ draw_delayed?          # a mesh glued to the eye is widened with the field of vi
 ge_geofile_onload      # a file is given its memory: one that gets none is logged (port/mods.cpp)
 ge_pick_next_maps      # a network game picks its next two maps: with a short map list it gives up on them being new ones (port/modmenu.cpp)
 ge_level_set           # the level manager is told its level: a mod level gets a level row to stand in, in a multiplayer game (port/mods.cpp)
+ge_team_mode_reset     # a team gamemode starts over: a mod level's second team gets the name of the map that has its characters (port/mods.cpp)
+ge_text_find           # a text's row is looked up: a mod level's own team names in place of the game's (port/mods.cpp)
 ge_spawn_points_setup  # a level spawn points are gathered: one too far above the floor is put on it, one with no floor is logged (port/mods.cpp)
 ge_level_picture       # a level select's picture is set: a mod level shows its own (port/pictures.cpp)
 ge_lobby_picture       # a network game's map picture is looked up by name: a mod level has its own (port/pictures.cpp)

@@ -211,7 +211,23 @@ void ReadFolder(const std::filesystem::path& dir, uint32_t modes, std::vector<Mo
 //map's gamemodes): a line each of team0, team1, hero0, hero1 with a character's name as the game
 //shows it (a team: the set that character is in) or a hash. then it gets a copy of the row
 //with those in it
-PPCFunc orig_level_set = nullptr, is_multiplayer = nullptr, level_alloc = nullptr;
+//
+//the teams' names aren't the row's. the first team is MI6 (text 43001487) and the other goes by
+//a number, 0 Russians (43001488), 1 Janus (43001486), 2 Zukovsky (43001489), which
+//ge_team_mode_reset gets from the level's hash (fn_8026F640: Archives 0, Railyard 1,
+//Zukovsky's 2, any other level 0) into the gamemode's +0xF7C and 805E8D40. the hud, the score
+//table and the lobby pick the text by it, and the other team's shouts go by it too. a mod level
+//gets the number of the map that has its second team's set (Two-Two's and Five-One's are
+//Janus, Vincent's Zukovsky), and `name0` and `name1` in the .txt are texts of its own, which
+//ge_text_find hands out in place of those four
+PPCFunc orig_level_set = nullptr, is_multiplayer = nullptr, level_alloc = nullptr, orig_team_mode_reset = nullptr, orig_text_find = nullptr;
+const uint32_t kCurrentLevel = 0x805D1804, kTeamKind = 0x805E8D40, kModeTeamKind = 0xF7C;
+const uint32_t kTextJanus = 0x43001486, kTextMi6 = 0x43001487, kTextZukovsky = 0x43001489;
+const uint32_t kTextHead = 0x10, kTextChars = 0x4, kTextEnd = 0x8, kTextWord = 0xC, kNameLength = 31;
+const uint32_t kKindSets[][2] = { { 0x4D000032, 1 }, { 0x4D000033, 1 }, { 0x4D00002F, 2 } };
+uint32_t g_name_text[2] = {}; //a text row and its characters for each team's name, the game's memory
+bool g_named[2] = {}; //the loaded mod level names that team itself
+uint32_t g_kind_level = 0, g_kind = 0; //the mod level a multiplayer game is in, and its second team's number
 const char* const kCastKeys[4] = { "team0", "team1", "hero0", "hero1" };
 const uint32_t kRowCast[4] = { 0xA4, 0xAC, 0xA8, 0xB0 };
 const uint32_t kCharacters = 0x805D1598, kCharacterCount = 0x8, kCharacterRows = 0xC, kCharacterSize = 0x44, kCharacterSet = 0x4, kCharacterName = 0x8;
@@ -257,8 +273,28 @@ uint32_t Character(const PPCContext& c, const std::string& name, bool set)
 	return 0;
 }
 
+//a team's name as the game's text: UTF-8 into the characters behind a text row of our own
+void SetName(int team, const std::string& name)
+{
+	const uint32_t row = g_name_text[team], chars = row + kTextHead;
+	uint32_t length = 0;
+	for (size_t i = 0; i < name.size() && length < kNameLength;)
+	{
+		const uint8_t lead = (uint8_t)name[i];
+		const int more = lead >= 0xF0 ? 3 : lead >= 0xE0 ? 2 : lead >= 0xC0 ? 1 : 0;
+		uint32_t code = more == 0 ? lead : lead & (0x3F >> more);
+		for (int k = 1; k <= more && i + k < name.size(); ++k) code = (code << 6) | ((uint8_t)name[i + k] & 0x3F);
+		i += more + 1;
+		st16(chars + length++ * 2, code < 0x10000 ? (uint16_t)code : '?');
+	}
+	st16(chars + length * 2, 0);
+	st32(row + kTextChars, kTextHead - kTextChars);
+	st32(row + kTextEnd, kTextHead - kTextEnd + length * 2);
+	st32(row + kTextWord, 0xFFFFFFFF);
+}
+
 //what the level's .txt says of the four, 0 for what it leaves to the row that stands in
-bool ReadCast(const PPCContext& c, const ModLevel& level, uint32_t cast[4])
+bool ReadCast(const PPCContext& c, const ModLevel& level, uint32_t cast[4], std::string names[2])
 {
 	std::ifstream file(mod_side_file(level, ".txt"));
 	if (!file) return false;
@@ -278,6 +314,12 @@ bool ReadCast(const PPCContext& c, const ModLevel& level, uint32_t cast[4])
 			else rt_log("goldeneye: mod level %s: the game has no character named %s for %s", level.name.c_str(), name.c_str(), kCastKeys[i]);
 			any |= found != 0;
 		}
+		for (int i = 0; i < 2; ++i)
+		{
+			if (Lower(line.substr(0, 5)) != (i == 0 ? "name0" : "name1")) continue;
+			names[i] = Trimmed(line.substr(5));
+			rt_log("goldeneye: mod level %s: team %d is called %s in a network game", level.name.c_str(), i, names[i].c_str());
+		}
 	}
 	return any;
 }
@@ -286,11 +328,14 @@ void LevelSet(PPCContext& c)
 {
 	const uint32_t levels = c.r[3], hash = c.r[4];
 	orig_level_set(c);
+	g_kind_level = 0;
+	g_named[0] = g_named[1] = false;
 	if (!guest_ptr(levels) || ld32(levels + kLevelRow) != 0) return;
 	const auto level = std::find_if(g_files.begin(), g_files.end(), [&](const ModLevel& m) { return m.hash == hash; });
 	if (level == g_files.end()) return;
 	uint32_t cast[4] = {};
-	const bool ownCast = ReadCast(c, *level, cast);
+	std::string names[2];
+	const bool ownCast = ReadCast(c, *level, cast, names);
 	PPCContext call = c;
 	uint32_t stack = c.r[1], frame = stack - 0x40;
 	st32(frame, stack);
@@ -316,7 +361,45 @@ void LevelSet(PPCContext& c)
 	}
 	st32(levels + kLevelRow, row);
 	st32(levels + kLevelRow2, RowOf(ld32(levels + kLevelRows2), ld32(levels + kLevelRow2Count), kLevelRow2Size, kStandIn));
+	//the second team's number, here for a gamemode that is already there and in TeamModeReset for one made later
+	g_kind = 0;
+	for (const auto& set : kKindSets)
+		if (ld32(row + kRowCast[1]) == set[0]) g_kind = set[1];
+	g_kind_level = hash;
+	st32(kTeamKind, g_kind);
+	for (int i = 0; i < 2; ++i)
+	{
+		if (names[i].empty() || !level_alloc) continue;
+		if (!g_name_text[i])
+		{
+			call.r[1] = frame;
+			call.r[3] = kTextHead + (kNameLength + 1) * 2; call.r[4] = 0;
+			level_alloc(call);
+			g_name_text[i] = guest_ptr(call.r[3]) ? call.r[3] : 0;
+		}
+		if (!g_name_text[i]) continue;
+		SetName(i, names[i]);
+		g_named[i] = true;
+	}
 	rt_log("goldeneye: mod level %08X in a multiplayer game: it has no row in the game's level table, %08X's stands in", hash, kStandIn);
+}
+
+void TeamModeReset(PPCContext& c)
+{
+	const uint32_t mode = c.r[3];
+	orig_team_mode_reset(c);
+	if (!g_kind_level || ld32(kCurrentLevel) != g_kind_level || !guest_ptr(mode)) return;
+	st32(mode + kModeTeamKind, g_kind);
+	st32(kTeamKind, g_kind);
+}
+
+void TextFind(PPCContext& c)
+{
+	const uint32_t hash = c.r[4];
+	const int team = hash == kTextMi6 ? 0 : 1;
+	if (hash < kTextJanus || hash > kTextZukovsky || !g_named[team] || ld32(kCurrentLevel) != g_kind_level) { orig_text_find(c); return; }
+	st32(g_name_text[team], hash);
+	c.r[3] = g_name_text[team];
 }
 
 //a multiplayer spawn point has to have floor within a metre below it: ge_spawn_points_setup
@@ -397,6 +480,8 @@ void install_mods()
 {
 	orig_onload = ppc_hook("ge_geofile_onload", OnLoad);
 	orig_level_set = ppc_hook("ge_level_set", LevelSet);
+	orig_team_mode_reset = ppc_hook("ge_team_mode_reset", TeamModeReset);
+	orig_text_find = ppc_hook("ge_text_find", TextFind);
 	level_alloc = ppc_lookup(kGameAlloc);
 	is_multiplayer = ppc_lookup(kIsMultiplayer);
 	orig_spawn_setup = ppc_hook("ge_spawn_points_setup", SpawnPointsSetup);

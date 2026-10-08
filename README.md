@@ -149,8 +149,10 @@ team0 = Jones
 team1 = Oddjob
 hero0 = Bond
 hero1 = Zukovsky
+name0 = Agents
+name1 = Villains
 ```
-A team is one of the game's sets of four, named by any character in it as the game shows the name (`Jones` is Jones, Davis, Smyth and Adams; `Oddjob` is him, Jaws, Blofeld and Scaramanga; `Pvt. Gurov`, `Red-one`, `Two-Two`, `Five-One`, `Agent Zero`, `Sgt. Morozov`, `Sgt. Glebov`, `Vincent`, `Dr. No` are the others). `hero0` and `hero1` are each team's hero in Heroes, one character. Leave a line out and that one stays Archives'. The log says what it made of each line when the level loads. Split screen isn't touched, everyone picks their own there.
+A team is one of the game's sets of four, named by any character in it as the game shows the name (`Jones` is Jones, Davis, Smyth and Adams; `Oddjob` is him, Jaws, Blofeld and Scaramanga; `Pvt. Gurov`, `Red-one`, `Two-Two`, `Five-One`, `Agent Zero`, `Sgt. Morozov`, `Sgt. Glebov`, `Vincent`, `Dr. No` are the others). `hero0` and `hero1` are each team's hero in Heroes, one character. `name0` and `name1` are what the two teams are called on the HUD, in the lobby and in the scores, any text up to 31 characters. Without them the first team is MI6, as it is on every map of the game, and the second is called after its characters the way the game's maps do it: Janus for Two-Two's and Five-One's, Zukovsky for Vincent's, Russians for the rest (its shouts follow that too). Leave a line out and that one stays Archives'. The log says what it made of each line when the level loads. Split screen isn't touched, everyone picks their own there.
 
 A level is just the hash of its file, so
 ```sh
