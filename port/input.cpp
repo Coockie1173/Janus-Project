@@ -404,6 +404,7 @@ void controller_update(PPCContext& c) {
         }
     }
     orig_controller_update(c);
+    if (ctrl != g_local_ctrl && !again && guest_ptr(player)) net_trace_controller(ctrl, player);
     if (ctrl == g_local_ctrl && frame == g_local_frame && !again && !is_tank(ctrl)) { //a tank has other things where the aim's blend is
         ads_fov_apply(ctrl);
         aim_lock_frame(ctrl);
