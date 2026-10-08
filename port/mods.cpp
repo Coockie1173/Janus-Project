@@ -406,7 +406,9 @@ void TextFind(PPCContext& c)
 //traces from 0.3 above each 1.3 down and, when one hits nothing, stops the game in an endless
 //loop at its end ("SpawnPoint @ ... is not in the map", which the release build doesn't print).
 //before it runs, a spawn point that hangs higher is put on the floor below it, and one with no
-//floor at all is logged, so the level's maker knows why the game stands still
+//floor at all is logged, so the level's maker knows why the game stands still. a spawn point
+//right over the line between two triangles of a floor falls through between them (a trace along
+//a shared edge hits neither): it is moved a little to the side first
 PPCFunc orig_spawn_setup = nullptr, make_ray = nullptr, trace_ray = nullptr;
 const uint32_t kObjects = 0x805F4D94, kObjectNext = 0x4, kObjectPlace = 0x10, kObjectClass = 0x5C, kObjectKind = 0x60;
 const uint32_t kSpawnClass = 0x1E000003, kMultiplayerSpawn = 0x1F000098;
@@ -414,6 +416,8 @@ const uint32_t kWorld = 0x805F4CCC, kMakeRay = 0x802D0250, kTraceRay = 0x8032E70
 const uint32_t kRayHit = 0xD4, kRayFraction = 0xA0; //of the ray: a byte, and how far along it
 const float kTraceAbove = 0.3f, kTraceDown = 1.3f; //the game's own
 const float kFarDown = 200.0f, kOnFloor = 0.05f;
+const float kAside = 0.03f;
+const float kAsides[][2] = { { 1.0f, 0.4f }, { -0.4f, 1.0f }, { -1.0f, -0.4f }, { 0.4f, -1.0f } };
 
 //how far below (x, y, z) the world is hit going straight down by reach, negative when it isn't
 float FloorBelow(const PPCContext& c, float x, float y, float z, float reach)
@@ -441,9 +445,20 @@ void SpawnPointsSetup(PPCContext& c)
 		for (uint32_t object = ld32(kObjects); guest_ptr(object) && guard < 100000; object = ld32(object + kObjectNext), ++guard)
 		{
 			if (ld32(object + kObjectClass) != kSpawnClass || ld32(object + kObjectKind) != kMultiplayerSpawn) continue;
-			const float x = ldf(object + kObjectPlace), y = ldf(object + kObjectPlace + 4), z = ldf(object + kObjectPlace + 8);
+			float x = ldf(object + kObjectPlace), y = ldf(object + kObjectPlace + 4), z = ldf(object + kObjectPlace + 8);
 			if (FloorBelow(c, x, y + kTraceAbove, z, kTraceDown) >= 0.0f) continue;
-			const float far = FloorBelow(c, x, y + kTraceAbove, z, kFarDown);
+			float far = FloorBelow(c, x, y + kTraceAbove, z, kFarDown);
+			for (const auto& aside : kAsides)
+			{
+				if (far >= 0.0f) break;
+				const float nx = x + aside[0] * kAside, nz = z + aside[1] * kAside;
+				far = FloorBelow(c, nx, y + kTraceAbove, nz, kFarDown);
+				if (far < 0.0f) continue;
+				rt_log("goldeneye: the multiplayer spawn point at %.2f %.2f %.2f is over a line between two triangles of the floor: moved %.2f aside", x, y, z, kAside);
+				stf(object + kObjectPlace, nx); stf(object + kObjectPlace + 8, nz);
+				x = nx; z = nz;
+			}
+			if (far >= 0.0f && far <= kTraceDown) continue;
 			if (far < 0.0f)
 			{
 				rt_log("goldeneye: the multiplayer spawn point at %.2f %.2f %.2f has no floor below it: the game stops on such a level, on purpose", x, y, z);
