@@ -599,6 +599,32 @@ template <int I> void look_sens(PPCContext& c) {
     for (int i = 0; i < 4; ++i) st32(kSensAddr[i], saved[i]);
 }
 
+//what the look update turns the stick with: ge_look_settings (the controller's vtable +0x1D4)
+//fills ten values, the sensitivities across and up and down at +0x18 and +0x1C
+//hip fire copies the ones ge_look_sens keeps, aiming the ones of ge_look_sens_ads times a
+//factor that goes by the angle the view is drawn with (+0x71C, between 805E04A8 and 805E04AC),
+//and a weapon of type 4B200006 aimed (fn_8014C220) takes a table of its own at 805E0458
+//so through a scope the mouse on the stick turned at the table's sensitivity, not kStickSens
+//the two are kStickSens here, how far a zoomed view turns is the Aim Sensitivity's alone
+//as in the direct mode
+//0 stays 0, that's the game turning an axis off
+const uint32_t kCtrlFovDrawn = 0x71C; //the angle the view is drawn with (fov.cpp)
+PPCFunc orig_look_settings = nullptr;
+void look_settings(PPCContext& c) {
+    uint32_t ctrl = c.r[3], out = c.r[4];
+    orig_look_settings(c);
+    if (!g_stick_took || !guest_ptr(out)) return;
+    static const bool trace = std::getenv("GE_TRACEAIM") != nullptr;
+    static uint32_t seen[2] = {};
+    if (trace && (ld32(out + 0x18) != seen[0] || ld32(out + 0x1C) != seen[1])) { //what the game would have turned with
+        seen[0] = ld32(out + 0x18); seen[1] = ld32(out + 0x1C);
+        rt_log("aim: frame %u the game's look sensitivities %.3f across, %.3f up and down, aim held %d, drawn at %.1f degrees", ld32(kFrameCount),
+               ldf(out + 0x18), ldf(out + 0x1C), ld8(ctrl + 0xD00), ldf(ctrl + kCtrlFovDrawn));
+    }
+    for (uint32_t at : {out + 0x18, out + 0x1C})
+        if (ldf(at) > 0) stf(at, kStickSens);
+}
+
 void classic_filter(int chan, ClassicState& s) {
     if (chan != 0) return;
     s.buttons |= settings_buttons();
@@ -628,6 +654,8 @@ void install_mouse() {
     orig_look_sens[0] = ppc_hook("ge_look_sens", look_sens<0>);
     orig_look_sens[1] = ppc_hook("ge_look_sens_ads", look_sens<1>);
     if (!orig_look_sens[0] || !orig_look_sens[1]) rt_die("goldeneye: the sensitivity readers are not hooked in this build");
+    orig_look_settings = ppc_hook("ge_look_settings", look_settings);
+    if (!orig_look_settings) rt_die("goldeneye: the look settings are not hooked in this build");
     orig_player_modifiers = ppc_hook("ge_player_modifiers", player_modifiers);
     if (!orig_player_modifiers) rt_die("goldeneye: the pitch limit's other reader is not hooked in this build");
     orig_sprint[0] = ppc_hook("ge_sprint_update", sprint_read<0>);
