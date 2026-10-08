@@ -143,6 +143,15 @@ Modded games are kept apart from everyone else's: the game's version number for 
 
 A `.png` with the level's name next to it, in the same folder (so `mt_yard.png` for `mt_yard.edb`), is its picture in the menus (a level in a gamemode's folder without one takes `mods/mt_yard.png`, so one picture does for all of a map's gamemodes): beside the list in Extras > Mods, in Conflict's map list, and for the two maps a network game offers. Any size works, the middle gets cut to the panel's shape (0.85 times as wide as high) and shown at 256 x 256. Can't be bothered making one? Press F12 while in a mod's level and it'll make that `.png` from whatever is on screen: black and white, without the HUD, the crosshair and the gun.
 
+Online the game dresses the two teams by the map, and a mod level gets Archives' characters. A `mt_yard.txt` next to the level (or in `mods/` itself, for all of the map's gamemodes) picks others:
+```
+team0 = Jones
+team1 = Oddjob
+hero0 = Bond
+hero1 = Zukovsky
+```
+A team is one of the game's sets of four, named by any character in it as the game shows the name (`Jones` is Jones, Davis, Smyth and Adams; `Oddjob` is him, Jaws, Blofeld and Scaramanga; `Pvt. Gurov`, `Red-one`, `Two-Two`, `Five-One`, `Agent Zero`, `Sgt. Morozov`, `Sgt. Glebov`, `Vincent`, `Dr. No` are the others). `hero0` and `hero1` are each team's hero in Heroes, one character. Leave a line out and that one stays Archives'. The log says what it made of each line when the level loads. Split screen isn't touched, everyone picks their own there.
+
 A level is just the hash of its file, so
 ```sh
 GE_LEVEL=01810201 ./launch.sh

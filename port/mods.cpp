@@ -14,6 +14,7 @@
 //geometry once, mg_yard.edb in the mods folder, and a small mt_yard.edb in each gamemode's
 //folder with that gamemode's triggers, one of which loads the geometry
 //a .png with a level's name is its picture in the menus (port/pictures.cpp)
+//a .txt with a level's name says who the players of a network game are in it (LevelSet)
 //
 //GE_MODS=DIR the folder, every .edb in it and in its gamemode folders (mods in the game's folder by default)
 //GE_TRACEFILES=1 log every file the game gives memory to, with its size
@@ -22,6 +23,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -199,7 +201,22 @@ void ReadFolder(const std::filesystem::path& dir, uint32_t modes, std::vector<Mo
 //a level of the mods folder isn't in the game's level table. a single player game does without
 //the row, a multiplayer game reads the players' characters out of it without asking (fn_8000F8E0,
 //a crash at 000000A4). there the row of one of the game's own multiplayer maps stands in
-PPCFunc orig_level_set = nullptr, is_multiplayer = nullptr;
+//
+//the row also says who the players of a network game are: a set of four characters for each
+//team (+0xA4, +0xAC: Facility has Red-one's and Pvt. Gurov's) and each team's hero for Heroes
+//(+0xA8, +0xB0: Bond and Ourumov). fn_8000F8E0 looks each up in the character spreadsheet
+//(805D1598: +8 how many, +0xC the rows, 0x44 bytes each: the character's hash, its set, its
+//name's text) and takes a set's characters in turn. in split screen everyone picks their own
+//a mod level can name them in mt_yard.txt (next to it, or in the mods folder for all of the
+//map's gamemodes): a line each of team0, team1, hero0, hero1 with a character's name as the game
+//shows it (a team: the set that character is in) or a hash. then it gets a copy of the row
+//with those in it
+PPCFunc orig_level_set = nullptr, is_multiplayer = nullptr, level_alloc = nullptr;
+const char* const kCastKeys[4] = { "team0", "team1", "hero0", "hero1" };
+const uint32_t kRowCast[4] = { 0xA4, 0xAC, 0xA8, 0xB0 };
+const uint32_t kCharacters = 0x805D1598, kCharacterCount = 0x8, kCharacterRows = 0xC, kCharacterSize = 0x44, kCharacterSet = 0x4, kCharacterName = 0x8;
+const uint32_t kNoSet = 0xFFFFFFFF, kGameAlloc = 0x803428C0;
+uint32_t g_cast_row = 0; //the copy, the game's memory
 const uint32_t kLevelRow = 0x1C, kLevelRowCount = 0x10, kLevelRows = 0x14, kLevelRowSize = 0xB4;
 const uint32_t kLevelRow2 = 0x34, kLevelRow2Count = 0x28, kLevelRows2 = 0x2C, kLevelRow2Size = 0x74;
 const uint32_t kStandIn = 0x01A00003; //Archives, Conflict
@@ -213,12 +230,67 @@ uint32_t RowOf(uint32_t rows, uint32_t count, uint32_t size, uint32_t hash)
 	return 0;
 }
 
+std::string Lower(std::string text)
+{
+	std::transform(text.begin(), text.end(), text.begin(), [](unsigned char ch) { return char(std::tolower(ch)); });
+	return text;
+}
+
+std::string Trimmed(const std::string& text)
+{
+	const size_t from = text.find_first_not_of(" \t\r\n="), to = text.find_last_not_of(" \t\r\n");
+	return from == std::string::npos ? std::string() : text.substr(from, to - from + 1);
+}
+
+//a character's hash by the name the game shows, or its set's: the first with that name
+uint32_t Character(const PPCContext& c, const std::string& name, bool set)
+{
+	if (name.size() == 8 && name.find_first_not_of("0123456789abcdefABCDEF") == std::string::npos) return (uint32_t)std::strtoul(name.c_str(), nullptr, 16);
+	const uint32_t count = ld32(kCharacters + kCharacterCount), rows = ld32(kCharacters + kCharacterRows);
+	if (!guest_ptr(rows) || count > 4096) return 0;
+	for (uint32_t i = 0; i < count; ++i)
+	{
+		const uint32_t row = rows + i * kCharacterSize;
+		if (Lower(game_text(c, ld32(row + kCharacterName))) != Lower(name)) continue;
+		return set && ld32(row + kCharacterSet) != kNoSet ? ld32(row + kCharacterSet) : ld32(row);
+	}
+	return 0;
+}
+
+//what the level's .txt says of the four, 0 for what it leaves to the row that stands in
+bool ReadCast(const PPCContext& c, const ModLevel& level, uint32_t cast[4])
+{
+	std::ifstream file(mod_side_file(level, ".txt"));
+	if (!file) return false;
+	bool any = false;
+	std::string line;
+	while (std::getline(file, line))
+	{
+		line = Trimmed(line);
+		for (int i = 0; i < 4; ++i)
+		{
+			const size_t length = std::strlen(kCastKeys[i]);
+			if (Lower(line.substr(0, length)) != kCastKeys[i]) continue;
+			const std::string name = Trimmed(line.substr(length));
+			const uint32_t found = Character(c, name, i < 2);
+			if (found) cast[i] = found;
+			if (found) rt_log("goldeneye: mod level %s: %s is %s (%08X) in a network game", level.name.c_str(), kCastKeys[i], name.c_str(), cast[i]);
+			else rt_log("goldeneye: mod level %s: the game has no character named %s for %s", level.name.c_str(), name.c_str(), kCastKeys[i]);
+			any |= found != 0;
+		}
+	}
+	return any;
+}
+
 void LevelSet(PPCContext& c)
 {
 	const uint32_t levels = c.r[3], hash = c.r[4];
 	orig_level_set(c);
 	if (!guest_ptr(levels) || ld32(levels + kLevelRow) != 0) return;
-	if (std::none_of(g_files.begin(), g_files.end(), [&](const ModLevel& m) { return m.hash == hash; })) return;
+	const auto level = std::find_if(g_files.begin(), g_files.end(), [&](const ModLevel& m) { return m.hash == hash; });
+	if (level == g_files.end()) return;
+	uint32_t cast[4] = {};
+	const bool ownCast = ReadCast(c, *level, cast);
 	PPCContext call = c;
 	uint32_t stack = c.r[1], frame = stack - 0x40;
 	st32(frame, stack);
@@ -226,8 +298,22 @@ void LevelSet(PPCContext& c)
 	if (!is_multiplayer) return;
 	is_multiplayer(call);
 	if ((call.r[3] & 0xFF) == 0) return;
-	const uint32_t row = RowOf(ld32(levels + kLevelRows), ld32(levels + kLevelRowCount), kLevelRowSize, kStandIn);
+	uint32_t row = RowOf(ld32(levels + kLevelRows), ld32(levels + kLevelRowCount), kLevelRowSize, kStandIn);
 	if (!row) return;
+	if (ownCast && !g_cast_row && level_alloc)
+	{
+		call.r[1] = frame;
+		call.r[3] = kLevelRowSize; call.r[4] = 0;
+		level_alloc(call);
+		g_cast_row = guest_ptr(call.r[3]) ? call.r[3] : 0;
+	}
+	if (ownCast && g_cast_row)
+	{
+		std::memcpy(PPC_MEM(g_cast_row), PPC_MEM(row), kLevelRowSize);
+		for (int i = 0; i < 4; ++i)
+			if (cast[i]) st32(g_cast_row + kRowCast[i], cast[i]);
+		row = g_cast_row;
+	}
 	st32(levels + kLevelRow, row);
 	st32(levels + kLevelRow2, RowOf(ld32(levels + kLevelRows2), ld32(levels + kLevelRow2Count), kLevelRow2Size, kStandIn));
 	rt_log("goldeneye: mod level %08X in a multiplayer game: it has no row in the game's level table, %08X's stands in", hash, kStandIn);
@@ -297,10 +383,21 @@ const std::vector<ModLevel>& mod_levels() { return g_levels; }
 const std::vector<ModLevel>& mod_files() { return g_files; }
 const std::string& mods_folder() { return g_folder; }
 
+//next to the mod's file, in whichever folder that is. a level in a gamemode's folder that has
+//none there has the one in the mods folder itself: one for the map, whichever gamemode
+std::string mod_side_file(const ModLevel& mod, const char* extension)
+{
+	const std::filesystem::path next = std::filesystem::path(mod.path).replace_extension(extension);
+	std::error_code error;
+	if (mod.modes == 0 || g_folder.empty() || std::filesystem::exists(next, error)) return next.string();
+	return (std::filesystem::path(g_folder) / next.filename()).string();
+}
+
 void install_mods()
 {
 	orig_onload = ppc_hook("ge_geofile_onload", OnLoad);
 	orig_level_set = ppc_hook("ge_level_set", LevelSet);
+	level_alloc = ppc_lookup(kGameAlloc);
 	is_multiplayer = ppc_lookup(kIsMultiplayer);
 	orig_spawn_setup = ppc_hook("ge_spawn_points_setup", SpawnPointsSetup);
 	make_ray = ppc_lookup(kMakeRay);

@@ -114,6 +114,8 @@ const std::vector<ModLevel>& mod_files(); //every mod
 const std::string& mods_folder(); //empty when there's none
 void install_mods_menu(); //modmenu.cpp, after install_mods
 void mods_menu_frame(PPCContext& c); //once a frame, on the game's thread
+std::string game_text(const PPCContext& c, uint32_t hash); //prompts.cpp: one of the game's texts, empty when it has none
+std::string mod_side_file(const ModLevel& mod, const char* extension); //mods.cpp: mt_yard.png for mt_yard.edb, next to it or in the mods folder
 uint32_t mods_menu_text(uint32_t hash); //the characters of one of the Mods menu's texts, 0 for any other
 std::string mod_shown_name(const std::string& file); //a mod level's name in the menus, from its file's
 void install_pictures(); //pictures.cpp, after install_mods

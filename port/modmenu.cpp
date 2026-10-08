@@ -56,6 +56,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <map>
 #include <string>
@@ -308,6 +309,10 @@ uint32_t PoolVersion()
 			if (found == sums.end()) found = sums.emplace(pMap->path, FileSum(pMap->path)).first;
 			Mix32(sum, pMap->hash);
 			Mix32(sum, found->second);
+			//who the players are in it
+			const std::string cast = mod_side_file(*pMap, ".txt");
+			std::error_code error;
+			if (std::filesystem::exists(cast, error)) Mix32(sum, FileSum(cast));
 		}
 	}
 	//what isn't a level goes in too: the geometry a map's levels load, a file in place of the disc's

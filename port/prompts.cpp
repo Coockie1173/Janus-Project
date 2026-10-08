@@ -412,6 +412,13 @@ void TextMsg(PPCContext& c)
 
 } //namespace
 
+std::string game_text(const PPCContext& c, uint32_t hash)
+{
+	if (!text_msg) return {};
+	const uint32_t text = TextOf(c, hash);
+	return text ? Readable(text) : std::string();
+}
+
 void install_prompts()
 {
 	g_trace = std::getenv("GE_TRACETEXT") != nullptr;
