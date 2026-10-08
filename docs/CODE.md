@@ -760,6 +760,10 @@ and zero, `BoxInRect`), `r13 - 0x4CE8` and `r13 - 0x4CE4` (the screen's offset).
 (`ios_net_add_host`) so the game's server names go to a community server, and turns on the
 network log with `GE_NETLOG`.
 
+`install_command_time()` hooks `bd_command_set_time` (bdUserCommand::setTimeInSeconds): a
+player's command carries the frame's time as a byte of whole milliseconds, `SetCommandTime`
+keeps what that cuts off for the next frame's command so the time adds up at any frame rate.
+
 ### overlay.cpp, dmw.cpp, dmw.h
 
 The debug overlay (F3), drawn with Dear ImGui on the renderer's thread through

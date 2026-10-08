@@ -85,3 +85,4 @@ ge_object_step         # a physics object's step: one whose place isn't a number
 ge_halt                # the game's halt, a loop on itself: the game ends with a report (port/sweep.cpp)
 ge_camera_sway         # the camera's sway is two sines of the frame count: above 30 of the time in console frames (port/shake.cpp)
 _APPLYING_PATCH_       # the server's live patch is poked into memory: left out, recompiled code can't take it (port/net.cpp)
+bd_command_set_time    # a player's command gets the frame's time in whole milliseconds: what's cut off goes into the next (port/net.cpp)

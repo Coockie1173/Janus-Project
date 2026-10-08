@@ -1,6 +1,7 @@
 //online: the hosts file for the game's servers, the live patch that isn't applied, how far
-//up and down a player's pitch goes to the others
+//up and down a player's pitch goes to the others, the time a player's step is sent with
 #include "ge.h"
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 
@@ -72,6 +73,70 @@ void net_frame()
 	if (range != said && std::getenv("GE_TRACE"))
 		rt_log("goldeneye: online: a player's pitch goes to the others within %.0f degrees", range * 57.29578f);
 	said = range;
+}
+
+//in a network game a player isn't stepped by the frame's time but by its command's: every
+//frame bdClient (fn_803DD6E0, the command period at +0x7C is 0) makes a bdUserCommand for each
+//player of this console and gives it the frame's time, bdUserCommand::setTimeInSeconds
+//(803EE270, "command time > 255 ms"): a byte of whole milliseconds, what's over is cut off.
+//the byte goes to the host, and here and there the player's time step (+0x578) is the byte
+//again (fn_80108350 reads it with fn_803EE30C). at 30 a frame is 33 of 33.33, at 144 it is 6
+//of 6.94: the player goes 14% slower than the game's clock. the others step their copy of the
+//player by their own frame's time and blend it towards what the host sends every 0.1 s
+//(bdInterpolationData, fn_803F3014), so it runs ahead and is drawn back, ten times a second
+//so what was cut off is kept for the next frame's command: 7 7 7 ... 6, and the time adds up
+//the same byte as before on the wire, a console reads it as it always did
+namespace
+{
+
+const uint32_t kCommandTime = 0x4; //the byte in a bdUserCommand
+const double kMaxCommandMs = 255.0;
+
+//(f1 seconds, the command)
+void SetCommandTime(PPCContext& c)
+{
+	static uint32_t frame = ~0u;
+	static double left = 0; //milliseconds not sent yet, under 1
+	static uint8_t sent = 0;
+	static double asked = 0, given = 0; //since the last line of the log
+	static uint32_t commands = 0;
+	const uint32_t now = ld32(kFrameCount);
+	if (now != frame) //a console's players all get the same time in a frame
+	{
+		frame = now;
+		double ms = c.f[1] * 1000.0;
+		if (!(ms >= 0)) ms = 0;
+		const double whole = std::floor(ms + left);
+		if (whole > kMaxCommandMs) //a stall: the byte holds no more, the rest is gone
+		{
+			sent = (uint8_t)kMaxCommandMs;
+			left = 0;
+		}
+		else
+		{
+			sent = (uint8_t)whole;
+			left = ms + left - whole;
+		}
+		asked += ms;
+		given += sent;
+		if (++commands == 600)
+		{
+			if (std::getenv("GE_TRACE"))
+				rt_log("goldeneye: online: a frame of %.2f ms goes out as %.2f ms of command time (cut off it would be %.0f)",
+					asked / commands, given / commands, std::floor(asked / commands));
+			asked = given = 0;
+			commands = 0;
+		}
+	}
+	st8(c.r[3] + kCommandTime, sent);
+}
+
+} //namespace
+
+void install_command_time()
+{
+	if (!ppc_hook("bd_command_set_time", SetCommandTime))
+		rt_log("goldeneye: bd_command_set_time is not hooked in this build, online a player's step loses the part of a millisecond every frame");
 }
 
 void install_live_patch()
