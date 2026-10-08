@@ -251,10 +251,14 @@ uint32_t Lend(const Picture& picture)
 	return kLenders[pick].number;
 }
 
-//next to the mod's file, in whichever folder that is
+//next to the mod's file, in whichever folder that is. a level in a gamemode's folder that has
+//none there has the one in the mods folder itself: a picture for the map, whichever gamemode
 std::string PngOf(const ModLevel& mod)
 {
-	return std::filesystem::path(mod.path).replace_extension(".png").string();
+	const std::filesystem::path next = std::filesystem::path(mod.path).replace_extension(".png");
+	std::error_code error;
+	if (mod.modes == 0 || mods_folder().empty() || std::filesystem::exists(next, error)) return next.string();
+	return (std::filesystem::path(mods_folder()) / next.filename()).string();
 }
 
 //every mod's .png. the lenders show their own pictures first, what they held is gone

@@ -10,6 +10,9 @@
 //a folder in it for each online gamemode (kModeFolders): the levels in conflict/ are the maps
 //Conflict has after Connect to WFC Modded, and so on. a file that is in more than one of them
 //is the same mod once. what is in the mods folder itself is only in Extras > Mods
+//a map for several gamemodes is made as the game's own are (eurochef's ge new-map): its
+//geometry once, mg_yard.edb in the mods folder, and a small mt_yard.edb in each gamemode's
+//folder with that gamemode's triggers, one of which loads the geometry
 //a .png with a level's name is its picture in the menus (port/pictures.cpp)
 //
 //GE_MODS=DIR the folder, every .edb in it and in its gamemode folders (mods in the game's folder by default)
@@ -20,6 +23,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <memory>
 #include <set>
 #include <vector>
@@ -167,7 +172,14 @@ std::string FolderName(std::string name)
 	return name;
 }
 
-//every .edb of a folder. one that is there already (the same name, hash and size, in another
+bool SameBytes(const std::string& a, const std::string& b)
+{
+	std::ifstream first(a, std::ios::binary), second(b, std::ios::binary);
+	if (!first || !second) return false;
+	return std::equal(std::istreambuf_iterator<char>(first), std::istreambuf_iterator<char>(), std::istreambuf_iterator<char>(second), std::istreambuf_iterator<char>());
+}
+
+//every .edb of a folder. one that is there already (the same name and bytes, in another
 //gamemode's folder) is the same mod and only gets that gamemode too
 void ReadFolder(const std::filesystem::path& dir, uint32_t modes, std::vector<Mod>& mods)
 {
@@ -178,7 +190,7 @@ void ReadFolder(const std::filesystem::path& dir, uint32_t modes, std::vector<Mo
 		Mod mod;
 		if (!ReadMod(entry.path(), mod)) { rt_log("goldeneye: mods: %s isn't an .edb of this game, left out", entry.path().string().c_str()); continue; }
 		mod.modes = modes;
-		auto same = std::find_if(mods.begin(), mods.end(), [&](const Mod& m) { return m.name == mod.name && m.hash == mod.hash && m.size == mod.size; });
+		auto same = std::find_if(mods.begin(), mods.end(), [&](const Mod& m) { return m.name == mod.name && m.hash == mod.hash && m.size == mod.size && SameBytes(m.path, mod.path); });
 		if (same != mods.end()) same->modes |= modes;
 		else mods.push_back(mod);
 	}

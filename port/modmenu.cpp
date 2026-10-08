@@ -130,6 +130,7 @@ const uint32_t kMostPages = 4096;
 
 PPCFunc game_alloc = nullptr;
 std::vector<ModLevel> g_levels;
+std::vector<const ModLevel*> g_listed; //the ones Extras > Mods lists: a name once
 std::map<uint32_t, uint32_t> g_texts; //a text's hash, its characters in the game's memory
 uint32_t g_mods_rows = 0, g_mods_row_count = 0;
 uint32_t g_extras_rows[2] = {}, g_extras_row_count[2] = {}; //without and with the unused items
@@ -211,23 +212,35 @@ uint32_t ListRows(const PPCContext& c, uint32_t items, uint32_t title, uint32_t&
 	return rows + head * kRowSize;
 }
 
+//a map that has a level of its own triggers in each gamemode's folder is in Extras > Mods once:
+//the level in the mods folder itself when there is one, the first of the others when not
+void ListLevels()
+{
+	for (const ModLevel& level : g_levels)
+	{
+		auto same = std::find_if(g_listed.begin(), g_listed.end(), [&](const ModLevel* p) { return p->name == level.name; });
+		if (same == g_listed.end()) g_listed.push_back(&level);
+		else if ((*same)->modes != 0 && level.modes == 0) *same = &level;
+	}
+}
+
 //the rows and the texts, made once
 bool Build(const PPCContext& c)
 {
 	g_texts[kTextMods] = Text(c, "Mods");
 	g_texts[kTextAbout] = Text(c, "Play the levels in the mods folder.");
-	for (size_t i = 0; i < g_levels.size(); ++i) g_texts[kTextLevel + (uint32_t)i] = Text(c, Shown(g_levels[i].name));
+	for (size_t i = 0; i < g_listed.size(); ++i) g_texts[kTextLevel + (uint32_t)i] = Text(c, Shown(g_listed[i]->name));
 	for (const auto& text : g_texts)
 		if (!text.second) return false;
 
 	//a level select like Conflict's: its rows before the maps, then a level a row
-	const uint32_t levels = (uint32_t)g_levels.size();
+	const uint32_t levels = (uint32_t)g_listed.size();
 	g_mods_row_count = kConflictHead + levels;
 	g_mods_rows = Alloc(c, g_mods_row_count * kRowSize);
 	if (!g_mods_rows) return false;
 	CopyRows(g_mods_rows, kConflictRows, kConflictHead);
 	st32(g_mods_rows + kTitleRow * kRowSize, kTextMods);
-	for (uint32_t i = 0; i < levels; ++i) Row(g_mods_rows + (kConflictHead + i) * kRowSize, kTextLevel + i, g_levels[i].hash, kMissionStart, kKindLevel);
+	for (uint32_t i = 0; i < levels; ++i) Row(g_mods_rows + (kConflictHead + i) * kRowSize, kTextLevel + i, g_listed[i]->hash, kMissionStart, kKindLevel);
 	uint32_t at = 0;
 
 	for (int unused = 0; unused < 2; ++unused)
@@ -252,7 +265,8 @@ void Mix(uint32_t& sum, const uint8_t* bytes, size_t count)
 }
 
 //a number for the pools: for each gamemode its number, each map's hash and every byte of its
-//file, in the order of the hashes (the order in the folder doesn't count). the hash a mod has
+//file, in the order of the hashes (the order in the folder doesn't count), then the same of
+//every mod that isn't a level (a map's geometry is a file of its own). the hash a mod has
 //here goes in too, two with the same one get theirs by what else is in the folders
 const uint32_t kGameVersion = 0x4F;
 const uint32_t kModdedVersions = 0x40000000; //where the numbers made here are, the game's own never is
@@ -295,6 +309,16 @@ uint32_t PoolVersion()
 			Mix32(sum, pMap->hash);
 			Mix32(sum, found->second);
 		}
+	}
+	//what isn't a level goes in too: the geometry a map's levels load, a file in place of the disc's
+	std::vector<const ModLevel*> others;
+	for (const ModLevel& file : mod_files())
+		if (std::none_of(g_levels.begin(), g_levels.end(), [&](const ModLevel& level) { return level.hash == file.hash; })) others.push_back(&file);
+	std::sort(others.begin(), others.end(), [](const ModLevel* a, const ModLevel* b) { return a->hash < b->hash; });
+	for (const ModLevel* pFile : others)
+	{
+		Mix32(sum, pFile->hash);
+		Mix32(sum, FileSum(pFile->path));
 	}
 	return kModdedVersions | (sum & (kModdedVersions - 1));
 }
@@ -550,7 +574,7 @@ void mods_menu_frame(PPCContext& c)
 		st32(kPages + kPagesCount, count + 1);
 		st32(kPages + kPagesRoom, count + 1);
 		data = fresh;
-		rt_log("goldeneye: Extras has Mods: %zu level(s)", g_levels.size());
+		rt_log("goldeneye: Extras has Mods: %zu level(s)", g_listed.size());
 	}
 
 	const int unused = extras_menu() ? 1 : 0;
@@ -565,6 +589,7 @@ void mods_menu_frame(PPCContext& c)
 void install_mods_menu()
 {
 	g_levels = mod_levels();
+	ListLevels();
 	game_alloc = ppc_lookup(kAlloc);
 	g_trace = std::getenv("GE_TRACE") != nullptr;
 	if (const char* e = std::getenv("GE_MODS_PAGE")) g_mods_target = (uint32_t)std::strtoul(e, nullptr, 16);

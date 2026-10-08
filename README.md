@@ -131,15 +131,17 @@ mods/
   team_license_to_kill/
 ```
 
-Every level in a gamemode's folder is in that gamemode's map pool. Want a map in more than one? Just copy it into each, it's loaded once. Anything in `mods/` itself isn't online at all, it only shows up under Extras > Mods (the ones in the folders are listed there as well, so you can walk around in them alone).
+Every level in a gamemode's folder is in that gamemode's map pool. Want a map in more than one? Just copy it into each, it's loaded once.
+
+A map with different things per gamemode (the golden gun only in Golden Gun, team spawns only in team games) is made the way the game's own are: its geometry once, as `mg_yard.edb` in `mods/` itself, and a tiny `mt_yard.edb` in each gamemode's folder with that gamemode's spawn points and objects, which loads the geometry. eurochef's `ge new-map` writes exactly that from one glTF scene, straight into `mods/`. Such a map is in Extras > Mods once. Anything in `mods/` itself isn't online at all, it only shows up under Extras > Mods (the ones in the folders are listed there as well, so you can walk around in them alone).
 
 With a level in any of those folders the Multiplayer menu gets two ways to go online:
 - Connect to Nintendo WFC, with the game's own gamemodes and maps
 - Connect to WFC Modded, with yours: Choose Game Mode only lists the gamemodes whose folder has a level in it, an empty (or missing) folder means the gamemode is gone from the list
 
-Modded games are kept apart from everyone else's: the game's version number for matchmaking is made from every gamemode's maps and their files, so you only find players who have the exact same folders (the log prints it at start, `a network game with them is version ...`). Got a friend who can't find your lobby? Compare that number.
+Modded games are kept apart from everyone else's: the game's version number for matchmaking is made from every gamemode's maps and their files (and every other mod that isn't a level, like a map's geometry), so you only find players who have the exact same folders (the log prints it at start, `a network game with them is version ...`). Got a friend who can't find your lobby? Compare that number.
 
-A `.png` with the level's name next to it, in the same folder (so `mt_yard.png` for `mt_yard.edb`), is its picture in the menus: beside the list in Extras > Mods, in Conflict's map list, and for the two maps a network game offers. Any size works, the middle gets cut to the panel's shape (0.85 times as wide as high) and shown at 256 x 256. Can't be bothered making one? Press F12 while in a mod's level and it'll make that `.png` from whatever is on screen: black and white, without the HUD, the crosshair and the gun.
+A `.png` with the level's name next to it, in the same folder (so `mt_yard.png` for `mt_yard.edb`), is its picture in the menus (a level in a gamemode's folder without one takes `mods/mt_yard.png`, so one picture does for all of a map's gamemodes): beside the list in Extras > Mods, in Conflict's map list, and for the two maps a network game offers. Any size works, the middle gets cut to the panel's shape (0.85 times as wide as high) and shown at 256 x 256. Can't be bothered making one? Press F12 while in a mod's level and it'll make that `.png` from whatever is on screen: black and white, without the HUD, the crosshair and the gun.
 
 A level is just the hash of its file, so
 ```sh
