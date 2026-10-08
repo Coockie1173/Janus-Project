@@ -39,7 +39,7 @@
 //asked for last says which maps the gamemodes have
 //
 //the gamemode is picked in Choose Game Mode (rows 8057FBE0: nine slots, the eight gamemodes and
-//Classic Conflict, each to its page of maps). which one was picked goes by the row's text
+//Classic Conflict, each to its page of maps; and a second one at 8057FE60, to the search). which one was picked goes by the row's text
 //(menu_thread_80232df0), not by its place, so after Connect to WFC Modded the page gets rows
 //made here that leave out the gamemodes with no level in their folder. Classic Conflict has
 //Conflict's page, and with it Conflict's folder
@@ -113,7 +113,9 @@ const Mode kModes[kModeCount] = {
 	{0x7D000055, 0x43000E82}, //License to Kill
 	{0x7D000059, 0x43000E87}}; //Team License to Kill
 const uint32_t kMapRowCount = 16; //each of those pages as the game has it: the six before the maps and ten maps
-const uint32_t kChooseRows = 0x8057FBE0, kChooseRowCount = 32; //Choose Game Mode, the game's
+//Choose Game Mode, the game's. there are two, alike row for row: one whose items go to the gamemode's
+//page of maps (7D000042), and the one a search for games comes through, all to 7D000048
+const uint32_t kChooseRows[] = { 0x8057FBE0, 0x8057FE60 }, kChooseRowCount = 32;
 const uint32_t kChooseItems = 13, kChooseItemCount = 9, kChooseAbout = 23; //its items, and the line of each
 const uint32_t kTextChoose = 0x43000E14; //its title
 const uint32_t kTextClassic = 0x43001566; //Classic Conflict, the ninth item
@@ -138,7 +140,7 @@ bool g_any_pool = false;
 std::atomic<bool> g_map_pool{false}; //Connect to WFC Modded was the item lit last
 uint32_t g_pool_rows[kModeCount] = {}, g_pool_row_count[kModeCount] = {};
 uint32_t g_game_rows[kModeCount] = {}; //the game's own rows of each gamemode's page, as found
-uint32_t g_choose_rows = 0, g_choose_row_count = 0; //Choose Game Mode without the gamemodes that have no maps
+uint32_t g_choose_rows[2] = {}, g_choose_row_count[2] = {}; //Choose Game Mode without the gamemodes that have no maps
 uint32_t g_multiplayer_rows = 0, g_multiplayer_row_count = 0;
 bool g_pool_failed = false;
 uint32_t g_pool_version = 0; //a network game's version with those maps
@@ -376,48 +378,50 @@ void PoolFrame(const PPCContext& c, uint32_t data, uint32_t count, int mode)
 	st32(page + kPageRowCount, on ? g_pool_row_count[mode] : kMapRowCount);
 }
 
-//Choose Game Mode after Connect to WFC Modded: only the gamemodes that have maps
-void ChooseFrame(const PPCContext& c, uint32_t data, uint32_t count)
+//a Choose Game Mode after Connect to WFC Modded: only the gamemodes that have maps
+void ChooseFrame(const PPCContext& c, uint32_t data, uint32_t count, int which)
 {
+	const uint32_t game = kChooseRows[which];
+	uint32_t& made = g_choose_rows[which];
 	uint32_t page = 0;
 	for (uint32_t i = 0; i < count && !page; ++i)
 	{
 		const uint32_t rows = ld32(data + i * kPageSize + kPageRows);
-		if (rows == kChooseRows || (g_choose_rows && rows == g_choose_rows)) page = data + i * kPageSize;
+		if (rows == game || (made && rows == made)) page = data + i * kPageSize;
 	}
 	if (!page || !g_any_pool || g_pool_failed || !game_alloc) return;
-	if (!g_choose_rows)
+	if (!made)
 	{
 		std::vector<uint32_t> items; //which of the game's nine stay
 		for (uint32_t i = 0; i < kChooseItemCount; ++i)
 		{
-			const uint32_t text = ld32(kChooseRows + (kChooseItems + i) * kRowSize);
+			const uint32_t text = ld32(game + (kChooseItems + i) * kRowSize);
 			int mode = 0;
 			while (mode < kModeCount && kModes[mode].text != text) ++mode;
 			if (text == kTextClassic) mode = 0;
 			if (mode == kModeCount || !g_pool[mode].empty()) items.push_back(i);
 		}
-		if (items.size() == kChooseItemCount) { g_choose_rows = kChooseRows; g_choose_row_count = kChooseRowCount; }
+		if (items.size() == kChooseItemCount) { made = game; g_choose_row_count[which] = kChooseRowCount; }
 		else
 		{
 			uint32_t rows = 0;
-			const uint32_t at = ListRows(c, (uint32_t)items.size(), kTextChoose, rows, g_choose_row_count);
+			const uint32_t at = ListRows(c, (uint32_t)items.size(), kTextChoose, rows, g_choose_row_count[which]);
 			if (!at) { g_pool_failed = true; return; }
 			const uint32_t about = at + uint32_t(items.size() + 1) * kRowSize;
 			for (size_t i = 0; i < items.size(); ++i)
 			{
-				CopyRows(at + uint32_t(i) * kRowSize, kChooseRows + (kChooseItems + items[i]) * kRowSize, 1);
-				CopyRows(about + uint32_t(i) * kRowSize, kChooseRows + (kChooseAbout + items[i]) * kRowSize, 1);
+				CopyRows(at + uint32_t(i) * kRowSize, game + (kChooseItems + items[i]) * kRowSize, 1);
+				CopyRows(about + uint32_t(i) * kRowSize, game + (kChooseAbout + items[i]) * kRowSize, 1);
 			}
-			g_choose_rows = rows;
+			made = rows;
 			rt_log("goldeneye: Choose Game Mode (page %08X) has %zu of the %u gamemodes after Connect to WFC Modded", ld32(page), items.size(), kChooseItemCount);
 		}
 	}
 	const bool on = Modded();
-	const uint32_t rows = on ? g_choose_rows : kChooseRows;
+	const uint32_t rows = on ? made : game;
 	if (ld32(page + kPageRows) == rows) return;
 	st32(page + kPageRows, rows);
-	st32(page + kPageRowCount, on ? g_choose_row_count : kChooseRowCount);
+	st32(page + kPageRowCount, on ? g_choose_row_count[which] : kChooseRowCount);
 }
 
 //ge_pick_next_maps (801E5860): a network game's next two maps, each drawn at random from the
@@ -508,7 +512,7 @@ void mods_menu_frame(PPCContext& c)
 	if (!guest_ptr(data) || count == 0 || count > kMostPages) return;
 	MultiplayerFrame(c, data, count);
 	for (int mode = 0; mode < kModeCount; ++mode) PoolFrame(c, data, count, mode);
-	ChooseFrame(c, data, count);
+	for (int which = 0; which < 2; ++which) ChooseFrame(c, data, count, which);
 	const uint32_t extras = FindPage(data, count, kExtrasPage);
 	if (!extras) return;
 
