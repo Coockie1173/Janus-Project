@@ -1,6 +1,6 @@
 #!/bin/sh
 # The Linux package: the portable build (make linux), what it needs beside it, the
-# instructions and the mods folder, zipped. Nothing of the disc goes in: game/ is left for the
+# instructions and an empty mods folder, zipped. Nothing of the disc goes in: game/ is left for the
 # player to fill.
 #     sh tools/package_linux.sh [FONTS_DIR]      -> build/GoldenEye007-linux64.zip
 set -e
@@ -31,15 +31,12 @@ mkdir -p "$S/launcher/wiikit"
 cp tools/launcher.py tools/extract_disc.py "$S/launcher/"
 cp wiikit/disc.py wiikit/rvz.py wiikit/aes.py "$S/launcher/wiikit/"
 : > "$S/launcher/wiikit/__init__.py"
-# the mods folder goes along as it is: the .edb files and their .png pictures, in it and in its
-# folder for each online gamemode (README.md, Mods). the gamemode folders are always there, empty or not
+# the mods folder is there and empty, with its folder for each online gamemode (README.md, Mods):
+# the mods themselves are a download of their own (tools/package_mods.sh), unzipped into this one
 mkdir -p "$S/mods"
-for f in mods/*.edb mods/*.png; do [ -f "$f" ] && cp "$f" "$S/mods/"; done
 for d in conflict team_conflict golden_gun black_box goldeneye heroes license_to_kill team_license_to_kill; do
     mkdir -p "$S/mods/$d"
-    for f in mods/$d/*.edb mods/$d/*.png; do [ -f "$f" ] && cp "$f" "$S/mods/$d/"; done
 done
-echo "mods: $(cd "$S/mods" && find . -type f | sed 's|^\./||' | sort | tr '\n' ' ')"
 cp port/linux/Play.sh port/linux/README.txt "$S/"
 chmod 755 "$S/Play.sh" "$S/GoldenEye"
 printf 'The game goes here: ./Play.sh, then "Extract disc..." and pick your GoldenEye 007 (SJBE52) image.\nWhen it is done this folder holds sys/main.dol and files/. See README.txt.\n' > "$S/game/PUT YOUR DISC HERE.txt"

@@ -70,12 +70,12 @@ The boot ROM fonts and the DSP's resampling table (`font_western.bin`, `font_jap
 ## Linux package
 `make linux` builds the same portable layout for Linux and packs it as `build/GoldenEye007-linux64.zip`: the executable (C++ runtime linked in, SDL3 next to it in `lib/`), `Play.sh` which opens the settings window with the system's Python, and a `README.txt` (see `port/linux/`). It needs glibc 2.38, OpenSSL 3 and OpenGL 4.5 wherever it runs. Online and crash dumps work there too.
 
-Both packages take the `mods/` folder along exactly as it is when they're made (the `.edb` files and their `.png` pictures, gamemode folders included), so whatever is in there when you run `make win` or `make linux` ships in the zip.
+Both packages come with an empty `mods/` folder (the gamemode folders are in it). The mods are a download of their own: `make mods-zip` packs `mods/` exactly as it is (the `.edb` files, their `.png` pictures and `.txt` files, gamemode folders included) as `build/GoldenEye007-mods.zip`, which gets unzipped into the game's folder, next to `Play`. No level in `mods/`, no zip.
 
 ## Releases
-Every push to `main` builds both packages and puts them up as the `latest` release, and pushing a tag like `v1.0` gives that one its own release. Since the build needs the disc, GitHub's own machines can't do it: `.github/workflows/release.yml` runs on a self-hosted runner, which is just my own PC. If it's off, the release simply waits.
+Every push to `main` builds both packages and the mods' zip and puts them up as the `latest` release, and pushing a tag like `v1.0` gives that one its own release. Since the build needs the disc, GitHub's own machines can't do it: `.github/workflows/release.yml` runs on a self-hosted runner, which is just my own PC. If it's off, the release simply waits.
 
-Want the same on your fork? Add a self-hosted runner (Settings > Actions > Runners), and give it an `.env` file with `GE_GAME=/path/to/your/extracted/disc` (and `GE_MODS=/path/to/mods` if you want mods in the zips).
+Want the same on your fork? Add a self-hosted runner (Settings > Actions > Runners), and give it an `.env` file with `GE_GAME=/path/to/your/extracted/disc` (and `GE_MODS=/path/to/mods` if you want a `GoldenEye007-mods.zip` next to them).
 
 # Playing
 `./launch.sh` opens a small window first. In there you can set the frame rate (60 by default, 30 is what the console does), the field of view, the mouse sensitivity, online on or off, and the key bindings (click Set, press a key or a mouse button). Then hit Play.

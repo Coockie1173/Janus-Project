@@ -124,6 +124,11 @@ linux: wiikit-patch recomp deps
 	ninja -C $(LINUX_OUT) wiiboot
 	sh tools/package_linux.sh $(FONTS)
 
+# the mods folder as a download of its own, for the packages' empty one
+.PHONY: mods-zip
+mods-zip:
+	sh tools/package_mods.sh
+
 # the key file: the port's defaults, copied once; build/keys.txt is the player's to edit
 $(BUILD)/keys.txt: | config/keys.txt
 	@mkdir -p $(BUILD) && cp config/keys.txt $@

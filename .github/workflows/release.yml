@@ -35,8 +35,9 @@ jobs:
 
       - run: make linux
       - run: make win
+      - run: make mods-zip
 
       - name: release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: sh tools/publish_release.sh build/GoldenEye007-linux64.zip build/GoldenEye007-win64.zip
+        run: sh tools/publish_release.sh build/GoldenEye007-linux64.zip build/GoldenEye007-win64.zip $(ls build/GoldenEye007-mods.zip 2>/dev/null)

@@ -88,6 +88,10 @@ Where things are
                     license_to_kill, team_license_to_kill): the levels in one are that
                     mode's maps after Multiplayer > Connect to WFC Modded, and a mode
                     with an empty folder isn't offered there
+                    It comes empty: GoldenEye007-mods.zip, a download of its own
+                    next to this one, has levels for it. Unzip it into this folder.
+                    Without any level in those folders Multiplayer is the game's own
+                    menu, with Nintendo Wi-Fi Connection alone.
     run.log         the log of the last run
     shadercache\    compiled shaders; safe to delete
     config\         Gecko codes, cheats, the server list, function names for the log
