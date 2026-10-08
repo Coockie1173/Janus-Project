@@ -87,3 +87,5 @@ ge_camera_sway         # the camera's sway is two sines of the frame count: abov
 _APPLYING_PATCH_       # the server's live patch is poked into memory: left out, recompiled code can't take it (port/net.cpp)
 bd_command_set_time    # a player's command gets the frame's time in whole milliseconds: what's cut off goes into the next (port/net.cpp)
 bd_interp_set_time     # a replica's blend time is set: a little more than the host's updates are apart (port/net.cpp)
+ge_input_copy          # a command is copied into its controller: in a modded network game two of its floats are the mouse's turn (port/input.cpp)
+ge_command_fill        # a frame's command is filled from the pad: in a modded network game the mouse's turn goes in (port/input.cpp)

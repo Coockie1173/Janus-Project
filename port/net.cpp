@@ -108,12 +108,12 @@ void TraceThrown()
 
 } //namespace
 
-//GE_NETTRACE: where another player's controller is after its update, every time it is updated
-void net_trace_controller(uint32_t ctrl, uint32_t player)
+//GE_NETTRACE: where a player's controller is after its update, every time it is updated
+void net_trace_controller(uint32_t ctrl, uint32_t player, bool own)
 {
 	static const bool trace = std::getenv("GE_NETTRACE") != nullptr;
 	if (!trace || !network_game()) return;
-	rt_log("nettrace: frame %u: other %08X at %.3f %.3f %.3f, yaw %.3f, pitch %.3f", ld32(kFrameCount), ctrl, ldf(player + kEntityPlace),
+	rt_log("nettrace: frame %u: %s %08X at %.3f %.3f %.3f, yaw %.5f, pitch %.5f", ld32(kFrameCount), own ? "own" : "other", ctrl, ldf(player + kEntityPlace),
 		ldf(player + kEntityPlace + 4), ldf(player + kEntityPlace + 8), ldf(player + kEntityYaw), ldf(ctrl + kCtrlPitch));
 }
 
@@ -160,7 +160,8 @@ void SetCommandTime(PPCContext& c)
 	static double asked = 0, given = 0; //since the last line of the log
 	static uint32_t commands = 0;
 	const uint32_t now = ld32(kFrameCount);
-	if (now != frame) //a console's players all get the same time in a frame
+	const bool first = now != frame;
+	if (first) //a console's players all get the same time in a frame
 	{
 		frame = now;
 		static const bool cut = std::getenv("GE_NO_COMMAND_TIME") != nullptr; //the game's own, to compare

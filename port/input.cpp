@@ -52,8 +52,9 @@ bool joined_game();
 //game's 45 degrees, ours between players who came through Connect to WFC Modded. a joined
 //player's own pitch comes back from the host through it (see controller_update), so past the
 //range the view got pulled back all the time. there it stops at the range's end instead
+bool net_turns();
 float pitch_limit() {
-    return joined_game() ? net_pitch_range() : kPitchLimit;
+    return joined_game() || net_turns() ? net_pitch_range() : kPitchLimit;
 }
 void player_modifiers(PPCContext& c) {
     set_pitch_limit(kGamePitchLimit);
@@ -79,8 +80,13 @@ bool network_game() {
 bool joined_game() {
     return network_game() && ld32(kNetState + 0x10) == 0;
 }
+//a network game between players who came through Connect to WFC Modded: a command carries the
+//mouse's turn (see net_command_look), the mouse turns the view itself there, joined or hosting
+bool net_turns() {
+    return network_game() && modded_lobby();
+}
 bool mouse_on_stick() {
-    bool stick = g_mouse_mode == 2 || (g_mouse_mode == 0 && joined_game());
+    bool stick = g_mouse_mode == 2 || (g_mouse_mode == 0 && joined_game() && !modded_lobby());
     static int said = -1;
     if (said != (int)stick) {
         said = stick;
@@ -231,10 +237,130 @@ void mouse_look(uint32_t ctrl, uint32_t player) {
     }
 }
 
+//the mouse in a network game between players of Connect to WFC Modded
+//a joined console's player is run three times: here on screen, here again as the host's copy
+//(stepped from what the host sent with the commands since), and on the host. all three go by
+//the command (bdUserCommand, filled by fn_801CA8B0, copied into the controller by
+//ge_input_copy), so the view only turns the same on all three if the turn is in the command.
+//the stick is: the mouse on the stick (mouse_stick) works, within what a stick can say
+//two of the command's floats are free to take the turn itself:
+//+0x2C, the player's own yaw (-pi to pi in steps of 0.0001), which the host only uses as the
+//  heading the move stick is turned by (the controller's +0x52C). every machine has the
+//  player's yaw itself, so +0x52C gets that after the copy
+//+0x28, within 0.5 in the same steps (the controller's +0x528, sent on to the others and never
+//  read by the game's own play code): a pad's axis 0x13 while aiming, nothing on a classic
+//there the two are the frame's turn in radians, across and up and down: net_command_look
+//puts them in after the game's own fill (ge_command_fill), and after ge_input_copy the pitch is turned right
+//there and the yaw kept for ge_look_apply, which turns the player by it through its own rate
+//as the mouse's turn always went. the same on every machine, whoever's player it is
+//every console in the game has to read the two that way: it is part of the modded games'
+//version (kPortProtocol, modmenu.cpp). a game over Nintendo WFC stays the game's
+const uint32_t kCmdPitchTurn = 0x28, kCmdYawTurn = 0x2C; //in the command
+const uint32_t kCtrlLean = 0x528, kCtrlHeading = 0x52C; //where ge_input_copy puts them
+const uint32_t kCtrlPitch = 0xC64;
+const float kTurnStep = 0.0001f, kMaxYawTurn = 3.1f, kMaxPitchTurn = 0.49f; //what the two floats hold
+//on the wire a float is a count of steps up from its lowest (bdBitBuffer's ranged float), and
+//0 is not one of the yaw's: -pi + 31416 steps is 0.0000073, a view that creeps a degree every
+//17 s. so a turn is a whole count of steps either side of that one, worked back out of the
+//float the same way on every machine. the lean's 0 is sent as a bit of its own and stays 0
+const uint32_t kCmdYawMin = 0x806EFF20, kCmdLeanMin = 0x806EFF28, kCmdStep = 0x806EFF14; //the game's own numbers for the two
+const int kYawZero = 31416, kLeanZero = 5000; //the step that stands for no turn
+
+float turn_float(int steps, uint32_t min, int zero) {
+    return (float)((double)ldf(min) + (double)(zero + steps) * (double)ldf(kCmdStep));
+}
+int turn_steps(float v, uint32_t min, int zero) {
+    return (int)std::lround(((double)v - (double)ldf(min)) / (double)ldf(kCmdStep)) - zero;
+}
+const int kTurnSlots = 16;
+struct Turn { uint32_t ctrl; float yaw; };
+Turn g_turns[kTurnSlots]; //a controller's yaw still to turn, from its last command
+PPCFunc orig_input_copy = nullptr;
+
+float& turn_of(uint32_t ctrl) {
+    int free = 0;
+    for (int i = 0; i < kTurnSlots; ++i) {
+        if (g_turns[i].ctrl == ctrl) return g_turns[i].yaw;
+        if (g_turns[i].yaw == 0) free = i;
+    }
+    g_turns[free] = {ctrl, 0};
+    return g_turns[free].yaw;
+}
+
+//the mouse's motion since the last command, into the command. what the steps of 0.0001 cut
+//off is kept for the next. once a frame, a console's other players turn nothing
+void net_command_look(uint32_t cmd, bool first) {
+    if (!net_turns() || !guest_ptr(cmd)) return;
+    static float left_yaw = 0, left_pitch = 0;
+    float yaw = 0, pitch = 0;
+    if (first) {
+        uint32_t ctrl = local_controller();
+        bool turns = ctrl && g_mouse_sens > 0 && g_mouse_mode != 2 && !ld8(kPaused) && !overlay_open() && !is_tank(ctrl) && look_mode(ctrl) == kLookView;
+        if (turns) {
+            float dx = 0, dy = 0;
+            video_take_mouse_motion(dx, dy);
+            debug_mouse(dx, dy);
+            if (g_mouse_invert) dy = -dy;
+            float sens = g_mouse_sens * aim_sens_scale(ctrl);
+            left_yaw += dx * kRadPerPixel * sens;
+            left_pitch += dy * kRadPerPixel * sens;
+            g_look_frame = ld32(kFrameCount);
+            g_look_ctrl = ctrl; //for the angle trace
+        } else left_yaw = left_pitch = 0;
+        yaw = std::clamp(std::round(left_yaw / kTurnStep) * kTurnStep, -kMaxYawTurn, kMaxYawTurn);
+        pitch = std::clamp(std::round(left_pitch / kTurnStep) * kTurnStep, -kMaxPitchTurn, kMaxPitchTurn);
+        left_yaw -= yaw;
+        left_pitch -= pitch;
+        if (std::fabs(left_yaw) > kTurnStep) left_yaw = 0; //more than a command holds: gone
+        if (std::fabs(left_pitch) > kTurnStep) left_pitch = 0;
+    }
+    int lean = (int)std::lround(pitch / kTurnStep);
+    stf(cmd + kCmdYawTurn, turn_float((int)std::lround(yaw / kTurnStep), kCmdYawMin, kYawZero));
+    stf(cmd + kCmdPitchTurn, lean ? turn_float(lean, kCmdLeanMin, kLeanZero) : 0.0f);
+}
+
+//(the console's input object, the command): the game's own fill, then the turn
+PPCFunc orig_command_fill = nullptr;
+void command_fill(PPCContext& c) {
+    static uint32_t frame = ~0u;
+    uint32_t cmd = c.r[4], now = ld32(kFrameCount);
+    orig_command_fill(c);
+    net_command_look(cmd, now != frame);
+    frame = now;
+}
+
+//(controller, command or the input of a game that isn't a network game)
+void input_copy(PPCContext& c) {
+    uint32_t ctrl = c.r[3];
+    orig_input_copy(c);
+    if (!net_turns() || !guest_ptr(ctrl)) return;
+    float yaw = ldf(ctrl + kCtrlHeading), pitch = ldf(ctrl + kCtrlLean);
+    uint32_t player = ld32(ctrl + 4);
+    if (std::isfinite(yaw)) yaw = turn_steps(yaw, kCmdYawMin, kYawZero) * kTurnStep;
+    if (std::isfinite(pitch) && pitch != 0) pitch = turn_steps(pitch, kCmdLeanMin, kLeanZero) * kTurnStep;
+    stf(ctrl + kCtrlLean, 0.0f);
+    if (guest_ptr(player)) stf(ctrl + kCtrlHeading, ldf(player + 0xDC));
+    if (is_tank(ctrl) || !std::isfinite(yaw) || !std::isfinite(pitch)) return;
+    turn_of(ctrl) = std::clamp(yaw, -kMaxYawTurn, kMaxYawTurn);
+    float had = ldf(ctrl + kCtrlPitch);
+    if (pitch != 0 && std::isfinite(had) && std::fabs(had) < 2.0f)
+        stf(ctrl + kCtrlPitch, std::clamp(had + std::clamp(pitch, -kMaxPitchTurn, kMaxPitchTurn), -pitch_limit(), pitch_limit()));
+}
+
 void look_apply(PPCContext& c) {
     uint32_t ctrl = c.r[3];
     float dt = guest_ptr(ctrl) ? ldf(ctrl + 0x578) : 0;
     if (guest_ptr(ctrl)) noclip_look(ctrl);
+    if (guest_ptr(ctrl) && net_turns()) { //the command's turn, whoever's player this is
+        float& turn = turn_of(ctrl);
+        float add = dt > 0.0005f && dt < 0.3f ? turn / dt : 0;
+        turn = 0;
+        if (add == 0) { orig_look_apply(c); return; }
+        stf(ctrl + 0x97C, ldf(ctrl + 0x97C) + add);
+        orig_look_apply(c);
+        stf(ctrl + 0x97C, ldf(ctrl + 0x97C) - add);
+        return;
+    }
     if (ctrl != g_look_ctrl || g_look_yaw == 0 || !(dt > 0.0005f && dt < 0.2f)) { orig_look_apply(c); return; }
     float rate = ldf(ctrl + 0x97C), add = g_look_yaw / dt;
     g_look_yaw = 0;
@@ -395,7 +521,7 @@ void controller_update(PPCContext& c) {
                 rt_log("goldeneye: player state %X: the mouse %s", st, look_name(look_mode(ctrl)));
             }
             Look look = look_mode(ctrl);
-            if (g_mouse_sens > 0 && !ld8(kPaused) && !overlay_open() && look != kLookLocked && !mouse_on_stick() && !is_tank(ctrl)) {
+            if (g_mouse_sens > 0 && !ld8(kPaused) && !overlay_open() && look != kLookLocked && !mouse_on_stick() && !net_turns() && !is_tank(ctrl)) {
                 g_look_frame = frame;
                 if (look == kLookAim) mouse_aim(ctrl);
                 else mouse_look(ctrl, player);
@@ -404,7 +530,7 @@ void controller_update(PPCContext& c) {
         }
     }
     orig_controller_update(c);
-    if (ctrl != g_local_ctrl && !again && guest_ptr(player)) net_trace_controller(ctrl, player);
+    if (!again && guest_ptr(player)) net_trace_controller(ctrl, player, ctrl == g_local_ctrl);
     if (ctrl == g_local_ctrl && frame == g_local_frame && !again && !is_tank(ctrl)) { //a tank has other things where the aim's blend is
         ads_fov_apply(ctrl);
         aim_lock_frame(ctrl);
@@ -651,6 +777,9 @@ void install_mouse() {
     controller_not_local = ppc_lookup(kControllerNotLocal);
     orig_controller_update = ppc_hook("ge_controller_update", controller_update);
     orig_look_apply = ppc_hook("ge_look_apply", look_apply);
+    orig_input_copy = ppc_hook("ge_input_copy", input_copy);
+    orig_command_fill = ppc_hook("ge_command_fill", command_fill);
+    if (!orig_input_copy || !orig_command_fill) rt_die("goldeneye: ge_input_copy and ge_command_fill are not hooked in this build");
     if (!orig_controller_update || !controller_not_local || !orig_look_apply) rt_die("goldeneye: the controller update is not hooked in this build");
     orig_look_sens[0] = ppc_hook("ge_look_sens", look_sens<0>);
     orig_look_sens[1] = ppc_hook("ge_look_sens_ads", look_sens<1>);

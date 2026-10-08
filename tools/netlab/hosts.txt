@@ -1,0 +1,5 @@
+# the local server (Goldeneye-Wii-Server) for the two-instance test
+127.0.0.1 naswii.nintendowifi.net
+127.0.0.1 dls1.nintendowifi.net
+127.0.0.1 jb2010-wii-live.auth.mmp3.demonware.net
+127.0.0.1 jb2010-wii-live.lsg.mmp3.demonware.net

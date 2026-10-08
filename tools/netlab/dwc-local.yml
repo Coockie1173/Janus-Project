@@ -1,0 +1,8 @@
+# Goldeneye-Wii-Server's login containers on this machine's loopback (its compose file binds a LAN address)
+services:
+  dwc:
+    ports: !override
+      - "127.0.0.1:80:80/tcp"
+  nas-tls:
+    ports: !override
+      - "127.0.0.1:443:443/tcp"

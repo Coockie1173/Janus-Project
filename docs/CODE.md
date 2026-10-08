@@ -760,6 +760,18 @@ and zero, `BoxInRect`), `r13 - 0x4CE8` and `r13 - 0x4CE4` (the screen's offset).
 (`ios_net_add_host`) so the game's server names go to a community server, and turns on the
 network log with `GE_NETLOG`.
 
+`install_blend_time()` hooks `bd_interp_set_time`: the time a joined console takes another
+player to the host's newest update over is 0.025 s more than the 0.1 s the updates are apart
+(`GE_NET_BLEND`), so the player never gets there early and stops. `GE_NETTRACE=1` logs every
+player's place and angles after each update (`net_trace_controller`) and every thrown thing
+(`TraceThrown`); `tools/netlab/` runs two hidden instances in one game against a local server
+and compares their logs.
+
+In a network game of Connect to WFC Modded the mouse turns the view itself, joined or hosting
+(input.cpp): `net_command_look` puts the frame's turn into the command's +0x2C and +0x28 after
+`ge_command_fill`, `input_copy` (the hook of `ge_input_copy`) takes them out again on whatever
+machine runs the command and `look_apply` turns the player.
+
 `install_command_time()` hooks `bd_command_set_time` (bdUserCommand::setTimeInSeconds): a
 player's command carries the frame's time as a byte of whole milliseconds, `SetCommandTime`
 keeps what that cuts off for the next frame's command so the time adds up at any frame rate.
