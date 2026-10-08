@@ -105,7 +105,10 @@ void net_frame(); //once a frame: the range a player's pitch is sent in
 float net_pitch_range(); //how far up and down it goes to the others, radians
 bool modded_lobby(); //modmenu.cpp: network games are the ones of Connect to WFC Modded
 void install_mods(); //mods.cpp
-struct ModLevel { uint32_t hash; std::string name; }; //a level among the mods: its file's hash and name
+//a level among the mods: its file's hash, name and path, and the gamemode folders it is in, a bit each (0: only in the mods folder itself)
+struct ModLevel { uint32_t hash; std::string name; std::string path; uint32_t modes; };
+const int kModeCount = 8; //the online gamemodes, each a folder in the mods folder
+extern const char* const kModeFolders[kModeCount];
 const std::vector<ModLevel>& mod_levels();
 const std::vector<ModLevel>& mod_files(); //every mod
 const std::string& mods_folder(); //empty when there's none

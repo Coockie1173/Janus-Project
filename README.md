@@ -70,7 +70,7 @@ The boot ROM fonts and the DSP's resampling table (`font_western.bin`, `font_jap
 ## Linux package
 `make linux` builds the same portable layout for Linux and packs it as `build/GoldenEye007-linux64.zip`: the executable (C++ runtime linked in, SDL3 next to it in `lib/`), `Play.sh` which opens the settings window with the system's Python, and a `README.txt` (see `port/linux/`). It needs glibc 2.38, OpenSSL 3 and OpenGL 4.5 wherever it runs. Online and crash dumps work there too.
 
-Both packages take the `mods/` folder along exactly as it is when they're made (the `.edb` files, their `.png` pictures and `online.txt`), so whatever is in there when you run `make win` or `make linux` ships in the zip.
+Both packages take the `mods/` folder along exactly as it is when they're made (the `.edb` files and their `.png` pictures, gamemode folders included), so whatever is in there when you run `make win` or `make linux` ships in the zip.
 
 ## Releases
 Every push to `main` builds both packages and puts them up as the `latest` release, and pushing a tag like `v1.0` gives that one its own release. Since the build needs the disc, GitHub's own machines can't do it: `.github/workflows/release.yml` runs on a self-hosted runner, which is just my own PC. If it's off, the release simply waits.
@@ -114,13 +114,32 @@ Gecko codes go in `config/gecko.txt` (RAM writes only).
 # Mods
 Every `.edb` file in `mods/` (or `GE_MODS=folder`) gets loaded in place of the disc's file with the same hash. If no file on the disc has that hash, it just comes on top. Any levels among them show up in the game's menu under Extras > Mods.
 
-If there's an `online.txt` in the folder (a mod's file name or a file's hash per line), the Multiplayer menu gets two ways to go online:
-- Connect to Nintendo WFC, with the game's own maps for Conflict
-- Connect to WFC Modded, with the listed ones
+Online maps go by folder. `mods/` has one for every online gamemode:
 
-Modded games are kept apart from everyone else's: the game's version number for matchmaking is made from the listed maps and their files, so you only find players who have the exact same ones (the log prints it at start, `a network game with them is version ...`). Got a friend who can't find your lobby? Compare that number.
+```
+mods/
+  mt_grid.edb              only in Extras > Mods
+  conflict/                Conflict, and Classic Conflict (it has Conflict's maps in the game too)
+    mt_yard.edb
+    mt_yard.png
+  team_conflict/
+  golden_gun/
+  black_box/
+  goldeneye/
+  heroes/
+  license_to_kill/
+  team_license_to_kill/
+```
 
-A `.png` with the level's name next to it (so `mt_yard.png` for `mt_yard.edb`) is its picture in the menus: beside the list in Extras > Mods, in Conflict's map list, and for the two maps a network game offers. Any size works, the middle gets cut to the panel's shape (0.85 times as wide as high) and shown at 256 x 256. Can't be bothered making one? Press F12 while in a mod's level and it'll make that `.png` from whatever is on screen: black and white, without the HUD, the crosshair and the gun.
+Every level in a gamemode's folder is in that gamemode's map pool. Want a map in more than one? Just copy it into each, it's loaded once. Anything in `mods/` itself isn't online at all, it only shows up under Extras > Mods (the ones in the folders are listed there as well, so you can walk around in them alone).
+
+With a level in any of those folders the Multiplayer menu gets two ways to go online:
+- Connect to Nintendo WFC, with the game's own gamemodes and maps
+- Connect to WFC Modded, with yours: Choose Game Mode only lists the gamemodes whose folder has a level in it, an empty (or missing) folder means the gamemode is gone from the list
+
+Modded games are kept apart from everyone else's: the game's version number for matchmaking is made from every gamemode's maps and their files, so you only find players who have the exact same folders (the log prints it at start, `a network game with them is version ...`). Got a friend who can't find your lobby? Compare that number.
+
+A `.png` with the level's name next to it, in the same folder (so `mt_yard.png` for `mt_yard.edb`), is its picture in the menus: beside the list in Extras > Mods, in Conflict's map list, and for the two maps a network game offers. Any size works, the middle gets cut to the panel's shape (0.85 times as wide as high) and shown at 256 x 256. Can't be bothered making one? Press F12 while in a mod's level and it'll make that `.png` from whatever is on screen: black and white, without the HUD, the crosshair and the gun.
 
 A level is just the hash of its file, so
 ```sh

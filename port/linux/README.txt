@@ -92,8 +92,11 @@ Where things are
     keys.txt        key bindings
     settings.env    what the settings window saved
     mods/           levels that aren't the game's own (.edb files): Extras > Mods in the
-                    game's menu lists them. online.txt in it lists the maps multiplayer's
-                    Conflict has after Multiplayer > Connect to WFC Modded
+                    game's menu lists them. It has a folder for each online game mode
+                    (conflict, team_conflict, golden_gun, black_box, goldeneye, heroes,
+                    license_to_kill, team_license_to_kill): the levels in one are that
+                    mode's maps after Multiplayer > Connect to WFC Modded, and a mode
+                    with an empty folder isn't offered there
     run.log         the log of the last run
     crashes/        a folder for each crash or stall, with what the game was doing
     shadercache/    compiled shaders; safe to delete

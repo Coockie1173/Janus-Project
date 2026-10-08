@@ -26,21 +26,28 @@
 //writes to where the array was on the heap, which is somewhere else when mods add files
 //
 //the maps of multiplayer's Conflict are a page of the same kind (7D000045, rows 805830C8: six
-//of dressing with one list widget, then a kind 0xB row for each of its ten maps). it can get
-//rows made here, a map for every line of online.txt in the mods folder, as many as there
-//are: a mod's file name (mt_yard.edb, or just mt_yard) or a file's hash in hex (01A00003, one
-//of the disc's). the code this replaces wrote other hashes into the game's ten rows
+//of dressing with one list widget, then a kind 0xB row for each of its ten maps), and each of the seven other
+//online gamemodes has one like it (kModes). a gamemode's page can get rows made here, a map
+//for every level in its folder of the mods folder (mods/conflict, mods/team_conflict, ...
+//port/mods.cpp), as many as there are. the code this replaces wrote other hashes into the
+//game's ten rows
 //which of the two it has is picked in the Multiplayer menu (7D000061, rows 8057E5A0: Split
-//Screen and Nintendo Wi-Fi Connection, which goes to page 7D000049). with an online.txt that
-//page gets rows made here too: Split Screen, "Connect to Nintendo WFC" and "Connect to WFC
+//Screen and Nintendo Wi-Fi Connection, which goes to page 7D000049). with a level in any of
+//those folders that page gets rows made here too: Split Screen, "Connect to Nintendo WFC" and "Connect to WFC
 //Modded", both to 7D000049. the line under the list that says what the lit item is gets
 //looked up as the item is lit, and each of the two has a text of its own for it: the one
-//asked for last says which maps Conflict has
+//asked for last says which maps the gamemodes have
+//
+//the gamemode is picked in Choose Game Mode (rows 8057FBE0: nine slots, the eight gamemodes and
+//Classic Conflict, each to its page of maps). which one was picked goes by the row's text
+//(menu_thread_80232df0), not by its place, so after Connect to WFC Modded the page gets rows
+//made here that leave out the gamemodes with no level in their folder. Classic Conflict has
+//Conflict's page, and with it Conflict's folder
 //
 //a console doesn't have those maps and stops on one, and so does someone with other files in
 //their mods folder. a network game has a version, 0x4F: the host's session is advertised with
 //it and a search asks the server for it (the queries are called ..._VERSIONPROTOCOL...). after
-//Connect to WFC Modded both get a number made here from the maps of online.txt and the mods'
+//Connect to WFC Modded both get a number made here from each gamemode's maps and the mods'
 //bytes, so only those with the same maps find each other
 //
 //GE_MODS_PAGE=7D000045 Extras > Mods opens that page instead (to look at a page without going
@@ -49,7 +56,6 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdlib>
-#include <filesystem>
 #include <fstream>
 #include <map>
 #include <string>
@@ -92,10 +98,25 @@ const uint32_t kKindAbout = 0x00AB0000;
 const uint32_t kKindPage = 0x00010000, kKindLevel = 0x000B0000;
 const uint32_t kMissionStart = 1; //the entrance a level begins at
 const uint32_t kTextMods = 0x4300F0FF, kTextAbout = 0x4300F0FE, kTextLevel = 0x4300F000; //the game's own texts stop at 430017xx
-const uint32_t kConflictMapsPage = 0x7D000045;
-const uint32_t kConflictRows = 0x805830C8, kConflictRowCount = 16; //the game's
+const uint32_t kConflictRows = 0x805830C8; //the game's
 const uint32_t kConflictHead = 6; //the rows before the maps
-const uint32_t kTextMap = 0x4300F100; //a text for each map of the pool that isn't one of the game's ten
+const uint32_t kTextMap = 0x4300F100; //a text for each level of the mods in a gamemode's maps
+//an online gamemode: its page of maps, its item in Choose Game Mode by the text. in the order of kModeFolders
+struct Mode { uint32_t page, text; };
+const Mode kModes[kModeCount] = {
+	{0x7D000045, 0x43000E80}, //Conflict
+	{0x7D000046, 0x43000E84}, //Team Conflict
+	{0x7D000054, 0x43000E81}, //Golden Gun
+	{0x7D000056, 0x43000E83}, //Black Box
+	{0x7D000057, 0x43000E85}, //GoldenEye
+	{0x7D000058, 0x43000E86}, //Heroes
+	{0x7D000055, 0x43000E82}, //License to Kill
+	{0x7D000059, 0x43000E87}}; //Team License to Kill
+const uint32_t kMapRowCount = 16; //each of those pages as the game has it: the six before the maps and ten maps
+const uint32_t kChooseRows = 0x8057FBE0, kChooseRowCount = 32; //Choose Game Mode, the game's
+const uint32_t kChooseItems = 13, kChooseItemCount = 9, kChooseAbout = 23; //its items, and the line of each
+const uint32_t kTextChoose = 0x43000E14; //its title
+const uint32_t kTextClassic = 0x43001566; //Classic Conflict, the ninth item
 const uint32_t kMultiplayerPage = 0x7D000061;
 const uint32_t kMultiplayerRows = 0x8057E5A0, kMultiplayerRowCount = 11; //the game's
 const uint32_t kSplitScreenRow = 6, kSplitScreenAboutRow = 9;
@@ -112,10 +133,12 @@ uint32_t g_mods_rows = 0, g_mods_row_count = 0;
 uint32_t g_extras_rows[2] = {}, g_extras_row_count[2] = {}; //without and with the unused items
 bool g_failed = false;
 
-struct PoolMap { uint32_t hash; std::string name; std::string file; }; //the file's name for a mod, none for one of the disc's
-std::vector<PoolMap> g_pool; //online.txt
+std::vector<const ModLevel*> g_pool[kModeCount]; //the levels in each gamemode's folder
+bool g_any_pool = false;
 std::atomic<bool> g_map_pool{false}; //Connect to WFC Modded was the item lit last
-uint32_t g_pool_rows = 0, g_pool_row_count = 0;
+uint32_t g_pool_rows[kModeCount] = {}, g_pool_row_count[kModeCount] = {};
+uint32_t g_game_rows[kModeCount] = {}; //the game's own rows of each gamemode's page, as found
+uint32_t g_choose_rows = 0, g_choose_row_count = 0; //Choose Game Mode without the gamemodes that have no maps
 uint32_t g_multiplayer_rows = 0, g_multiplayer_row_count = 0;
 bool g_pool_failed = false;
 uint32_t g_pool_version = 0; //a network game's version with those maps
@@ -219,12 +242,6 @@ bool Build(const PPCContext& c)
 	return true;
 }
 
-std::string Lower(std::string text)
-{
-	std::transform(text.begin(), text.end(), text.begin(), [](unsigned char ch) { return (char)std::tolower(ch); });
-	return text;
-}
-
 //FNV-1a
 const uint32_t kFnvStart = 0x811C9DC5, kFnvPrime = 0x01000193;
 void Mix(uint32_t& sum, const uint8_t* bytes, size_t count)
@@ -232,82 +249,82 @@ void Mix(uint32_t& sum, const uint8_t* bytes, size_t count)
 	for (size_t i = 0; i < count; ++i) sum = (sum ^ bytes[i]) * kFnvPrime;
 }
 
-//a number for the pool: each map's hash and, for a mod, every byte of its file, in the order
-//of the hashes (the order of the lines doesn't count). the hash a mod has here goes in too, two
-//with the same one get theirs by what else is in the folder
+//a number for the pools: for each gamemode its number, each map's hash and every byte of its
+//file, in the order of the hashes (the order in the folder doesn't count). the hash a mod has
+//here goes in too, two with the same one get theirs by what else is in the folders
 const uint32_t kGameVersion = 0x4F;
 const uint32_t kModdedVersions = 0x40000000; //where the numbers made here are, the game's own never is
 //what this build sends differently from the game in such a game goes in as well, so builds
-//that don't read each other's packets don't find each other: 1 the pitch's range (net.cpp)
-const uint8_t kPortProtocol = 1;
+//that don't read each other's packets don't find each other: 1 the pitch's range (net.cpp),
+//2 a pool for every gamemode
+const uint8_t kPortProtocol = 2;
+
+uint32_t FileSum(const std::string& path)
+{
+	uint32_t sum = kFnvStart;
+	std::ifstream file(path, std::ios::binary);
+	if (!file) { rt_log("goldeneye: %s couldn't be read for the network game's version", path.c_str()); return sum; }
+	std::vector<uint8_t> bytes(1 << 16);
+	while (file.read((char*)bytes.data(), (std::streamsize)bytes.size()) || file.gcount() > 0)
+		Mix(sum, bytes.data(), (size_t)file.gcount());
+	return sum;
+}
+
+void Mix32(uint32_t& sum, uint32_t value)
+{
+	const uint8_t bytes[4] = { uint8_t(value >> 24), uint8_t(value >> 16), uint8_t(value >> 8), uint8_t(value) };
+	Mix(sum, bytes, sizeof bytes);
+}
+
 uint32_t PoolVersion()
 {
-	std::vector<const PoolMap*> maps;
-	for (const PoolMap& map : g_pool) maps.push_back(&map);
-	std::sort(maps.begin(), maps.end(), [](const PoolMap* a, const PoolMap* b) { return a->hash < b->hash; });
+	std::map<std::string, uint32_t> sums; //a file in several gamemodes is read once
 	uint32_t sum = kFnvStart;
 	Mix(sum, &kPortProtocol, 1);
-	std::vector<uint8_t> bytes(1 << 16);
-	for (const PoolMap* map : maps)
+	for (int mode = 0; mode < kModeCount; ++mode)
 	{
-		const uint8_t hash[4] = { uint8_t(map->hash >> 24), uint8_t(map->hash >> 16), uint8_t(map->hash >> 8), uint8_t(map->hash) };
-		Mix(sum, hash, sizeof hash);
-		if (map->file.empty()) continue;
-		//the mod's name is in lower case, the file's may not be
-		std::error_code error;
-		std::filesystem::path found;
-		for (const auto& entry : std::filesystem::directory_iterator(mods_folder(), error))
-			if (Lower(entry.path().filename().string()) == map->file) { found = entry.path(); break; }
-		std::ifstream file(found, std::ios::binary);
-		if (!file) { rt_log("goldeneye: %s couldn't be read for the network game's version", map->file.c_str()); continue; }
-		while (file.read((char*)bytes.data(), (std::streamsize)bytes.size()) || file.gcount() > 0)
-			Mix(sum, bytes.data(), (size_t)file.gcount());
+		std::vector<const ModLevel*> maps = g_pool[mode];
+		std::sort(maps.begin(), maps.end(), [](const ModLevel* a, const ModLevel* b) { return a->hash < b->hash; });
+		Mix32(sum, (uint32_t)mode);
+		for (const ModLevel* pMap : maps)
+		{
+			auto found = sums.find(pMap->path);
+			if (found == sums.end()) found = sums.emplace(pMap->path, FileSum(pMap->path)).first;
+			Mix32(sum, pMap->hash);
+			Mix32(sum, found->second);
+		}
 	}
 	return kModdedVersions | (sum & (kModdedVersions - 1));
 }
 
-//online.txt: a map a line, anything behind a # is a note
+//each gamemode's maps: the levels in its folder
 void ReadPool()
 {
-	if (mods_folder().empty()) return;
-	const std::string path = mods_folder() + "/online.txt";
-	std::ifstream file(path);
-	if (!file) return;
-	std::string line;
-	while (std::getline(file, line))
+	for (const ModLevel& level : g_levels)
+		for (int mode = 0; mode < kModeCount; ++mode)
+			if (level.modes & (1u << mode)) g_pool[mode].push_back(&level);
+	for (int mode = 0; mode < kModeCount; ++mode)
 	{
-		line = line.substr(0, line.find('#'));
-		const size_t first = line.find_first_not_of(" \t\r"), last = line.find_last_not_of(" \t\r");
-		if (first == std::string::npos) continue;
-		line = line.substr(first, last - first + 1);
-		const std::string wanted = Lower(line);
-		const auto& files = mod_files();
-		auto mod = std::find_if(files.begin(), files.end(), [&](const ModLevel& m) { return m.name == wanted || m.name == wanted + ".edb"; });
-		if (mod != files.end()) { g_pool.push_back({ mod->hash, Shown(mod->name), mod->name }); continue; }
-		char* end = nullptr;
-		const unsigned long hash = std::strtoul(line.c_str(), &end, 16);
-		if (end != line.c_str() && *end == 0 && line.size() >= 7 && line.size() <= 10) { g_pool.push_back({ (uint32_t)hash, line, {} }); continue; }
-		rt_log("goldeneye: %s: \"%s\" is neither a mod's file nor a file's hash, left out", path.c_str(), line.c_str());
+		if (g_pool[mode].empty()) continue;
+		g_any_pool = true;
+		rt_log("goldeneye: %zu map(s) in %s/%s", g_pool[mode].size(), mods_folder().c_str(), kModeFolders[mode]);
 	}
-	rt_log("goldeneye: %zu map(s) for Conflict in %s", g_pool.size(), path.c_str());
-	if (!g_pool.empty())
-	{
-		g_pool_version = PoolVersion();
-		rt_log("goldeneye: a network game with them is version %08X (the game's own: %X)", g_pool_version, kGameVersion);
-	}
+	if (!g_any_pool) return;
+	g_pool_version = PoolVersion();
+	rt_log("goldeneye: a network game with them is version %08X (the game's own: %X)", g_pool_version, kGameVersion);
 }
 
 //the Multiplayer menu with the two ways online, when there is a pool to pick
 void MultiplayerFrame(const PPCContext& c, uint32_t data, uint32_t count)
 {
 	const uint32_t page = FindPage(data, count, kMultiplayerPage);
-	if (!page || g_pool.empty() || g_pool_failed || !game_alloc) return;
+	if (!page || !g_any_pool || g_pool_failed || !game_alloc) return;
 	if (!g_multiplayer_rows)
 	{
 		g_texts[kTextWfc] = Text(c, "Connect to Nintendo WFC");
 		g_texts[kTextWfcModded] = Text(c, "Connect to WFC Modded");
 		g_texts[kTextAboutWfc] = Text(c, "Connect to Nintendo WFC.");
-		g_texts[kTextAboutModded] = Text(c, "Connect to Nintendo WFC with the maps of the mods folder.");
+		g_texts[kTextAboutModded] = Text(c, "Connect to Nintendo WFC with the gamemodes and maps of the mods folder.");
 		const uint32_t items = 3;
 		uint32_t rows = 0;
 		const uint32_t at = ListRows(c, items, kTextMultiplayer, rows, g_multiplayer_row_count);
@@ -326,39 +343,81 @@ void MultiplayerFrame(const PPCContext& c, uint32_t data, uint32_t count)
 	st32(page + kPageRowCount, g_multiplayer_row_count);
 }
 
-//Conflict's page gets the pool's rows after Connect to WFC Modded, the game's own otherwise
-void PoolFrame(const PPCContext& c, uint32_t data, uint32_t count)
+bool Modded() { return g_map_pool && g_any_pool && !g_pool_failed; }
+
+//a gamemode's page gets its pool's rows after Connect to WFC Modded, the game's own otherwise
+void PoolFrame(const PPCContext& c, uint32_t data, uint32_t count, int mode)
 {
-	const uint32_t page = FindPage(data, count, kConflictMapsPage);
+	const uint32_t page = FindPage(data, count, kModes[mode].page);
 	if (!page) return;
-	const bool on = g_map_pool && !g_pool.empty() && !g_pool_failed && game_alloc;
-	if (on && !g_pool_rows)
+	if (!g_game_rows[mode]) g_game_rows[mode] = ld32(page + kPageRows);
+	const uint32_t game = g_game_rows[mode];
+	const auto& pool = g_pool[mode];
+	const bool on = Modded() && !pool.empty() && game_alloc;
+	if (on && !g_pool_rows[mode])
 	{
-		g_pool_row_count = kConflictHead + (uint32_t)g_pool.size();
-		const uint32_t rows = Alloc(c, g_pool_row_count * kRowSize);
+		g_pool_row_count[mode] = kConflictHead + (uint32_t)pool.size();
+		const uint32_t rows = Alloc(c, g_pool_row_count[mode] * kRowSize);
 		if (!rows) { g_pool_failed = true; return; }
-		CopyRows(rows, kConflictRows, kConflictHead);
-		for (size_t i = 0; i < g_pool.size(); ++i)
+		CopyRows(rows, game, kConflictHead);
+		for (size_t i = 0; i < pool.size(); ++i)
 		{
-			//one of the game's ten keeps the game's name for it
-			uint32_t text = 0;
-			for (uint32_t k = kConflictHead; k < kConflictRowCount && !text; ++k)
-				if (ld32(kConflictRows + k * kRowSize + kRowHash) == g_pool[i].hash) text = ld32(kConflictRows + k * kRowSize);
-			if (!text)
-			{
-				text = kTextMap + (uint32_t)i;
-				g_texts[text] = Text(c, g_pool[i].name);
-				if (!g_texts[text]) { g_pool_failed = true; return; }
-			}
-			Row(rows + (kConflictHead + (uint32_t)i) * kRowSize, text, g_pool[i].hash, kMissionStart, kKindLevel);
+			const uint32_t text = kTextMap + uint32_t(pool[i] - g_levels.data());
+			if (!g_texts[text]) g_texts[text] = Text(c, Shown(pool[i]->name));
+			if (!g_texts[text]) { g_pool_failed = true; return; }
+			Row(rows + (kConflictHead + (uint32_t)i) * kRowSize, text, pool[i]->hash, kMissionStart, kKindLevel);
 		}
-		g_pool_rows = rows;
-		rt_log("goldeneye: Conflict's maps are the %zu of online.txt", g_pool.size());
+		g_pool_rows[mode] = rows;
+		rt_log("goldeneye: the maps of %s are the %zu of its folder", kModeFolders[mode], pool.size());
 	}
-	const uint32_t rows = on ? g_pool_rows : kConflictRows, have = ld32(page + kPageRows);
-	if (have == rows || (have != kConflictRows && have != g_pool_rows)) return;
+	const uint32_t rows = on ? g_pool_rows[mode] : game, have = ld32(page + kPageRows);
+	if (have == rows || (have != game && have != g_pool_rows[mode])) return;
 	st32(page + kPageRows, rows);
-	st32(page + kPageRowCount, on ? g_pool_row_count : kConflictRowCount);
+	st32(page + kPageRowCount, on ? g_pool_row_count[mode] : kMapRowCount);
+}
+
+//Choose Game Mode after Connect to WFC Modded: only the gamemodes that have maps
+void ChooseFrame(const PPCContext& c, uint32_t data, uint32_t count)
+{
+	uint32_t page = 0;
+	for (uint32_t i = 0; i < count && !page; ++i)
+	{
+		const uint32_t rows = ld32(data + i * kPageSize + kPageRows);
+		if (rows == kChooseRows || (g_choose_rows && rows == g_choose_rows)) page = data + i * kPageSize;
+	}
+	if (!page || !g_any_pool || g_pool_failed || !game_alloc) return;
+	if (!g_choose_rows)
+	{
+		std::vector<uint32_t> items; //which of the game's nine stay
+		for (uint32_t i = 0; i < kChooseItemCount; ++i)
+		{
+			const uint32_t text = ld32(kChooseRows + (kChooseItems + i) * kRowSize);
+			int mode = 0;
+			while (mode < kModeCount && kModes[mode].text != text) ++mode;
+			if (text == kTextClassic) mode = 0;
+			if (mode == kModeCount || !g_pool[mode].empty()) items.push_back(i);
+		}
+		if (items.size() == kChooseItemCount) { g_choose_rows = kChooseRows; g_choose_row_count = kChooseRowCount; }
+		else
+		{
+			uint32_t rows = 0;
+			const uint32_t at = ListRows(c, (uint32_t)items.size(), kTextChoose, rows, g_choose_row_count);
+			if (!at) { g_pool_failed = true; return; }
+			const uint32_t about = at + uint32_t(items.size() + 1) * kRowSize;
+			for (size_t i = 0; i < items.size(); ++i)
+			{
+				CopyRows(at + uint32_t(i) * kRowSize, kChooseRows + (kChooseItems + items[i]) * kRowSize, 1);
+				CopyRows(about + uint32_t(i) * kRowSize, kChooseRows + (kChooseAbout + items[i]) * kRowSize, 1);
+			}
+			g_choose_rows = rows;
+			rt_log("goldeneye: Choose Game Mode (page %08X) has %zu of the %u gamemodes after Connect to WFC Modded", ld32(page), items.size(), kChooseItemCount);
+		}
+	}
+	const bool on = Modded();
+	const uint32_t rows = on ? g_choose_rows : kChooseRows;
+	if (ld32(page + kPageRows) == rows) return;
+	st32(page + kPageRows, rows);
+	st32(page + kPageRowCount, on ? g_choose_row_count : kChooseRowCount);
 }
 
 //ge_pick_next_maps (801E5860): a network game's next two maps, each drawn at random from the
@@ -405,8 +464,6 @@ void PickNextMaps(PPCContext& c)
 const uint32_t kExportRecord = 0x4, kRecordVersion = 0x154, kTaskVersion = 0x44;
 PPCFunc orig_session_export = nullptr, orig_find_query = nullptr;
 
-bool Modded() { return g_map_pool && !g_pool.empty() && !g_pool_failed; }
-
 void SessionExport(PPCContext& c)
 {
 	const uint32_t record = ld32(c.r[3] + kExportRecord);
@@ -450,7 +507,8 @@ void mods_menu_frame(PPCContext& c)
 	uint32_t data = ld32(kPages + kPagesData);
 	if (!guest_ptr(data) || count == 0 || count > kMostPages) return;
 	MultiplayerFrame(c, data, count);
-	PoolFrame(c, data, count);
+	for (int mode = 0; mode < kModeCount; ++mode) PoolFrame(c, data, count, mode);
+	ChooseFrame(c, data, count);
 	const uint32_t extras = FindPage(data, count, kExtrasPage);
 	if (!extras) return;
 
@@ -509,7 +567,7 @@ void install_mods_menu()
 	ReadPool();
 	random_map = ppc_lookup(kRandomMap);
 	if (random_map) ppc_hook("ge_pick_next_maps", PickNextMaps);
-	if (!g_pool.empty())
+	if (g_any_pool)
 	{
 		orig_session_export = ppc_hook("ge_session_export", SessionExport);
 		orig_find_query = ppc_hook("ge_find_query", FindQuery);

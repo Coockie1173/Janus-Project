@@ -251,9 +251,10 @@ uint32_t Lend(const Picture& picture)
 	return kLenders[pick].number;
 }
 
-std::string PngOf(const std::string& mod)
+//next to the mod's file, in whichever folder that is
+std::string PngOf(const ModLevel& mod)
 {
-	return (std::filesystem::path(mods_folder()) / std::filesystem::path(mod).replace_extension(".png")).string();
+	return std::filesystem::path(mod.path).replace_extension(".png").string();
 }
 
 //every mod's .png. the lenders show their own pictures first, what they held is gone
@@ -270,7 +271,7 @@ void ReadPictures()
 	g_pictures.clear();
 	for (const ModLevel& mod : mod_files())
 	{
-		const std::string path = PngOf(mod.name);
+		const std::string path = PngOf(mod);
 		std::error_code error;
 		if (!std::filesystem::exists(path, error)) continue;
 		std::vector<uint8_t> rgba;
@@ -374,7 +375,7 @@ std::string pictures_draw()
 		cut[i] = cut[i + 1] = cut[i + 2] = grey;
 		cut[i + 3] = 255;
 	}
-	const std::string path = PngOf(mod->name);
+	const std::string path = PngOf(*mod);
 	write_png(path, cw, ch, cut.data());
 	g_again = true;
 	rt_log("goldeneye: picture of %s written to %s (%d x %d)", mod->name.c_str(), path.c_str(), cw, ch);

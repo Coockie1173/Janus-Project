@@ -7,10 +7,12 @@
 //row at the end. two mods with the same hash: the second gets another one. a level is its mt_ file's hash: GE_LEVEL=hash starts a new one
 //
 //the levels among them can be picked in the game's menu: Extras > Mods (port/modmenu.cpp)
-//online.txt in the folder is a list of maps for multiplayer's Conflict (the same file)
+//a folder in it for each online gamemode (kModeFolders): the levels in conflict/ are the maps
+//Conflict has after Connect to WFC Modded, and so on. a file that is in more than one of them
+//is the same mod once. what is in the mods folder itself is only in Extras > Mods
 //a .png with a level's name is its picture in the menus (port/pictures.cpp)
 //
-//GE_MODS=DIR the folder, every .edb in it (mods in the game's folder by default)
+//GE_MODS=DIR the folder, every .edb in it and in its gamemode folders (mods in the game's folder by default)
 //GE_TRACEFILES=1 log every file the game gives memory to, with its size
 #include "ge.h"
 #include "disc.h"
@@ -47,6 +49,7 @@ struct Mod
 	std::string path, name;
 	uint32_t hash{}, version{}, flags{}, size{}, loaded{};
 	uint32_t ownHash{}; //the hash in the file itself, when it had to get another one
+	uint32_t modes{}; //the gamemode folders it is in, a bit each
 };
 
 uint32_t Be32(const uint8_t* p) { return (uint32_t)p[0] << 24 | p[1] << 16 | p[2] << 8 | p[3]; }
@@ -157,6 +160,30 @@ void OnLoad(PPCContext& c)
 std::vector<ModLevel> g_levels, g_files;
 std::string g_folder;
 
+//a folder's name as it is looked for: lower case, a space or a dash is an underscore
+std::string FolderName(std::string name)
+{
+	std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) { return c == ' ' || c == '-' ? '_' : char(std::tolower(c)); });
+	return name;
+}
+
+//every .edb of a folder. one that is there already (the same name, hash and size, in another
+//gamemode's folder) is the same mod and only gets that gamemode too
+void ReadFolder(const std::filesystem::path& dir, uint32_t modes, std::vector<Mod>& mods)
+{
+	std::error_code error;
+	for (const auto& entry : std::filesystem::directory_iterator(dir, error))
+	{
+		if (entry.path().extension() != ".edb" || entry.is_directory(error)) continue;
+		Mod mod;
+		if (!ReadMod(entry.path(), mod)) { rt_log("goldeneye: mods: %s isn't an .edb of this game, left out", entry.path().string().c_str()); continue; }
+		mod.modes = modes;
+		auto same = std::find_if(mods.begin(), mods.end(), [&](const Mod& m) { return m.name == mod.name && m.hash == mod.hash && m.size == mod.size; });
+		if (same != mods.end()) same->modes |= modes;
+		else mods.push_back(mod);
+	}
+}
+
 //a level of the mods folder isn't in the game's level table. a single player game does without
 //the row, a multiplayer game reads the players' characters out of it without asking (fn_8000F8E0,
 //a crash at 000000A4). there the row of one of the game's own multiplayer maps stands in
@@ -251,6 +278,9 @@ void SpawnPointsSetup(PPCContext& c)
 
 } //namespace
 
+//in the order of the game's Choose Game Mode. Classic Conflict has Conflict's maps, as in the game
+const char* const kModeFolders[kModeCount] = { "conflict", "team_conflict", "golden_gun", "black_box", "goldeneye", "heroes", "license_to_kill", "team_license_to_kill" };
+
 const std::vector<ModLevel>& mod_levels() { return g_levels; }
 const std::vector<ModLevel>& mod_files() { return g_files; }
 const std::string& mods_folder() { return g_folder; }
@@ -270,15 +300,20 @@ void install_mods()
 	if (dir.empty() || !std::filesystem::is_directory(dir, error)) return;
 	g_folder = dir;
 	std::vector<Mod> mods;
+	ReadFolder(dir, 0, mods);
+	std::vector<std::filesystem::path> folders;
 	for (const auto& entry : std::filesystem::directory_iterator(dir, error))
+		if (entry.is_directory(error)) folders.push_back(entry.path());
+	std::sort(folders.begin(), folders.end());
+	for (const auto& folder : folders)
 	{
-		if (entry.path().extension() != ".edb") continue;
-		Mod mod;
-		if (ReadMod(entry.path(), mod)) mods.push_back(mod);
-		else rt_log("goldeneye: mods: %s isn't an .edb of this game, left out", entry.path().string().c_str());
+		const std::string name = FolderName(folder.filename().string());
+		const auto mode = std::find(std::begin(kModeFolders), std::end(kModeFolders), name);
+		if (mode != std::end(kModeFolders)) ReadFolder(folder, 1u << (mode - std::begin(kModeFolders)), mods);
+		else rt_log("goldeneye: mods: the folder %s isn't a gamemode's, left out", folder.filename().string().c_str());
 	}
 	if (mods.empty()) return;
-	std::sort(mods.begin(), mods.end(), [](const Mod& a, const Mod& b) { return a.name < b.name; });
+	std::sort(mods.begin(), mods.end(), [](const Mod& a, const Mod& b) { return a.name != b.name ? a.name < b.name : a.path < b.path; });
 
 	uint64_t listAt = 0, listSize = 0, dataSize = 0;
 	if (!disc_file("Filelist.bin", &listAt, &listSize) || !disc_file("Filelist.000", nullptr, &dataSize))
@@ -345,8 +380,8 @@ void install_mods()
 		row->size = mod.loaded; row->hash = mod.hash; row->version = mod.version; row->flags = mod.flags;
 		row->places = { { uint32_t(at), 0 } };
 		rt_log("goldeneye: mod %s: file %08X, %s", mod.name.c_str(), mod.hash, isNew ? "new" : "in place of the disc's");
-		g_files.push_back({ mod.hash, mod.name });
-		if ((mod.hash & 0xFFFF0000u) == kLevelFiles) g_levels.push_back({ mod.hash, mod.name });
+		g_files.push_back({ mod.hash, mod.name, mod.path, mod.modes });
+		if ((mod.hash & 0xFFFF0000u) == kLevelFiles) g_levels.push_back({ mod.hash, mod.name, mod.path, mod.modes });
 	}
 	if (!disc_replace("Filelist.000", parts) || !disc_replace("Filelist.bin", { DiscPart{ {}, 0, 0, WriteList(rows, buildType, lists) } }))
 		rt_log("goldeneye: mods: the disc's file list couldn't be replaced");
