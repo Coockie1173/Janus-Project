@@ -109,9 +109,8 @@ void install_command_time(); //a player's step online keeps the part of a millis
 void net_frame(); //once a frame: the range a player's pitch is sent in
 void net_trace_controller(uint32_t ctrl, uint32_t player, bool own); //GE_NETTRACE: a player's place and angles after its update
 float net_pitch_range(); //how far up and down it goes to the others, radians
-struct Ping { bool host; float ms; }; //ms: the round trip to the host, of a joined console
-bool ping(Ping& p); //in a modded network game with the display on, false otherwise
-bool show_ping(); //the ping is shown in a modded network game
+void install_ping(); //the scoreboard of a modded network game has the ping next to this console's player
+bool show_ping();
 void set_show_ping(bool on);
 bool modded_lobby(); //modmenu.cpp: network games are the ones of Connect to WFC Modded
 void install_mods(); //mods.cpp

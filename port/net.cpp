@@ -122,45 +122,58 @@ void net_trace_controller(uint32_t ctrl, uint32_t player, bool own)
 //bdClient (the game's own class of it, made by fn_801B4270: the pointer at 805D5474) has its
 //connection's statistics from +0x120, filled every frame by fn_801D6840; the float at +0x138
 //is the round trip to the host in seconds, the connection's own (fn_803FFDB0, its +0x3C, set
-//by fn_803FFD18 with the least and the most before it). the game's debug page prints it as
-//"CLIENT ... AverageRTT:%2.2f" (fn_801BEE00)
-//the host has no round trip of its own: it is told apart, the display says so
+//by bdUnicastConnection::handleSAck, fn_804091C0, whenever a reliable message is acknowledged).
+//the game's debug page prints it as "CLIENT ... AverageRTT:%2.2f" (fn_801BEE00)
+//the host has no round trip of its own: its scoreboard says "host"
+//
+//it is shown in the scoreboard, after the name of this console's player. ge_scoreboard_draw
+//(8026D9C0: r3 the scoreboard, r5 the controller it is drawn for) writes a row's name from the
+//pointer at the scoreboard's +0xC + 4 * the player's slot, and knows this console's row by the
+//slot's byte at +0x2C being the controller's network player's (fn_80108C10 gives that one, the
+//byte at its +0xC). for the call the pointer is one to the name with the ping behind it, kept
+//in a frame under the stack
 namespace
 {
 
 const uint32_t kNetHost = 0x805D5470, kNetClient = 0x805D5474; //the game's server and client, 0 without
 const uint32_t kClientRoundTrip = 0x138;
 const float kPingSmooth = 0.1f; //how much of a frame's value goes into the shown one
+const uint32_t kNetPlayerOf = 0x80108C10; //(a controller) -> its network player, 0 without
+const uint32_t kNetPlayerId = 0xC; //a byte
+const uint32_t kBoardNames = 0xC, kBoardIds = 0x2C, kBoardSlots = 8;
+const uint32_t kMostName = 32;
 
+enum PingState { kNoPing, kHosting, kJoined };
 std::atomic<bool> g_showPing{ true };
-std::atomic<int> g_pingState{ 0 }; //0 none, 1 hosting, 2 joined
-std::atomic<float> g_pingMs{ 0.0f };
+PingState g_pingState = kNoPing; //the game's thread only
+float g_pingMs = 0;
+PPCFunc orig_scoreboard = nullptr, net_player_of = nullptr;
 
 void UpdatePing()
 {
 	static const bool trace = std::getenv("GE_TRACE") != nullptr;
-	static int said = -1;
-	int state = 0;
+	static PingState said = kNoPing;
+	PingState state = kNoPing;
 	if (g_showPing && network_game() && modded_lobby())
 	{
 		const uint32_t client = ld32(kNetClient);
-		if (ld32(kNetHost) != 0) state = 1;
+		if (ld32(kNetHost) != 0) state = kHosting;
 		else if (guest_ptr(client))
 		{
 			const float ms = ldf(client + kClientRoundTrip) * 1000.0f;
 			if (ms >= 0 && ms < 10000.0f)
 			{
 				//the first one as it is, then eased so the number can be read
-				g_pingMs = g_pingState == 2 ? g_pingMs + (ms - g_pingMs) * kPingSmooth : ms;
-				state = 2;
+				g_pingMs = g_pingState == kJoined ? g_pingMs + (ms - g_pingMs) * kPingSmooth : ms;
+				state = kJoined;
 			}
 		}
 	}
 	g_pingState = state;
 	if (trace && state != said)
-		rt_log("goldeneye: online: ping display %s", state == 0 ? "off" : state == 1 ? "on, hosting" : "on, joined");
+		rt_log("goldeneye: online: ping in the scoreboard %s", state == kNoPing ? "off" : state == kHosting ? "on, hosting" : "on, joined");
 	said = state;
-	if (trace && state == 2)
+	if (trace && state == kJoined)
 	{
 		//how often the connection measures: its value's changes between two lines
 		static float raw = 0;
@@ -170,23 +183,62 @@ void UpdatePing()
 		raw = now;
 		if (ld32(kFrameCount) % 600 == 0)
 		{
-			rt_log("goldeneye: online: ping %.2f ms shown, the connection's %.3f ms, measured %u times since the last line", g_pingMs.load(), raw * 1000.0f, changes);
+			rt_log("goldeneye: online: ping %.2f ms shown, the connection's %.3f ms, measured %u times since the last line", g_pingMs, raw * 1000.0f, changes);
 			changes = 0;
 		}
 	}
 }
 
+//the slot of the controller's player in the scoreboard, -1 when it has none
+int BoardSlot(const PPCContext& c, uint32_t board, uint32_t ctrl)
+{
+	if (!net_player_of || !guest_ptr(board) || !guest_ptr(ctrl)) return -1;
+	PPCContext call = c;
+	call.r[3] = ctrl;
+	net_player_of(call);
+	const uint32_t player = call.r[3];
+	if (!guest_ptr(player)) return -1;
+	const uint8_t id = ld8(player + kNetPlayerId);
+	for (uint32_t slot = 0; slot < kBoardSlots; ++slot)
+		if (ld8(board + kBoardIds + slot) == id && guest_ptr(ld32(board + kBoardNames + slot * 4))) return (int)slot;
+	return -1;
+}
+
+//(r3 the scoreboard, r5 the controller)
+void ScoreboardDraw(PPCContext& c)
+{
+	const uint32_t board = c.r[3];
+	const int slot = g_pingState == kNoPing || c.r[5] != local_controller() ? -1 : BoardSlot(c, board, c.r[5]);
+	if (slot < 0) { orig_scoreboard(c); return; }
+	char ping[24];
+	if (g_pingState == kHosting) std::snprintf(ping, sizeof ping, "   host");
+	else std::snprintf(ping, sizeof ping, "   %.0f ms", g_pingMs);
+	const uint32_t at = board + kBoardNames + (uint32_t)slot * 4, name = ld32(at);
+	const uint32_t stack = c.r[1], frame = (stack - 0x20 - (kMostName + sizeof ping) * 2) & ~0xFu, text = frame + 0x10;
+	uint32_t count = 0;
+	for (; count < kMostName && ld16(name + count * 2); ++count) st16(text + count * 2, ld16(name + count * 2));
+	for (const char* p = ping; *p; ++p) st16(text + count++ * 2, (uint16_t)*p);
+	st16(text + count * 2, 0);
+	st32(frame, stack);
+	st32(at, text);
+	c.r[1] = frame;
+	orig_scoreboard(c);
+	c.r[1] = stack;
+	st32(at, name);
+}
+
 } //namespace
 
-bool ping(Ping& p)
-{
-	const int state = g_pingState;
-	p.host = state == 1;
-	p.ms = g_pingMs;
-	return state != 0;
-}
 bool show_ping() { return g_showPing; }
 void set_show_ping(bool on) { g_showPing = on; }
+
+void install_ping()
+{
+	if (const char* e = std::getenv("GE_PING")) g_showPing = std::atoi(e) != 0;
+	net_player_of = ppc_lookup(kNetPlayerOf);
+	orig_scoreboard = ppc_hook("ge_scoreboard_draw", ScoreboardDraw);
+	if (!orig_scoreboard) rt_log("goldeneye: ge_scoreboard_draw is not hooked in this build, no ping in the scoreboard");
+}
 
 //once a frame
 void net_frame()
@@ -329,7 +381,6 @@ void install_hosts() {
     const char* path = std::getenv("GE_HOSTS");
     if (!path) path = GE_HOSTS_DEFAULT;
     ios_net_log(std::getenv("GE_NETLOG") != nullptr);
-    if (const char* e = std::getenv("GE_PING")) g_showPing = std::atoi(e) != 0;
     if (!*path) return;
     FILE* f = std::fopen(path, "r");
     if (!f) { rt_log("goldeneye: no hosts file %s: the game's servers as the system resolves them", path); return; }

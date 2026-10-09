@@ -791,10 +791,12 @@ machine runs the command and `look_apply` turns the player.
 player's command carries the frame's time as a byte of whole milliseconds, `SetCommandTime`
 keeps what that cuts off for the next frame's command so the time adds up at any frame rate.
 
-`UpdatePing` (from `net_frame`) keeps the ping for the overlay: in a network game of Connect to
-WFC Modded with Show Ping on, a joined console's is the client's float at +0x138 (the pointer
-at `805D5474`; seconds, the connection's smoothed round trip of its reliable messages), eased
-a little; the host is only told apart. `ping(p)` gives it to the renderer's thread,
+`UpdatePing` (from `net_frame`) keeps the ping: in a network game of Connect to WFC Modded
+with Show Ping on, a joined console's is the client's float at +0x138 (the pointer at
+`805D5474`; seconds, the connection's smoothed round trip of its reliable messages), eased a
+little; the host is only told apart. `ScoreboardDraw` (the hook of `ge_scoreboard_draw`,
+`install_ping`) puts it after the name in this console's row of the scoreboard: the name's
+pointer (the scoreboard's +0xC + 4 * slot) is one to "name   9 ms" for the call.
 `show_ping` / `set_show_ping` are the setting (`GE_PING`).
 
 ### overlay.cpp, dmw.cpp, dmw.h
@@ -917,7 +919,7 @@ Options (the launcher sets these from its settings):
 |---|---|
 | `GE_FPS=N` or `auto` | the frame rate the engine may reach, 31..1000 (auto is 60) |
 | `GE_VSYNC=1` | frames wait for the screen's refresh, the rate is the screen's at most |
-| `GE_PING=0` | no ping shown in a modded network game |
+| `GE_PING=0` | no ping in the scoreboard of a modded network game |
 | `GE_FOV=D`, `GE_ADS_FOV=D` | field of view, and aiming down the sight |
 | `GE_MOUSE=S` | mouse sensitivity, 0 leaves the mouse free |
 | `GE_MOUSE_MODE=auto\|direct\|stick` | how the mouse turns the view |

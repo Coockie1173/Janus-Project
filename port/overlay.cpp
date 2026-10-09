@@ -117,23 +117,6 @@ void cheats_label() {
     dl->AddText(font, size, at, IM_COL32(255, 196, 64, 255), text);
 }
 
-//the ping in a modded network game (net.cpp), in the top left corner: green, yellow from 80 ms, red from 150
-void ping_label(const Ping& p) {
-    char text[32];
-    if (p.host) std::snprintf(text, sizeof text, "Ping: host");
-    else std::snprintf(text, sizeof text, "Ping: %.0f ms", p.ms);
-    ImFont* font = ImGui::GetFont();
-    ImVec2 screen = ImGui::GetIO().DisplaySize;
-    float u = std::min(screen.y / 720, screen.x / 960);
-    float size = font->FontSize * 1.5f * std::max(u, 1.0f), pad = 5 * u;
-    ImVec2 box = font->CalcTextSizeA(size, FLT_MAX, 0, text);
-    ImVec2 at(14 * u + pad, 14 * u + pad);
-    ImU32 colour = p.host ? IM_COL32(255, 255, 255, 255) : p.ms < 80 ? IM_COL32(80, 230, 110, 255) : p.ms < 150 ? IM_COL32(255, 196, 64, 255) : IM_COL32(255, 70, 60, 255);
-    ImDrawList* dl = ImGui::GetBackgroundDrawList();
-    dl->AddRectFilled(ImVec2(at.x - pad, at.y - pad), ImVec2(at.x + box.x + pad, at.y + box.y + pad), IM_COL32(0, 0, 0, 150), 3);
-    dl->AddText(font, size, at, colour, text);
-}
-
 //the stamina meter (stamina.cpp): the sprint that's left, and the line a sprint is cancelled
 //right under. green under the line, dimmer while it refills
 void stamina_bar(const Stamina& s) {
@@ -280,9 +263,7 @@ void draw() {
     bool cheats = cheats_active();
     Stamina sprint;
     bool meter = stamina(sprint);
-    Ping net;
-    bool online = ping(net);
-    if (!overlay_open() && !g_show_state && !skipping_cutscene() && fade <= 0 && !settings_toast() && !cheats && !meter && !online) return;
+    if (!overlay_open() && !g_show_state && !skipping_cutscene() && fade <= 0 && !settings_toast() && !cheats && !meter) return;
     //with only the state shown the cursor stays hidden over the picture
     ImGuiIO& io = ImGui::GetIO();
     if (overlay_open()) io.ConfigFlags &= ~ImGuiConfigFlags_NoMouseCursorChange;
@@ -293,7 +274,6 @@ void draw() {
     if (fade > 0) cutscene_black(fade);
     if (meter) stamina_bar(sprint);
     if (cheats) cheats_label();
-    if (online) ping_label(net);
     if (g_show_state) player_state();
     if (skipping_cutscene()) skipping_label();
     if (g_open) watches();

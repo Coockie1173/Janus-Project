@@ -35,7 +35,7 @@
 //GE_SETTINGS=N start with the settings menu (F1) open on page N
 //GE_FPS=N frame rate the engine may reach (30 by default, auto is 60)
 //GE_VSYNC=1 frames wait for the screen's refresh
-//GE_PING=0 no ping shown in a modded network game
+//GE_PING=0 no ping in the scoreboard of a modded network game
 //GE_NATIVE=0 run the recompiled math routines instead of the host ones
 //GE_CRASH_MEM=1 put the guest's memory in crash dumps (build/crashes)
 //GE_TRACETEXT=1 log the texts the game looks up and the buttons its prompts ask for
@@ -73,6 +73,7 @@ void install() {
     install_live_patch();
     install_command_time();
     install_blend_time();
+    install_ping();
     install_mods();
     install_mods_menu();
     install_pictures();
