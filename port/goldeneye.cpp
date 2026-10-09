@@ -30,6 +30,7 @@
 //GE_EXTRAS_MENU=1 cheat, the menu's unused extras page
 //GE_UNLOCK_ALL=1 cheat, every mission and difficulty unlocked
 //GE_NOCLIP=1 cheat, start flying through walls
+//GE_STAMINA=1 cheat, the sprint that's left as a bar
 //GE_COLLISION=1 cheat, the level's collision is drawn in place of the world
 //GE_SETTINGS=N start with the settings menu (F1) open on page N
 //GE_FPS=N frame rate the engine may reach (30 by default, auto is 60)
@@ -96,6 +97,7 @@ void install() {
     install_flipbooks();
     install_shake();
     install_noclip();
+    install_stamina();
     install_collision();
     install_autosave();
     install_weapons();

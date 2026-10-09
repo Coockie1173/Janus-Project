@@ -21,6 +21,7 @@ namespace ge {
 //a CC switch starts on, so what follows it runs until the condition before it first turns true
 struct GeckoLine { uint32_t a, b; bool was = false, on = true; };
 std::vector<std::vector<GeckoLine>> g_gecko;
+size_t g_cheat_codes = 0; //how many of them are the Cheats tab's
 
 bool gecko_ok(uint32_t addr, uint32_t size) {
     return (addr >= 0x80003000u && addr + size <= 0x81800000u) || (addr >= 0x90000000u && addr + size <= 0x94000000u);
@@ -97,7 +98,13 @@ void gecko_load(const char* path) {
     }
     std::fclose(f);
     if (g_gecko.size() > before) rt_log("goldeneye: %zu Gecko code(s) from %s", g_gecko.size() - before, path);
+    //the launcher writes the ticked cheats to build/cheats.txt, the other files are fixes and aids
+    std::string name = path;
+    if (size_t slash = name.find_last_of("/\\"); slash != std::string::npos) name.erase(0, slash + 1);
+    if (name == "cheats.txt") g_cheat_codes += g_gecko.size() - before;
 }
+
+bool gecko_cheats() { return g_cheat_codes > 0; }
 
 void install_gecko() {
     const char* path = std::getenv("GE_GECKO");

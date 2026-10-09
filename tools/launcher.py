@@ -55,7 +55,7 @@ ACTIONS = [
     ("Move left", "Left Stick Left"), ("Move right", "Left Stick Right"),
 ]
 DEFAULTS = {"fps": "auto", "fov": "49", "mouse": "1.0", "online": "1", "fullscreen": "0", "faststart": "0", "mousemode": "auto",
-            "mouseinvert": "0", "adsfov": "22.5", "adssens": "0.5", "aimlock": "0", "mouseeverywhere": "0", "skipcutscenes": "0", "skipzukovsky": "0", "skipbriggs": "0", "skipmovies": "0", "notutorials": "0", "nocolourfilter": "0", "autosave": "1", "leveltimer": "1", "autoqte": "0", "autostart": "0", "extrasmenu": "0", "unlockall": "0",
+            "mouseinvert": "0", "adsfov": "22.5", "adssens": "0.5", "aimlock": "0", "mouseeverywhere": "0", "skipcutscenes": "0", "skipzukovsky": "0", "skipbriggs": "0", "skipmovies": "0", "notutorials": "0", "nocolourfilter": "0", "autosave": "1", "leveltimer": "1", "autoqte": "0", "autostart": "0", "extrasmenu": "0", "unlockall": "0", "staminameter": "0",
             "crashdump": "1", "crashmem": "0"}
 
 #Tk's key names -> SDL's (the key file's)
@@ -428,15 +428,19 @@ def run_gui():
     ttk.Checkbutton(ch, text="Unlock Everything", variable=unlock_all).grid(row=4, column=0, sticky="w", **pad)
     ttk.Label(ch, text="Every mission and every difficulty can be picked. A save made with it on may keep them.",
               foreground="gray", wraplength=520, justify="left").grid(row=5, column=0, sticky="w", padx=(30, 8))
+    stamina_meter = tk.BooleanVar(value=settings["staminameter"] == "1")
+    ttk.Checkbutton(ch, text="Stamina Meter", variable=stamina_meter).grid(row=6, column=0, sticky="w", **pad)
+    ttk.Label(ch, text="A bar shows the sprint that's left, with a line where a sprint is best cancelled.",
+              foreground="gray", wraplength=520, justify="left").grid(row=7, column=0, sticky="w", padx=(30, 8))
     ttk.Label(ch, text="Gecko codes from config/gecko/cheats.txt. They apply the next time the game starts.",
-              justify="left").grid(row=6, column=0, sticky="w", **pad)
+              justify="left").grid(row=8, column=0, sticky="w", **pad)
     for i, (name, code, notes) in enumerate(cheats):
         cheat_vars[name] = tk.BooleanVar(value=name in already_on)
-        ttk.Checkbutton(ch, text=name, variable=cheat_vars[name]).grid(row=7 + 2 * i, column=0, sticky="w", **pad)
+        ttk.Checkbutton(ch, text=name, variable=cheat_vars[name]).grid(row=9 + 2 * i, column=0, sticky="w", **pad)
         ttk.Label(ch, text="\n".join(notes) or "  ".join(code), foreground="gray", wraplength=520,
-                  justify="left").grid(row=8 + 2 * i, column=0, sticky="w", padx=(30, 8))
+                  justify="left").grid(row=10 + 2 * i, column=0, sticky="w", padx=(30, 8))
     if not cheats:
-        ttk.Label(ch, text="No codes in there yet.", foreground="gray").grid(row=7, column=0, sticky="w", **pad)
+        ttk.Label(ch, text="No codes in there yet.", foreground="gray").grid(row=9, column=0, sticky="w", **pad)
 
     #play
     result = {"play": False}
@@ -462,6 +466,7 @@ def run_gui():
         settings["nocolourfilter"] = "1" if no_colour_filter.get() else "0"
         settings["extrasmenu"] = "1" if extras_menu.get() else "0"
         settings["unlockall"] = "1" if unlock_all.get() else "0"
+        settings["staminameter"] = "1" if stamina_meter.get() else "0"
         settings["mousemode"] = next((k for k, v in modes.items() if v == mousemode.get()), "auto")
         save_settings(settings)
         save_keys(lines, binds)
@@ -602,6 +607,8 @@ def run_game(args):
             s["extrasmenu"] = "1"
         elif a == "--unlock-all":
             s["unlockall"] = "1"
+        elif a == "--stamina-meter":
+            s["staminameter"] = "1"
         elif a == "--fast-start":
             s["faststart"] = "1"
         elif a == "--cheats":
@@ -629,7 +636,7 @@ def run_game(args):
                      ("GE_MOUSE_INVERT", "mouseinvert"), ("GE_ADS_FOV", "adsfov"),
                      ("GE_ADS_SENS", "adssens"), ("GE_AIM_LOCK", "aimlock"), ("GE_MOUSE_EVERYWHERE", "mouseeverywhere"),
                      ("GE_SKIP_CUTSCENES", "skipcutscenes"), ("GE_SKIP_ZUKOVSKY", "skipzukovsky"), ("GE_SKIP_BRIGGS", "skipbriggs"), ("GE_LEVEL_TIMER", "leveltimer"), ("GE_AUTO_QTE", "autoqte"), ("GE_AUTO_START", "autostart"), ("GE_SKIP_MOVIES", "skipmovies"), ("GE_NO_TUTORIALS", "notutorials"), ("GE_NO_COLOUR_FILTER", "nocolourfilter"), ("GE_AUTOSAVE", "autosave"),
-                     ("GE_EXTRAS_MENU", "extrasmenu"), ("GE_UNLOCK_ALL", "unlockall")):
+                     ("GE_EXTRAS_MENU", "extrasmenu"), ("GE_UNLOCK_ALL", "unlockall"), ("GE_STAMINA", "staminameter")):
         env.setdefault(var, s[key])
     if s["online"] == "0":
         env["GE_HOSTS"] = ""

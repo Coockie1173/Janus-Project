@@ -16,6 +16,7 @@
 //tweaks.cpp the level timer, the unused extras menu, auto start, no tutorials
 //tank.cpp the tank: the mouse on its aim, its buttons, driving at higher frame rates
 //noclip.cpp fly through the level
+//stamina.cpp the sprint that's left as a bar
 //weapons.cpp a key for each weapon slot
 //prompts.cpp the bound key in the game's prompts, where it shows a controller button
 //collision.cpp the level's collision drawn in place of the world
@@ -129,6 +130,7 @@ std::string pictures_draw(); //on the renderer's thread before the overlay, what
 void pictures_file(uint32_t hash, uint32_t file); //a file (the game's object for it) was given its memory
 void install_gecko(); //gecko.cpp
 void gecko_apply();
+bool gecko_cheats(); //codes of the launcher's Cheats tab are running
 void install_fov(); //fov.cpp
 void fov_apply();
 const float kGameFov = 49.0f, kFovMin = 20.0f, kFovMax = 120.0f;
@@ -194,6 +196,12 @@ void set_noclip(bool on);
 void noclip_look(uint32_t controller); //before ge_look_apply, the game's own step is taken out
 void noclip_apply(uint32_t controller); //after the local controller's update
 bool player_state(uint32_t& state, float& fallen, uint32_t& bodyFlags); //the local player as of its last update, false before there is one
+void install_stamina(); //stamina.cpp
+bool stamina_meter(); //cheat, the sprint that's left as a bar
+void set_stamina_meter(bool on);
+void stamina_apply(uint32_t controller); //after the local controller's update
+struct Stamina { float left, full, cancel; bool sprinting; }; //seconds: left of full, and where a cancelled sprint's refill jumps
+bool stamina(Stamina& s); //the local player's as of its last update, false with the meter off or nobody in play
 void install_collision(); //collision.cpp
 void install_body(); //body.cpp
 void install_unload(); //unload.cpp

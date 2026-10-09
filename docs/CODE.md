@@ -76,7 +76,7 @@ frame_tick
 ```
 
 **Install order** (`goldeneye.cpp`): hosts, fov, gecko, crash handler, profiler, debug, fps,
-native, cutscenes, qte, tweaks, movies, files, records, zones, tank, body, noclip, collision,
+native, cutscenes, qte, tweaks, movies, files, records, zones, tank, body, noclip, stamina, collision,
 autosave, weapons, prompts, then `wpad_set_classic(true)` (keys, mouse and gamepads all map to
 the classic controller), mouse, overlay.
 
@@ -188,6 +188,7 @@ front part.
 | `+0xD00` | u8 | aim is held |
 | `+0xD10` | float | the aim blend, 0 to 1 in about eight frames (`+0xF48` its opposite) |
 | `+0xE59` | u8 | sprinting |
+| `+0xE5C` | float | the sprint left, seconds (0 to 3.1) |
 | `+0xE64` | u8 | the sprint button is still down |
 | `+0xE78` | 4 floats | the fall's velocity |
 | `+0xE90` | float | the distance fallen |
@@ -506,7 +507,7 @@ view's angles once a frame.
 | `mouse_aim(ctrl)` | the aim inside a cutscene's view (`+0xEDC`, `+0xEE0`) within the game's limits |
 | `look_apply` | hook on `ge_look_apply`: `g_look_yaw / dt` added to the yaw rate (`+0x97C`) for the call |
 | `aim_sens_scale(ctrl)` | the sensitivity goes to the aim sensitivity by the aim blend |
-| `controller_update` | hook: finds the local controller with the game's test, applies the mouse, then `ads_fov_apply` and `noclip_apply` after the game's update; the `GE_TRACE` and `GE_TRACELOOK` logs |
+| `controller_update` | hook: finds the local controller with the game's test, applies the mouse, then `ads_fov_apply`, `noclip_apply` and `stamina_apply` after the game's update; the `GE_TRACE` and `GE_TRACELOOK` logs |
 | `sprint_buttons`, `sprint_frame`, `sprint_read<I>` | sprint on its own key: for the three readers bit 4 is the sprint key, b only the action |
 | `action_update` | hook on `ge_action_update`: the sprint key is b too for a climb or vault |
 | `wheel_buttons` | the wheel as D-pad right/left presses, 80 ms held and 60 ms apart |
@@ -535,7 +536,8 @@ stretched by `tan(view / 2) / tan(24.5)` for that draw. With Disable Colour Filt
 ### gecko.cpp
 
 Codes that patch code are applied to the dol before recompiling (`tools/gecko.py`); the rest
-run here once a frame. `gecko_load(path)` reads Dolphin's notation (`$` starts a code, `*` and
+run here once a frame. `gecko_cheats()` is true when a file named `cheats.txt` (the launcher's
+Cheats tab) had codes. `gecko_load(path)` reads Dolphin's notation (`$` starts a code, `*` and
 `#` are comments), `gecko_apply()` runs them. Supported types: `00`, `02`, `04` writes, `08`
 serial write, `20..2E` conditions (an odd address is an endif first), `CC` on/off switch,
 `E0`, `E2`. Writes outside MEM1/MEM2 are dropped.
@@ -683,6 +685,17 @@ keeps the body's flags `0x1` and `0x2` set and the fall speed, velocity and dist
 position is taken again when it jumps more than 4 units or the player is not in a free state;
 `Land(body)` clears them again.
 
+### stamina.cpp
+
+The stamina meter (a cheat). `stamina_apply(ctrl)` (after the local controller's update) keeps
+the sprint left (`+0xE5C`), full (`806E9490`, or `806E9494` with the byte at `806EBA7D` set,
+3.1 both) and the line (full over `806EEC80`, 10) for the renderer's thread; `stamina(s)` gives
+them to the overlay, false with the meter off, outside play or after 4 frames without an
+update. Sprinting takes the frame's time off it (`ge_sprint_update`), `PlayerSprint` gives a
+tenth of full back a second, and a refill that gets from under that tenth (0.31) to it makes
+it 0.36 of full (`806EEC84`, 1.116) at once; a new sprint needs 1.0 (`806EEC20`). With
+`GE_TRACE` a sprint's start and end and every such jump are logged.
+
 ### weapons.cpp
 
 A key for each weapon slot. `weapon_buttons` (in the classic's filter) keeps the slot whose
@@ -782,7 +795,10 @@ The debug overlay (F3), drawn with Dear ImGui on the renderer's thread through
 `video_set_overlay` (only when ImGui's sources are in `build/deps/imgui`, `GE_IMGUI`). It
 shows a Dolphin Memory Engine watch list live, grouped as the file groups it or flat under a
 filter; the local player's state in the top right corner when asked; "Skipping cutscene..."
-in the bottom right. The settings menu and the hotkeys' line are drawn in the same frame.
+in the bottom right; "Cheats active" in the bottom left while anything on the menu's Cheats
+page is on or a code of the launcher's Cheats tab runs (`cheats_active()`, settings.cpp); the
+stamina meter's bar at the bottom (`stamina_bar`: green under the line, dimmer while it
+refills). The settings menu and the hotkeys' line are drawn in the same frame.
 `overlay_open()` is true for either window, which frees the mouse.
 
 `dmw.cpp`: a small JSON reader (`Json`, `Parser`), `dmw_load` (a `.dmw` is
@@ -806,7 +822,7 @@ Everything the pages change is one list of `Setting` (`hotkeys.h`: id, label, hi
 | Screen | `fov`, `ads_fov`, `fps` (stops 30 to 275) |
 | Controls | `mouse_sens`, `ads_sens`, `aim_lock`, `mouse_invert`, `mouse_mode`, `input`, `face_buttons`, `dead_zone` |
 | Enhancements | `skip_cutscenes`, `skip_movies`, `level_timer`, `auto_qte`, `auto_start`, `autosave`, `no_tutorials`, `no_colour_filter` |
-| Cheats | `mouse_everywhere`, `extras_menu`, `unlock_all`, `noclip`, `collision_view` |
+| Cheats | `mouse_everywhere`, `extras_menu`, `unlock_all`, `noclip`, `stamina_meter`, `collision_view` |
 
 Key bindings (`kActions`): Fire ZR, Aim ZL, Melee L, Throw Grenade R, Reload Y, Crouch A,
 Action B, Sprint Extra 1, Cycle Grenades X, Next/Previous Weapon Right/Left, Weapon 1..3
@@ -898,7 +914,7 @@ Options (the launcher sets these from its settings):
 | `GE_MOUSE_INVERT=1`, `GE_ADS_SENS=S`, `GE_AIM_LOCK=1` | |
 | `GE_SKIP_CUTSCENES=1`, `GE_SKIP_MOVIES=1`, `GE_AUTO_QTE=1`, `GE_AUTO_START=1`, `GE_NO_TUTORIALS=1`, `GE_NO_COLOUR_FILTER=1` | enhancements |
 | `GE_LEVEL_TIMER=0`, `GE_AUTOSAVE=0` | on by default |
-| `GE_MOUSE_EVERYWHERE=1`, `GE_EXTRAS_MENU=1`, `GE_UNLOCK_ALL=1`, `GE_NOCLIP=1`, `GE_COLLISION=1` | cheats |
+| `GE_MOUSE_EVERYWHERE=1`, `GE_EXTRAS_MENU=1`, `GE_UNLOCK_ALL=1`, `GE_NOCLIP=1`, `GE_STAMINA=1`, `GE_COLLISION=1` | cheats |
 | `GE_HOSTS=F`, `GE_NETLOG=1` | the hosts file, the network log |
 | `GE_GECKO=F`, `GE_GECKO_EXTRA=F[:F...]` | gecko code files |
 | `GE_SETTINGS=N` | start with the settings menu open on page N |

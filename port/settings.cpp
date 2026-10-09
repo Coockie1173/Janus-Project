@@ -94,7 +94,7 @@ void save_launch_settings() {
         {"LAUNCH_ADSFOV", ads_fov_text}, {"LAUNCH_ADSSENS", ads_sens_text}, {"LAUNCH_AIMLOCK", aim_lock() ? "1" : "0"},
         {"LAUNCH_MOUSEEVERYWHERE", mouse_everywhere() ? "1" : "0"},
         {"LAUNCH_SKIPCUTSCENES", skip_cutscenes() ? "1" : "0"}, {"LAUNCH_SKIPZUKOVSKY", skip_zukovsky() ? "1" : "0"}, {"LAUNCH_SKIPBRIGGS", skip_briggs() ? "1" : "0"}, {"LAUNCH_SKIPMOVIES", skip_movies() ? "1" : "0"}, {"LAUNCH_NOTUTORIALS", no_tutorials() ? "1" : "0"}, {"LAUNCH_NOCOLOURFILTER", no_colour_filter() ? "1" : "0"},
-        {"LAUNCH_LEVELTIMER", level_timer() ? "1" : "0"}, {"LAUNCH_AUTOQTE", auto_qte() ? "1" : "0"}, {"LAUNCH_AUTOSTART", auto_start() ? "1" : "0"}, {"LAUNCH_AUTOSAVE", autosave() ? "1" : "0"}, {"LAUNCH_EXTRASMENU", extras_menu() ? "1" : "0"}, {"LAUNCH_UNLOCKALL", unlock_all() ? "1" : "0"}};
+        {"LAUNCH_LEVELTIMER", level_timer() ? "1" : "0"}, {"LAUNCH_AUTOQTE", auto_qte() ? "1" : "0"}, {"LAUNCH_AUTOSTART", auto_start() ? "1" : "0"}, {"LAUNCH_AUTOSAVE", autosave() ? "1" : "0"}, {"LAUNCH_EXTRASMENU", extras_menu() ? "1" : "0"}, {"LAUNCH_UNLOCKALL", unlock_all() ? "1" : "0"}, {"LAUNCH_STAMINAMETER", stamina_meter() ? "1" : "0"}};
     if (g_fps_changed) values.push_back({"LAUNCH_FPS", std::to_string(fps_limit())}); //"auto" stays until it's changed
     auto lines = read_lines(GE_SETTINGS_FILE);
     if (lines.empty()) lines.push_back("# written by the launcher, read when the game is started");
@@ -380,6 +380,7 @@ void BuildSettings()
 	AddToggle(kCheats, "extras_menu", "Unused Extras Menu", "On: Extras also lists Mission Select, Character Viewer, Movies and the Calibration Menu.", extras_menu, set_extras_menu);
 	AddToggle(kCheats, "unlock_all", "Unlock Everything", "On: every mission and every difficulty can be picked. A save made with it on may keep them.", unlock_all, set_unlock_all);
 	AddToggle(kCheats, "noclip", "Noclip", "On: you fly where you look, through walls, and don't fall. The sprint key flies faster.", noclip, set_noclip);
+	AddToggle(kCheats, "stamina_meter", "Stamina Meter", "On: a bar shows the sprint that's left. Cancel a sprint right under the line and it's back at a second the frame after.", stamina_meter, set_stamina_meter);
 	AddToggle(kCheats, "collision_view", "Collision Viewer", "On: the level's collision is drawn in place of the world. Floors are green, walls grey, ceilings red, props orange.", collision_view, set_collision_view);
 }
 
@@ -1159,6 +1160,16 @@ uint32_t settings_buttons() {
 
 #ifdef GE_IMGUI
 const std::vector<Setting>& Settings() { return g_settings; }
+//anything on the Cheats page is on, or a code of the launcher's Cheats tab runs
+bool cheats_active()
+{
+	if (gecko_cheats()) return true;
+	for (const Setting& s : g_settings)
+	{
+		if (s.page == kCheats && s.get() > 0.5f) return true;
+	}
+	return false;
+}
 bool menu_event(const SDL_Event* e);
 
 void settings_init() {

@@ -535,6 +535,7 @@ void controller_update(PPCContext& c) {
         ads_fov_apply(ctrl);
         aim_lock_frame(ctrl);
         noclip_apply(ctrl);
+        stamina_apply(ctrl);
     }
     //the cheat, in a state whose update never got to ge_look_apply: turn the player's yaw directly
     if (forced && ctrl == g_look_ctrl && g_look_yaw != 0) {
