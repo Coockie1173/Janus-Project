@@ -25,6 +25,14 @@
 //screen's size and offset (the first 600 such views)
 //F9 while it logs writes a "mark" line (press it on seeing the level flash) and, of the 4 s of
 //views before it, the same for every one that walked another number of zones than the one before
+//
+//the things in the level (people too) are drawn after the walk by ge_draw_things: one whose way of
+//being hidden (+0x168) is 2 is only drawn when its zone (+0x164, or the tree's for its position)
+//was walked, or a zone its sphere reaches into was seen, and it is in the view. so a level can
+//look whole with somebody in it gone. while it logs, a mark also lists for those views the things
+//within kThingsNear of the camera that their zone hid, when they change: the position, the
+//vtable, the zone with the depth it was walked at (0: not) and its +0x6B, and the result (+0x169)
+//GE_ZONELOG_THINGS=N writes that list every N views too
 #include "ge.h"
 #include <algorithm>
 #include <atomic>
@@ -67,11 +75,16 @@ struct View
 	double m_Seconds;
 	std::string m_State;
 	std::vector<ClipCall> m_Calls;
+	std::string m_Hidden, m_HiddenKey; //the things their zone hid, and which they were
 };
 std::deque<View> g_views; //the last kMarkSeconds of them, for a mark
 const double kMarkSeconds = 4.0;
 std::atomic<uint32_t> g_marks{ 0 }; //asked for by the window's thread, written by the game's
 uint32_t g_marksDone = 0;
+PPCFunc orig_things = nullptr;
+float g_camera[3]{};
+uint32_t g_thingsEvery = 0, g_thingsViews = 0; //GE_ZONELOG_THINGS
+const float kThingsNear = 80.0f;
 
 std::string ViewState()
 {
@@ -117,6 +130,13 @@ void WriteMark(double seconds)
 		Dump("the view before", before.m_State, before.m_Calls);
 		Dump("this view", now.m_State, now.m_Calls);
 	}
+	for (size_t i = 0; i < g_views.size(); ++i)
+	{
+		const View& now{ g_views[i] };
+		if (i > 0 && g_views[i - 1].m_HiddenKey == now.m_HiddenKey) continue;
+		std::fprintf(g_log, " mark's view: frame %u %.4f hidden by their zone:%s\n", now.m_Frame, now.m_Seconds, now.m_Hidden.empty() ? " nothing" : "");
+		std::fputs(now.m_Hidden.c_str(), g_log);
+	}
 	std::fprintf(g_log, "mark %u ends\n", g_marksDone);
 	std::fflush(g_log);
 }
@@ -126,6 +146,7 @@ void Root(PPCContext& c)
 {
 	const uint32_t pos{ c.r[4] };
 	const float x{ ldf(pos) }, y{ ldf(pos + 4) }, z{ ldf(pos + 8) };
+	g_camera[0] = x, g_camera[1] = y, g_camera[2] = z;
 	g_inRoot = true;
 	g_zone = -2;
 	g_walked = g_kept = g_dropped = g_forced = 0;
@@ -150,9 +171,54 @@ void Root(PPCContext& c)
 	g_walkedBefore = g_walked;
 	g_callsBefore = g_calls;
 	g_viewBefore = view;
-	g_views.push_back({ ld32(kFrameCount), g_walked, seconds, view, g_calls });
+	g_views.push_back({ ld32(kFrameCount), g_walked, seconds, view, g_calls, {}, {} });
 	while (g_views.front().m_Seconds < seconds - kMarkSeconds) g_views.pop_front();
 	if (g_marksDone != g_marks.load()) WriteMark(seconds);
+}
+
+//(world): draws the things of the level's list for the view, after the walk
+void Things(PPCContext& c)
+{
+	const uint32_t world{ c.r[3] };
+	orig_things(c);
+	if (!g_log || g_views.empty() || !guest_ptr(world) || !guest_ptr(ld32(world + 0xA0))) return;
+	std::string hidden, key;
+	char line[200];
+	uint32_t count{ 0 };
+	for (uint32_t thing{ ld32(ld32(world + 0xA0)) }; guest_ptr(thing) && count < 4096; thing = ld32(thing + 4), ++count)
+	{
+		if ((ld16(thing + 0xC) & 0x51) != 1 || ld8(thing + 0x168) != 2) continue; //not drawn at all, a door's way, or never hidden by a zone
+		if ((ld8(thing + 0x169) & 2) == 0) continue; //drawn
+		const int16_t zone{ (int16_t)ld16(thing + 0x164) };
+		int depth{ 0 }, seen{ 0 };
+		if (zone != -1)
+		{
+			const int32_t mapIndex{ zone >> 8 };
+			const uint32_t list{ mapIndex < 1 ? ld32(world + 0x20) : ld32(world + 0xC) + mapIndex * 0x10 + 0xC };
+			const uint32_t map{ guest_ptr(list) ? ld32(list) : 0 };
+			const uint32_t state{ guest_ptr(map) && guest_ptr(ld32(map + 0x128)) ? ld32(map + 0x128) + (zone & 0xFF) * 0x88 : 0 };
+			if (!state) continue;
+			depth = (int8_t)ld8(state + 0x6D);
+			seen = (int8_t)ld8(state + 0x6B);
+			if (depth > 0) continue; //its zone was walked: it is out of the view
+		}
+		const float x{ ldf(thing + 0xF8) }, y{ ldf(thing + 0xFC) }, z{ ldf(thing + 0x100) };
+		const float dx{ x - g_camera[0] }, dy{ y - g_camera[1] }, dz{ z - g_camera[2] };
+		if (!(dx * dx + dy * dy + dz * dz < kThingsNear * kThingsNear)) continue;
+		std::snprintf(line, sizeof line, "  thing %08X vtable %08X at %.3f %.3f %.3f zone %d depth %d seen %d result %u\n",
+			thing, ld32(thing + 0x18), x, y, z, (int)zone, depth, seen, ld8(thing + 0x169));
+		hidden += line;
+		std::snprintf(line, sizeof line, "%08X:%d ", thing, (int)zone);
+		key += line;
+	}
+	if (g_thingsEvery && ++g_thingsViews % g_thingsEvery == 0)
+	{
+		std::fprintf(g_log, "things: frame %u camera %.3f %.3f %.3f, %u in the list, hidden by their zone:%s\n", ld32(kFrameCount),
+			g_camera[0], g_camera[1], g_camera[2], count, hidden.empty() ? " nothing" : "");
+		std::fputs(hidden.c_str(), g_log);
+	}
+	g_views.back().m_Hidden = std::move(hidden);
+	g_views.back().m_HiddenKey = std::move(key);
 }
 
 //(tree, position) gives the zone's number
@@ -274,6 +340,10 @@ void install_zones()
 	orig_walk = ppc_hook("ge_zone_walk", Walk);
 	orig_clip = ppc_hook("ge_portal_clip", Clip);
 	if (!orig_root || !orig_at || !orig_walk || !orig_clip) rt_die("goldeneye: the portal walk is not hooked in this build");
+	if (!g_log) return;
+	if (const char* text{ std::getenv("GE_ZONELOG_THINGS") }) g_thingsEvery = (uint32_t)std::max(0, std::atoi(text));
+	orig_things = ppc_hook("ge_draw_things", Things);
+	if (!orig_things) rt_die("goldeneye: the things' draw is not hooked in this build");
 }
 
 } //namespace ge

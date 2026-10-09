@@ -57,6 +57,7 @@ ge_zone_root           # a view's portal walk starts: GE_ZONELOG logs the camera
 ge_zone_at             # the zone a position lies in: the one the walk starts from is logged
 ge_zone_walk           # a zone is drawn and its portals gone through: counted
 ge_portal_clip         # a portal is cut to the screen: one the camera is right at is kept; kept and dropped ones counted
+ge_draw_things         # the level's things are drawn after the walk: GE_ZONELOG lists the ones their zone hid
 GetTextMsg_MENU_Text   # a text is looked up by its hash: one that names a controller button gets the bound key
 ge_text_action         # an <ACT name> tag is written out as its button's character: the bound key in its place
 ge_text_tag            # the other tags (<menuSELECT>): the same
