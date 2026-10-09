@@ -26,7 +26,7 @@
 #     ./launch.sh --no-colour-filter   the tint some levels lay over the picture isn't drawn (the F1 menu's Enhancements)
 #     ./launch.sh --auto-start         a loaded mission starts without "Continue" being pressed (the F1 menu's Enhancements)
 #     ./launch.sh --extras-menu        the cheat "Unused Extras Menu" (also in the F1 menu's Cheats)
-#     ./launch.sh --unlock-all         the cheat "Unlock Everything": every mission and difficulty
+#     ./launch.sh --unlock-all         "Unlock Everything": every mission and difficulty (the F1 menu's Enhancements)
 #     ./launch.sh --stamina-meter      the cheat "Stamina Meter": the sprint that's left as a bar
 #     ./launch.sh --trace              log the mouse's player, its angles and the look state (for a report)
 #     ./launch.sh --extract GAME.rvz   take the game's files out of a disc image (.rvz .iso .wbfs) into ./game

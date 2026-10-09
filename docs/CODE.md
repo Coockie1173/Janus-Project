@@ -821,8 +821,8 @@ Everything the pages change is one list of `Setting` (`hotkeys.h`: id, label, hi
 |---|---|
 | Screen | `fov`, `ads_fov`, `fps` (stops 30 to 275) |
 | Controls | `mouse_sens`, `ads_sens`, `aim_lock`, `mouse_invert`, `mouse_mode`, `input`, `face_buttons`, `dead_zone` |
-| Enhancements | `skip_cutscenes`, `skip_movies`, `level_timer`, `auto_qte`, `auto_start`, `autosave`, `no_tutorials`, `no_colour_filter` |
-| Cheats | `mouse_everywhere`, `extras_menu`, `unlock_all`, `noclip`, `stamina_meter`, `collision_view` |
+| Enhancements | `skip_cutscenes`, `skip_movies`, `level_timer`, `auto_qte`, `auto_start`, `autosave`, `no_tutorials`, `no_colour_filter`, `unlock_all` |
+| Cheats | `mouse_everywhere`, `extras_menu`, `noclip`, `stamina_meter`, `collision_view` |
 
 Key bindings (`kActions`): Fire ZR, Aim ZL, Melee L, Throw Grenade R, Reload Y, Crouch A,
 Action B, Sprint Extra 1, Cycle Grenades X, Next/Previous Weapon Right/Left, Weapon 1..3
@@ -912,9 +912,9 @@ Options (the launcher sets these from its settings):
 | `GE_MOUSE=S` | mouse sensitivity, 0 leaves the mouse free |
 | `GE_MOUSE_MODE=auto\|direct\|stick` | how the mouse turns the view |
 | `GE_MOUSE_INVERT=1`, `GE_ADS_SENS=S`, `GE_AIM_LOCK=1` | |
-| `GE_SKIP_CUTSCENES=1`, `GE_SKIP_MOVIES=1`, `GE_AUTO_QTE=1`, `GE_AUTO_START=1`, `GE_NO_TUTORIALS=1`, `GE_NO_COLOUR_FILTER=1` | enhancements |
+| `GE_SKIP_CUTSCENES=1`, `GE_SKIP_MOVIES=1`, `GE_AUTO_QTE=1`, `GE_AUTO_START=1`, `GE_NO_TUTORIALS=1`, `GE_NO_COLOUR_FILTER=1`, `GE_UNLOCK_ALL=1` | enhancements |
 | `GE_LEVEL_TIMER=0`, `GE_AUTOSAVE=0` | on by default |
-| `GE_MOUSE_EVERYWHERE=1`, `GE_EXTRAS_MENU=1`, `GE_UNLOCK_ALL=1`, `GE_NOCLIP=1`, `GE_STAMINA=1`, `GE_COLLISION=1` | cheats |
+| `GE_MOUSE_EVERYWHERE=1`, `GE_EXTRAS_MENU=1`, `GE_NOCLIP=1`, `GE_STAMINA=1`, `GE_COLLISION=1` | cheats |
 | `GE_HOSTS=F`, `GE_NETLOG=1` | the hosts file, the network log |
 | `GE_GECKO=F`, `GE_GECKO_EXTRA=F[:F...]` | gecko code files |
 | `GE_SETTINGS=N` | start with the settings menu open on page N |

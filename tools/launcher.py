@@ -407,6 +407,10 @@ def run_gui():
     ttk.Checkbutton(en, text="Disable Colour Filter", variable=no_colour_filter).grid(row=16, column=0, sticky="w", **pad)
     ttk.Label(en, text="The tint some levels lay over the picture (Facility's blue-green, Tank's, Solar's) isn't drawn.",
               foreground="gray", wraplength=520, justify="left").grid(row=17, column=0, sticky="w", padx=(30, 8))
+    unlock_all = tk.BooleanVar(value=settings["unlockall"] == "1")
+    ttk.Checkbutton(en, text="Unlock Everything", variable=unlock_all).grid(row=18, column=0, sticky="w", **pad)
+    ttk.Label(en, text="Every mission and every difficulty can be picked. A save made with it on may keep them.",
+              foreground="gray", wraplength=520, justify="left").grid(row=19, column=0, sticky="w", padx=(30, 8))
 
     #cheats
     #the tab just lists whatever is in config/gecko/cheats.txt, so adding a cheat is adding it to that file
@@ -424,23 +428,19 @@ def run_gui():
     ttk.Checkbutton(ch, text="Unused Extras Menu", variable=extras_menu).grid(row=2, column=0, sticky="w", **pad)
     ttk.Label(ch, text="Extras also lists Mission Select, Character Viewer, Movies and the Calibration Menu.",
               foreground="gray", wraplength=520, justify="left").grid(row=3, column=0, sticky="w", padx=(30, 8))
-    unlock_all = tk.BooleanVar(value=settings["unlockall"] == "1")
-    ttk.Checkbutton(ch, text="Unlock Everything", variable=unlock_all).grid(row=4, column=0, sticky="w", **pad)
-    ttk.Label(ch, text="Every mission and every difficulty can be picked. A save made with it on may keep them.",
-              foreground="gray", wraplength=520, justify="left").grid(row=5, column=0, sticky="w", padx=(30, 8))
     stamina_meter = tk.BooleanVar(value=settings["staminameter"] == "1")
-    ttk.Checkbutton(ch, text="Stamina Meter", variable=stamina_meter).grid(row=6, column=0, sticky="w", **pad)
+    ttk.Checkbutton(ch, text="Stamina Meter", variable=stamina_meter).grid(row=4, column=0, sticky="w", **pad)
     ttk.Label(ch, text="A bar shows the sprint that's left, with a line where a sprint is best cancelled.",
-              foreground="gray", wraplength=520, justify="left").grid(row=7, column=0, sticky="w", padx=(30, 8))
+              foreground="gray", wraplength=520, justify="left").grid(row=5, column=0, sticky="w", padx=(30, 8))
     ttk.Label(ch, text="Gecko codes from config/gecko/cheats.txt. They apply the next time the game starts.",
-              justify="left").grid(row=8, column=0, sticky="w", **pad)
+              justify="left").grid(row=6, column=0, sticky="w", **pad)
     for i, (name, code, notes) in enumerate(cheats):
         cheat_vars[name] = tk.BooleanVar(value=name in already_on)
-        ttk.Checkbutton(ch, text=name, variable=cheat_vars[name]).grid(row=9 + 2 * i, column=0, sticky="w", **pad)
+        ttk.Checkbutton(ch, text=name, variable=cheat_vars[name]).grid(row=7 + 2 * i, column=0, sticky="w", **pad)
         ttk.Label(ch, text="\n".join(notes) or "  ".join(code), foreground="gray", wraplength=520,
-                  justify="left").grid(row=10 + 2 * i, column=0, sticky="w", padx=(30, 8))
+                  justify="left").grid(row=8 + 2 * i, column=0, sticky="w", padx=(30, 8))
     if not cheats:
-        ttk.Label(ch, text="No codes in there yet.", foreground="gray").grid(row=9, column=0, sticky="w", **pad)
+        ttk.Label(ch, text="No codes in there yet.", foreground="gray").grid(row=7, column=0, sticky="w", **pad)
 
     #play
     result = {"play": False}

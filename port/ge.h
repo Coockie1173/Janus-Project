@@ -178,7 +178,7 @@ bool level_timer(); //the hud shows the level's time
 void set_level_timer(bool on);
 bool extras_menu(); //cheat, the menu's unused extras page
 void set_extras_menu(bool on);
-bool unlock_all(); //cheat, every mission and difficulty can be picked
+bool unlock_all(); //every mission and difficulty can be picked
 void set_unlock_all(bool on);
 bool auto_start(); //a loaded mission starts without its "Continue" being pressed
 void set_auto_start(bool on);
