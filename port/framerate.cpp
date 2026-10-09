@@ -61,8 +61,22 @@ void vi_wait(PPCContext& c) {
     else orig_vi_wait(c);
 }
 
-void frame_tick(PPCContext& c) {
+//with vsync the renderer's presents wait for the screen, and a game drawing faster is held
+//back by the frames it has queued. the limiter doesn't see that as late frames: it comes in
+//bursts, on time more often than late, and the rate stays at its highest while fewer frames
+//are run, so the game goes slow. so the rate asked for is the screen's at most
+uint32_t wanted_rate() {
     uint32_t fps = g_fps;
+    if (!video_vsync()) return fps;
+    float screen = video_refresh_rate();
+    if (screen < 30 || screen > 1000) return fps;
+    uint32_t most = (uint32_t)std::lround(screen);
+    if ((fps ? fps : kGameFps) <= most) return fps;
+    return most <= kGameFps ? 0 : most;
+}
+
+void frame_tick(PPCContext& c) {
+    uint32_t fps = wanted_rate();
     bool fast = g_fast;
     if (fps != g_fps_applied || fast != g_fast_applied) apply_rate(fps, fast);
     //raise the game's highest rate to ours, or update it if it was already ours
@@ -170,6 +184,7 @@ void install_fps() {
     orig_vi_wait = ppc_hook("VIWaitForRetrace", vi_wait);
     if (!orig_vi_wait) rt_die("goldeneye: VIWaitForRetrace is not hooked in this build");
     if (const char* r = std::getenv("GE_SKIP_RATE")) g_skip_rate = std::clamp((float)std::atof(r), 1.0f, 30.0f);
+    if (const char* v = std::getenv("GE_VSYNC")) set_vsync(std::atoi(v) != 0);
     const char* e = std::getenv("GE_FPS");
     if (!e) return;
     int fps = std::atoi(e);
@@ -201,5 +216,8 @@ uint32_t engine_top_rate()
 }
 uint32_t fps_limit() { return g_fps ? g_fps.load() : kGameFps; }
 void set_fps_limit(uint32_t fps) { g_fps = fps <= kGameFps ? 0 : std::min(fps, 1000u); }
+//the renderer's presents wait for the screen (wiikit), see wanted_rate
+bool vsync() { return video_vsync(); }
+void set_vsync(bool on) { video_set_vsync(on); }
 
 } //namespace ge

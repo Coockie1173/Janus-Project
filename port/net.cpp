@@ -2,6 +2,7 @@
 //up and down a player's pitch goes to the others, the time a player's step is sent with
 #include "ge.h"
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -117,9 +118,80 @@ void net_trace_controller(uint32_t ctrl, uint32_t player, bool own)
 		ldf(player + kEntityPlace + 4), ldf(player + kEntityPlace + 8), ldf(player + kEntityYaw), ldf(ctrl + kCtrlPitch));
 }
 
+//the ping, in a game between players who came through Connect to WFC Modded: a joined console's
+//bdClient (the game's own class of it, made by fn_801B4270: the pointer at 805D5474) has its
+//connection's statistics from +0x120, filled every frame by fn_801D6840; the float at +0x138
+//is the round trip to the host in seconds, the connection's own (fn_803FFDB0, its +0x3C, set
+//by fn_803FFD18 with the least and the most before it). the game's debug page prints it as
+//"CLIENT ... AverageRTT:%2.2f" (fn_801BEE00)
+//the host has no round trip of its own: it is told apart, the display says so
+namespace
+{
+
+const uint32_t kNetHost = 0x805D5470, kNetClient = 0x805D5474; //the game's server and client, 0 without
+const uint32_t kClientRoundTrip = 0x138;
+const float kPingSmooth = 0.1f; //how much of a frame's value goes into the shown one
+
+std::atomic<bool> g_showPing{ true };
+std::atomic<int> g_pingState{ 0 }; //0 none, 1 hosting, 2 joined
+std::atomic<float> g_pingMs{ 0.0f };
+
+void UpdatePing()
+{
+	static const bool trace = std::getenv("GE_TRACE") != nullptr;
+	static int said = -1;
+	int state = 0;
+	if (g_showPing && network_game() && modded_lobby())
+	{
+		const uint32_t client = ld32(kNetClient);
+		if (ld32(kNetHost) != 0) state = 1;
+		else if (guest_ptr(client))
+		{
+			const float ms = ldf(client + kClientRoundTrip) * 1000.0f;
+			if (ms >= 0 && ms < 10000.0f)
+			{
+				//the first one as it is, then eased so the number can be read
+				g_pingMs = g_pingState == 2 ? g_pingMs + (ms - g_pingMs) * kPingSmooth : ms;
+				state = 2;
+			}
+		}
+	}
+	g_pingState = state;
+	if (trace && state != said)
+		rt_log("goldeneye: online: ping display %s", state == 0 ? "off" : state == 1 ? "on, hosting" : "on, joined");
+	said = state;
+	if (trace && state == 2)
+	{
+		//how often the connection measures: its value's changes between two lines
+		static float raw = 0;
+		static uint32_t changes = 0;
+		const float now = ldf(ld32(kNetClient) + kClientRoundTrip);
+		if (now != raw) ++changes;
+		raw = now;
+		if (ld32(kFrameCount) % 600 == 0)
+		{
+			rt_log("goldeneye: online: ping %.2f ms shown, the connection's %.3f ms, measured %u times since the last line", g_pingMs.load(), raw * 1000.0f, changes);
+			changes = 0;
+		}
+	}
+}
+
+} //namespace
+
+bool ping(Ping& p)
+{
+	const int state = g_pingState;
+	p.host = state == 1;
+	p.ms = g_pingMs;
+	return state != 0;
+}
+bool show_ping() { return g_showPing; }
+void set_show_ping(bool on) { g_showPing = on; }
+
 //once a frame
 void net_frame()
 {
+	UpdatePing();
 	static const bool trace = std::getenv("GE_NETTRACE") != nullptr;
 	if (trace && in_play()) TraceThrown();
 	static float said = 0;
@@ -257,6 +329,7 @@ void install_hosts() {
     const char* path = std::getenv("GE_HOSTS");
     if (!path) path = GE_HOSTS_DEFAULT;
     ios_net_log(std::getenv("GE_NETLOG") != nullptr);
+    if (const char* e = std::getenv("GE_PING")) g_showPing = std::atoi(e) != 0;
     if (!*path) return;
     FILE* f = std::fopen(path, "r");
     if (!f) { rt_log("goldeneye: no hosts file %s: the game's servers as the system resolves them", path); return; }

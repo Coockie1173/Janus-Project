@@ -80,7 +80,7 @@ Want the same on your fork? Add a self-hosted runner (Settings > Actions > Runne
 # Playing
 `./launch.sh` opens a small window first. In there you can set the frame rate (60 by default, 30 is what the console does), the field of view, the mouse sensitivity, online on or off, and the key bindings (click Set, press a key or a mouse button). Then hit Play.
 
-Don't want the window? `./launch.sh --no-gui` starts the game with whatever was saved, and so does passing any option (`--fps 60`, `--fov 70`, `--mouse 1.5`, `--offline`, `--fullscreen`).
+Don't want the window? `./launch.sh --no-gui` starts the game with whatever was saved, and so does passing any option (`--fps 60`, `--vsync`, `--fov 70`, `--mouse 1.5`, `--offline`, `--fullscreen`).
 
 It's keyboard and mouse by default:
 
@@ -102,7 +102,7 @@ It's keyboard and mouse by default:
 A gamepad just acts as a Classic Controller.
 
 Then there's a couple of extra keys:
-- **F1** opens the settings menu, drawn like the game's own. Field of view, frame rate (30 to 275), the mouse (sensitivity, invert, how it turns the view), the gamepad (face buttons, dead zone) and the key bindings. Changes count right away and are kept in `build/settings.env` and `build/keys.txt`, which are the launcher's files too.
+- **F1** opens the settings menu, drawn like the game's own. Field of view, frame rate (30 to 275), VSync, the ping in modded online games, the mouse (sensitivity, invert, how it turns the view), the gamepad (face buttons, dead zone) and the key bindings. Changes count right away and are kept in `build/settings.env` and `build/keys.txt`, which are the launcher's files too.
 - **F3** opens a debug overlay. It shows the memory watches of a Dolphin Memory Engine list (a `.dmw` file in the project's folder, or `GE_DMW=file`), read live from the running game, with a filter. It's drawn with Dear ImGui, which `make` fetches into `build/deps`.
 - **F12** takes a mod level's picture, see Mods.
 

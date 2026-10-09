@@ -94,7 +94,8 @@ void save_launch_settings() {
         {"LAUNCH_ADSFOV", ads_fov_text}, {"LAUNCH_ADSSENS", ads_sens_text}, {"LAUNCH_AIMLOCK", aim_lock() ? "1" : "0"},
         {"LAUNCH_MOUSEEVERYWHERE", mouse_everywhere() ? "1" : "0"},
         {"LAUNCH_SKIPCUTSCENES", skip_cutscenes() ? "1" : "0"}, {"LAUNCH_SKIPZUKOVSKY", skip_zukovsky() ? "1" : "0"}, {"LAUNCH_SKIPBRIGGS", skip_briggs() ? "1" : "0"}, {"LAUNCH_SKIPMOVIES", skip_movies() ? "1" : "0"}, {"LAUNCH_NOTUTORIALS", no_tutorials() ? "1" : "0"}, {"LAUNCH_NOCOLOURFILTER", no_colour_filter() ? "1" : "0"},
-        {"LAUNCH_LEVELTIMER", level_timer() ? "1" : "0"}, {"LAUNCH_AUTOQTE", auto_qte() ? "1" : "0"}, {"LAUNCH_AUTOSTART", auto_start() ? "1" : "0"}, {"LAUNCH_AUTOSAVE", autosave() ? "1" : "0"}, {"LAUNCH_EXTRASMENU", extras_menu() ? "1" : "0"}, {"LAUNCH_UNLOCKALL", unlock_all() ? "1" : "0"}, {"LAUNCH_STAMINAMETER", stamina_meter() ? "1" : "0"}};
+        {"LAUNCH_LEVELTIMER", level_timer() ? "1" : "0"}, {"LAUNCH_AUTOQTE", auto_qte() ? "1" : "0"}, {"LAUNCH_AUTOSTART", auto_start() ? "1" : "0"}, {"LAUNCH_AUTOSAVE", autosave() ? "1" : "0"}, {"LAUNCH_EXTRASMENU", extras_menu() ? "1" : "0"}, {"LAUNCH_UNLOCKALL", unlock_all() ? "1" : "0"}, {"LAUNCH_STAMINAMETER", stamina_meter() ? "1" : "0"},
+        {"LAUNCH_VSYNC", vsync() ? "1" : "0"}, {"LAUNCH_PING", show_ping() ? "1" : "0"}};
     if (g_fps_changed) values.push_back({"LAUNCH_FPS", std::to_string(fps_limit())}); //"auto" stays until it's changed
     auto lines = read_lines(GE_SETTINGS_FILE);
     if (lines.empty()) lines.push_back("# written by the launcher, read when the game is started");
@@ -334,6 +335,8 @@ void BuildSettings()
 	fps.step = [](float v, int d) { return (float)kFpsStops[std::clamp(FpsStop(v) + d, 0, kFpsStopCount - 1)]; };
 	fps.frac = [](float v) { return (float)FpsStop(v) / (float)(kFpsStopCount - 1); };
 	fps.at = [](float f) { return (float)kFpsStops[std::clamp((int)std::lround(f * (float)(kFpsStopCount - 1)), 0, kFpsStopCount - 1)]; };
+	AddToggle(kScreen, "vsync", "VSync", "On: frames wait for the screen's refresh, so the picture doesn't tear. The game runs at the screen's rate at most.", vsync, set_vsync);
+	AddToggle(kScreen, "show_ping", "Show Ping", "On: a game through Connect to WFC Modded shows the round trip to its host in the top left corner.", show_ping, set_show_ping);
 
 	Setting& sens = AddRange(kControls, "mouse_sens", "Mouse Sensitivity", "How far the view turns for the mouse's motion. Off leaves the mouse free.",
 		mouse_sens, [](float v) { set_mouse_sens(v); g_dirty = true; }, 0, kMouseSensMax, 0.05f, 2);

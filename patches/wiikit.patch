@@ -3950,7 +3950,7 @@ index 8a4e097..8b1b1a8 100644
  void ppc_mmio_write(uint32_t addr, uint32_t, int) { rt_die("mmio write %08X", addr); }
  uint64_t ppc_timebase() { return 0; }
 diff --git a/runtime/video.cpp b/runtime/video.cpp
-index 5726093..16d25ee 100644
+index 5726093..5c18caa 100644
 --- a/runtime/video.cpp
 +++ b/runtime/video.cpp
 @@ -67,7 +67,8 @@ ClassicState classic[4];
@@ -4329,7 +4329,10 @@ index 5726093..16d25ee 100644
 +        draw_state = ds;
 +        gl_state_stale = false;
 +    }
-+
+ 
+-    int offx = s10(bp[0x59]) * 2, offy = s10(bp[0x59] >> 10) * 2;
+-    float wd = std::fabs(fx(0x101A)), ht = std::fabs(fx(0x101B));
+-    glViewportIndexedf(0, (fx(0x101D) - wd - (float)offx) * (float)S, (fx(0x101E) - ht - (float)offy) * (float)S,
 +    // room for all the blocks in this quarter of the ring, or on to the next
 +    const size_t q = ubo_off / UBO_QUARTER;
 +    if ((ubo_off + 8192) / UBO_QUARTER != q) {
@@ -4379,10 +4382,7 @@ index 5726093..16d25ee 100644
 +    bind_textures();
 +    return true;
 +}
- 
--    int offx = s10(bp[0x59]) * 2, offy = s10(bp[0x59] >> 10) * 2;
--    float wd = std::fabs(fx(0x101A)), ht = std::fabs(fx(0x101B));
--    glViewportIndexedf(0, (fx(0x101D) - wd - (float)offx) * (float)S, (fx(0x101E) - ht - (float)offy) * (float)S,
++
 +std::vector<GLint> firsts;
 +std::vector<GLsizei> counts;
 +// A draw's pieces are thousands of short strips a frame, and to the GPU each
@@ -5309,7 +5309,7 @@ index 5726093..16d25ee 100644
  void video_take_mouse_motion(float& dx, float& dy) {
      std::lock_guard<std::mutex> lk(motion_mx);
      dx = motion_x; dy = motion_y;
-@@ -1473,12 +2123,18 @@ PadState video_pad() {
+@@ -1473,12 +2123,23 @@ PadState video_pad() {
      return pad;
  }
  ClassicState video_classic(int chan) {
@@ -5325,10 +5325,15 @@ index 5726093..16d25ee 100644
      if (chan >= 0 && chan < 4) rumble_want[chan] = on;
  }
 +bool g_present_on_frame = false;
++std::atomic<bool> vsync_want{false};
++void video_set_vsync(bool on) { vsync_want = on; }
++bool video_vsync() { return vsync_want; }
++std::atomic<float> refresh_hz{0.0f};
++float video_refresh_rate() { return refresh_hz; }
  void video_retrace() {
      retraces.fetch_add(1);
      if (wake) SDL_SignalSemaphore(wake);
-@@ -1499,6 +2155,7 @@ void video_run(const char* title) {
+@@ -1499,6 +2160,7 @@ void video_run(const char* title) {
      int w0 = opt.window_w ? opt.window_w : (opt.widescreen ? 1280 : 960), h0 = opt.window_h ? opt.window_h : 720;
      SDL_WindowFlags wflags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE;
      if (opt.fullscreen) wflags |= SDL_WINDOW_FULLSCREEN;
@@ -5336,7 +5341,7 @@ index 5726093..16d25ee 100644
      win = SDL_CreateWindow(title, w0, h0, wflags);
      if (!win) rt_die("video: SDL_CreateWindow: %s", SDL_GetError());
      SDL_GLContext ctx = SDL_GL_CreateContext(win);
-@@ -1506,6 +2163,7 @@ void video_run(const char* title) {
+@@ -1506,6 +2168,7 @@ void video_run(const char* title) {
      SDL_GL_MakeCurrent(win, ctx);
      SDL_GL_SetSwapInterval(0);                   // VI paces the presents
      if (!gl_load()) rt_die("video: OpenGL functions missing");
@@ -5344,7 +5349,7 @@ index 5726093..16d25ee 100644
      rt_log("video: %s, %s", (const char*)glGetString(GL_RENDERER), (const char*)glGetString(GL_VERSION));
      if (debug) {
          glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
-@@ -1529,11 +2187,15 @@ void video_run(const char* title) {
+@@ -1529,11 +2192,15 @@ void video_run(const char* title) {
      uint64_t frames_then = 0;
      uint32_t seen = retraces.load();
      std::string base_title = title;
@@ -5360,7 +5365,23 @@ index 5726093..16d25ee 100644
              if (e.type == SDL_EVENT_GAMEPAD_ADDED) pad_added(e.gdevice.which);
              if (e.type == SDL_EVENT_GAMEPAD_REMOVED) pad_removed(e.gdevice.which);
              // F11 or Alt+Enter: fullscreen and back
-@@ -1592,7 +2254,14 @@ void video_run(const char* title) {
+@@ -1560,6 +2227,15 @@ void video_run(const char* title) {
+             }
+         }
+         auto now = Clock::now();
++        {
++            // the screen the window is on, looked up again every second: windows get moved
++            static auto asked = now - std::chrono::seconds(2);
++            if (now - asked >= std::chrono::seconds(1)) {
++                asked = now;
++                const SDL_DisplayMode* m = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(win));
++                refresh_hz = m ? m->refresh_rate : 0.0f;
++            }
++        }
+         if (opt.quit_after > 0 && std::chrono::duration<double>(now - t0).count() > opt.quit_after) quit = true;
+         if (quit) {
+             rt_log("video: %llu frames, %llu presents, %llu draws, %llu programs (%llu linked, %llu from the shader cache)",
+@@ -1592,7 +2268,14 @@ void video_run(const char* title) {
                  double vtx = ms(g_vperf.vtx), tex = ms(g_vperf.tex), wait = ms(g_vperf.wait), draw = ms(g_vperf.draw),
                         pres = ms(g_vperf.present);
                  rt_log("perf: %.1f fps; frame %.1f ms; game thread: vertices %.1f, textures %.1f, waiting for the renderer %.1f; "
@@ -5376,7 +5397,7 @@ index 5726093..16d25ee 100644
              }
              frames_then = cnt.frames;
              t_title = now;
-@@ -1608,6 +2277,8 @@ void video_run(const char* title) {
+@@ -1608,6 +2291,8 @@ void video_run(const char* title) {
              }
              if (c.readback) { if (c.copy) copy_readback(c.copy); else efb_readback(); busy = true; continue; }
              auto te = Clock::now();
@@ -5385,7 +5406,7 @@ index 5726093..16d25ee 100644
              exec(c.data);
              if (g_vperf_on) g_vperf.draw += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - te).count();
              {
-@@ -1621,6 +2292,17 @@ void video_run(const char* title) {
+@@ -1621,8 +2306,25 @@ void video_run(const char* title) {
              if (retraces.load() != seen) break;
          }
          uint32_t r = retraces.load();
@@ -5402,9 +5423,17 @@ index 5726093..16d25ee 100644
 +        }
          if (r != seen) {
              seen = r;
++            static bool vsync_now = false;
++            if (bool v = vsync_want.load(); v != vsync_now) {
++                vsync_now = v;
++                if (!SDL_GL_SetSwapInterval(v ? 1 : 0)) rt_log("video: vsync %s: %s", v ? "on" : "off", SDL_GetError());
++                else rt_log("video: vsync %s", v ? "on" : "off");
++            }
              auto tp = Clock::now();
+             present();
+             if (g_vperf_on) g_vperf.present += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - tp).count();
 diff --git a/runtime/video.h b/runtime/video.h
-index ecfb499..3f6cb43 100644
+index ecfb499..4eb1b9d 100644
 --- a/runtime/video.h
 +++ b/runtime/video.h
 @@ -3,7 +3,7 @@
@@ -5506,7 +5535,7 @@ index ecfb499..3f6cb43 100644
  ClassicState video_classic(int chan);
  // The Remote's motor on a channel: its pad rumbles (the Remote's own on
  // channel 1 when a pad is there).
-@@ -98,6 +135,35 @@ void video_set_rumble(int chan, bool on);
+@@ -98,6 +135,44 @@ void video_set_rumble(int chan, bool on);
  void video_set_relative_mouse(bool on);
  void video_take_mouse_motion(float& dx, float& dy);
  
@@ -5536,6 +5565,15 @@ index ecfb499..3f6cb43 100644
 +const std::string& video_keys_path();
 +void video_reload_keys();
 +void video_set_input(int mode);
++// Presents wait for the screen's refresh, so the picture does not tear (off
++// by default: VI and the game pace them). A game that draws faster than the
++// screen is held to the screen's rate. From any thread; the renderer takes it
++// up at its next present.
++void video_set_vsync(bool on);
++bool video_vsync();
++// The refresh rate of the screen the window is on, 0 before there is a window
++// or when the system does not say.
++float video_refresh_rate();
 +// The mouse wheel's notches since the last call: up positive, down negative.
 +int video_take_wheel();
 +

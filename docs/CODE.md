@@ -483,7 +483,9 @@ the whole unlock.
 | `apply_rate(fps, fast)` | sets `g_gx_early_done` (above 30) and `g_present_on_frame` (above 60 or fast forward: frames shown as drawn, not at VI's retrace) |
 | `vi_wait` | hook: above 60 or in fast forward a quarter millisecond's sleep instead of the wait |
 | `frame_tick` | hook: writes the highest rate, sleeps up to 0.2 ms before the next frame above 60, runs the per-frame list, fast forwards, calls the game, then mends the rate after a long frame |
-| `install_fps` | hooks, `GE_FPS` (`auto` is 60 or the screen's rate if lower), `GE_SKIP_RATE` |
+| `wanted_rate` | the limit, or the screen's rate (`video_refresh_rate`) when vsync is on and that is lower |
+| `vsync`, `set_vsync` | wiikit's `video_vsync` / `video_set_vsync` |
+| `install_fps` | hooks, `GE_VSYNC`, `GE_FPS` (`auto` is 60 or the screen's rate if lower), `GE_SKIP_RATE` |
 | `set_fast_forward(on, easeRate)` | a cutscene is skipped: the rate is held at the skip rate (3) and the guest's clock jumps to the next frame (`rt_advance`) after the audio caught up (`hw_ai_behind`); `easeRate` shows each frame instead |
 | `skip_rate`, `engine_rate`, `engine_top_rate`, `fps_limit`, `set_fps_limit` | getters and the setter the menu uses |
 
@@ -789,6 +791,12 @@ machine runs the command and `look_apply` turns the player.
 player's command carries the frame's time as a byte of whole milliseconds, `SetCommandTime`
 keeps what that cuts off for the next frame's command so the time adds up at any frame rate.
 
+`UpdatePing` (from `net_frame`) keeps the ping for the overlay: in a network game of Connect to
+WFC Modded with Show Ping on, a joined console's is the client's float at +0x138 (the pointer
+at `805D5474`; seconds, the connection's smoothed round trip of its reliable messages), eased
+a little; the host is only told apart. `ping(p)` gives it to the renderer's thread,
+`show_ping` / `set_show_ping` are the setting (`GE_PING`).
+
 ### overlay.cpp, dmw.cpp, dmw.h
 
 The debug overlay (F3), drawn with Dear ImGui on the renderer's thread through
@@ -819,7 +827,7 @@ Everything the pages change is one list of `Setting` (`hotkeys.h`: id, label, hi
 
 | Page | Ids |
 |---|---|
-| Screen | `fov`, `ads_fov`, `fps` (stops 30 to 275) |
+| Screen | `fov`, `ads_fov`, `fps` (stops 30 to 275), `vsync`, `show_ping` |
 | Controls | `mouse_sens`, `ads_sens`, `aim_lock`, `mouse_invert`, `mouse_mode`, `input`, `face_buttons`, `dead_zone` |
 | Enhancements | `skip_cutscenes`, `skip_movies`, `level_timer`, `auto_qte`, `auto_start`, `autosave`, `no_tutorials`, `no_colour_filter`, `unlock_all` |
 | Cheats | `mouse_everywhere`, `extras_menu`, `noclip`, `stamina_meter`, `collision_view` |
@@ -908,6 +916,8 @@ Options (the launcher sets these from its settings):
 | Variable | What |
 |---|---|
 | `GE_FPS=N` or `auto` | the frame rate the engine may reach, 31..1000 (auto is 60) |
+| `GE_VSYNC=1` | frames wait for the screen's refresh, the rate is the screen's at most |
+| `GE_PING=0` | no ping shown in a modded network game |
 | `GE_FOV=D`, `GE_ADS_FOV=D` | field of view, and aiming down the sight |
 | `GE_MOUSE=S` | mouse sensitivity, 0 leaves the mouse free |
 | `GE_MOUSE_MODE=auto\|direct\|stick` | how the mouse turns the view |

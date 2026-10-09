@@ -13,7 +13,7 @@ listed here are rewritten, the rest of the file is kept as it is).
 In a package (Windows: Play.bat, Linux: Play.sh) this file sits in launcher/ beside the game's
 executable and does launch.sh's part as well: the same window, then it starts the game with
 what was chosen. There the settings are settings.env and keys.txt in the package's folder, and
-the options are launch.sh's: --no-gui, --fps N, --fov N, --mouse N, --mouse-mode M, --fullscreen,
+the options are launch.sh's: --no-gui, --fps N, --vsync, --no-ping, --fov N, --mouse N, --mouse-mode M, --fullscreen,
 --fast-start, --cheats, --offline, --extract IMAGE (Linux also --no-crash-dumps, --crash-mem);
 anything else goes to the game.
 """
@@ -55,7 +55,7 @@ ACTIONS = [
     ("Move left", "Left Stick Left"), ("Move right", "Left Stick Right"),
 ]
 DEFAULTS = {"fps": "auto", "fov": "49", "mouse": "1.0", "online": "1", "fullscreen": "0", "faststart": "0", "mousemode": "auto",
-            "mouseinvert": "0", "adsfov": "22.5", "adssens": "0.5", "aimlock": "0", "mouseeverywhere": "0", "skipcutscenes": "0", "skipzukovsky": "0", "skipbriggs": "0", "skipmovies": "0", "notutorials": "0", "nocolourfilter": "0", "autosave": "1", "leveltimer": "1", "autoqte": "0", "autostart": "0", "extrasmenu": "0", "unlockall": "0", "staminameter": "0",
+            "mouseinvert": "0", "adsfov": "22.5", "adssens": "0.5", "aimlock": "0", "mouseeverywhere": "0", "skipcutscenes": "0", "skipzukovsky": "0", "skipbriggs": "0", "skipmovies": "0", "notutorials": "0", "nocolourfilter": "0", "autosave": "1", "leveltimer": "1", "autoqte": "0", "autostart": "0", "extrasmenu": "0", "unlockall": "0", "staminameter": "0", "vsync": "0", "ping": "1",
             "crashdump": "1", "crashmem": "0"}
 
 #Tk's key names -> SDL's (the key file's)
@@ -265,8 +265,12 @@ def run_gui():
     fullscreen = tk.BooleanVar(value=settings["fullscreen"] == "1")
     ttk.Checkbutton(st, text="Online: use the community server (config/hosts.txt)", variable=online).grid(
         row=3, column=0, columnspan=2, sticky="w", **pad)
-    ttk.Checkbutton(st, text="Fullscreen  (F11 or Alt+Enter switches in the game)", variable=fullscreen).grid(
-        row=4, column=0, columnspan=2, sticky="w", **pad)
+    #vsync shares fullscreen's row
+    vsync = tk.BooleanVar(value=settings["vsync"] == "1")
+    fr = ttk.Frame(st)
+    fr.grid(row=4, column=0, columnspan=2, sticky="w", **pad)
+    ttk.Checkbutton(fr, text="Fullscreen  (F11 or Alt+Enter switches in the game)", variable=fullscreen).pack(side="left")
+    ttk.Checkbutton(fr, text="VSync: no tearing, the screen's rate at most", variable=vsync).pack(side="left", padx=(24, 0))
     faststart = tk.BooleanVar(value=settings["faststart"] == "1")
     ttk.Checkbutton(st, text="Quicker start: hurry through the screens before the menu (a Gecko code)",
                     variable=faststart).grid(row=5, column=0, columnspan=2, sticky="w", **pad)
@@ -451,6 +455,7 @@ def run_gui():
         settings["mouse"] = f"{mouse.get():.2f}"
         settings["online"] = "1" if online.get() else "0"
         settings["fullscreen"] = "1" if fullscreen.get() else "0"
+        settings["vsync"] = "1" if vsync.get() else "0"
         settings["faststart"] = "1" if faststart.get() else "0"
         settings["crashdump"] = "1" if crashdump.get() else "0"
         settings["crashmem"] = "1" if crashmem.get() else "0"
@@ -583,6 +588,10 @@ def run_game(args):
             i += 1
         elif a == "--fullscreen":
             s["fullscreen"] = "1"
+        elif a == "--vsync":
+            s["vsync"] = "1"
+        elif a == "--no-ping":
+            s["ping"] = "0"
         elif a == "--always-mouse":
             s["mouseeverywhere"] = "1"
         elif a == "--skip-cutscenes":
@@ -636,7 +645,8 @@ def run_game(args):
                      ("GE_MOUSE_INVERT", "mouseinvert"), ("GE_ADS_FOV", "adsfov"),
                      ("GE_ADS_SENS", "adssens"), ("GE_AIM_LOCK", "aimlock"), ("GE_MOUSE_EVERYWHERE", "mouseeverywhere"),
                      ("GE_SKIP_CUTSCENES", "skipcutscenes"), ("GE_SKIP_ZUKOVSKY", "skipzukovsky"), ("GE_SKIP_BRIGGS", "skipbriggs"), ("GE_LEVEL_TIMER", "leveltimer"), ("GE_AUTO_QTE", "autoqte"), ("GE_AUTO_START", "autostart"), ("GE_SKIP_MOVIES", "skipmovies"), ("GE_NO_TUTORIALS", "notutorials"), ("GE_NO_COLOUR_FILTER", "nocolourfilter"), ("GE_AUTOSAVE", "autosave"),
-                     ("GE_EXTRAS_MENU", "extrasmenu"), ("GE_UNLOCK_ALL", "unlockall"), ("GE_STAMINA", "staminameter")):
+                     ("GE_EXTRAS_MENU", "extrasmenu"), ("GE_UNLOCK_ALL", "unlockall"), ("GE_STAMINA", "staminameter"),
+                     ("GE_VSYNC", "vsync"), ("GE_PING", "ping")):
         env.setdefault(var, s[key])
     if s["online"] == "0":
         env["GE_HOSTS"] = ""
