@@ -118,20 +118,21 @@ void cheats_label() {
 }
 
 //the stamina meter (stamina.cpp): the sprint that's left, and the line a sprint is cancelled
-//right under. green under the line, dimmer while it refills
+//right under. green under the line, dimmer while it refills, red while there's too little
+//left to sprint again
 void stamina_bar(const Stamina& s) {
     ImVec2 screen = ImGui::GetIO().DisplaySize;
     float u = std::min(screen.y / 720, screen.x / 960);
     float w = 280 * u, h = 10 * u, edge = 2 * u;
     float x = std::floor((screen.x - w) / 2), y = std::floor(screen.y - 58 * u);
     float left = std::clamp(s.left / s.full, 0.0f, 1.0f), line = std::clamp(s.cancel / s.full, 0.0f, 1.0f);
-    ImU32 fill = s.left < s.cancel ? IM_COL32(80, 230, 110, 255) : s.sprinting ? IM_COL32(245, 240, 225, 255) : IM_COL32(245, 240, 225, 170);
+    ImU32 fill = !s.sprinting && s.left < s.needs ? IM_COL32(235, 60, 50, 255) : s.left < s.cancel ? IM_COL32(80, 230, 110, 255) : s.sprinting ? IM_COL32(245, 240, 225, 255) : IM_COL32(245, 240, 225, 170);
     ImDrawList* dl = ImGui::GetBackgroundDrawList();
     dl->AddRectFilled(ImVec2(x - edge, y - edge), ImVec2(x + w + edge, y + h + edge), IM_COL32(0, 0, 0, 150), 2);
     if (left > 0) dl->AddRectFilled(ImVec2(x, y), ImVec2(x + w * left, y + h), fill);
     float at = std::floor(x + w * line), wide = std::max(2.0f, std::floor(2 * u));
     dl->AddRectFilled(ImVec2(at - 1, y - 5 * u - 1), ImVec2(at + wide + 1, y + h + 5 * u + 1), IM_COL32(0, 0, 0, 200));
-    dl->AddRectFilled(ImVec2(at, y - 5 * u), ImVec2(at + wide, y + h + 5 * u), IM_COL32(255, 70, 60, 255));
+    dl->AddRectFilled(ImVec2(at, y - 5 * u), ImVec2(at + wide, y + h + 5 * u), IM_COL32(255, 255, 255, 255));
 }
 
 std::string find_dmw() {

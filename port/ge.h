@@ -205,7 +205,7 @@ void install_stamina(); //stamina.cpp
 bool stamina_meter(); //cheat, the sprint that's left as a bar
 void set_stamina_meter(bool on);
 void stamina_apply(uint32_t controller); //after the local controller's update
-struct Stamina { float left, full, cancel; bool sprinting; }; //seconds: left of full, and where a cancelled sprint's refill jumps
+struct Stamina { float left, full, cancel, needs; bool sprinting; }; //seconds: left of full, where a cancelled sprint's refill jumps, what a new sprint needs
 bool stamina(Stamina& s); //the local player's as of its last update, false with the meter off or nobody in play
 void install_collision(); //collision.cpp
 void install_body(); //body.cpp

@@ -12,6 +12,7 @@
 //so an empty sprint is back at 1.1 seconds after a second, and one cancelled right under 0.31
 //(a reload ends it) is there a frame later: sprinting again the frame after loses next to
 //nothing. the line is at that tenth, the bar turns green under it
+//not sprinting and under what a new one needs the bar is red: no sprint until it's refilled
 //above the line a cancel only gets the slow refill, and the further under it the longer the
 //wait: a frame's refill is 0.31 of what a frame of sprinting takes, so the first frame under
 //the line is the one
@@ -32,10 +33,11 @@ namespace
 const uint32_t kSprinting = 0xE59, kSprintLeft = 0xE5C;
 const uint32_t kSprintFull = 0x806E9490, kSprintFullOther = 0x806E9494, kSprintOther = 0x806EBA7D;
 const uint32_t kRefillParts = 0x806EEC80; //full over this is a second's refill, and where the refill jumps
+const uint32_t kSprintNeeds = 0x806EEC20; //a new sprint starts with this much left or more (fn_8010D6D0)
 
 std::atomic<bool> g_meter{false};
 //the local player's as of its last update, read by the renderer's thread
-std::atomic<float> g_left{0}, g_full{0}, g_cancel{0};
+std::atomic<float> g_left{0}, g_full{0}, g_cancel{0}, g_needs{0};
 std::atomic<bool> g_sprinting{false};
 std::atomic<uint32_t> g_frame{~0u};
 bool g_trace = false;
@@ -58,11 +60,13 @@ void stamina_apply(uint32_t ctrl)
 	const float left{ ldf(ctrl + kSprintLeft) };
 	const float full{ ldf(ld8(kSprintOther) ? kSprintFullOther : kSprintFull) };
 	const float parts{ ldf(kRefillParts) };
-	if (!std::isfinite(left) || !std::isfinite(full) || !(full > 0) || !(parts > 1)) return;
+	const float needs{ ldf(kSprintNeeds) };
+	if (!std::isfinite(left) || !std::isfinite(full) || !std::isfinite(needs) || !(full > 0) || !(parts > 1)) return;
 	if (g_trace) Trace(left, ld8(ctrl + kSprinting) != 0);
 	g_left = left;
 	g_full = full;
 	g_cancel = full / parts;
+	g_needs = needs;
 	g_sprinting = ld8(ctrl + kSprinting) != 0;
 	g_frame = ld32(kFrameCount);
 }
@@ -73,6 +77,7 @@ bool stamina(Stamina& s)
 	s.left = g_left;
 	s.full = g_full;
 	s.cancel = g_cancel;
+	s.needs = g_needs;
 	s.sprinting = g_sprinting;
 	return true;
 }
