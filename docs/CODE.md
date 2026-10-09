@@ -791,12 +791,16 @@ machine runs the command and `look_apply` turns the player.
 player's command carries the frame's time as a byte of whole milliseconds, `SetCommandTime`
 keeps what that cuts off for the next frame's command so the time adds up at any frame rate.
 
-`UpdatePing` (from `net_frame`) keeps the ping: in a network game of Connect to WFC Modded
-with Show Ping on, a joined console's is the client's float at +0x138 (the pointer at
+`UpdatePing` (from `net_frame`) keeps this console's ping: in a network game of Connect to WFC
+Modded with Show Ping on, a joined console's is the client's float at +0x138 (the pointer at
 `805D5474`; seconds, the connection's smoothed round trip of its reliable messages), eased a
-little; the host is only told apart. `ScoreboardDraw` (the hook of `ge_scoreboard_draw`,
-`install_ping`) puts it after the name in this console's row of the scoreboard: the name's
-pointer (the scoreboard's +0xC + 4 * slot) is one to "name   9 ms" for the call.
+little. The others' come from the host: `PlayerWrite` (the hook of `ge_player_write`) puts a
+player's ping (`HostPingOf`: the server's player with that controller, its connection's round
+trip) behind the player's state as one more ranged number, `PlayerRead` (`ge_player_read`)
+takes it out again and keeps it by controller (`KeepPing`); both only in a modded game.
+`ScoreboardDraw` (the hook of `ge_scoreboard_draw`, `install_ping`) puts each row's ping after
+its name: the name's pointer (the scoreboard's +0xC + 4 * slot) is one to "name   9 ms" for
+the call, the slot's player found by the controller's +0x998 (`PingOfSlot`).
 `show_ping` / `set_show_ping` are the setting (`GE_PING`).
 
 ### overlay.cpp, dmw.cpp, dmw.h

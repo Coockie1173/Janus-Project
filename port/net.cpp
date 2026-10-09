@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <string>
 
 namespace ge {
 
@@ -189,6 +190,113 @@ void UpdatePing()
 	}
 }
 
+//everyone's ping: the host has a connection a console (the server at 805D5470: its players at
+//+0x54, +0x58 of them; a player's +0x38 is its controller and +0x18 points at the pointer to its
+//connection, a bdUnicastConnection with the round trip at +0x60, or the host's own loopback
+//one), the others only their own to the host. so the host sends them: a player's state goes
+//from the host to every console through ge_player_write (80126FC0: r3 the controller, r4 the
+//stream) and is read by ge_player_read (80128300, the same), every 0.1 s, and in a modded game
+//both go on for a number of 10 bits behind what the game puts there, the player's ping in
+//milliseconds. only between consoles that both do it (modmenu.cpp, kPortProtocol)
+//a console keeps what it read by controller; a controller's slot in the scoreboard is its +0x998
+const uint32_t kHostPlayers = 0x54, kHostPlayerCount = 0x58;
+const uint32_t kNetPlayerCtrl = 0x38, kNetPlayerConn = 0x18;
+const uint32_t kUnicastConnection = 0x8059917C, kLoopbackConnection = 0x80598784; //their classes
+const uint32_t kConnRoundTrip = 0x60;
+const uint32_t kStreamWrite = 0x801260B0; //(the stream, a number, the least and the most it can be, 1): bdBitBuffer::writeRangedUInt32
+const uint32_t kStreamRead = 0x801263B0; //(the stream, where to, the least, the most, 1)
+const uint32_t kPingMost = 1021, kPingHost = 1022, kPingNone = 1023; //the numbers sent, 0 to 1023
+const uint32_t kCtrlSlot = 0x998; //the player's slot in the scoreboard, sent with its name (fn_801266A0)
+const uint32_t kPingKept = 1200; //frames a controller's ping is kept without news of it
+PPCFunc orig_player_write = nullptr, orig_player_read = nullptr, stream_write = nullptr, stream_read = nullptr;
+
+struct PlayerPing { uint32_t ctrl; uint32_t ms; uint32_t frame; };
+PlayerPing g_pings[16];
+
+void KeepPing(uint32_t ctrl, uint32_t ms)
+{
+	//the controller's own place, else the one longest without news
+	PlayerPing* pKept = &g_pings[0];
+	for (PlayerPing& p : g_pings)
+	{
+		if (p.ctrl == ctrl) { pKept = &p; break; }
+		if (p.frame < pKept->frame) pKept = &p;
+	}
+	*pKept = { ctrl, ms, ld32(kFrameCount) };
+}
+
+//the ping of the player in this slot of the scoreboard, kPingNone when nothing is known
+uint32_t PingOfSlot(uint32_t slot)
+{
+	const uint32_t frame = ld32(kFrameCount);
+	for (const PlayerPing& p : g_pings)
+		if (p.ctrl != 0 && frame - p.frame < kPingKept && guest_ptr(p.ctrl) && guest_ptr(ld32(p.ctrl + 4)) && ld32(p.ctrl + kCtrlSlot) == slot) return p.ms;
+	return kPingNone;
+}
+
+//on the host: the round trip of the controller's console
+uint32_t HostPingOf(uint32_t ctrl)
+{
+	const uint32_t host = ld32(kNetHost);
+	if (!guest_ptr(host)) return kPingNone;
+	const uint32_t players = ld32(host + kHostPlayers), count = ld32(host + kHostPlayerCount);
+	if (!guest_ptr(players) || count > 64) return kPingNone;
+	for (uint32_t i = 0; i < count; ++i)
+	{
+		const uint32_t player = ld32(players + i * 4);
+		if (!guest_ptr(player) || ld32(player + kNetPlayerCtrl) != ctrl) continue;
+		const uint32_t held = ld32(player + kNetPlayerConn), conn = guest_ptr(held) ? ld32(held) : 0;
+		if (!guest_ptr(conn)) return kPingNone;
+		if (ld32(conn) == kLoopbackConnection) return kPingHost;
+		if (ld32(conn) != kUnicastConnection) return kPingNone;
+		const float ms = ldf(conn + kConnRoundTrip) * 1000.0f;
+		return ms >= 0 ? std::min((uint32_t)std::lround(ms), kPingMost) : kPingNone;
+	}
+	return kPingNone;
+}
+
+//(r3 the controller, r4 the stream, r5 the state)
+void PlayerWrite(PPCContext& c)
+{
+	const uint32_t ctrl = c.r[3], stream = c.r[4];
+	orig_player_write(c);
+	if (!modded_lobby()) return;
+	const uint32_t ms = HostPingOf(ctrl);
+	if (ms != kPingNone) KeepPing(ctrl, ms); //the host's own scoreboard reads them here too
+	PPCContext call = c;
+	call.r[3] = stream;
+	call.r[4] = ms;
+	call.r[5] = 0;
+	call.r[6] = kPingNone;
+	call.r[7] = 1;
+	stream_write(call);
+}
+
+//(r3 the controller, r4 the stream, r5 the state), true when it was read
+void PlayerRead(PPCContext& c)
+{
+	const uint32_t ctrl = c.r[3], stream = c.r[4];
+	orig_player_read(c);
+	if (!modded_lobby()) return;
+	const uint32_t stack = c.r[1], frame = stack - 0x20, out = frame + 0x10;
+	st32(frame, stack);
+	st32(out, kPingNone);
+	PPCContext call = c;
+	call.r[1] = frame;
+	call.r[3] = stream;
+	call.r[4] = out;
+	call.r[5] = 0;
+	call.r[6] = kPingNone;
+	call.r[7] = 1;
+	stream_read(call);
+	const uint32_t ms = ld32(out);
+	if (ms < kPingNone) KeepPing(ctrl, ms);
+	static const bool trace = std::getenv("GE_TRACE") != nullptr;
+	static uint32_t said = 0;
+	if (trace && said < 6 && ms < kPingNone && ++said)
+		rt_log("goldeneye: online: the host says the player in slot %u (%08X) has ping %u", ld32(ctrl + kCtrlSlot), ctrl, ms);
+}
+
 //the slot of the controller's player in the scoreboard, -1 when it has none
 int BoardSlot(const PPCContext& c, uint32_t board, uint32_t ctrl)
 {
@@ -208,23 +316,38 @@ int BoardSlot(const PPCContext& c, uint32_t board, uint32_t ctrl)
 void ScoreboardDraw(PPCContext& c)
 {
 	const uint32_t board = c.r[3];
-	const int slot = g_pingState == kNoPing || c.r[5] != local_controller() ? -1 : BoardSlot(c, board, c.r[5]);
-	if (slot < 0) { orig_scoreboard(c); return; }
-	char ping[24];
-	if (g_pingState == kHosting) std::snprintf(ping, sizeof ping, "   host");
-	else std::snprintf(ping, sizeof ping, "   %.0f ms", g_pingMs);
-	const uint32_t at = board + kBoardNames + (uint32_t)slot * 4, name = ld32(at);
-	const uint32_t stack = c.r[1], frame = (stack - 0x20 - (kMostName + sizeof ping) * 2) & ~0xFu, text = frame + 0x10;
-	uint32_t count = 0;
-	for (; count < kMostName && ld16(name + count * 2); ++count) st16(text + count * 2, ld16(name + count * 2));
-	for (const char* p = ping; *p; ++p) st16(text + count++ * 2, (uint16_t)*p);
-	st16(text + count * 2, 0);
+	if (g_pingState == kNoPing || !guest_ptr(board)) { orig_scoreboard(c); return; }
+	const int own = c.r[5] == local_controller() ? BoardSlot(c, board, c.r[5]) : -1;
+	const uint32_t room = (kMostName + 12) * 2; //a name and its ping
+	const uint32_t stack = c.r[1], frame = (stack - 0x20 - kBoardSlots * room) & ~0xFu;
+	uint32_t names[kBoardSlots];
+	static const bool trace = std::getenv("GE_TRACE") != nullptr;
+	static uint32_t said = 0;
+	for (uint32_t slot = 0; slot < kBoardSlots; ++slot)
+	{
+		const uint32_t at = board + kBoardNames + slot * 4, name = names[slot] = ld32(at);
+		if (!guest_ptr(name)) continue;
+		//this console's own is the one it measures, the others' are what the host says
+		uint32_t ms = PingOfSlot(slot);
+		if ((int)slot == own) ms = g_pingState == kHosting ? kPingHost : (uint32_t)std::lround(g_pingMs);
+		if (trace && said < 16 && ++said)
+			rt_log("goldeneye: online: scoreboard slot %u is player %u, ping %u%s", slot, ld8(board + kBoardIds + slot), ms, (int)slot == own ? " (this console's)" : "");
+		if (ms == kPingNone) continue;
+		char ping[16];
+		if (ms == kPingHost) std::snprintf(ping, sizeof ping, "   host");
+		else std::snprintf(ping, sizeof ping, "   %u ms", ms);
+		const uint32_t text = frame + 0x10 + slot * room;
+		uint32_t count = 0;
+		for (; count < kMostName && ld16(name + count * 2); ++count) st16(text + count * 2, ld16(name + count * 2));
+		for (const char* p = ping; *p; ++p) st16(text + count++ * 2, (uint16_t)*p);
+		st16(text + count * 2, 0);
+		st32(at, text);
+	}
 	st32(frame, stack);
-	st32(at, text);
 	c.r[1] = frame;
 	orig_scoreboard(c);
 	c.r[1] = stack;
-	st32(at, name);
+	for (uint32_t slot = 0; slot < kBoardSlots; ++slot) st32(board + kBoardNames + slot * 4, names[slot]);
 }
 
 } //namespace
@@ -238,6 +361,13 @@ void install_ping()
 	net_player_of = ppc_lookup(kNetPlayerOf);
 	orig_scoreboard = ppc_hook("ge_scoreboard_draw", ScoreboardDraw);
 	if (!orig_scoreboard) rt_log("goldeneye: ge_scoreboard_draw is not hooked in this build, no ping in the scoreboard");
+	//both or neither: a console that reads the bits and one that doesn't write them can't play together
+	stream_write = ppc_lookup(kStreamWrite);
+	stream_read = ppc_lookup(kStreamRead);
+	orig_player_write = ppc_hook("ge_player_write", PlayerWrite);
+	orig_player_read = ppc_hook("ge_player_read", PlayerRead);
+	if (!orig_player_write || !orig_player_read || !stream_write || !stream_read)
+		rt_die("goldeneye: ge_player_write and ge_player_read are not hooked in this build");
 }
 
 //once a frame

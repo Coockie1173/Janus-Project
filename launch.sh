@@ -5,7 +5,7 @@
 #     ./launch.sh --no-gui             straight to the game, with the saved settings
 #     ./launch.sh --fps 120            the frame rate, up to 275 (60 by default; 30 is the console's)
 #     ./launch.sh --vsync              frames wait for the screen's refresh, no tearing (the F1 menu's Screen)
-#     ./launch.sh --no-ping            no ping next to your name in the scoreboard of a modded online game (the F1 menu's Screen)
+#     ./launch.sh --no-ping            no pings next to the names in the scoreboard of a modded online game (the F1 menu's Screen)
 #     ./launch.sh --fov 70             the field of view in degrees (the game's is 49)
 #     ./launch.sh --mouse 1.5          mouse look sensitivity (1 by default; 0: mouse look off)
 #     ./launch.sh --crash-dumps        write a dump into build/crashes when the game dies or stalls (on by

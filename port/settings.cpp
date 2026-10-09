@@ -336,7 +336,7 @@ void BuildSettings()
 	fps.frac = [](float v) { return (float)FpsStop(v) / (float)(kFpsStopCount - 1); };
 	fps.at = [](float f) { return (float)kFpsStops[std::clamp((int)std::lround(f * (float)(kFpsStopCount - 1)), 0, kFpsStopCount - 1)]; };
 	AddToggle(kScreen, "vsync", "VSync", "On: frames wait for the screen's refresh, so the picture doesn't tear. The game runs at the screen's rate at most.", vsync, set_vsync);
-	AddToggle(kScreen, "show_ping", "Show Ping", "On: in a game through Connect to WFC Modded the scoreboard has the round trip to the host next to your name.", show_ping, set_show_ping);
+	AddToggle(kScreen, "show_ping", "Show Ping", "On: in a game through Connect to WFC Modded the scoreboard has every player's ping next to their name.", show_ping, set_show_ping);
 
 	Setting& sens = AddRange(kControls, "mouse_sens", "Mouse Sensitivity", "How far the view turns for the mouse's motion. Off leaves the mouse free.",
 		mouse_sens, [](float v) { set_mouse_sens(v); g_dirty = true; }, 0, kMouseSensMax, 0.05f, 2);
