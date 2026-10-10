@@ -87,6 +87,7 @@ Things that only break above 60 fps.
 
 ## Audio
 
+- [ ] **critical** crunchy audio at higher fps
 - [ ] **medium** Double audio on reloads
 - [ ] **medium** Main menu cursor sound is sometimes a loud click
 - [ ] **medium** Nightclub: the score keeps playing over the breach music
