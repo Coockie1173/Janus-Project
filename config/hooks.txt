@@ -93,3 +93,4 @@ ge_command_fill        # a frame's command is filled from the pad: in a modded n
 ge_scoreboard_draw     # the scoreboard is drawn: the ping after this console's player's name in a modded network game (port/net.cpp)
 ge_player_write        # a player's state is written for the other consoles: its ping behind it in a modded network game (port/net.cpp)
 ge_player_read         # and read: the ping behind it
+MIXInitChannel         # a new sound's mixer channel is made: silent, not at 0 dB, so it doesn't click when its voice runs a frame later (port/sound.cpp)

@@ -39,6 +39,7 @@
 //GE_NATIVE=0 run the recompiled math routines instead of the host ones
 //GE_CRASH_MEM=1 put the guest's memory in crash dumps (build/crashes)
 //GE_TRACETEXT=1 log the texts the game looks up and the buttons its prompts ask for
+//GE_SOUND_CLICKS=1 a new sound's channel starts at 0 dB as in the game, it clicks at high frame rates
 //GE_DMW=F watch list for the debug overlay (F3), the .dmw in the project folder by default
 #include "debug.h"
 #include "ge.h"
@@ -99,6 +100,7 @@ void install() {
     install_timeline();
     install_flipbooks();
     install_shake();
+    install_sound();
     install_noclip();
     install_stamina();
     install_collision();
