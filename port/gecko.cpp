@@ -24,7 +24,7 @@ std::vector<std::vector<GeckoLine>> g_gecko;
 size_t g_cheat_codes = 0; //how many of them are the Cheats tab's
 
 bool gecko_ok(uint32_t addr, uint32_t size) {
-    return (addr >= 0x80003000u && addr + size <= 0x81800000u) || (addr >= 0x90000000u && addr + size <= 0x94000000u);
+    return (addr >= 0x80003000u && addr + size <= 0x81800000u) || (addr >= 0x90000000u && addr + size <= 0x90000000u + g_mem2_size);
 }
 void gecko_store(uint32_t addr, uint32_t size, uint32_t v) {
     if (!gecko_ok(addr, size)) return;

@@ -25,11 +25,20 @@
 //which tells the frame something wrote over the heap and what it wrote
 //a network game's start and end are logged with what the checks saw so far, without being
 //asked for: the launcher's run.log (the Windows package's too) then tells they were on
+//
+//the files of a level (.edb) each get one block of the second heap, the "Large Data Heap": 53 MB
+//of MEM2's 64 (its size is a word at 806E8F84, fn_802A4890 makes it out of MEM2's arena). a
+//file that doesn't fit is asked for again every frame for good (ge_geofile_onload returns 0,
+//port/mods.cpp logs it): the 35 MB of a big mod level's geometry never fitted next to the rest
+//so MEM2 is 128 MB here and that heap gets all of what is more, which a console doesn't have:
+//a level that needs it loads here only
+//GE_MEM2=MB MEM2's size, 64 (the console's) to 256
 //GE_HEAPCHECK=0 no walk, =1 says in the log that it walks
 //GE_HEAPNET=1 takes the first 600 frames in play for a network game, to see those lines
 //GE_HEAPTEST=1 frees one block twice, once in play, to see the second one refused
 #include "ge.h"
 #include <cstdio>
+#include <algorithm>
 #include <cstdlib>
 #include <string>
 
@@ -41,6 +50,18 @@ namespace
 const uint32_t kHeaps = 0x80643040, kHeapCount = 4, kHeapFirst = 4, kHeapLast = 8;
 const uint32_t kHeader = 0x10, kBlockSize = 8, kBlockBefore = 0xC, kBlockFree = 1;
 const int kMaxReports = 32;
+const uint32_t kLargeHeapSize = 0x806E8F84, kConsoleLargeHeap = 0x03540000, kConsoleMem2 = 0x04000000, kMiB = 0x100000;
+
+//before the runtime maps the memory, which is before anything is installed
+struct Mem2Size
+{
+	Mem2Size()
+	{
+		uint32_t megabytes = 128;
+		if (const char* e = std::getenv("GE_MEM2")) megabytes = uint32_t(std::atoi(e));
+		g_mem2_size = std::clamp(megabytes, 64u, 256u) * kMiB;
+	}
+} g_mem2;
 PPCFunc orig_free = nullptr;
 int g_reports = 0;
 
@@ -240,6 +261,12 @@ void install_heap()
 	if (const char* e = std::getenv("GE_HEAPCHECK")) g_walk = g_say = std::atoi(e) != 0;
 	g_test = std::getenv("GE_HEAPTEST") != nullptr;
 	g_fakeNetwork = std::getenv("GE_HEAPNET") != nullptr;
+	if (g_mem2_size > kConsoleMem2)
+	{
+		if (ld32(kLargeHeapSize) != kConsoleLargeHeap) rt_die("goldeneye: the Large Data Heap's size isn't where it is expected (%08X at %08X)", ld32(kLargeHeapSize), kLargeHeapSize);
+		st32(kLargeHeapSize, kConsoleLargeHeap + (g_mem2_size - kConsoleMem2));
+		rt_log("goldeneye: MEM2 is %u MB, the Large Data Heap %u MB (GE_MEM2=64: as on the console)", g_mem2_size / kMiB, ld32(kLargeHeapSize) / kMiB);
+	}
 	orig_free = ppc_hook("ge_heap_free", Free);
 	if (!orig_free) rt_die("goldeneye: ge_heap_free is not hooked in this build");
 }

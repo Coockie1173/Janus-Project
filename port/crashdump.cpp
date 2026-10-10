@@ -8,7 +8,7 @@
 //0 fps (nothing drawn, the number in the window's title) while the game's own count goes on.
 //nobody crashed there, so the dump asks every host thread where it is (SIGUSR1, OnWhere).
 //
-//GE_CRASH_MEM=1   also write the guest's memory (mem1.bin, mem2.bin: 88 MB a dump)
+//GE_CRASH_MEM=1   also write the guest's memory (mem1.bin, mem2.bin: 152 MB a dump)
 //GE_CRASH_DIR=D   somewhere else than build/crashes
 //GE_NO_CRASHDUMP=1  just the few lines on stderr, like before
 //GE_CRASH_TEST=crash|die|stall[,seconds]  make one happen on the game's thread (10 s in by default)
@@ -227,7 +227,7 @@ namespace
 	void WriteMemory(const std::string& Dir)
 	{
 		const struct { const char* m_Name; uint32_t m_Base, m_Size; } Regions[] = {
-			{ "mem1.bin", 0x80000000u, 0x01800000u }, { "mem2.bin", 0x90000000u, 0x04000000u } };
+			{ "mem1.bin", 0x80000000u, 0x01800000u }, { "mem2.bin", 0x90000000u, g_mem2_size } };
 		for (const auto& Region : Regions)
 		{
 			if (FILE* File{ std::fopen((Dir + "/" + Region.m_Name).c_str(), "wb") })

@@ -120,7 +120,7 @@ void fill(const Json& entries, WatchGroup& g) {
 }
 
 bool readable(uint32_t a, uint32_t n) {
-    return (a >= 0x80000000u && a + n <= 0x81800000u) || (a >= 0x90000000u && a + n <= 0x94000000u);
+    return (a >= 0x80000000u && a + n <= 0x81800000u) || (a >= 0x90000000u && a + n <= 0x90000000u + g_mem2_size);
 }
 
 } //namespace

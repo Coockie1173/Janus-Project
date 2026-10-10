@@ -102,7 +102,13 @@ std::vector<Hold> holds, moves;
 struct Press { double a, b; uint32_t bits; };
 std::vector<Press> presses;
 
-const uint32_t kRanges[][2] = {{0x80000000u, 0x81800000u}, {0x90000000u, 0x94000000u}};
+//MEM1 and MEM2. asked for when used: MEM2's size is set while the program starts (port/heap.cpp)
+struct Ranges
+{
+    uint32_t m_Ranges[2][2]{ { 0x80000000u, 0x81800000u }, { 0x90000000u, 0x90000000u + g_mem2_size } };
+    const uint32_t (*begin() const)[2] { return m_Ranges; }
+    const uint32_t (*end() const)[2] { return m_Ranges + 2; }
+};
 
 float fl(const std::vector<uint8_t>& snap, size_t off) {
     uint32_t v;
@@ -119,7 +125,7 @@ void scan_main(std::vector<double> times) {
     for (double t : times) {
         sleep_until_s(t);
         std::vector<uint8_t> s;
-        for (auto& r : kRanges) s.insert(s.end(), host(r[0]), host(r[0]) + (r[1] - r[0]));
+        for (auto& r : Ranges()) s.insert(s.end(), host(r[0]), host(r[0]) + (r[1] - r[0]));
         snaps.push_back(std::move(s));
         rt_log("scan: snapshot %zu at %.1f s", snaps.size(), now_s());
     }
@@ -265,7 +271,7 @@ void obj_main(uint32_t ptr, uint32_t size, std::vector<double> times) {
         uint32_t base = ld32(ptr);
         std::fprintf(out, "# %.1f s: *%08X = %08X\n", now_s(), ptr, base);
         std::vector<uint32_t> r;
-        if (base >= 0x80000000u && base < 0x94000000u)
+        if (base >= 0x80000000u && base < 0x90000000u + g_mem2_size)
             for (uint32_t o = 0; o < size; o += 4) r.push_back(ld32(base + o));
         rows.push_back(r);
     }
@@ -300,7 +306,7 @@ void dump_main(double t, uint32_t lo, uint32_t hi, std::string path) {
 void findptr_main(double t, uint32_t lo, uint32_t hi) {
     sleep_until_s(t);
     int n = 0;
-    for (auto& r : kRanges)
+    for (auto& r : Ranges())
         for (uint32_t a = r[0]; a < r[1] && n < 200; a += 4) {
             uint32_t v = ld32(a);
             if (v >= lo && v <= hi) { rt_log("findptr: %08X holds %08X", a, v); ++n; }
@@ -311,7 +317,7 @@ void findptr_main(double t, uint32_t lo, uint32_t hi) {
 void setall_main(double t, float from, float to, uint32_t lo, uint32_t hi) {
     sleep_until_s(t);
     int n = 0;
-    for (auto& r : kRanges)
+    for (auto& r : Ranges())
         for (uint32_t a = std::max(r[0], lo); a < std::min(r[1], hi); a += 4)
             if (rdf(a) == from) {
                 wrf(a, to);
@@ -695,7 +701,7 @@ void debug_install() {
         char* end;
         double t = std::strtod(e, &end);
         float from = std::strtof(end + 1, &end), to = std::strtof(end + 1, &end);
-        uint32_t lo = 0x80000000u, hi = 0x94000000u;
+        uint32_t lo = 0x80000000u, hi = 0x90000000u + g_mem2_size;
         if (*end == ':') { lo = (uint32_t)std::strtoul(end + 1, &end, 16); hi = (uint32_t)std::strtoul(end + 1, &end, 16); }
         std::thread(setall_main, t, from, to, lo, hi).detach();
     }

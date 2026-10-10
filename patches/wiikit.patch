@@ -496,8 +496,44 @@ index 4050960..7b12f99 100644
      if (rate != stream_rate) {
          SDL_AudioSpec spec = {SDL_AUDIO_S16, 2, (int)rate};
          SDL_SetAudioStreamFormat(stream, &spec, nullptr);
+diff --git a/runtime/boot.cpp b/runtime/boot.cpp
+index 3941f3b..621bb0b 100644
+--- a/runtime/boot.cpp
++++ b/runtime/boot.cpp
+@@ -92,20 +92,23 @@ uint32_t boot_disc(const char* extract_dir, bool eurgb60) {
+     st32(0x8000310C, 0);                           // MEM1 arena begin
+     st32(0x80003110, fst_addr);                    // MEM1 arena end
+     st32(0x80003114, 0xDEADBEEF);
+-    st32(0x80003118, 0x04000000);                  // MEM2 physical size
+-    st32(0x8000311C, 0x04000000);                  // MEM2 simulated size
+-    st32(0x80003120, 0x93600000);                  // MEM2 end
++    // IOS keeps the top 10 MiB of MEM2 (0x93600000 up in 64 MiB) and the IPC
++    // buffer lies under that; a larger MEM2 (g_mem2_size) moves them up with it
++    const uint32_t ios_lo = 0x90000000u + g_mem2_size - 0x00A00000u;
++    st32(0x80003118, g_mem2_size);                 // MEM2 physical size
++    st32(0x8000311C, g_mem2_size);                 // MEM2 simulated size
++    st32(0x80003120, ios_lo);                      // MEM2 end
+     st32(0x80003124, 0x90000800);                  // MEM2 arena begin
+-    st32(0x80003128, 0x935E0000);                  // MEM2 arena end
++    st32(0x80003128, ios_lo - 0x20000);            // MEM2 arena end
+     st32(0x8000312C, 0xDEADBEEF);
+-    st32(0x80003130, 0x935E0000);                  // IPC buffer
+-    st32(0x80003134, 0x93600000);
++    st32(0x80003130, ios_lo - 0x20000);            // IPC buffer
++    st32(0x80003134, ios_lo);
+     st32(0x80003138, 0x00000011);                  // Hollywood revision
+     st32(0x8000313C, 0xDEADBEEF);
+     st32(0x80003140, ios_version);
+     st32(0x80003144, 0x03192009);                  // IOS build date
+-    st32(0x80003148, 0x93600000);                  // IOS reserved
+-    st32(0x8000314C, 0x93620000);
++    st32(0x80003148, ios_lo);                      // IOS reserved
++    st32(0x8000314C, ios_lo + 0x20000);
+     st32(0x80003150, 0xDEADBEEF);
+     st32(0x80003154, 0xDEADBEEF);
+     st32(0x80003158, 0x0000FF16);                  // DDR vendor
 diff --git a/runtime/core.cpp b/runtime/core.cpp
-index d0baebf..8f66089 100644
+index d0baebf..2cdc3db 100644
 --- a/runtime/core.cpp
 +++ b/runtime/core.cpp
 @@ -11,6 +11,7 @@
@@ -596,7 +632,7 @@ index d0baebf..8f66089 100644
  void rt_backtrace(const PPCContext& c, FILE* out, int max) {
      std::fprintf(out, "  lr  %08X  %s\n", c.lr, rt_name(c.lr).c_str());
 +    // a broken stack pointer is what a crash report often has to work with: only what is mapped
-+    auto mapped = [](uint32_t a) { return (a >= 0x80000000u && a < 0x817FFFF8u) || (a >= 0x90000000u && a < 0x93FFFFF8u); };
++    auto mapped = [](uint32_t a) { return (a >= 0x80000000u && a < 0x817FFFF8u) || (a >= 0x90000000u && a < 0x90000000u + g_mem2_size - 8); };
      uint32_t sp = c.r[1];
 -    for (int i = 0; i < max && sp >= 0x80000000u && sp < 0x94000000u; ++i) {
 +    for (int i = 0; i < max && mapped(sp); ++i) {
@@ -846,7 +882,7 @@ index 3d2da4e..a96ab70 100644
      X(PFNGLVERTEXARRAYELEMENTBUFFERPROC, glVertexArrayElementBuffer)                                \
      X(PFNGLENABLEVERTEXARRAYATTRIBPROC, glEnableVertexArrayAttrib)                                  \
 diff --git a/runtime/gx.cpp b/runtime/gx.cpp
-index a6b37f2..7c08314 100644
+index a6b37f2..d3d5ab9 100644
 --- a/runtime/gx.cpp
 +++ b/runtime/gx.cpp
 @@ -25,6 +25,7 @@
@@ -875,6 +911,15 @@ index a6b37f2..7c08314 100644
  namespace {
  
  uint32_t pi_base, pi_end, pi_wptr;                 // PI CPU FIFO (physical addresses)
+@@ -109,7 +119,7 @@ void warn_once(const char* what, uint32_t v) {
+ 
+ // guest physical range [a, a + n) is in MEM1 or MEM2
+ bool mem_ok(uint32_t a, size_t n) {
+-    return (a + n <= 0x01800000u) || (a >= 0x10000000u && a + n <= 0x14000000u);
++    return (a + n <= 0x01800000u) || (a >= 0x10000000u && a + n <= 0x10000000u + (size_t)g_mem2_size);
+ }
+ 
+ // ---- the record ------------------------------------------------------------------------------
 @@ -139,7 +149,9 @@ void flush(bool force) {
      submit_pending = true;
  }
@@ -3274,10 +3319,10 @@ index 0000000..af0c901
 +    }
 +};
 diff --git a/runtime/mem.cpp b/runtime/mem.cpp
-index c164101..3e48c2d 100644
+index c164101..904f716 100644
 --- a/runtime/mem.cpp
 +++ b/runtime/mem.cpp
-@@ -1,13 +1,16 @@
+@@ -1,24 +1,148 @@
  // wiikit runtime — guest memory and executable loading.
  #include "mem.h"
  #include "ppc.h"
@@ -3294,14 +3339,24 @@ index c164101..3e48c2d 100644
  #include <sys/mman.h>
  #endif
  
-@@ -18,6 +21,119 @@ static const Region kRegions[] = {
++// MEM2 is 64 MiB on the console. A host can set more before mem_init (in whole
++// MiB, up to 256: GX and the DSP take physical addresses below 0x20000000 and
++// MEM2 starts at 0x10000000): the arena the OS hands out grows by as much, and
++// IOS's part stays at the top (boot.cpp).
++uint32_t g_mem2_size = 0x04000000u;
++
+ struct Region { uint32_t base, size; };
+-static const Region kRegions[] = {
++static Region kRegions[] = {
+     {0x80000000u, 0x01800000u},   // MEM1, 24 MiB
+     {0x90000000u, 0x04000000u},   // MEM2, 64 MiB
      {0xE0000000u, 0x00004000u},   // the locked half of the L1 data cache, 16 KiB
  };
  
 +// ---- watched memory (mem.h) -------------------------------------------------------------------
 +#if defined(PPC_MEM_FIXED) && !defined(_WIN32)
 +namespace {
-+constexpr uintptr_t kWatchBase = 0x80000000u, kWatchEnd = 0x94000000u;
++constexpr uintptr_t kWatchBase = 0x80000000u, kWatchEnd = 0xA0000000u;
 +constexpr size_t kWatchPages = (kWatchEnd - kWatchBase) >> 12;
 +constexpr uint8_t kHot = 16;                         // faults after which a page is left alone for a while
 +std::atomic<uint8_t> w_state[kWatchPages];           // 1: write-protected, not written since
@@ -3315,7 +3370,7 @@ index c164101..3e48c2d 100644
 +    WatchLock() { while (w_lock.test_and_set(std::memory_order_acquire)) {} }
 +    ~WatchLock() { w_lock.clear(std::memory_order_release); }
 +};
-+bool watch_mapped(uintptr_t a) { return (a >= 0x80000000u && a < 0x81800000u) || (a >= 0x90000000u && a < 0x94000000u); }
++bool watch_mapped(uintptr_t a) { return (a >= 0x80000000u && a < 0x81800000u) || (a >= 0x90000000u && a < 0x90000000u + (uintptr_t)g_mem2_size); }
 +bool watch_range(const void* p, size_t n, size_t& first, size_t& last) {
 +    uintptr_t a = (uintptr_t)p;
 +    if (!n || !watch_mapped(a) || !watch_mapped(a + n - 1) || (a ^ (a + n - 1)) >> 28) return false;
@@ -3412,9 +3467,12 @@ index c164101..3e48c2d 100644
 +#endif
 +
  bool mem_init() {
++    if (g_mem2_size < 0x04000000u || g_mem2_size > 0x10000000u || (g_mem2_size & 0xFFFFFu)) g_mem2_size = 0x04000000u;
++    kRegions[1].size = g_mem2_size;
      const size_t span = size_t(1) << 32;
  #ifdef _WIN32
-@@ -26,6 +142,25 @@ bool mem_init() {
+     void* base = VirtualAlloc(nullptr, span, MEM_RESERVE, PAGE_NOACCESS);
+@@ -26,6 +150,25 @@ bool mem_init() {
      g_mem = static_cast<uint8_t*>(base);
      for (const Region& r : kRegions)
          if (!VirtualAlloc(g_mem + r.base, r.size, MEM_COMMIT, PAGE_READWRITE)) return false;
@@ -3441,9 +3499,18 @@ index c164101..3e48c2d 100644
      void* base = mmap(nullptr, span, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
      if (base == MAP_FAILED) return false;
 diff --git a/runtime/mem.h b/runtime/mem.h
-index c544428..d46f70a 100644
+index c544428..67e8233 100644
 --- a/runtime/mem.h
 +++ b/runtime/mem.h
+@@ -4,7 +4,7 @@
+ #include <cstddef>
+ 
+ // Reserve 4 GiB of host address space at g_mem and make MEM1 (0x80000000,
+-// 24 MiB), MEM2 (0x90000000, 64 MiB) and the locked cache (0xE0000000,
++// 24 MiB), MEM2 (0x90000000, g_mem2_size: 64 MiB) and the locked cache (0xE0000000,
+ // 16 KiB) usable. The uncached mirrors at 0xC0000000 and 0xD0000000 are
+ // folded onto them by ppc_io_*. Returns false on failure.
+ bool mem_init();
 @@ -14,3 +14,25 @@ uint32_t mem_load_dol(const char* path);
  // Guest <-> host helpers for tests and HLE.
  void mem_write(uint32_t addr, const void* src, size_t n);
@@ -3621,7 +3688,7 @@ index aa1274e..3d497c6 100644
  void watch_main(int seconds) {
      for (;;) {
 diff --git a/runtime/ppc.h b/runtime/ppc.h
-index 99351d5..af71db9 100644
+index 99351d5..f6af62d 100644
 --- a/runtime/ppc.h
 +++ b/runtime/ppc.h
 @@ -23,11 +23,13 @@
@@ -3656,7 +3723,7 @@ index 99351d5..af71db9 100644
  typedef void (*PPCFunc)(PPCContext&);
  
  // The generated tables: address -> function, replaceable functions, named data.
-@@ -57,10 +70,10 @@ struct RsoModule { const char* name; uint32_t vbase; uint32_t size; };
+@@ -57,10 +70,11 @@ struct RsoModule { const char* name; uint32_t vbase; uint32_t size; };
  
  // ---- services provided by the runtime ------------------------------------------------
  extern uint8_t* g_mem;
@@ -3664,6 +3731,7 @@ index 99351d5..af71db9 100644
 -void     ppc_syscall(PPCContext& c, uint32_t addr);
 -void     ppc_trap(PPCContext& c, uint32_t addr);
 -void     ppc_unimplemented(PPCContext& c, uint32_t addr, const char* what);
++extern uint32_t g_mem2_size;                            // MEM2 in bytes: 64 MiB, or more when set before mem_init
 +void     ppc_call_indirect(PPC_CTX c, uint32_t addr);   // bctrl, blrl, indirect tail calls
 +void     ppc_syscall(PPC_CTX c, uint32_t addr);
 +void     ppc_trap(PPC_CTX c, uint32_t addr);
@@ -3671,7 +3739,7 @@ index 99351d5..af71db9 100644
  uint32_t ppc_mmio_read(uint32_t addr, int size);
  void     ppc_mmio_write(uint32_t addr, uint32_t value, int size);
  uint32_t ppc_io_read(uint32_t addr, int size);              // any address >= 0xC0000000
-@@ -69,8 +82,8 @@ uint64_t ppc_timebase();
+@@ -69,8 +83,8 @@ uint64_t ppc_timebase();
  void     ppc_mttb(int upper, uint32_t v);
  void     ppc_mtdec(uint32_t v);
  uint32_t ppc_mfdec();
@@ -3682,7 +3750,7 @@ index 99351d5..af71db9 100644
  uint32_t ppc_lc_dma(uint32_t dma_u, uint32_t dma_l);        // mtspr DMA_L: the locked cache's DMA; returns DMA_L
  void     ppc_wpar_write(uint32_t wpar);                     // mtspr WPAR: the gather buffer's partial burst dropped
  extern uint32_t g_ppc_spr[1024];                            // the processor's own SPRs (HID0/1/2/4, WPAR, DMA)
-@@ -85,14 +98,20 @@ uint32_t ppc_symbol(const char* name);                      // 0 if not in the l
+@@ -85,14 +99,20 @@ uint32_t ppc_symbol(const char* name);                      // 0 if not in the l
  // backward branch and whenever it sets MSR[EE]; the runtime then delivers
  // whatever is pending, if MSR[EE] allows, through the guest's own handlers.
  extern std::atomic<uint32_t> g_ppc_pending;
@@ -3706,7 +3774,7 @@ index 99351d5..af71db9 100644
      if (v & 0x8000u) PPC_POLL(c);
  }
  
-@@ -100,39 +119,58 @@ static inline void ppc_mtmsr(PPCContext& c, uint32_t v) {
+@@ -100,39 +120,58 @@ static inline void ppc_mtmsr(PPCContext& c, uint32_t v) {
  // Below 0xC0000000 the guest address indexes host memory directly (MEM1 at
  // 0x80000000, MEM2 at 0x90000000). Above it, ppc_io_*: the uncached mirrors
  // (0xC0000000, 0xD0000000), the hardware (0xCC000000-0xCDFFFFFF: GX FIFO
@@ -3773,7 +3841,7 @@ index 99351d5..af71db9 100644
  static inline void ppc_dcbz(uint32_t ea) {
      ea &= ~31u;
      for (int i = 0; i < 32; i += 4) st32(ea + i, 0);
-@@ -165,6 +203,8 @@ static inline void cr_cmp_s(PPCContext& c, int field, int32_t a, int32_t b) {
+@@ -165,6 +204,8 @@ static inline void cr_cmp_s(PPCContext& c, int field, int32_t a, int32_t b) {
  static inline void cr_cmp_u(PPCContext& c, int field, uint32_t a, uint32_t b) {
      cr_set(c, field, a < b, a > b, a == b, c.xer_so);
  }
@@ -3782,7 +3850,7 @@ index 99351d5..af71db9 100644
  static inline void cr0_rc(PPCContext& c, uint32_t v) { cr_cmp_s(c, 0, (int32_t)v, 0); }
  static inline void cr1_rc(PPCContext& c) {          // FP record form: CR1 = FPSCR[FX FEX VX OX]
      uint32_t f = c.fpscr;
-@@ -172,7 +212,7 @@ static inline void cr1_rc(PPCContext& c) {          // FP record form: CR1 = FPS
+@@ -172,7 +213,7 @@ static inline void cr1_rc(PPCContext& c) {          // FP record form: CR1 = FPS
  }
  static inline uint32_t mfcr(const PPCContext& c) {
      uint32_t v = 0;
@@ -3791,7 +3859,7 @@ index 99351d5..af71db9 100644
      return v;
  }
  static inline void mtcrf(PPCContext& c, uint32_t crm, uint32_t v) {
-@@ -278,12 +318,24 @@ static inline void ps_quant(uint32_t type, int scale, uint32_t ea, double v, int
+@@ -278,12 +319,24 @@ static inline void ps_quant(uint32_t type, int scale, uint32_t ea, double v, int
  }
  static inline int gqr_scale(uint32_t s6) { return (int)(s6 & 0x20 ? s6 | ~0x3Fu : s6); }
  static inline void psq_load(PPCContext& c, int d, uint32_t ea, int w, int i) {

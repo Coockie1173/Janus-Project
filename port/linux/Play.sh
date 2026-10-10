@@ -17,7 +17,7 @@
 #     ./Play.sh --extras-menu          "Unused Extras Menu"
 #     ./Play.sh --unlock-all           "Unlock Everything": every mission and difficulty
 #     ./Play.sh --no-crash-dumps       no dump in crashes/ when the game dies or stalls (--crash-mem adds
-#                                      the game's memory to each dump, 88 MB)
+#                                      the game's memory to each dump, 152 MB)
 # Any option skips the window; what the launcher does not know goes to the game (--window 1920x1080...).
 cd "$(dirname "$0")" || exit 1
 [ -x ./GoldenEye ] || { echo "GoldenEye is missing or not executable: unzip the whole package (unzip keeps the permissions)"; exit 1; }

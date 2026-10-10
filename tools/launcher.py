@@ -280,7 +280,7 @@ def run_gui():
     if not WINDOWS:
         ttk.Checkbutton(st, text=f"Crash dumps: write a report into {CRASHES} when the game dies or stalls",
                         variable=crashdump).grid(row=7, column=0, columnspan=2, sticky="w", **pad)
-        ttk.Checkbutton(st, text="...with the game's memory in each dump (88 MB)",
+        ttk.Checkbutton(st, text="...with the game's memory in each dump (152 MB)",
                         variable=crashmem).grid(row=8, column=0, columnspan=2, sticky="w", padx=(30, 8))
 
     #controls
