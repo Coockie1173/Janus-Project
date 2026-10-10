@@ -138,6 +138,7 @@ do several things.
 - [ ] **low** Facility: a guard in the Atrium got stuck once
 - [ ] **low** Enemies seem a bit more likely to throw grenades (needs checking)
 - [x] **high** ADS broken on online
+- [x] **low** "Cheats Active" shows when only the Extras menu is enabled, which isn't much of a cheat
 
 ## Performance
 
@@ -147,7 +148,6 @@ do several things.
 
 ## Feature requests
 
-- [x] The Unused Extras Menu is an enhancement, not a cheat ("Cheats Active" no longer shows for it)
 - [ ] Options to remap the tank controls (shooting, aiming, locking on)
 - [ ] A menu option to load any map, the unused ones too
 - [ ] Options for anisotropic filtering and anti-aliasing, if possible
