@@ -422,19 +422,9 @@ const float kAsides[][2] = { { 1.0f, 0.4f }, { -0.4f, 1.0f }, { -1.0f, -0.4f }, 
 //how far below (x, y, z) the world is hit going straight down by reach, negative when it isn't
 float FloorBelow(const PPCContext& c, float x, float y, float z, float reach)
 {
-	PPCContext call = c;
-	const uint32_t stack = c.r[1], frame = stack - 0x200, ray = frame + 0x40, start = frame + 0x10, way = frame + 0x20;
-	st32(frame, stack);
-	stf(start, x); stf(start + 4, y); stf(start + 8, z); stf(start + 12, 0.0f);
-	stf(way, 0.0f); stf(way + 4, -reach); stf(way + 8, 0.0f); stf(way + 12, 0.0f);
-	call.r[1] = frame;
-	call.r[3] = ray; call.r[4] = start; call.r[5] = way;
-	call.r[6] = call.r[7] = call.r[8] = call.r[9] = 0;
-	make_ray(call);
-	call.r[1] = frame;
-	call.r[3] = kWorld; call.r[4] = ray; call.r[5] = 0;
-	trace_ray(call);
-	return ld8(ray + kRayHit) ? ldf(ray + kRayFraction) * reach : -1.0f;
+	const float start[3] = { x, y, z }, way[3] = { 0.0f, -reach, 0.0f };
+	const float hit = world_trace(c, start, way);
+	return hit >= 0.0f ? hit * reach : -1.0f;
 }
 
 void SpawnPointsSetup(PPCContext& c)
@@ -473,6 +463,27 @@ void SpawnPointsSetup(PPCContext& c)
 }
 
 } //namespace
+
+//the game's own trace through the world's collision (the level, not the people in it): from
+//start along way, how far along it the first hit is (0 to 1), negative when nothing is hit.
+//on the game's thread, the ray is made on its stack below the caller's frame
+float world_trace(const PPCContext& c, const float start[3], const float way[3])
+{
+	if (!make_ray || !trace_ray) return -1.0f;
+	PPCContext call = c;
+	const uint32_t stack = c.r[1], frame = stack - 0x200, ray = frame + 0x40, from = frame + 0x10, along = frame + 0x20;
+	st32(frame, stack);
+	stf(from, start[0]); stf(from + 4, start[1]); stf(from + 8, start[2]); stf(from + 12, 0.0f);
+	stf(along, way[0]); stf(along + 4, way[1]); stf(along + 8, way[2]); stf(along + 12, 0.0f);
+	call.r[1] = frame;
+	call.r[3] = ray; call.r[4] = from; call.r[5] = along;
+	call.r[6] = call.r[7] = call.r[8] = call.r[9] = 0;
+	make_ray(call);
+	call.r[1] = frame;
+	call.r[3] = kWorld; call.r[4] = ray; call.r[5] = 0;
+	trace_ray(call);
+	return ld8(ray + kRayHit) ? ldf(ray + kRayFraction) : -1.0f;
+}
 
 //in the order of the game's Choose Game Mode. Classic Conflict has Conflict's maps, as in the game
 const char* const kModeFolders[kModeCount] = { "conflict", "team_conflict", "golden_gun", "black_box", "goldeneye", "heroes", "license_to_kill", "team_license_to_kill" };

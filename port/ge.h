@@ -26,6 +26,7 @@
 //flipbooks.cpp animated textures (fire, screens) play at the console's speed at any frame rate
 //shake.cpp the camera's sway (Nightclub's dance floor) goes by time, not by frames
 //sound.cpp a sound starts silent, so it doesn't click at higher frame rates
+//occlusion.cpp a sound behind a wall or a floor is quieter
 //mods.cpp loose .edb files in place of the disc's, or on top of them
 //modmenu.cpp Extras > Mods in the game's menu, the levels among the mods
 //pictures.cpp a mod level's .png as its picture in the menus
@@ -115,6 +116,7 @@ bool show_ping();
 void set_show_ping(bool on);
 bool modded_lobby(); //modmenu.cpp: network games are the ones of Connect to WFC Modded
 void install_mods(); //mods.cpp
+float world_trace(const PPCContext& c, const float start[3], const float way[3]); //the first hit of the level's collision along way from start, 0 to 1 of it, negative for none. on the game's thread
 //a level among the mods: its file's hash, name and path, and the gamemode folders it is in, a bit each (0: only in the mods folder itself)
 struct ModLevel { uint32_t hash; std::string name; std::string path; uint32_t modes; };
 const int kModeCount = 8; //the online gamemodes, each a folder in the mods folder
@@ -217,6 +219,9 @@ void install_timeline(); //timeline.cpp
 void install_flipbooks(); //flipbooks.cpp
 void install_shake(); //shake.cpp
 void install_sound(); //sound.cpp
+void install_occlusion(); //occlusion.cpp, after install_mods
+bool occlusion(); //sounds behind a wall or a floor are quieter
+void set_occlusion(bool on);
 bool collision_view(); //cheat, the level's collision is drawn in place of the world
 void set_collision_view(bool on);
 void collision_tick(); //every tick of the game's loop

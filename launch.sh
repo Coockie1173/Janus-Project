@@ -5,6 +5,7 @@
 #     ./launch.sh --no-gui             straight to the game, with the saved settings
 #     ./launch.sh --fps 120            the frame rate, up to 275 (60 by default; 30 is the console's)
 #     ./launch.sh --vsync              frames wait for the screen's refresh, no tearing (the F1 menu's Screen)
+#     ./launch.sh --no-occlusion       sounds are heard through walls and floors, as on the console (the F1 menu's Enhancements)
 #     ./launch.sh --no-ping            no pings next to the names in the scoreboard of a modded online game (the F1 menu's Screen)
 #     ./launch.sh --fov 70             the field of view in degrees (the game's is 49)
 #     ./launch.sh --mouse 1.5          mouse look sensitivity (1 by default; 0: mouse look off)
@@ -59,7 +60,7 @@ fi
 # the saved settings, then the command line over them
 LAUNCH_FPS=auto; LAUNCH_FOV=49; LAUNCH_MOUSE=1.0; LAUNCH_ONLINE=1; LAUNCH_FULLSCREEN=0; LAUNCH_FASTSTART=0; LAUNCH_MOUSEMODE=auto
 LAUNCH_CRASHDUMP=1; LAUNCH_CRASHMEM=0; LAUNCH_MOUSEINVERT=0; LAUNCH_MOUSEEVERYWHERE=0; LAUNCH_SKIPCUTSCENES=0; LAUNCH_SKIPZUKOVSKY=0; LAUNCH_SKIPBRIGGS=0
-LAUNCH_LEVELTIMER=1; LAUNCH_AUTOQTE=0; LAUNCH_AUTOSTART=0; LAUNCH_SKIPMOVIES=0; LAUNCH_NOTUTORIALS=0; LAUNCH_NOCOLOURFILTER=0; LAUNCH_AUTOSAVE=1; LAUNCH_EXTRASMENU=0; LAUNCH_UNLOCKALL=0; LAUNCH_ONLINEUNLOCKS=1; LAUNCH_STAMINAMETER=0; LAUNCH_ADSFOV=22.5; LAUNCH_ADSSENS=0.5; LAUNCH_AIMLOCK=0; LAUNCH_VSYNC=0; LAUNCH_PING=1
+LAUNCH_LEVELTIMER=1; LAUNCH_AUTOQTE=0; LAUNCH_AUTOSTART=0; LAUNCH_SKIPMOVIES=0; LAUNCH_NOTUTORIALS=0; LAUNCH_NOCOLOURFILTER=0; LAUNCH_AUTOSAVE=1; LAUNCH_EXTRASMENU=0; LAUNCH_UNLOCKALL=0; LAUNCH_ONLINEUNLOCKS=1; LAUNCH_STAMINAMETER=0; LAUNCH_ADSFOV=22.5; LAUNCH_ADSSENS=0.5; LAUNCH_AIMLOCK=0; LAUNCH_VSYNC=0; LAUNCH_PING=1; LAUNCH_OCCLUSION=1
 [ -f build/settings.env ] && . ./build/settings.env
 ARGS=
 while [ $# -gt 0 ]; do
@@ -68,6 +69,7 @@ while [ $# -gt 0 ]; do
         --fps) LAUNCH_FPS=$2; shift 2 ;;
         --vsync) LAUNCH_VSYNC=1; shift ;;
         --no-ping) LAUNCH_PING=0; shift ;;
+        --no-occlusion) LAUNCH_OCCLUSION=0; shift ;;
         --fov) LAUNCH_FOV=$2; shift 2 ;;
         --mouse) LAUNCH_MOUSE=$2; shift 2 ;;
         --mouse-mode) LAUNCH_MOUSEMODE=$2; shift 2 ;;
@@ -105,7 +107,7 @@ GE_ADS_FOV=${GE_ADS_FOV:-$LAUNCH_ADSFOV}; GE_ADS_SENS=${GE_ADS_SENS:-$LAUNCH_ADS
 GE_AUTO_QTE=${GE_AUTO_QTE:-$LAUNCH_AUTOQTE}; GE_AUTO_START=${GE_AUTO_START:-$LAUNCH_AUTOSTART}
 GE_SKIP_MOVIES=${GE_SKIP_MOVIES:-$LAUNCH_SKIPMOVIES}; GE_SKIP_ZUKOVSKY=${GE_SKIP_ZUKOVSKY:-$LAUNCH_SKIPZUKOVSKY}; GE_SKIP_BRIGGS=${GE_SKIP_BRIGGS:-$LAUNCH_SKIPBRIGGS}
 GE_NO_TUTORIALS=${GE_NO_TUTORIALS:-$LAUNCH_NOTUTORIALS}; GE_NO_COLOUR_FILTER=${GE_NO_COLOUR_FILTER:-$LAUNCH_NOCOLOURFILTER}; GE_AUTOSAVE=${GE_AUTOSAVE:-$LAUNCH_AUTOSAVE}
-GE_VSYNC=${GE_VSYNC:-$LAUNCH_VSYNC}; GE_PING=${GE_PING:-$LAUNCH_PING}; export GE_VSYNC GE_PING
+GE_VSYNC=${GE_VSYNC:-$LAUNCH_VSYNC}; GE_PING=${GE_PING:-$LAUNCH_PING}; GE_OCCLUSION=${GE_OCCLUSION:-$LAUNCH_OCCLUSION}; export GE_VSYNC GE_PING GE_OCCLUSION
 export GE_ADS_FOV GE_ADS_SENS GE_AIM_LOCK GE_AUTO_QTE GE_AUTO_START GE_SKIP_MOVIES GE_SKIP_ZUKOVSKY GE_SKIP_BRIGGS GE_NO_TUTORIALS GE_NO_COLOUR_FILTER GE_AUTOSAVE
 export GE_FPS GE_FOV GE_MOUSE GE_MOUSE_MODE GE_MOUSE_INVERT GE_MOUSE_EVERYWHERE GE_SKIP_CUTSCENES GE_LEVEL_TIMER GE_EXTRAS_MENU GE_UNLOCK_ALL GE_ONLINE_UNLOCKS GE_STAMINA
 # through X11 when there is one: a present on Wayland costs the renderer 2 ms, 0.3 there
