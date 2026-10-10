@@ -6,10 +6,10 @@
 //recompiled code can't be patched while it runs, so we feed the update what makes it show
 //the same thing: the flag set and a limit of twice the time (limit - time = time)
 //
-//unused extras menu (a cheat, off by default): Extras also lists Mission Select, Character
+//unused extras menu (off by default): Extras also lists Mission Select, Character
 //Viewer, Movies and the Calibration Menu. the Extras page gets other rows (port/modmenu.cpp)
 //
-//unlock everything (a cheat, off by default): every mission and every difficulty can be picked
+//unlock everything (off by default): every mission and every difficulty can be picked
 //the two codes patch a menu callback (8024BB80) and the progress getter (80230154) to store
 //-1 into the progress before it is read: the missions' mask (+0x38) and the four masks of
 //missions done per difficulty (+0x40). the same five words are kept at -1 each frame here

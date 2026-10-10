@@ -22,7 +22,7 @@
 //layout draws all of its slots, filled or not, so each list is given the layout of one of the
 //game's pages with as many slots as it has items (kLayouts). the texts are answered from here (prompts.cpp asks for every text the game looks
 //up)
-//the unused extras menu's items are in the same rows when that cheat is on. it used to be two
+//the unused extras menu's items are in the same rows when that option is on. it used to be two
 //writes to where the array was on the heap, which is somewhere else when mods add files
 //
 //the maps of multiplayer's Conflict are a page of the same kind (7D000045, rows 805830C8: six

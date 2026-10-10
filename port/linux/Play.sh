@@ -14,8 +14,8 @@
 #     ./Play.sh --no-level-timer       the hud without the level's time (it is on by default)
 #     ./Play.sh --auto-qte             quick time events press their own buttons
 #     ./Play.sh --auto-start           a loaded mission starts without "Continue" being pressed
-#     ./Play.sh --extras-menu          the cheat "Unused Extras Menu"
-#     ./Play.sh --unlock-all           the cheat "Unlock Everything": every mission and difficulty
+#     ./Play.sh --extras-menu          "Unused Extras Menu"
+#     ./Play.sh --unlock-all           "Unlock Everything": every mission and difficulty
 #     ./Play.sh --no-crash-dumps       no dump in crashes/ when the game dies or stalls (--crash-mem adds
 #                                      the game's memory to each dump, 88 MB)
 # Any option skips the window; what the launcher does not know goes to the game (--window 1920x1080...).

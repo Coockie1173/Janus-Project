@@ -71,8 +71,8 @@ Settings
 The window Play.sh opens has them: frame rate, field of view, mouse
 sensitivity and mode, online, fullscreen, a quicker start, crash dumps; the
 Controls tab rebinds every action (Set, then press a key or a mouse button);
-the Enhancements tab has Skip Intro Cutscenes and the Level Timer; the Cheats
-tab Always Enable Mouse, the Unused Extras Menu and any code in
+the Enhancements tab has Skip Intro Cutscenes, the Level Timer and the Unused
+Extras Menu; the Cheats tab Always Enable Mouse and any code in
 config/gecko/cheats.txt.
 
 From a command line, any option skips the window:

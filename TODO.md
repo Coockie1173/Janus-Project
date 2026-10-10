@@ -15,7 +15,7 @@ Importance:
 - [x] **high** Vents at high fps (Dam, Facility, Nightclub, Bunker, Archives, Outpost), most likely one cause:
       fixed where it was recorded (a vent's exit at 144)
 - [X] **high** Carrier ladders at high fps
-- [ ] **high** The camera is locked while aiming in
+- [x] **high** The camera is locked while aiming in
 - [x] **high** Doors break when the intro skip is used
 - [ ] **high** Tank: the cars are broken
 - [X] **high** Flickering issue
@@ -42,6 +42,10 @@ Things that only break above 60 fps.
 - [X] **high** Carrier ladders get progressively harder to climb, need sprinting from 75 or 90 fps
 - [X] **medium** Harder to walk onto slight vertical geometry changes (happens a lot in Outpost and Bunker)
 
+### Vehicles
+
+- [ ] **medium** Tank: cars still get stuck in the ground now and then at high fps
+
 ### Cutscenes
 
 - [x] **high** Nightclub: after the opening the camera stays locked (player state 0x22) at high fps:
@@ -51,9 +55,9 @@ Things that only break above 60 fps.
 
 - [x] **high** Animated textures break above 60 fps (fire, the Nightclub screens): they stood still from 64 fps on,
       now they play at the console's speed (measured on a Nightclub flipbook at 144, see docs/STATUS.md)
-- [ ] **low** Bond's dancing animation is too fast
+- [x] **low** Bond's dancing animation is too fast
 - [ ] **low** Camera shake in the Carrier ending is too fast
-- [ ] **low** Breaches seem faster at higher fps (needs checking)
+- [x] **low** Breaches seem faster at higher fps (needs checking)
 
 ### Quick time events
 
@@ -66,16 +70,17 @@ Things that only break above 60 fps.
 - [x] Final boss: the 3rd QTE (Trevelyan points a gun at you on the last platform) took no button, you
       died: button bashes work at any fps now (seen on Dam's, the boss not played again yet)
 - [x] Prompts show the keys to press (seen on Dam's button bash, single presses come the same way)
-- [ ] **medium** Auto Quick Time Events on single presses and sequences (not checked yet)
+- [x] **medium** Auto Quick Time Events on single presses and sequences (not checked yet)
 
 ## Graphics
 
 - [X] **high** Flickering issue
-- [ ] **medium** Bloom still looks incorrect
-- [ ] **medium** Facility: the colour filter / post processing "bubble" around the player doesn't cover
+- [x] **medium** Bloom still looks incorrect
+- [x] **medium** Facility: the colour filter / post processing "bubble" around the player doesn't cover
       the whole screen, worse at higher FOV
 - [ ] **medium** Black bars at the top and bottom in windowed mode
 - [ ] **medium** Dam: the opening scene isn't as foggy as it should be
+- [ ] **medium** Vertigo: the skybox is black in one corner of the map
 - [ ] **low** Halo around characters' hair (needs checking, may be the original game or the resolution)
 - [ ] **low** Dam: the sniper's lower body is visible below the window through the thermal scope (needs checking)
 - [ ] **low** Other missing or different effects compared to the console (go through the levels next to Dolphin)
@@ -108,10 +113,11 @@ do several things.
 - [x] Toggle ADS option (F1 > Control Settings)
 - [x] ADS sensitivity scale ("Aim Sensitivity", 0.5 by default)
 - [x] Option for how far ADS zooms ("Aim Field of View")
-- [ ] **high** The camera is locked while aiming in, until about half a second after the gun is up
+- [x] **high** The camera is locked while aiming in, until about half a second after the gun is up
       (not on the Airfield motorbike)
 - [ ] **medium** Airfield motorbike ignores Aim Field of View, zooms in too much
-- [ ] **medium** ACOG and reflex sights ignore Aim Field of View
+- [ ] **medium** Airfield: Toggle ADS doesn't work on the motorbike
+- [x] **medium** ACOG and reflex sights ignore Aim Field of View
 - [x] **low** Rename "Lock Aim" to "Toggle ADS"
 - [ ] **low** ADS snap off by default with mouse and keyboard
 - [ ] **low** Maybe show Aim Field of View as a fraction of the FOV (0.75 = 75%) like the sensitivity scale, it's an angle now
@@ -119,7 +125,7 @@ do several things.
 ## Cutscenes
 
 - [x] **high** Doors break when the intro skip is used
-- [ ] **medium** Cutscenes aren't sped through when entering from another level, in time trial mode, or from Continue Game
+- [x] **medium** Cutscenes aren't sped through when entering from another level, in time trial mode, or from Continue Game
 - [ ] **medium** Outpost: crouch and melee the guard in front of the log, the camera stays near the ground
       for the whole takedown and you only hear it (there's a VOD, a clip on request)
 
@@ -130,10 +136,35 @@ do several things.
 - [ ] **medium** Interactable things show a red cursor, NPC models don't
 - [ ] **low** Facility: a guard in the Atrium got stuck once
 - [ ] **low** Enemies seem a bit more likely to throw grenades (needs checking)
-- [ ] **high** ADS broken on online
+- [x] **high** ADS broken on online
+- [x] **low** "Cheats Active" shows when only the Extras menu is enabled, which isn't much of a cheat
 
 ## Performance
 
 - [ ] **medium** Choppy at times, not a steady 144; the Memorial sewers are the one place that is really
       smooth. A later message says the newest build feels much better (Airfield), so measure
       frame pacing again before chasing it
+
+## Feature requests
+
+- [ ] Options to remap the tank controls (shooting, aiming, locking on)
+- [ ] A menu option to load any map, the unused ones too
+- [ ] Options for anisotropic filtering and anti-aliasing, if possible
+- [ ] An option to halve screen shake or turn it off
+- [ ] An option to turn the HUD off
+- [ ] A speedrun timer for the whole game: resets to 0 when Dam starts, ends when input is lost at the
+      end of Cradle after killing Trevelyan, adds up the in-game times so loading screens don't count
+
+## Cheats
+
+- [ ] Turbo mode
+- [ ] Spawn any weapon
+- [ ] Infinite ammo
+- [ ] Grenades in single player
+- [ ] Infinite sprint
+- [ ] God mode
+- [ ] Enemy rockets
+- [ ] 007 mode (sliders for enemy health, damage, accuracy and reaction speed)
+- [ ] Invisible enemies
+- [ ] Invisible player (enemies never see you)
+- [ ] Fly mode (noclip that doesn't go through walls)

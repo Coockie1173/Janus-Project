@@ -27,7 +27,7 @@
 #     ./launch.sh --no-tutorials       the tutorial boxes in the missions aren't shown (the F1 menu's Enhancements)
 #     ./launch.sh --no-colour-filter   the tint some levels lay over the picture isn't drawn (the F1 menu's Enhancements)
 #     ./launch.sh --auto-start         a loaded mission starts without "Continue" being pressed (the F1 menu's Enhancements)
-#     ./launch.sh --extras-menu        the cheat "Unused Extras Menu" (also in the F1 menu's Cheats)
+#     ./launch.sh --extras-menu        "Unused Extras Menu" (the F1 menu's Enhancements)
 #     ./launch.sh --unlock-all         "Unlock Everything": every mission and difficulty (the F1 menu's Enhancements)
 #     ./launch.sh --stamina-meter      the cheat "Stamina Meter": the sprint that's left as a bar
 #     ./launch.sh --trace              log the mouse's player, its angles and the look state (for a report)
