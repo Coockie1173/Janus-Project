@@ -1,5 +1,5 @@
 //small options: the level timer, the unused extras menu, unlock everything (all three were
-//gecko codes), auto start and no tutorials
+//gecko codes), auto start, no tutorials and the online unlocks
 //
 //level timer (on by default): the hud only shows a clock in a time challenge, counting down
 //the code [Mars] patches four instructions of the hud's update to always show the level's time
@@ -23,7 +23,16 @@
 //paused until a button. nothing reads the answer or waits for the box, so with the option on
 //the hud is never asked: the box, its pause and the boxes chained after it don't happen
 //
+//online unlocks (on by default): a loadout's weapons, attachments and gadgets open at a level,
+//and so do three game modes
+//the menu asks ge_unlock_level for an item's level (a table of hash and level, 0x10 a row at
+//805D1908) and locks it above the profile's (+0x434). the answer is 0 here, so they are all
+//open, but for the Proximity Mine (level 53, as it was). Choose Game Mode locks License to
+//Kill, Team License to Kill and Classic Conflict under level 25, 30 and 35 by itself, their
+//rows' bytes are cleared after the menu's update
+//
 //GE_LEVEL_TIMER=0 no level timer
+//GE_ONLINE_UNLOCKS=0 the loadouts' items and the game modes open at their levels
 //GE_AUTO_START=1 a loaded mission starts by itself
 //GE_EXTRAS_MENU=1 the unused extras menu
 //GE_UNLOCK_ALL=1 every mission and difficulty unlocked
@@ -59,6 +68,11 @@ std::atomic<bool> g_extras_menu{false};
 std::atomic<bool> g_unlock_all{false};
 std::atomic<bool> g_auto_start{false};
 std::atomic<bool> g_no_tutorials{false};
+std::atomic<bool> g_online_unlocks{true};
+const uint32_t kProximityMine = 0x7D060005; //the gadget's hash (the loadout items' table at 80585C80)
+const uint32_t kMenuPage = 0x214, kMenuRowLocked = 0x548; //the menu's page, a byte a row: it is locked
+const uint32_t kGameModesPage = 0x7D000047; //Choose Game Mode
+const uint32_t kFirstLevelRow = 6, kLevelRows = 3; //the game modes that open at level 25, 30 and 35
 bool g_trace = false;
 const uint32_t kAppPtr = 0x806EB694, kLoadStep = 0x354; //the step the level's load is at
 const uint32_t kStepContinue = 0x1A; //waiting for a button under the mission's name
@@ -66,6 +80,8 @@ bool g_unlock_written = false; //the progress does
 PPCFunc orig_hud_update = nullptr;
 PPCFunc orig_pad_confirmed = nullptr;
 PPCFunc orig_show_tutorial = nullptr;
+PPCFunc orig_unlock_level = nullptr;
+PPCFunc orig_menu_locks = nullptr;
 
 uint32_t Load(const MenuWrite& w) { return w.size == 1 ? ld8(w.addr) : ld32(w.addr); }
 void Store(const MenuWrite& w, uint32_t v)
@@ -134,6 +150,26 @@ void ShowTutorial(PPCContext& c)
 	c.r[3] = 0;
 }
 
+//(the item's hash) -> the level before the one it opens at, 0 when it has none
+void UnlockLevel(PPCContext& c)
+{
+	if (g_online_unlocks && c.r[3] != kProximityMine)
+	{
+		c.r[3] = 0;
+		return;
+	}
+	orig_unlock_level(c);
+}
+
+//(menu): sets the locked rows of the page it is on
+void MenuLocks(PPCContext& c)
+{
+	uint32_t menu = c.r[3];
+	orig_menu_locks(c);
+	if (!g_online_unlocks || ld32(menu + kMenuPage) != kGameModesPage) return;
+	for (uint32_t row = kFirstLevelRow; row < kFirstLevelRow + kLevelRows; ++row) st8(menu + kMenuRowLocked + row, 0);
+}
+
 } //namespace
 
 bool level_timer() { return g_level_timer; }
@@ -146,6 +182,8 @@ bool auto_start() { return g_auto_start; }
 void set_auto_start(bool on) { g_auto_start = on; }
 bool no_tutorials() { return g_no_tutorials; }
 void set_no_tutorials(bool on) { g_no_tutorials = on; }
+bool online_unlocks() { return g_online_unlocks; }
+void set_online_unlocks(bool on) { g_online_unlocks = on; }
 
 void tweaks_apply()
 {
@@ -159,6 +197,7 @@ void install_tweaks()
 	if (const char* e = std::getenv("GE_UNLOCK_ALL")) g_unlock_all = std::atoi(e) != 0;
 	if (const char* e = std::getenv("GE_AUTO_START")) g_auto_start = std::atoi(e) != 0;
 	if (const char* e = std::getenv("GE_NO_TUTORIALS")) g_no_tutorials = std::atoi(e) != 0;
+	if (const char* e = std::getenv("GE_ONLINE_UNLOCKS")) g_online_unlocks = std::atoi(e) != 0;
 	g_trace = std::getenv("GE_TRACE") != nullptr;
 	orig_hud_update = ppc_hook("ge_hud_update", HudUpdate);
 	if (!orig_hud_update) rt_die("goldeneye: the hud's update is not hooked in this build");
@@ -166,6 +205,10 @@ void install_tweaks()
 	if (!orig_pad_confirmed) rt_die("goldeneye: the loading screen's button is not hooked in this build");
 	orig_show_tutorial = ppc_hook("ge_show_tutorial", ShowTutorial);
 	if (!orig_show_tutorial) rt_die("goldeneye: the tutorials are not hooked in this build");
+	orig_unlock_level = ppc_hook("ge_unlock_level", UnlockLevel);
+	if (!orig_unlock_level) rt_die("goldeneye: the unlock levels are not hooked in this build");
+	orig_menu_locks = ppc_hook("ge_menu_locks", MenuLocks);
+	if (!orig_menu_locks) rt_die("goldeneye: the menu's locks are not hooked in this build");
 }
 
 } //namespace ge

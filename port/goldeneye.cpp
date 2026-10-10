@@ -25,6 +25,7 @@
 //GE_AUTO_START=1 a loaded mission starts without its "Continue" being pressed
 //GE_SKIP_MOVIES=1 movies are skipped
 //GE_NO_TUTORIALS=1 no tutorial boxes
+//GE_ONLINE_UNLOCKS=0 the loadouts' items and the game modes open at their levels
 //GE_NO_COLOUR_FILTER=1 a level's colour filter over the picture isn't drawn
 //GE_AUTOSAVE=0 a checkpoint doesn't save the game
 //GE_EXTRAS_MENU=1 the menu's unused extras page

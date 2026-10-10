@@ -55,7 +55,7 @@ ACTIONS = [
     ("Move left", "Left Stick Left"), ("Move right", "Left Stick Right"),
 ]
 DEFAULTS = {"fps": "auto", "fov": "49", "mouse": "1.0", "online": "1", "fullscreen": "0", "faststart": "0", "mousemode": "auto",
-            "mouseinvert": "0", "adsfov": "22.5", "adssens": "0.5", "aimlock": "0", "mouseeverywhere": "0", "skipcutscenes": "0", "skipzukovsky": "0", "skipbriggs": "0", "skipmovies": "0", "notutorials": "0", "nocolourfilter": "0", "autosave": "1", "leveltimer": "1", "autoqte": "0", "autostart": "0", "extrasmenu": "0", "unlockall": "0", "staminameter": "0", "vsync": "0", "ping": "1",
+            "mouseinvert": "0", "adsfov": "22.5", "adssens": "0.5", "aimlock": "0", "mouseeverywhere": "0", "skipcutscenes": "0", "skipzukovsky": "0", "skipbriggs": "0", "skipmovies": "0", "notutorials": "0", "nocolourfilter": "0", "autosave": "1", "leveltimer": "1", "autoqte": "0", "autostart": "0", "extrasmenu": "0", "onlineunlocks": "1", "unlockall": "0", "staminameter": "0", "vsync": "0", "ping": "1",
             "crashdump": "1", "crashmem": "0"}
 
 #Tk's key names -> SDL's (the key file's)
@@ -419,6 +419,10 @@ def run_gui():
     ttk.Checkbutton(en, text="Unused Extras Menu", variable=extras_menu).grid(row=20, column=0, sticky="w", **pad)
     ttk.Label(en, text="Extras also lists Mission Select, Character Viewer, Movies and the Calibration Menu.",
               foreground="gray", wraplength=520, justify="left").grid(row=21, column=0, sticky="w", padx=(30, 8))
+    online_unlocks = tk.BooleanVar(value=settings["onlineunlocks"] == "1")
+    ttk.Checkbutton(en, text="Online Unlocks", variable=online_unlocks).grid(row=22, column=0, sticky="w", **pad)
+    ttk.Label(en, text="Online, every weapon, attachment, gadget and game mode is open at any level, but for the Proximity Mine.",
+              foreground="gray", wraplength=520, justify="left").grid(row=23, column=0, sticky="w", padx=(30, 8))
 
     #cheats
     #the tab just lists whatever is in config/gecko/cheats.txt, so adding a cheat is adding it to that file
@@ -471,6 +475,7 @@ def run_gui():
         settings["nocolourfilter"] = "1" if no_colour_filter.get() else "0"
         settings["extrasmenu"] = "1" if extras_menu.get() else "0"
         settings["unlockall"] = "1" if unlock_all.get() else "0"
+        settings["onlineunlocks"] = "1" if online_unlocks.get() else "0"
         settings["staminameter"] = "1" if stamina_meter.get() else "0"
         settings["mousemode"] = next((k for k, v in modes.items() if v == mousemode.get()), "auto")
         save_settings(settings)
@@ -645,7 +650,7 @@ def run_game(args):
                      ("GE_MOUSE_INVERT", "mouseinvert"), ("GE_ADS_FOV", "adsfov"),
                      ("GE_ADS_SENS", "adssens"), ("GE_AIM_LOCK", "aimlock"), ("GE_MOUSE_EVERYWHERE", "mouseeverywhere"),
                      ("GE_SKIP_CUTSCENES", "skipcutscenes"), ("GE_SKIP_ZUKOVSKY", "skipzukovsky"), ("GE_SKIP_BRIGGS", "skipbriggs"), ("GE_LEVEL_TIMER", "leveltimer"), ("GE_AUTO_QTE", "autoqte"), ("GE_AUTO_START", "autostart"), ("GE_SKIP_MOVIES", "skipmovies"), ("GE_NO_TUTORIALS", "notutorials"), ("GE_NO_COLOUR_FILTER", "nocolourfilter"), ("GE_AUTOSAVE", "autosave"),
-                     ("GE_EXTRAS_MENU", "extrasmenu"), ("GE_UNLOCK_ALL", "unlockall"), ("GE_STAMINA", "staminameter"),
+                     ("GE_EXTRAS_MENU", "extrasmenu"), ("GE_UNLOCK_ALL", "unlockall"), ("GE_ONLINE_UNLOCKS", "onlineunlocks"), ("GE_STAMINA", "staminameter"),
                      ("GE_VSYNC", "vsync"), ("GE_PING", "ping")):
         env.setdefault(var, s[key])
     if s["online"] == "0":

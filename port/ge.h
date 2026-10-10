@@ -13,7 +13,7 @@
 //heap.cpp a free of something that isn't a block is logged and left out
 //sweep.cpp a moving shape's sweep is kept to a number of steps that ends
 //zones.cpp keeps the level behind a portal drawn while the camera is right at it, and logs the portal walk
-//tweaks.cpp the level timer, the unused extras menu, auto start, no tutorials
+//tweaks.cpp the level timer, the unused extras menu, auto start, no tutorials, online unlocks
 //tank.cpp the tank: the mouse on its aim, its buttons, driving at higher frame rates
 //noclip.cpp fly through the level
 //stamina.cpp the sprint that's left as a bar
@@ -190,6 +190,8 @@ bool auto_start(); //a loaded mission starts without its "Continue" being presse
 void set_auto_start(bool on);
 bool no_tutorials(); //the tutorial boxes aren't shown
 void set_no_tutorials(bool on);
+bool online_unlocks(); //a loadout's items and the game modes are open at any level, but for the Proximity Mine
+void set_online_unlocks(bool on);
 void install_autosave(); //autosave.cpp
 void autosave_frame(PPCContext& c); //once a frame, on the game's thread
 bool autosave(); //a checkpoint saves the game

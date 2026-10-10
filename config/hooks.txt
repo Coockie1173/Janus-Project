@@ -42,6 +42,8 @@ ge_hud_update          # the hud's update: the level timer is shown outside time
 ge_pad_confirmed       # a pad pressed select: the loading screen's "Continue" presses itself (auto start)
 ge_movie_start         # a movie is opened: one that plays once is over at once instead (skip movies)
 ge_show_tutorial       # a tutorial box is asked for: it isn't shown (no tutorials)
+ge_unlock_level        # the level a loadout's item opens at: none, but for the Proximity Mine (online unlocks)
+ge_menu_locks          # a menu page's locked rows: the game modes that open at a level aren't (online unlocks)
 ge_file_read_done      # a file read's piece is over: asked and counted with interrupts off, so it is counted once
 ge_file_read_start     # a piece is started: the busy byte is set with interrupts off, so the read's interrupt can't be overwritten
 ge_weapon_input        # the weapon buttons, once a frame: a slot's key presses "next weapon" for that call

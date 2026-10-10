@@ -407,6 +407,8 @@ Hooked (replaced, the original called from inside) unless marked *called* (throu
 | `8018CD40` | `ge_hud_update` | (hud) | tweaks |
 | `8023D200` | `ge_pad_confirmed` | (front end, pad) -> the pad pressed select | tweaks |
 | `8019A080` | `ge_show_tutorial` | (hud, tutorial's hash) -> shown | tweaks |
+| `800C2E00` | `ge_unlock_level` | (item's hash) -> the level before the one it opens at | tweaks |
+| `80231320` | `ge_menu_locks` | (menu): sets the locked rows of its page | tweaks |
 | `802AD300` | `ge_movie_start` | (widget, path, x, y, width, height, audio track, loops) | movies |
 | `8037F0F0` | `ge_file_read_start` | (file system, request, size) | files |
 | `8037E610` | `ge_file_read_done` | (file system) | files |
@@ -659,6 +661,7 @@ Nothing is hooked when `GE_PORTAL_NEAR=0` and there is no log.
 | Unlock everything | `Keep` holds the five progress words (2.10) at -1 |
 | Auto start | `PadConfirmed`: answers yes while the load's step is `0x1A` |
 | No tutorials | `ShowTutorial`: answers 0 without asking the hud |
+| Online unlocks | `UnlockLevel`: answers 0 for every item's hash but the Proximity Mine's (`7D060005`); `MenuLocks`: on Choose Game Mode (`7D000047`) the bytes of rows 6 to 8 at menu `+0x548` are cleared after the game's own update |
 
 `Keep(writes, on, written)` remembers what the game had and puts it back when the option is
 turned off. `tweaks_apply()` runs both once a frame.
@@ -835,7 +838,7 @@ Everything the pages change is one list of `Setting` (`hotkeys.h`: id, label, hi
 |---|---|
 | Screen | `fov`, `ads_fov`, `fps` (stops 30 to 275), `vsync`, `show_ping` |
 | Controls | `mouse_sens`, `ads_sens`, `aim_lock`, `mouse_invert`, `mouse_mode`, `input`, `face_buttons`, `dead_zone` |
-| Enhancements | `skip_cutscenes`, `skip_movies`, `level_timer`, `auto_qte`, `auto_start`, `autosave`, `no_tutorials`, `no_colour_filter`, `unlock_all`, `extras_menu` |
+| Enhancements | `skip_cutscenes`, `skip_movies`, `level_timer`, `auto_qte`, `auto_start`, `autosave`, `no_tutorials`, `no_colour_filter`, `unlock_all`, `online_unlocks`, `extras_menu` |
 | Cheats | `mouse_everywhere`, `noclip`, `stamina_meter`, `collision_view` |
 
 Key bindings (`kActions`): Fire ZR, Aim ZL, Melee L, Throw Grenade R, Reload Y, Crouch A,
@@ -928,7 +931,7 @@ Options (the launcher sets these from its settings):
 | `GE_MOUSE=S` | mouse sensitivity, 0 leaves the mouse free |
 | `GE_MOUSE_MODE=auto\|direct\|stick` | how the mouse turns the view |
 | `GE_MOUSE_INVERT=1`, `GE_ADS_SENS=S`, `GE_AIM_LOCK=1` | |
-| `GE_SKIP_CUTSCENES=1`, `GE_SKIP_MOVIES=1`, `GE_AUTO_QTE=1`, `GE_AUTO_START=1`, `GE_NO_TUTORIALS=1`, `GE_NO_COLOUR_FILTER=1`, `GE_UNLOCK_ALL=1`, `GE_EXTRAS_MENU=1` | enhancements |
+| `GE_SKIP_CUTSCENES=1`, `GE_SKIP_MOVIES=1`, `GE_AUTO_QTE=1`, `GE_AUTO_START=1`, `GE_NO_TUTORIALS=1`, `GE_NO_COLOUR_FILTER=1`, `GE_UNLOCK_ALL=1`, `GE_ONLINE_UNLOCKS=0`, `GE_EXTRAS_MENU=1` | enhancements |
 | `GE_LEVEL_TIMER=0`, `GE_AUTOSAVE=0` | on by default |
 | `GE_MOUSE_EVERYWHERE=1`, `GE_NOCLIP=1`, `GE_STAMINA=1`, `GE_COLLISION=1` | cheats |
 | `GE_HOSTS=F`, `GE_NETLOG=1` | the hosts file, the network log |
