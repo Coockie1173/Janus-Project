@@ -56,6 +56,9 @@
 //levels by their file's name (but for two that don't load, kBrokenLevels); Multiplayer Maps the mpt_ files, a map once for each gamemode
 //it was made for ("Frigate - Conflict"). a row loads its level as a mission is loaded
 //
+//the same two lists are grids in the settings menu (F1 > Level Select, F1 > Multiplayer Maps,
+//port/settings.cpp), which is where 150 levels are easier to pick from
+//
 //GE_MODS_PAGE=7D000045 Extras > Mods opens that page instead (to look at a page without going
 //through the menus that lead to it)
 #include "ge.h"
@@ -117,7 +120,7 @@ const uint32_t kLevelFiles = 0x01810000; //mt_, the others of the disc's levels 
 const uint32_t kBrokenLevels[] = { 0x018100ED, 0x01810123 };
 //the end of a multiplayer level's name says which gamemode it is for
 struct MapKind { const char* ending; const char* mode; };
-const MapKind kMapKinds[] = {{"fdm", "Conflict"}, {"tdm", "Team Conflict"}, {"gdm", "Golden Gun"}, {"bbh", "Black Box"},
+const MapKind kMapKinds[kMapModeCount] = {{"fdm", "Conflict"}, {"tdm", "Team Conflict"}, {"gdm", "Golden Gun"}, {"bbh", "Black Box"},
 	{"gec", "GoldenEye"}, {"htd", "Heroes"}, {"lfd", "License to Kill"}, {"ltd", "Team License to Kill"}};
 //an online gamemode: its page of maps, its item in Choose Game Mode by the text. in the order of kModeFolders
 struct Mode { uint32_t page, text; };
@@ -246,22 +249,30 @@ void ListLevels()
 	}
 }
 
-//a multiplayer level's name in the list: mpt_frigate_fdm.edb is "Frigate - Conflict"
-std::string ShownMap(const std::string& file)
+//a multiplayer level's map and gamemode: mpt_frigate_fdm.edb is "Frigate" and Conflict's number
+std::string MapOf(const std::string& file, int& mode)
 {
 	std::string name = file;
 	if (name.size() > 4 && name.compare(name.size() - 4, 4, ".edb") == 0) name.resize(name.size() - 4);
 	if (name.compare(0, 4, "mpt_") == 0) name.erase(0, 4);
-	std::string mode;
+	mode = -1;
 	const size_t last = name.find_last_of('_');
-	for (const MapKind& kind : kMapKinds)
+	for (int i = 0; i < kMapModeCount; ++i)
 	{
-		if (last != std::string::npos && name.compare(last + 1, std::string::npos, kind.ending) == 0) mode = kind.mode;
+		if (last != std::string::npos && name.compare(last + 1, std::string::npos, kMapKinds[i].ending) == 0) mode = i;
 	}
-	if (!mode.empty()) name.resize(last);
+	if (mode >= 0) name.resize(last);
 	std::replace(name.begin(), name.end(), '_', ' ');
 	if (!name.empty()) name[0] = (char)std::toupper((unsigned char)name[0]);
-	return mode.empty() ? name : name + " - " + mode;
+	return name;
+}
+
+//its name in the game's list: "Frigate - Conflict"
+std::string ShownMap(const std::string& file)
+{
+	int mode = -1;
+	const std::string name = MapOf(file, mode);
+	return mode < 0 ? name : name + " - " + kMapKinds[mode].mode;
 }
 
 //the disc's levels in the two lists, each by name
@@ -603,6 +614,9 @@ void FindQuery(PPCContext& c)
 } //namespace
 
 std::string mod_shown_name(const std::string& file) { return Shown(file); }
+std::string map_shown_name(const std::string& file, int& mode) { return MapOf(file, mode); }
+const char* map_mode_name(int mode) { return kMapKinds[mode].mode; }
+bool level_loads(uint32_t hash) { return std::find(std::begin(kBrokenLevels), std::end(kBrokenLevels), hash) == std::end(kBrokenLevels); }
 bool modded_lobby() { return Modded(); }
 
 uint32_t mods_menu_text(uint32_t hash)

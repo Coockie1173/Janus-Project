@@ -157,6 +157,11 @@ bool no_colour_filter(); //a level's colour filter (a mesh on the eye) isn't dra
 void set_no_colour_filter(bool on);
 void install_native(); //native.cpp
 void install_cutscenes(); //cutscenes.cpp
+void load_level(uint32_t hash); //the game's menu loads that level at its next update, from a menu or from play
+bool level_loads(uint32_t hash); //modmenu.cpp: not one of the disc's levels that end the game as they load
+std::string map_shown_name(const std::string& file, int& mode); //a multiplayer level's map ("Airfield") and which gamemode it is for, -1 for none
+const char* map_mode_name(int mode);
+const int kMapModeCount = 8;
 bool skip_cutscenes(); //a mission's opening cutscene is skipped
 void set_skip_cutscenes(bool on);
 bool skip_zukovsky(); //Nightclub's meeting with Zukovsky is skipped (config/cutscenes.txt)

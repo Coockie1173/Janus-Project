@@ -202,7 +202,7 @@ struct Row {
 };
 struct Page { std::string title; std::vector<Row> rows; };
 
-enum { kRoot, kScreen, kControls, kBindings, kEnhancements, kCheats, kHotkeys, kHotkeyEdit, kPageCount };
+enum { kRoot, kScreen, kControls, kBindings, kEnhancements, kCheats, kHotkeys, kHotkeyEdit, kLevels, kMaps, kPageCount };
 std::vector<Page> g_pages;
 int g_page = kRoot, g_row = 0, g_scroll = 0;
 int g_root_row = 0; //where the cursor was on the first page
@@ -439,10 +439,127 @@ Row SettingRow(int i)
 	return r;
 }
 
+//the two level grids: every level the disc has. Level Select is the missions and the test
+//levels by name, four to a row; Multiplayer Maps a row a map and a column a gamemode, a cell
+//where the disc has that map's level for the gamemode. Enter or a click loads the level
+struct Grid
+{
+	std::vector<std::string> columns, rowNames; //the headings, none for a grid of names
+	int cols{ 1 };
+	std::vector<uint32_t> hash; //a row after the other, 0 where there's no level
+	std::vector<std::string> label, about; //what a cell shows, and what the foot says for it
+	int Rows() const { return (int)hash.size() / cols; }
+};
+Grid g_grids[2];
+int g_gridAt = 0, g_gridScroll = 0; //the cell under the cursor, the first row shown
+const int kGridVisible = 9, kLevelColumns = 4;
+const float kGridLeft = 150, kGridRight = 1130, kGridTop = 190, kGridPitch = 38, kGridNames = 190;
+const uint32_t kMissionFiles = 0x0181; //the top of an mt_ level's hash
+
+bool OnGrid() { return g_page == kLevels || g_page == kMaps; }
+Grid& CurrentGrid() { return g_grids[g_page == kMaps ? 1 : 0]; }
+
+//made when a grid is first opened: the disc's list is read as the game starts
+void BuildGrids()
+{
+	if (!g_grids[0].hash.empty() || !g_grids[1].hash.empty()) return;
+	std::vector<std::pair<std::string, uint32_t>> levels;
+	std::vector<std::pair<std::string, std::vector<uint32_t>>> maps;
+	for (const ModLevel& level : disc_levels())
+	{
+		if (!level_loads(level.hash)) continue;
+		if (level.hash >> 16 == kMissionFiles)
+		{
+			levels.push_back({ mod_shown_name(level.name), level.hash });
+			continue;
+		}
+		int mode = -1;
+		const std::string map = map_shown_name(level.name, mode);
+		if (mode < 0) continue;
+		auto row = std::find_if(maps.begin(), maps.end(), [&map](const auto& m) { return m.first == map; });
+		if (row == maps.end()) row = maps.insert(maps.end(), { map, std::vector<uint32_t>(kMapModeCount, 0) });
+		row->second[mode] = level.hash;
+	}
+	std::sort(levels.begin(), levels.end());
+	std::sort(maps.begin(), maps.end());
+
+	Grid& names = g_grids[0];
+	names.cols = kLevelColumns;
+	for (const auto& [name, hash] : levels)
+	{
+		names.hash.push_back(hash);
+		names.label.push_back(name);
+		names.about.push_back(name);
+	}
+	while (names.hash.size() % kLevelColumns)
+	{
+		names.hash.push_back(0);
+		names.label.emplace_back();
+		names.about.emplace_back();
+	}
+
+	Grid& table = g_grids[1];
+	table.cols = kMapModeCount;
+	for (int mode = 0; mode < kMapModeCount; ++mode) table.columns.push_back(map_mode_name(mode));
+	for (const auto& [map, hashes] : maps)
+	{
+		table.rowNames.push_back(map);
+		for (int mode = 0; mode < kMapModeCount; ++mode)
+		{
+			table.hash.push_back(hashes[mode]);
+			table.label.push_back(hashes[mode] ? "Play" : "");
+			table.about.push_back(map + " - " + map_mode_name(mode));
+		}
+	}
+}
+
+void OpenGrid()
+{
+	BuildGrids();
+	const Grid& grid = CurrentGrid();
+	g_gridAt = g_gridScroll = 0;
+	while (g_gridAt + 1 < (int)grid.hash.size() && !grid.hash[g_gridAt]) ++g_gridAt;
+}
+
+//to the next cell with a level that way, the cursor stays when there's none
+void GridMove(int dx, int dy)
+{
+	const Grid& grid = CurrentGrid();
+	int at = g_gridAt;
+	for (;;)
+	{
+		int row = at / grid.cols + dy, col = at % grid.cols + dx;
+		if (row < 0 || row >= grid.Rows() || col < 0 || col >= grid.cols) return;
+		at = row * grid.cols + col;
+		if (grid.hash[at]) break;
+	}
+	g_gridAt = at;
+}
+
+void open(bool on);
+
+void GridLoad()
+{
+	const Grid& grid = CurrentGrid();
+	if (g_gridAt >= (int)grid.hash.size() || !grid.hash[g_gridAt]) return;
+	if (guest_ptr(ld32(kPlayerPtr))) //the menu's load ends the game when a level is running already
+	{
+		g_toast = "Quit to the main menu first, a level loads from there";
+		g_toastUntil = Clock::now() + std::chrono::milliseconds(2500);
+		open(false);
+		return;
+	}
+	load_level(grid.hash[g_gridAt]);
+	g_toast = "Loading " + grid.about[g_gridAt];
+	g_toastUntil = Clock::now() + std::chrono::milliseconds(1800);
+	open(false);
+}
+
 void go(int page, int row = 0) {
     if (g_page == kRoot) g_root_row = g_row;
     g_page = page;
     g_row = row;
+    if (OnGrid()) OpenGrid();
     g_scroll = 0;
     g_listening = g_dragging = g_drop = -1;
 }
@@ -615,6 +732,17 @@ void build_pages() {
     root.rows.push_back({"Hotkeys", "Keys that change a setting while you play.", {}, {}, [] { go(kHotkeys); }});
     root.rows.push_back({"Enhancements", "Things the port adds to the game.", {}, {}, [] { go(kEnhancements); }});
     root.rows.push_back({"Cheats", "Things the game itself would not let you do.", {}, {}, [] { go(kCheats); }});
+    root.rows.push_back({"Level Select", "Load any level of the disc, the unused ones too.", {}, {}, [] { go(kLevels); }});
+    root.rows.push_back({"Multiplayer Maps", "Load any multiplayer map of the disc to walk around in, the unused ones too.", {}, {}, [] { go(kMaps); }});
+    //a grid's one row is what the foot reads: the cell under the cursor (settings_draw)
+    for (int page : {kLevels, kMaps}) {
+        Row cell;
+        cell.select = [] { GridLoad(); };
+        cell.does = "Load";
+        g_pages[page].rows.push_back(cell);
+    }
+    g_pages[kLevels].title = "Level Select";
+    g_pages[kMaps].title = "Multiplayer Maps";
 
     BuildSettings();
     for (size_t i = 0; i < g_settings.size(); ++i) g_pages[g_settings[i].page].rows.push_back(SettingRow((int)i));
@@ -1005,6 +1133,78 @@ void DrawDrop(ImDrawList* dl, const Layout& L)
 	if (g_dropScroll + shown < n) dl->AddTriangleFilled(ImVec2(ax, bottom + a + 3 * u), ImVec2(ax - a, bottom + 3 * u), ImVec2(ax + a, bottom + 3 * u), kCream);
 }
 
+//where a grid's cells start after its row names, and how wide one is
+void GridColumns(const Layout& L, const Grid& grid, float& x0, float& width)
+{
+	x0 = L.x(kGridLeft + (grid.rowNames.empty() ? 0.0f : kGridNames));
+	width = (L.x(kGridRight) - x0) / (float)grid.cols;
+}
+
+void DrawGrid(ImDrawList* dl, const Layout& L)
+{
+	const Grid& grid = CurrentGrid();
+	float u = L.u, x0, cw;
+	GridColumns(L, grid, x0, cw);
+	int rows = grid.Rows(), at = g_gridAt / grid.cols;
+	g_gridScroll = std::clamp(g_gridScroll, std::max(0, at - kGridVisible + 1), at);
+	g_gridScroll = std::clamp(g_gridScroll, 0, std::max(0, rows - kGridVisible));
+	for (int col = 0; col < (int)grid.columns.size(); ++col)
+	{
+		float size = fit(grid.columns[col], 21 * u, cw - 8 * u);
+		text(dl, ImVec2(x0 + cw * ((float)col + 0.5f) - text_width(grid.columns[col], size) / 2, L.y(kGridTop - 30) + (21 * u - size) * 0.55f), size, kCream, grid.columns[col]);
+	}
+	for (int row = g_gridScroll; row < rows && row < g_gridScroll + kGridVisible; ++row)
+	{
+		float y0 = L.y(kGridTop + kGridPitch * (float)(row - g_gridScroll)), y1 = y0 + (kGridPitch - 4) * u;
+		if (!grid.rowNames.empty())
+		{
+			float size = fit(grid.rowNames[row], 27 * u, (kGridNames - 12) * u);
+			text(dl, ImVec2(L.x(kGridLeft), y0 + 3 * u + (27 * u - size) * 0.55f), size, row == at ? kSelected : kCream, grid.rowNames[row]);
+		}
+		for (int col = 0; col < grid.cols; ++col)
+		{
+			int i = row * grid.cols + col;
+			ImVec2 a(x0 + cw * (float)col + 2 * u, y0), b(x0 + cw * (float)(col + 1) - 2 * u, y1);
+			if (!grid.hash[i])
+			{
+				dl->AddRectFilled(a, b, fade(kBar, 0.25f));
+				continue;
+			}
+			bool sel = i == g_gridAt;
+			dl->AddRectFilled(a, b, sel ? kSelected : kBar);
+			float size = fit(grid.label[i], 26 * u, cw - 18 * u);
+			text(dl, ImVec2((a.x + b.x - text_width(grid.label[i], size)) / 2, y0 + 3 * u + (26 * u - size) * 0.55f), size, sel ? kSelectedText : kCream, grid.label[i], !sel);
+		}
+	}
+	//more above, more below
+	float mx = (L.x(kGridLeft) + L.x(kGridRight)) / 2, a = 9 * u;
+	if (g_gridScroll > 0)
+	{
+		float y = L.y(kGridTop - 36);
+		dl->AddTriangleFilled(ImVec2(mx, y - a), ImVec2(mx - a, y), ImVec2(mx + a, y), kCream);
+	}
+	if (g_gridScroll + kGridVisible < rows)
+	{
+		float y = L.y(kGridTop + kGridPitch * kGridVisible + 2);
+		dl->AddTriangleFilled(ImVec2(mx, y + a), ImVec2(mx - a, y), ImVec2(mx + a, y), kCream);
+	}
+}
+
+//the grid's cell with a level under a point of the window, -1 for none
+int GridAt(float x, float y)
+{
+	const Layout& L = g_layout;
+	const Grid& grid = CurrentGrid();
+	if (L.u <= 0 || grid.hash.empty()) return -1;
+	float x0, cw;
+	GridColumns(L, grid, x0, cw);
+	float r = (y - L.y(kGridTop)) / (kGridPitch * L.u), c = (x - x0) / cw;
+	int row = (int)std::floor(r), col = (int)std::floor(c);
+	if (r < 0 || row >= kGridVisible || c < 0 || col >= grid.cols) return -1;
+	int i = (row + g_gridScroll) * grid.cols + col;
+	return i < (int)grid.hash.size() && grid.hash[i] ? i : -1;
+}
+
 //the one in the list under a point of the window, -1 for none
 int DropAt(float x, float y)
 {
@@ -1139,6 +1339,24 @@ void key_down(const SDL_KeyboardEvent& k) {
         }
         return;
     }
+    if (OnGrid()) {
+        switch (k.scancode) {
+            case SDL_SCANCODE_UP: case SDL_SCANCODE_W: GridMove(0, -1); break;
+            case SDL_SCANCODE_DOWN: case SDL_SCANCODE_S: GridMove(0, 1); break;
+            case SDL_SCANCODE_LEFT: case SDL_SCANCODE_A: GridMove(-1, 0); break;
+            case SDL_SCANCODE_RIGHT: case SDL_SCANCODE_D: GridMove(1, 0); break;
+            case SDL_SCANCODE_PAGEUP: for (int i = 0; i < kGridVisible; ++i) GridMove(0, -1); break;
+            case SDL_SCANCODE_PAGEDOWN: for (int i = 0; i < kGridVisible; ++i) GridMove(0, 1); break;
+            case SDL_SCANCODE_RETURN: case SDL_SCANCODE_KP_ENTER: case SDL_SCANCODE_SPACE:
+                if (!k.repeat) GridLoad();
+                break;
+            case SDL_SCANCODE_ESCAPE: case SDL_SCANCODE_BACKSPACE:
+                if (!k.repeat) back();
+                break;
+            default: break;
+        }
+        return;
+    }
     switch (k.scancode) {
         case SDL_SCANCODE_UP: case SDL_SCANCODE_W: move(-1); break;
         case SDL_SCANCODE_DOWN: case SDL_SCANCODE_S: move(1); break;
@@ -1169,6 +1387,19 @@ void pad_down(int button) {
             case SDL_GAMEPAD_BUTTON_DPAD_UP: MoveDrop(-1, true); break;
             case SDL_GAMEPAD_BUTTON_DPAD_DOWN: MoveDrop(1, true); break;
             case SDL_GAMEPAD_BUTTON_SOUTH: ChooseDrop(); break;
+            case SDL_GAMEPAD_BUTTON_EAST: back(); break;
+            case SDL_GAMEPAD_BUTTON_START: open(false); break;
+            default: break;
+        }
+        return;
+    }
+    if (OnGrid()) {
+        switch (button) {
+            case SDL_GAMEPAD_BUTTON_DPAD_UP: GridMove(0, -1); break;
+            case SDL_GAMEPAD_BUTTON_DPAD_DOWN: GridMove(0, 1); break;
+            case SDL_GAMEPAD_BUTTON_DPAD_LEFT: GridMove(-1, 0); break;
+            case SDL_GAMEPAD_BUTTON_DPAD_RIGHT: GridMove(1, 0); break;
+            case SDL_GAMEPAD_BUTTON_SOUTH: GridLoad(); break;
             case SDL_GAMEPAD_BUTTON_EAST: back(); break;
             case SDL_GAMEPAD_BUTTON_START: open(false); break;
             default: break;
@@ -1245,6 +1476,7 @@ void settings_init() {
     if (const char* e = std::getenv("GE_SETTINGS")) {
         open(true);
         g_page = std::clamp(std::atoi(e), 0, (int)g_pages.size() - 1);
+        if (OnGrid()) OpenGrid();
     }
 }
 
@@ -1285,13 +1517,23 @@ bool menu_event(const SDL_Event* e) {
             return true;
         case SDL_EVENT_MOUSE_MOTION:
             if (!(e->motion.state & SDL_BUTTON_LMASK)) g_dragging = -1; //let go where the window didn't see it
+            if (OnGrid()) {
+                if (int i = GridAt(e->motion.x, e->motion.y); i >= 0) g_gridAt = i;
+                return true;
+            }
             if (g_drop >= 0) {
                 if (int i = DropAt(e->motion.x, e->motion.y); i >= 0) g_dropAt = i;
             } else if (g_dragging >= 0) drag(e->motion.x);
             else if (int i = row_at(e->motion.x, e->motion.y); i >= 0 && g_listening < 0) g_row = i;
             return true;
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
-            if (g_drop >= 0) { //a click outside the list shuts it
+            if (OnGrid()) {
+                if (e->button.button == SDL_BUTTON_RIGHT) back();
+                else if (int i = GridAt(e->button.x, e->button.y); i >= 0 && e->button.button == SDL_BUTTON_LEFT) {
+                    g_gridAt = i;
+                    GridLoad();
+                }
+            } else if (g_drop >= 0) { //a click outside the list shuts it
                 if (int i = DropAt(e->button.x, e->button.y); i >= 0 && e->button.button == SDL_BUTTON_LEFT) {
                     g_dropAt = i;
                     ChooseDrop();
@@ -1305,7 +1547,9 @@ bool menu_event(const SDL_Event* e) {
             g_dragging = -1;
             return true;
         case SDL_EVENT_MOUSE_WHEEL:
-            if (g_drop >= 0) {
+            if (OnGrid()) {
+                if (e->wheel.y != 0) GridMove(0, e->wheel.y > 0 ? -1 : 1);
+            } else if (g_drop >= 0) {
                 if (e->wheel.y != 0) MoveDrop(e->wheel.y > 0 ? -1 : 1, false);
             } else if (g_listening < 0 && e->wheel.y != 0) {
                 int n = (int)g_pages[g_page].rows.size();
@@ -1346,9 +1590,15 @@ void settings_draw() {
     if (g_open) {
         if (g_keys.lines.empty()) load_keys(); //opened before the window had read the key file
         RefreshHotkeyPages();
+        if (OnGrid()) { //the foot says which level the cursor is on
+            const Grid& grid = CurrentGrid();
+            g_pages[g_page].rows[0].hint = !(g_gridAt < (int)grid.about.size() && grid.hash[g_gridAt]) ? "The disc's levels couldn't be listed."
+                : guest_ptr(ld32(kPlayerPtr)) ? grid.about[g_gridAt] + ". Levels load from the main menu: quit this one first." : "Load " + grid.about[g_gridAt] + ".";
+        }
         const Page& page = g_pages[g_page];
         draw_frame(dl, L, page);
-        draw_rows(dl, L, page);
+        if (OnGrid()) DrawGrid(dl, L);
+        else draw_rows(dl, L, page);
         if (g_drop >= 0) DrawDrop(dl, L);
     } else DrawToast(dl, L);
     dl->PopTextureID();

@@ -87,6 +87,7 @@ PPCFunc orig_frame_draw = nullptr;
 bool g_restarting = false; //the menu's restart action is running, or its Continue Game: both go straight to StartLevelChange
 bool g_trace = false, g_tracecut = false;
 int g_forced_entrance = -1; //GE_ENTRANCE
+std::atomic<uint32_t> g_asked_level{0}; //load_level
 uint32_t g_forced_level = 0; //GE_LEVEL, a level's hash: whichever mission the menu starts, this one loads
 Skip g_state = Skip::Idle;
 uint32_t g_frames = 0; //frames in this state
@@ -275,6 +276,27 @@ void Run()
 	if (!g_gx_skip_frames) g_drawn = 0;
 }
 
+//the menu's update (the function the symbols call WIFI_FUN_80234a60, the menu in r3) calls
+//ge_menu_pending while the byte at +0x7E8 is set. a level asked for in the settings menu's grid
+//is put there as the game's own menus put one: the level, the entrance, action 5 and the two bytes
+const uint32_t kPendingSet = 0x7E8;
+PPCFunc orig_menu_update = nullptr;
+void MenuUpdate(PPCContext& c)
+{
+	uint32_t menu = c.r[3];
+	if (uint32_t asked = guest_ptr(menu) ? g_asked_level.exchange(0) : 0)
+	{
+		rt_log("goldeneye: level %08X asked for in the settings menu", asked);
+		st32(menu + kPendingLevel, asked);
+		st32(menu + kPendingEntrance, kMissionStart);
+		st32(menu + kPendingAction, kActionLoadLevel);
+		st8(menu + kPendingSplit, 0);
+		st8(menu + kPendingReady, 3);
+		st8(menu + kPendingSet, 1);
+	}
+	orig_menu_update(c);
+}
+
 void MenuPending(PPCContext& c)
 {
 	uint32_t menu = c.r[3];
@@ -423,6 +445,8 @@ void PlayerRelease(PPCContext& c)
 	orig_player_release(c);
 }
 
+void load_level(uint32_t hash) { g_asked_level = hash; }
+
 void install_cutscenes()
 {
 	if (const char* e = std::getenv("GE_SKIP_CUTSCENES")) g_skip_cutscenes = std::atoi(e) != 0;
@@ -433,6 +457,8 @@ void install_cutscenes()
 	g_trace = std::getenv("GE_TRACE") != nullptr;
 	LoadOpenings(std::string(GE_ROOT) + "/config/openings.txt");
 	orig_menu_pending = ppc_hook("ge_menu_pending", MenuPending);
+	orig_menu_update = ppc_hook("WIFI_FUN_80234a60", MenuUpdate);
+	if (!orig_menu_update) rt_log("goldeneye: the menu's update is not hooked in this build, the settings menu's level grids load nothing");
 	orig_level_change = ppc_hook("StartLevelChange", LevelChange);
 	orig_frame_draw = ppc_hook("ge_frame_draw", FrameDraw);
 	g_tracecut = std::getenv("GE_TRACECUT") != nullptr;

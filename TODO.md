@@ -152,8 +152,8 @@ do several things.
 
 - [x] Options to remap the tank controls: F1 > Control Settings has the machine gun, the cannon and the
       lock on, each on the button of an action on foot (pressed by script, not played by hand)
-- [x] A menu option to load any map, the unused ones too: Extras > Level Select and Extras > Multiplayer Maps
-      (not every unused level loads, see docs/STATUS.md)
+- [x] A menu option to load any map, the unused ones too: F1 > Level Select and F1 > Multiplayer Maps are
+      grids (from the main menu only), Extras has the same as lists (two test levels don't load, see docs/STATUS.md)
 - [x] Options for anisotropic filtering and anti-aliasing: F1 > Screen Settings, up to 16x and 8x MSAA
 - [x] An option to halve screen shake or turn it off: F1 > Screen Settings > Screen Shake, a slider from off to 5x (measured on the
       sway, explosions not seen)
