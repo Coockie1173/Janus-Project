@@ -324,10 +324,9 @@ bool ReadCast(const PPCContext& c, const ModLevel& level, uint32_t cast[4], std:
 	return any;
 }
 
-void LevelSet(PPCContext& c)
+//a mod level in a multiplayer game gets a level row to stand in, with its own cast and names
+void StandIn(PPCContext& c, uint32_t levels, uint32_t hash)
 {
-	const uint32_t levels = c.r[3], hash = c.r[4];
-	orig_level_set(c);
 	g_kind_level = 0;
 	g_named[0] = g_named[1] = false;
 	if (!guest_ptr(levels) || ld32(levels + kLevelRow) != 0) return;
@@ -462,7 +461,7 @@ void SpawnPointsSetup(PPCContext& c)
 	orig_spawn_setup(c);
 }
 
-//a level's rows in the game's tables, picked as it loads: ge_level_rows(tables, level) looks the
+//a level's rows in the game's tables, picked as it loads: ge_level_set(levels, level) looks the
 //level's hash up in two sorted tables and keeps the rows at +0x1C and +0x34. the second has a
 //row for each of the 16 missions and nothing else: four values by difficulty, read without a
 //look by seven small functions (fn_800C0B70 on), one of them when the player is hurt
@@ -470,17 +469,15 @@ void SpawnPointsSetup(PPCContext& c)
 //the mods has no row, so the first thing that hurts the player offline, their own grenade,
 //read through 0 and crashed. it gets the first mission's row: all 16 are the same but for one
 //value of Nightclub's
-const uint32_t kRowsCount = 0x28, kRowsFirst = 0x2C, kRowsOfLevel = 0x34;
-PPCFunc orig_level_rows = nullptr;
-
-void LevelRows(PPCContext& c)
+void LevelSet(PPCContext& c)
 {
-	const uint32_t tables = c.r[3], level = c.r[4];
-	st32(tables + kRowsOfLevel, 0); //the game leaves the last level's when the first table has no row either
-	orig_level_rows(c);
-	if (ld32(tables + kRowsOfLevel) || !ld32(tables + kRowsCount) || !guest_ptr(ld32(tables + kRowsFirst))) return;
-	st32(tables + kRowsOfLevel, ld32(tables + kRowsFirst));
-	if (level >> 16 == 0x0181) rt_log("goldeneye: level %08X has no difficulty values of its own, the first mission's are used", level); //not for the menus' 01080004
+	const uint32_t levels = c.r[3], hash = c.r[4];
+	st32(levels + kLevelRow2, 0); //the game leaves the last level's when the first table has no row either
+	orig_level_set(c);
+	StandIn(c, levels, hash);
+	if (ld32(levels + kLevelRow2) || !ld32(levels + kLevelRow2Count) || !guest_ptr(ld32(levels + kLevelRows2))) return;
+	st32(levels + kLevelRow2, ld32(levels + kLevelRows2));
+	if (hash >> 16 == 0x0181) rt_log("goldeneye: level %08X has no difficulty values of its own, the first mission's are used", hash); //not for the menus' 01080004
 }
 
 } //namespace
@@ -527,9 +524,9 @@ void install_mods()
 {
 	orig_onload = ppc_hook("ge_geofile_onload", OnLoad);
 	orig_level_set = ppc_hook("ge_level_set", LevelSet);
+	if (!orig_level_set) rt_die("goldeneye: ge_level_set is not hooked in this build");
 	orig_team_mode_reset = ppc_hook("ge_team_mode_reset", TeamModeReset);
 	orig_text_find = ppc_hook("ge_text_find", TextFind);
-	orig_level_rows = ppc_hook("ge_level_rows", LevelRows);
 	level_alloc = ppc_lookup(kGameAlloc);
 	is_multiplayer = ppc_lookup(kIsMultiplayer);
 	orig_spawn_setup = ppc_hook("ge_spawn_points_setup", SpawnPointsSetup);
