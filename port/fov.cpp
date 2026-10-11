@@ -38,6 +38,7 @@ void set_fov(float degrees) { g_fov = degrees == kGameFov ? 0 : std::clamp(degre
 //write the angle it would have got with the scaled one. never wider than the view itself
 const uint32_t kCtrlFov = 0x71C, kCtrlAimBlend = 0xD10;
 std::atomic<float> g_ads_fov{0}; //0 is the game's own
+std::atomic<float> g_host_drawn{0}; //the angle a console draws this player's aim with, 0 when it isn't aimed
 
 void ads_fov_apply(uint32_t ctrl) {
     static uint32_t last_ctrl = 0;
@@ -45,16 +46,23 @@ void ads_fov_apply(uint32_t ctrl) {
     float blend = last_ctrl == ctrl ? last_blend : 0;
     last_ctrl = ctrl;
     last_blend = ldf(ctrl + kCtrlAimBlend);
+    g_host_drawn = 0;
     uint32_t o = ld32(kViewSettingsPtr);
-    if (g_ads_fov <= 0 || !guest_ptr(o) || !(blend > 0) || blend > 1) { if (!(blend > 0)) aimed = 0; return; }
+    if (!guest_ptr(o) || !(blend > 0) || blend > 1) { if (!(blend > 0)) aimed = 0; return; }
     float view = ldf(o + 0x328), now = ldf(ctrl + kCtrlFov);
     if (!std::isfinite(view) || !std::isfinite(now) || view < 1 || now < 1 || now > view) return;
     if (blend > 0.2f || aimed == 0) aimed = view + (now - view) / blend; //early in the blend it's mostly rounding
+    g_host_drawn = kGameFov + (aimed - kGameFov) * blend;
+    if (g_ads_fov <= 0) return;
     float want = std::min(view, aimed * g_ads_fov / kGameAdsFov);
     float angle = view + (want - view) * blend;
     stf(ctrl + kCtrlFov, angle);
     stf(ctrl + kCtrlFov + 4, angle);
 }
+
+//the same aim on a console, whose view is the game's 49 and whose weapon aims at its own angle:
+//what the host of a network game works this player's aimed turning out with (input.cpp)
+float host_drawn_fov() { return g_host_drawn; }
 
 float ads_fov() { return g_ads_fov > 0 ? g_ads_fov.load() : kGameAdsFov; }
 void set_ads_fov(float degrees) { g_ads_fov = degrees == kGameAdsFov ? 0 : std::clamp(degrees, kAdsFovMin, kFovMax); }

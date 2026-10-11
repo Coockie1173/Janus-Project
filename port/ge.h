@@ -150,6 +150,7 @@ const float kGameAdsFov = 22.5f, kAdsFovMin = 10.0f; //the pistol's, aimed down 
 float ads_fov(); //degrees for a weapon the game aims at 22.5, the others in proportion
 void set_ads_fov(float degrees);
 void ads_fov_apply(uint32_t controller); //after the local controller's update
+float host_drawn_fov(); //the angle a console draws the local player's aim with, 0 when it isn't aimed
 bool no_colour_filter(); //a level's colour filter (a mesh on the eye) isn't drawn
 void set_no_colour_filter(bool on);
 void install_native(); //native.cpp

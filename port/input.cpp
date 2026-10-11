@@ -56,10 +56,20 @@ bool net_turns();
 float pitch_limit() {
     return joined_game() || net_turns() ? net_pitch_range() : kPitchLimit;
 }
+//the host of a network game steps everyone's player with the two floats. over Nintendo WFC the
+//others keep theirs within the game's 45 degrees on their own consoles: with ours here a player
+//held up or down went on past it on the host, and came back that much later than on its console
+//so there only this console's own player gets ours
+extern uint32_t g_local_ctrl;
+float g_pitch_limit_now = kPitchLimit; //what the two floats hold for the controller being updated
+float pitch_limit_of(uint32_t ctrl) {
+    if (network_game() && !modded_lobby() && ctrl != g_local_ctrl) return kGamePitchLimit;
+    return pitch_limit();
+}
 void player_modifiers(PPCContext& c) {
     set_pitch_limit(kGamePitchLimit);
     orig_player_modifiers(c);
-    set_pitch_limit(pitch_limit());
+    set_pitch_limit(g_pitch_limit_now);
 }
 
 
@@ -342,6 +352,8 @@ void command_fill(PPCContext& c) {
 //(controller, command or the input of a game that isn't a network game)
 void input_copy(PPCContext& c) {
     uint32_t ctrl = c.r[3];
+    //a player's look is stepped from here on, not in its controller's update: the limits are this player's
+    if (guest_ptr(ctrl)) set_pitch_limit(g_pitch_limit_now = pitch_limit_of(ctrl));
     orig_input_copy(c);
     if (!net_turns() || !guest_ptr(ctrl)) return;
     float yaw = ldf(ctrl + kCtrlHeading), pitch = ldf(ctrl + kCtrlLean);
@@ -517,7 +529,7 @@ void controller_update(PPCContext& c) {
     uint32_t player = guest_ptr(ctrl) ? ld32(ctrl + 4) : 0;
     bool forced = false;
     bool again = (uint8_t)c.r[4] != 0 || (guest_ptr(ctrl) && ld32(ctrl + kCtrlHostCopyOf) != 0);
-    set_pitch_limit(pitch_limit());
+    set_pitch_limit(g_pitch_limit_now = pitch_limit_of(ctrl));
     if (frame != g_local_frame && guest_ptr(player) && !again) {
         bool local = controller_is_local(c, ctrl, frame);
         if (local) {
@@ -695,6 +707,7 @@ const float kStickSens = 100.0f, kStickRate = 2.95f, kStickDead = 0.12f; //the r
 const uint32_t kSensAddr[4] = {0x805DE7A4, 0x805DE7A8, 0x805DE7CC, 0x805DE7D0};
 float g_pitch_rate_scale = 1.25f; //the pitch's rate compared to the yaw's at the same sensitivity
 bool g_stick_took = false;
+std::atomic<float> g_stick_sens[2]{kStickSens, kStickSens}; //what the game turns the stick with, across and up and down (look_settings)
 void mouse_stick(ClassicState& s) {
     g_stick_took = g_mouse_sens > 0 && in_play() && !overlay_open() && stick_look_allowed() && mouse_on_stick();
     if (!g_stick_took) return;
@@ -712,13 +725,14 @@ void mouse_stick(ClassicState& s) {
         defl_x = defl_y = 0;
         if (dt <= 0.25f) {
             float blend = 0, aim = local_aim_blend(blend) ? 1.0f + (g_ads_sens - 1.0f) * blend : 1.0f;
-            float k = kRadPerPixel * g_mouse_sens * aim / dt / (kStickRate * kStickSens);
+            float k = kRadPerPixel * g_mouse_sens * aim / dt / kStickRate;
+            float across = g_stick_sens[0], up = g_stick_sens[1]; //0 is an axis the game has turned off
             //the game takes the dead zone off each axis by itself, so each gets past it by itself
             auto past_dead = [](float v) {
                 return std::fabs(v) > 1e-7f ? std::copysign(std::min(1.0f, kStickDead + (1 - kStickDead) * std::fabs(v)), v) : 0.0f;
             };
-            defl_x = past_dead(ax * k);
-            defl_y = past_dead(ay * k / g_pitch_rate_scale);
+            defl_x = across > 0 ? past_dead(ax * k / across) : 0.0f;
+            defl_y = up > 0 ? past_dead(ay * k / (up * g_pitch_rate_scale)) : 0.0f;
         }
         ax = ay = 0;
         last = now;
@@ -729,7 +743,9 @@ void mouse_stick(ClassicState& s) {
 
 //the game's two readers of the sensitivities, with the mouse on the stick they see kStickSens
 PPCFunc orig_look_sens[2];
+bool g_sens_ours[2] = {}; //the set the game keeps (and has sent the host) is kStickSens
 template <int I> void look_sens(PPCContext& c) {
+    g_sens_ours[I] = g_stick_took;
     if (!g_stick_took) { orig_look_sens[I](c); return; }
     uint32_t saved[4];
     for (int i = 0; i < 4; ++i) { saved[i] = ld32(kSensAddr[i]); stf(kSensAddr[i], kStickSens); }
@@ -746,21 +762,45 @@ template <int I> void look_sens(PPCContext& c) {
 //the two are kStickSens here, how far a zoomed view turns is the Aim Sensitivity's alone
 //as in the direct mode
 //0 stays 0, that's the game turning an axis off
+//
+//not in a game someone else hosts. the host turns this console's player too, from the stick in
+//the command and with its own answer here: the set this console sent it (kStickSens), aimed
+//times the factor or a scope's table. a console can't be told otherwise, so with kStickSens
+//here the view turned further than the host's while aimed and was drawn back to it all the
+//time. there the answer stays the game's, worked out for the angle the host draws the aim
+//with (the game's view, the weapon's own angle: fov.cpp), and the stick's deflection is made
+//for it (mouse_stick): the two turn the same, as far as a stick goes through a scope
 const uint32_t kCtrlFovDrawn = 0x71C; //the angle the view is drawn with (fov.cpp)
 PPCFunc orig_look_settings = nullptr;
 void look_settings(PPCContext& c) {
     uint32_t ctrl = c.r[3], out = c.r[4];
+    bool hosted = joined_game();
+    bool ours = guest_ptr(ctrl) && guest_ptr(g_local_ctrl) && (ctrl == g_local_ctrl || ld32(ctrl + kCtrlHostCopyOf) == g_local_ctrl);
+    float theirs = hosted && ours ? host_drawn_fov() : 0;
+    uint32_t drawn = theirs > 0 ? ld32(ctrl + kCtrlFovDrawn) : 0;
+    if (theirs > 0) stf(ctrl + kCtrlFovDrawn, theirs);
     orig_look_settings(c);
+    if (theirs > 0) st32(ctrl + kCtrlFovDrawn, drawn);
     if (!g_stick_took || !guest_ptr(out)) return;
     static const bool trace = std::getenv("GE_TRACEAIM") != nullptr;
     static uint32_t seen[2] = {};
     if (trace && (ld32(out + 0x18) != seen[0] || ld32(out + 0x1C) != seen[1])) { //what the game would have turned with
         seen[0] = ld32(out + 0x18); seen[1] = ld32(out + 0x1C);
-        rt_log("aim: frame %u the game's look sensitivities %.3f across, %.3f up and down, aim held %d, drawn at %.1f degrees", ld32(kFrameCount),
-               ldf(out + 0x18), ldf(out + 0x1C), ld8(ctrl + 0xD00), ldf(ctrl + kCtrlFovDrawn));
+        rt_log("aim: frame %u the game's look sensitivities %.3f across, %.3f up and down, aim held %d, drawn at %.1f degrees%s", ld32(kFrameCount),
+               ldf(out + 0x18), ldf(out + 0x1C), ld8(ctrl + 0xD00), ldf(ctrl + kCtrlFovDrawn), hosted ? ", kept: the host's" : "");
     }
-    for (uint32_t at : {out + 0x18, out + 0x1C})
+    if (hosted) {
+        //once the game has kStickSens in the set it reads here, before that the deflection stays kStickSens's
+        bool sent = g_sens_ours[ld8(ctrl + 0xD00) != 0];
+        if (ctrl == g_local_ctrl)
+            for (int i = 0; i < 2; ++i) g_stick_sens[i] = sent ? std::max(ldf(out + 0x18 + 4 * i), 0.0f) : kStickSens;
+        return;
+    }
+    for (int i = 0; i < 2; ++i) {
+        uint32_t at = out + 0x18 + 4 * i;
         if (ldf(at) > 0) stf(at, kStickSens);
+        g_stick_sens[i] = kStickSens;
+    }
 }
 
 //the wii's home button menu (wii menu, reset) has no place here: the button never reaches the game
