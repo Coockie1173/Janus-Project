@@ -38,6 +38,7 @@
 //GE_VSYNC=1 frames wait for the screen's refresh
 //GE_PING=0 no ping in the scoreboard of a modded network game
 //GE_OCCLUSION=0 sounds are heard through walls and floors, as on the console
+//GE_SOUND_HEIGHT=0 sounds above and below sound the same, as on the console
 //GE_NATIVE=0 run the recompiled math routines instead of the host ones
 //GE_CRASH_MEM=1 put the guest's memory in crash dumps (build/crashes)
 //GE_TRACETEXT=1 log the texts the game looks up and the buttons its prompts ask for
@@ -104,6 +105,7 @@ void install() {
     install_shake();
     install_sound();
     install_occlusion();
+    install_height();
     install_noclip();
     install_stamina();
     install_collision();

@@ -27,6 +27,7 @@
 //shake.cpp the camera's sway (Nightclub's dance floor) goes by time, not by frames
 //sound.cpp a sound starts silent, so it doesn't click at higher frame rates
 //occlusion.cpp a sound behind a wall or a floor is quieter
+//height.cpp a sound above the listener is thinner, one below is duller
 //mods.cpp loose .edb files in place of the disc's, or on top of them
 //modmenu.cpp Extras > Mods in the game's menu, the levels among the mods
 //pictures.cpp a mod level's .png as its picture in the menus
@@ -222,6 +223,9 @@ void install_sound(); //sound.cpp
 void install_occlusion(); //occlusion.cpp, after install_mods
 bool occlusion(); //sounds behind a wall or a floor are quieter
 void set_occlusion(bool on);
+void install_height(); //height.cpp
+bool sound_height(); //sounds above and below the listener sound different
+void set_sound_height(bool on);
 bool collision_view(); //cheat, the level's collision is drawn in place of the world
 void set_collision_view(bool on);
 void collision_tick(); //every tick of the game's loop
