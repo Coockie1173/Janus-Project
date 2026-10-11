@@ -17,7 +17,7 @@ Importance:
 - [X] **high** Carrier ladders at high fps
 - [x] **high** The camera is locked while aiming in
 - [x] **high** Doors break when the intro skip is used
-- [ ] **high** Tank: the cars are broken
+- [x] **high** Tank: the cars are broken: not seen any more, played at 144 on 2026-10-11 with every car riding right
 - [X] **high** Flickering issue
 - [x] **high** Animated textures break above 60 fps
 
@@ -132,7 +132,7 @@ do several things.
 
 ## Gameplay and AI
 
-- [ ] **high** Tank: the cars are broken
+- [x] **high** Tank: the cars are broken: not seen any more, played at 144 on 2026-10-11 with every car riding right
 - [ ] **medium** Allies can be shot through (or killed, for the Carrier hostages)
 - [ ] **medium** Interactable things show a red cursor, NPC models don't
 - [ ] **low** Facility: a guard in the Atrium got stuck once

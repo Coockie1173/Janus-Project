@@ -146,14 +146,14 @@ void VehicleStep(PPCContext& c)
 	uint32_t vehicle = c.r[3], wheels = guest_ptr(vehicle) ? ld32(vehicle + kVehicleWheels) : 0;
 	uint32_t count = wheels ? ld32(vehicle + kVehicleWheelCount) : 0;
 	float frames;
+	bool car = guest_ptr(vehicle) && ld32(vehicle) == kCarVtable;
+	static const bool trace = std::getenv("GE_VEHTRACE") != nullptr;
+	if (trace && car && guest_ptr(wheels)) TraceCar(vehicle, (float)c.f[1]);
 	if (!guest_ptr(wheels) || count > kMaxWheels || !ShortStep((float)c.f[1], frames))
 	{
 		orig_vehicle_step(c);
 		return;
 	}
-	bool car = ld32(vehicle) == kCarVtable;
-	static const bool trace = std::getenv("GE_VEHTRACE") != nullptr;
-	if (trace && car) TraceCar(vehicle, (float)c.f[1]);
 	uint32_t drags[kMaxWheels], gives[kMaxWheels];
 	for (uint32_t i = 0; i < count; ++i)
 	{
