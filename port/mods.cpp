@@ -462,6 +462,27 @@ void SpawnPointsSetup(PPCContext& c)
 	orig_spawn_setup(c);
 }
 
+//a level's rows in the game's tables, picked as it loads: ge_level_rows(tables, level) looks the
+//level's hash up in two sorted tables and keeps the rows at +0x1C and +0x34. the second has a
+//row for each of the 16 missions and nothing else: four values by difficulty, read without a
+//look by seven small functions (fn_800C0B70 on), one of them when the player is hurt
+//(fn_80135040 > fn_800C0BD0, which only in a network game answers 0.6 instead). a level of
+//the mods has no row, so the first thing that hurts the player offline, their own grenade,
+//read through 0 and crashed. it gets the first mission's row: all 16 are the same but for one
+//value of Nightclub's
+const uint32_t kRowsCount = 0x28, kRowsFirst = 0x2C, kRowsOfLevel = 0x34;
+PPCFunc orig_level_rows = nullptr;
+
+void LevelRows(PPCContext& c)
+{
+	const uint32_t tables = c.r[3], level = c.r[4];
+	st32(tables + kRowsOfLevel, 0); //the game leaves the last level's when the first table has no row either
+	orig_level_rows(c);
+	if (ld32(tables + kRowsOfLevel) || !ld32(tables + kRowsCount) || !guest_ptr(ld32(tables + kRowsFirst))) return;
+	st32(tables + kRowsOfLevel, ld32(tables + kRowsFirst));
+	if (level >> 16 == 0x0181) rt_log("goldeneye: level %08X has no difficulty values of its own, the first mission's are used", level); //not for the menus' 01080004
+}
+
 } //namespace
 
 //the game's own trace through the world's collision (the level, not the people in it): from
@@ -508,6 +529,7 @@ void install_mods()
 	orig_level_set = ppc_hook("ge_level_set", LevelSet);
 	orig_team_mode_reset = ppc_hook("ge_team_mode_reset", TeamModeReset);
 	orig_text_find = ppc_hook("ge_text_find", TextFind);
+	orig_level_rows = ppc_hook("ge_level_rows", LevelRows);
 	level_alloc = ppc_lookup(kGameAlloc);
 	is_multiplayer = ppc_lookup(kIsMultiplayer);
 	orig_spawn_setup = ppc_hook("ge_spawn_points_setup", SpawnPointsSetup);
