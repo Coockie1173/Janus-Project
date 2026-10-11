@@ -27,7 +27,8 @@
 //a sound within kOwn of the listener is its own (its steps are 1.5 below the camera). one
 //with a range past kFarthest (music, the menus: 300 and 5000) or one the game doesn't make
 //quieter by distance (2D7011AF, 30 to 30 at 0 -10 0 in every level) is not in the world.
-//people and doors aren't in the trace. in a cutscene (the player's state 0x22) nothing is made
+//people and doors aren't in the trace. the campaign is left as it is, its voice lines come from
+//behind walls all the time: this is for hearing other players. in a cutscene (the player's state 0x22) nothing is made
 //quieter: it's mixed for the cutscene's camera, not for where the player stands
 //
 //GE_OCCLUSION=0 the game's own
@@ -152,7 +153,7 @@ float Quieter(const PPCContext& c, uint32_t sound)
 void Update(PPCContext& c)
 {
 	const uint32_t sound = c.r[3];
-	const float quieter = g_on && in_play() && !local_in_cutscene() ? Quieter(c, sound) : 0.0f;
+	const float quieter = g_on && in_play() && multiplayer_game() && !local_in_cutscene() ? Quieter(c, sound) : 0.0f;
 	if (quieter <= 0.0f) { orig_update(c); return; }
 	const float set = ldf(sound + kSoundQuieter);
 	stf(sound + kSoundQuieter, set + quieter);

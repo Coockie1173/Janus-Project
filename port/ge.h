@@ -202,6 +202,7 @@ bool autosave(); //a checkpoint saves the game
 void set_autosave(bool on);
 bool joined_game(); //input.cpp
 bool network_game(); //hosted or joined
+bool multiplayer_game(); //a network game or a split screen level, not the campaign
 void install_noclip(); //noclip.cpp
 bool noclip(); //cheat, the player flies through walls and doesn't fall
 void set_noclip(bool on);

@@ -77,6 +77,10 @@ bool network_game() {
     uint32_t mode = ld32(kNetState + 0x30);
     return mode == 1 || mode == 2;
 }
+bool multiplayer_game() {
+    const uint32_t kCurrentLevel = 0x805D1804, kLevelKind = 0xFFFF0000, kMultiplayerLevel = 0x01A00000; //the campaign's are 0181xxxx
+    return network_game() || (ld32(kCurrentLevel) & kLevelKind) == kMultiplayerLevel;
+}
 bool joined_game() {
     return network_game() && ld32(kNetState + 0x10) == 0;
 }
