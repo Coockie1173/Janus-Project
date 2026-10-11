@@ -414,7 +414,7 @@ void BuildSettings()
 	AddToggle(kEnhancements, "unlock_all", "Unlock Everything", "On: every mission and every difficulty can be picked. A save made with it on may keep them.", unlock_all, set_unlock_all);
 	AddToggle(kEnhancements, "online_unlocks", "Online Unlocks", "On: online, every weapon, attachment, gadget and game mode is open at any level, but for the Proximity Mine.", online_unlocks, set_online_unlocks);
 	AddToggle(kEnhancements, "occlusion", "Sound Occlusion", "On: in multiplayer a sound behind a wall is quieter, one behind a floor more so, so someone a floor up doesn't sound next to you. Off: the game's own, distance only.", occlusion, set_occlusion);
-	AddToggle(kEnhancements, "sound_height", "Sound Height", "On: in multiplayer a sound from above you is thinner and one from below is duller, so you can hear which floor someone is on. Off: the game's own, left and right only.", sound_height, set_sound_height);
+	AddToggle(kEnhancements, "sound_height", "Sound Height", "On: in multiplayer a sound from the floor above or below you is muffled, so you can hear that someone isn't on your floor. Off: the game's own, left and right only.", sound_height, set_sound_height);
 	AddToggle(kEnhancements, "extras_menu", "Unused Extras Menu", "On: Extras also lists Mission Select, Character Viewer, Movies and the Calibration Menu.", extras_menu, set_extras_menu);
 
 	AddToggle(kCheats, "mouse_everywhere", "Always Enable Mouse", "On: the mouse turns the view where the game locks it: cutscenes, melee, climbing, death.", mouse_everywhere, set_mouse_everywhere);
