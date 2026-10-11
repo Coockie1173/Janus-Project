@@ -78,7 +78,7 @@ Things that only break above 60 fps.
 - [x] **medium** Bloom still looks incorrect
 - [x] **medium** Facility: the colour filter / post processing "bubble" around the player doesn't cover
       the whole screen, worse at higher FOV
-- [ ] **medium** Black bars at the top and bottom in windowed mode
+- [x] **medium** Black bars at the top and bottom in windowed mode: to avoid stretching, it must always be 16:9 or 4:3
 - [ ] **medium** Dam: the opening scene isn't as foggy as it should be
 - [ ] **medium** Vertigo: the skybox is black in one corner of the map
 - [ ] **low** Halo around characters' hair (needs checking, may be the original game or the resolution)
