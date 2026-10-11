@@ -89,6 +89,7 @@ Things that only break above 60 fps.
 
 - [x] **critical** crunchy audio at higher fps: a new sound played 3 ms at full volume (to be confirmed by ear)
 - [ ] **medium** Online: a static noise plays when another player fires the Golden Gun
+- [ ] **medium** Multiplayer: a player above you should have the low frequencies cut, not the high ones
 - [ ] **medium** Double audio on reloads
 - [ ] **medium** Main menu cursor sound is sometimes a loud click
 - [ ] **medium** Nightclub: the score keeps playing over the breach music
