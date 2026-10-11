@@ -36,6 +36,12 @@
 //GE_SETTINGS=N start with the settings menu (F1) open on page N
 //GE_FPS=N frame rate the engine may reach (30 by default, auto is 60)
 //GE_VSYNC=1 frames wait for the screen's refresh
+//GE_ANISO=N anisotropic filtering, 2 to 16
+//GE_MSAA=N anti-aliasing, 2, 4 or 8 samples a pixel
+//GE_SHAKE=S the game's screen shake times S, 0 (none) to 5
+//GE_HUD=0 no hud
+//GE_TANK_BUTTONS=A,B,C the buttons of the tank's machine gun, cannon and lock (port/tank.cpp)
+//GE_SAVED_SETTINGS=0 those five only from the environment, not from the settings the menu saved
 //GE_PING=0 no ping in the scoreboard of a modded network game
 //GE_OCCLUSION=0 sounds are heard through walls and floors, as on the console
 //GE_SOUND_HEIGHT=0 sounds above and below sound the same, as on the console
@@ -103,6 +109,7 @@ void install() {
     install_timeline();
     install_flipbooks();
     install_shake();
+    install_render();
     install_sound();
     install_occlusion();
     install_height();

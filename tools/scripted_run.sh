@@ -40,6 +40,7 @@ if [ -n "$REPLAY" ]; then
 fi
 [ -n "$INTRO" ] || { GE_GECKO_EXTRA="$PWD/config/gecko/faststart.txt${GE_GECKO_EXTRA:+:$GE_GECKO_EXTRA}"; export GE_GECKO_EXTRA; }
 [ -n "$SHOW" ] || { WIIKIT_HIDDEN=1; export WIIKIT_HIDDEN; }
+GE_SAVED_SETTINGS=${GE_SAVED_SETTINGS:-0}; export GE_SAVED_SETTINGS #not what the settings menu saved: the same run every time
 FONTS=/usr/share/dolphin-emu/Sys/GC
 WIIKIT_PAD="$SCRIPT" timeout $((SECS + 40)) ${GE_BIN:-build/out/wiiboot} game --nand $NAND --keys build/keys.txt \
     --symbols build/recomp/symbols.tsv $( [ -d $FONTS ] && echo --fonts $FONTS ) $( [ -n "$AUDIO" ] || echo --no-audio ) --input keyboard \

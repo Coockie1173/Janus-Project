@@ -43,6 +43,7 @@ const char* kNamePrefix = "x:\\bondx\\binary\\_bin_wii\\";
 const uint32_t kGeom = 0x47454F4D, kHeadSize = 8; //an .edb starts with GEOM and its hash
 const uint32_t kFirstFree = 0x0200; //the low half of the hashes eurochef gives the files it makes, from here up
 const uint32_t kLevelFiles = 0x01810000; //a level's own file (mt_), the hash a level is started by
+const uint32_t kMultiplayerLevelFiles = 0x01A00000; //a multiplayer map's, one for each gamemode it has (mpt_)
 
 struct Row
 {
@@ -164,7 +165,7 @@ void OnLoad(PPCContext& c)
 		rt_log("goldeneye: no memory for the file %s (%u bytes), it isn't loaded", guest_ptr(name) ? (const char*)PPC_MEM(name) : "?", size);
 }
 
-std::vector<ModLevel> g_levels, g_files;
+std::vector<ModLevel> g_levels, g_files, g_disc_levels;
 std::string g_folder;
 
 //a folder's name as it is looked for: lower case, a space or a dash is an underscore
@@ -508,6 +509,7 @@ const char* const kModeFolders[kModeCount] = { "conflict", "team_conflict", "gol
 
 const std::vector<ModLevel>& mod_levels() { return g_levels; }
 const std::vector<ModLevel>& mod_files() { return g_files; }
+const std::vector<ModLevel>& disc_levels() { return g_disc_levels; }
 const std::string& mods_folder() { return g_folder; }
 
 //next to the mod's file, in whichever folder that is. a level in a gamemode's folder that has
@@ -533,6 +535,25 @@ void install_mods()
 	make_ray = ppc_lookup(kMakeRay);
 	trace_ray = ppc_lookup(kTraceRay);
 
+	//the disc's own list, read whether there are mods or not: its levels are Extras > Level Select's
+	uint64_t listAt = 0, listSize = 0, dataSize = 0;
+	std::vector<Row> rows;
+	uint16_t buildType = 0, lists = 0;
+	const bool listed = disc_file("Filelist.bin", &listAt, &listSize) && disc_file("Filelist.000", nullptr, &dataSize);
+	if (listed)
+	{
+		std::vector<uint8_t> bin(listSize);
+		disc_read(listAt, bin.data(), bin.size());
+		if (!ReadList(bin, rows, buildType, lists)) rows.clear();
+	}
+	for (const Row& row : rows)
+	{
+		const uint32_t kind = row.hash & 0xFFFF0000u;
+		if (kind != kLevelFiles && kind != kMultiplayerLevelFiles) continue;
+		const size_t slash = row.name.find_last_of("\\/");
+		g_disc_levels.push_back({ row.hash, slash == std::string::npos ? row.name : row.name.substr(slash + 1), {}, 0 });
+	}
+
 	const char* env = std::getenv("GE_MODS");
 	const std::string dir = env ? env : std::string(GE_ROOT) + "/mods";
 	std::error_code error;
@@ -554,17 +575,12 @@ void install_mods()
 	if (mods.empty()) return;
 	std::sort(mods.begin(), mods.end(), [](const Mod& a, const Mod& b) { return a.name != b.name ? a.name < b.name : a.path < b.path; });
 
-	uint64_t listAt = 0, listSize = 0, dataSize = 0;
-	if (!disc_file("Filelist.bin", &listAt, &listSize) || !disc_file("Filelist.000", nullptr, &dataSize))
+	if (!listed)
 	{
 		rt_log("goldeneye: mods: the disc has no Filelist.bin and Filelist.000");
 		return;
 	}
-	std::vector<uint8_t> bin(listSize);
-	disc_read(listAt, bin.data(), bin.size());
-	std::vector<Row> rows;
-	uint16_t buildType = 0, lists = 0;
-	if (!ReadList(bin, rows, buildType, lists))
+	if (rows.empty())
 	{
 		rt_log("goldeneye: mods: Filelist.bin isn't a version %u list", kListVersion);
 		return;

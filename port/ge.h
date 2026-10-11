@@ -29,12 +29,13 @@
 //occlusion.cpp a sound behind a wall or a floor is quieter
 //height.cpp a sound above the listener is thinner, one below is duller
 //mods.cpp loose .edb files in place of the disc's, or on top of them
-//modmenu.cpp Extras > Mods in the game's menu, the levels among the mods
+//modmenu.cpp Extras > Mods and Extras > Level Select in the game's menu: the levels among the mods, every level of the disc
 //pictures.cpp a mod level's .png as its picture in the menus
 //native.cpp the engine's hot math routines written for the host
 //net.cpp the hosts file for the game's servers
 //overlay.cpp the debug overlay (F3), memory watches from a .dmw file (dmw.cpp)
 //settings.cpp the settings menu (F1)
+//render.cpp anisotropic filtering and anti-aliasing, the renderer's
 //hotkeys.cpp keys that change the menu's settings in play (hotkeys.h)
 //crashdump.cpp crash, die and stall dumps into build/crashes
 //diagnostics.cpp the sampling profiler
@@ -125,6 +126,7 @@ const int kModeCount = 8; //the online gamemodes, each a folder in the mods fold
 extern const char* const kModeFolders[kModeCount];
 const std::vector<ModLevel>& mod_levels();
 const std::vector<ModLevel>& mod_files(); //every mod
+const std::vector<ModLevel>& disc_levels(); //every level the disc has (mt_ and mpt_ files), the ones no menu leads to as well. no path
 const std::string& mods_folder(); //empty when there's none
 void install_mods_menu(); //modmenu.cpp, after install_mods
 void mods_menu_frame(PPCContext& c); //once a frame, on the game's thread
@@ -184,7 +186,15 @@ void install_tweaks(); //tweaks.cpp
 void install_tank(); //tank.cpp
 bool is_tank(uint32_t ctrl); //the controller is the Tank mission's
 void tank_buttons(ClassicState& s); //the tank's own button layout, in the classic's filter
+const int kTankActionCount = 3, kTankSourceCount = 7; //what the tank does, and the buttons of the actions on foot that can do it
+const char* tank_action_label(int action);
+const char* tank_action_hint(int action);
+const char* tank_source_label(int source);
+int tank_source(int action); //the button that does it, a number of the sources
+void set_tank_source(int action, int source);
 void tweaks_apply();
+bool hud(); //the hud is drawn
+void set_hud(bool on);
 bool level_timer(); //the hud shows the level's time
 void set_level_timer(bool on);
 bool extras_menu(); //the menu's unused extras page
@@ -222,6 +232,9 @@ void install_unload(); //unload.cpp
 void install_timeline(); //timeline.cpp
 void install_flipbooks(); //flipbooks.cpp
 void install_shake(); //shake.cpp
+const float kShakeMax = 5.0f;
+float shake_scale(); //the game's screen shake times this, 0 is none
+void set_shake_scale(float scale);
 void install_sound(); //sound.cpp
 void install_occlusion(); //occlusion.cpp, after install_mods
 bool occlusion(); //sounds behind a wall or a floor are quieter
@@ -239,6 +252,12 @@ bool sprint_key(); //input.cpp, the sprint key is down this frame
 void install_overlay(); //overlay.cpp
 bool overlay_open(); //the watches or the settings menu are up, so the mouse is free
 bool settings_open(); //settings.cpp
+std::string saved_setting(const char* env, const char* name); //a setting as the game starts: the environment's, or what the menu saved under name in the launcher's file. empty for neither
+void install_render(); //render.cpp: anisotropic filtering and anti-aliasing
+int anisotropy(); //1 is off, up to 16
+void set_anisotropy(int level);
+int anti_aliasing(); //samples a pixel, 1 is off
+void set_anti_aliasing(int samples);
 uint32_t settings_buttons(); //classic buttons the menu presses itself (+ to pause as it opens)
 
 } //namespace ge

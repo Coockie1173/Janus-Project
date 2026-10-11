@@ -11,9 +11,18 @@
 //for that one call the mouse's motion is added to the rates and taken out again after,
 //like ge_look_apply on foot
 //
-//the buttons go round by one: the left mouse button (ZR) does what the classic's r did, the
-//right one (ZL) what the left did and r what the right did. only in the tank and in play,
-//a menu keeps the triggers as select and back
+//the buttons: the tank has three (fn_80144BF0 asks for the actions at +0x534
+//pressed and +0x538 held). the classic's r is action 0x10, the machine gun while it is held;
+//ZR is action 4, a press fires the cannon, or a missile when the lock is held and has a
+//target (+0xA00); ZL is action 0x40, the lock while it is held. no other button gives the
+//tank an action (each pressed in turn with GE_TRACE)
+//which button of the game's actions on foot presses each is a setting (Control Settings): as
+//the port starts the fire button (ZR, the left mouse button) is the machine gun, the aim
+//button (ZL, the right one) the cannon and the grenade button (r) the lock. a button that is
+//given to the tank doesn't do what it did by itself. only in the tank and in play, a menu
+//keeps the triggers as select and back
+//GE_TANK_BUTTONS=0,1,2 the buttons of the machine gun, the cannon and the lock, numbers in kTankSources
+//GE_TRACE=1 also logs the tank's actions (+0x538) whenever they change, with the buttons that gave them
 //
 //the driving:
 //three things in a vehicle's physics happen once a call with no time step in them, so at 144
@@ -45,10 +54,12 @@
 #include "ge.h"
 #include "debug.h"
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <string>
 
 namespace ge
 {
@@ -60,7 +71,20 @@ const uint32_t kPlayerState = 0x704, kStateMoving = 2;
 const uint32_t kLookPitchRate = 0x978, kLookYawRate = 0x97C;
 const uint32_t kTankHeading = 0x52C; //where the view looks, radians, as the frame's input has it
 const uint32_t kTankAimPitch = 0x99C, kTankAimYaw = 0x9A0;
-const uint32_t kClZR = 0x0004, kClZL = 0x0080, kClR = 0x0200; //KPAD's classic bits
+const uint32_t kClZR = 0x0004, kClZL = 0x0080, kClR = 0x0200, kClL = 0x2000; //KPAD's classic bits
+const uint32_t kClA = 0x0010, kClX = 0x0008, kClY = 0x0020;
+const uint32_t kActHeld = 0x538;
+//what the tank does, the classic button the game has it on, and the button that presses it here
+struct TankAction { const char* label; const char* hint; uint32_t button; int source; };
+const TankAction kTankActions[kTankActionCount] = {
+	{"Tank: Machine Gun", "The button that fires the tank's machine gun while it is held.", kClR, 0},
+	{"Tank: Fire Cannon", "The button that fires the tank's cannon, and a missile at what is locked on.", kClZR, 1},
+	{"Tank: Lock On", "The button that locks the tank's missiles on a target while it is held.", kClZL, 2}};
+struct TankSource { const char* label; uint32_t button; };
+const TankSource kTankSources[kTankSourceCount] = {{"Fire", kClZR}, {"Aim", kClZL}, {"Throw Grenade", kClR},
+	{"Melee Attack", kClL}, {"Reload", kClY}, {"Crouch", kClA}, {"Cycle Grenades", kClX}};
+std::atomic<int> g_sources[kTankActionCount];
+std::atomic<uint32_t> g_buttons_in{0}, g_buttons_out{0}; //the last ones, for the trace
 PPCFunc orig_tank_look = nullptr;
 
 const uint32_t kVehicleWheels = 0x1FC, kVehicleWheelCount = 0x200, kWheelSize = 0x90, kWheelDrag = 0x84;
@@ -90,6 +114,15 @@ void TraceAim(uint32_t ctrl)
 		ldf(tank + 0xF8), ldf(tank + 0xFC), ldf(tank + 0x100));
 }
 
+void TraceActions(uint32_t ctrl)
+{
+	static uint32_t last = 0;
+	uint32_t held = ld32(ctrl + kActHeld);
+	if (held == last) return;
+	last = held;
+	rt_log("goldeneye: tank: actions held %05X, buttons %04X of %04X pressed", held, g_buttons_out.load(), g_buttons_in.load());
+}
+
 void TankLook(PPCContext& c)
 {
 	uint32_t ctrl = c.r[3];
@@ -101,6 +134,7 @@ void TankLook(PPCContext& c)
 	}
 	static const bool trace = std::getenv("GE_TRACE") != nullptr;
 	if (trace) TraceAim(ctrl);
+	if (trace) TraceActions(ctrl);
 	mouse_applied(ld32(kFrameCount));
 	float dx = 0, dy = 0, dt = ldf(ctrl + kCtrlTimeStep);
 	video_take_mouse_motion(dx, dy);
@@ -242,19 +276,36 @@ void TankDrive(PPCContext& c)
 
 bool is_tank(uint32_t ctrl) { return ld32(ctrl) == kTankVtable; }
 
+const char* tank_action_label(int action) { return kTankActions[action].label; }
+const char* tank_action_hint(int action) { return kTankActions[action].hint; }
+const char* tank_source_label(int source) { return kTankSources[source].label; }
+int tank_source(int action) { return g_sources[action]; }
+void set_tank_source(int action, int source) { g_sources[action] = std::clamp(source, 0, kTankSourceCount - 1); }
+
 void tank_buttons(ClassicState& s)
 {
 	uint32_t ctrl = local_controller();
 	if (!ctrl || !is_tank(ctrl) || !in_play()) return;
-	uint32_t b = s.buttons & ~(kClZR | kClZL | kClR);
-	if (s.buttons & kClZR) b |= kClR;
-	if (s.buttons & kClZL) b |= kClZR;
-	if (s.buttons & kClR) b |= kClZL;
+	uint32_t b = s.buttons;
+	for (int i = 0; i < kTankActionCount; ++i) b &= ~(kTankActions[i].button | kTankSources[g_sources[i]].button);
+	for (int i = 0; i < kTankActionCount; ++i)
+	{
+		if (s.buttons & kTankSources[g_sources[i]].button) b |= kTankActions[i].button;
+	}
+	g_buttons_in = s.buttons;
+	g_buttons_out = b;
 	s.buttons = b;
 }
 
 void install_tank()
 {
+	for (int i = 0; i < kTankActionCount; ++i) g_sources[i] = kTankActions[i].source;
+	std::string saved = saved_setting("GE_TANK_BUTTONS", "LAUNCH_TANKBUTTONS");
+	int sources[kTankActionCount];
+	if (std::sscanf(saved.c_str(), "%d,%d,%d", &sources[0], &sources[1], &sources[2]) == kTankActionCount)
+	{
+		for (int i = 0; i < kTankActionCount; ++i) set_tank_source(i, sources[i]);
+	}
 	orig_tank_look = ppc_hook("ge_tank_look", TankLook);
 	if (!orig_tank_look) rt_die("goldeneye: the tank's look is not hooked in this build");
 	orig_vehicle_step = ppc_hook("ge_vehicle_step", VehicleStep);

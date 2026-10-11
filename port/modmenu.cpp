@@ -50,6 +50,12 @@
 //Connect to WFC Modded both get a number made here from each gamemode's maps and the mods'
 //bytes, so only those with the same maps find each other
 //
+//Extras also gets "Level Select" and "Multiplayer Maps", with mods or without: two more pages
+//of the same kind with every level the disc's file list has (port/mods.cpp), the ones no menu
+//of the game leads to as well. Level Select has the mt_ files, the missions and the test
+//levels by their file's name (but for two that don't load, kBrokenLevels); Multiplayer Maps the mpt_ files, a map once for each gamemode
+//it was made for ("Frigate - Conflict"). a row loads its level as a mission is loaded
+//
 //GE_MODS_PAGE=7D000045 Extras > Mods opens that page instead (to look at a page without going
 //through the menus that lead to it)
 #include "ge.h"
@@ -73,6 +79,7 @@ const uint32_t kPageSize = 0x10, kPageRows = 0x4, kPageRowCount = 0x8, kPageClas
 const uint32_t kRowSize = 20, kRowHash = 0x4, kRowKind = 0xC;
 const uint32_t kExtrasPage = 0x7D0000D2;
 const uint32_t kModsPage = 0x7D000DFF; //the game's own stop at 7D00010A
+const uint32_t kLevelsPage = 0x7D000DFE, kMapsPage = 0x7D000DFD; //Level Select, Multiplayer Maps
 const uint32_t kExtrasRows = 0x805808B4, kExtrasRowCount = 11; //the game's
 const uint32_t kUnusedRows = 0x80580990, kUnusedRowCount = 0x19; //the code's, as it set them
 //a layout draws all its slots, with an item in them or not, so a list takes the layout of one
@@ -102,6 +109,16 @@ const uint32_t kTextMods = 0x4300F0FF, kTextAbout = 0x4300F0FE, kTextLevel = 0x4
 const uint32_t kConflictRows = 0x805830C8; //the game's
 const uint32_t kConflictHead = 6; //the rows before the maps
 const uint32_t kTextMap = 0x4300F100; //a text for each level of the mods in a gamemode's maps
+const uint32_t kTextLevels = 0x4300F0F4, kTextAboutLevels = 0x4300F0F5, kTextMaps = 0x4300F0F6, kTextAboutMaps = 0x4300F0F7;
+const uint32_t kTextDisc = 0x4300F200; //a text for each level of the disc
+const uint32_t kLevelFiles = 0x01810000; //mt_, the others of the disc's levels are multiplayer's (mpt_)
+//two of the disc's test levels end the game with a read through 0 as they load (mt_ai in
+//fn_800C7D20, mt_archive_io the same way), so they aren't listed. the other 31 mt_ files get into play
+const uint32_t kBrokenLevels[] = { 0x018100ED, 0x01810123 };
+//the end of a multiplayer level's name says which gamemode it is for
+struct MapKind { const char* ending; const char* mode; };
+const MapKind kMapKinds[] = {{"fdm", "Conflict"}, {"tdm", "Team Conflict"}, {"gdm", "Golden Gun"}, {"bbh", "Black Box"},
+	{"gec", "GoldenEye"}, {"htd", "Heroes"}, {"lfd", "License to Kill"}, {"ltd", "Team License to Kill"}};
 //an online gamemode: its page of maps, its item in Choose Game Mode by the text. in the order of kModeFolders
 struct Mode { uint32_t page, text; };
 const Mode kModes[kModeCount] = {
@@ -134,6 +151,10 @@ std::vector<ModLevel> g_levels;
 std::vector<const ModLevel*> g_listed; //the ones Extras > Mods lists: a name once
 std::map<uint32_t, uint32_t> g_texts; //a text's hash, its characters in the game's memory
 uint32_t g_mods_rows = 0, g_mods_row_count = 0;
+struct DiscLevel { uint32_t hash; std::string shown; };
+std::vector<DiscLevel> g_disc[2]; //the disc's levels: the missions and tests, multiplayer's maps
+uint32_t g_disc_rows[2] = {}, g_disc_row_count[2] = {};
+bool g_built = false;
 uint32_t g_extras_rows[2] = {}, g_extras_row_count[2] = {}; //without and with the unused items
 bool g_failed = false;
 
@@ -225,35 +246,97 @@ void ListLevels()
 	}
 }
 
+//a multiplayer level's name in the list: mpt_frigate_fdm.edb is "Frigate - Conflict"
+std::string ShownMap(const std::string& file)
+{
+	std::string name = file;
+	if (name.size() > 4 && name.compare(name.size() - 4, 4, ".edb") == 0) name.resize(name.size() - 4);
+	if (name.compare(0, 4, "mpt_") == 0) name.erase(0, 4);
+	std::string mode;
+	const size_t last = name.find_last_of('_');
+	for (const MapKind& kind : kMapKinds)
+	{
+		if (last != std::string::npos && name.compare(last + 1, std::string::npos, kind.ending) == 0) mode = kind.mode;
+	}
+	if (!mode.empty()) name.resize(last);
+	std::replace(name.begin(), name.end(), '_', ' ');
+	if (!name.empty()) name[0] = (char)std::toupper((unsigned char)name[0]);
+	return mode.empty() ? name : name + " - " + mode;
+}
+
+//the disc's levels in the two lists, each by name
+void ListDisc()
+{
+	for (const ModLevel& level : disc_levels())
+	{
+		const bool map = (level.hash & 0xFFFF0000u) != kLevelFiles;
+		if (std::find(std::begin(kBrokenLevels), std::end(kBrokenLevels), level.hash) != std::end(kBrokenLevels)) continue;
+		g_disc[map].push_back({ level.hash, map ? ShownMap(level.name) : Shown(level.name) });
+	}
+	for (auto& list : g_disc) std::sort(list.begin(), list.end(), [](const DiscLevel& a, const DiscLevel& b) { return a.shown < b.shown; });
+}
+
+//a level select like Conflict's: its rows before the maps, then a level a row
+uint32_t LevelRows(const PPCContext& c, uint32_t title, uint32_t levels, uint32_t& count)
+{
+	count = kConflictHead + levels;
+	const uint32_t rows = Alloc(c, count * kRowSize);
+	if (!rows) return 0;
+	CopyRows(rows, kConflictRows, kConflictHead);
+	st32(rows + kTitleRow * kRowSize, title);
+	return rows;
+}
+
 //the rows and the texts, made once
 bool Build(const PPCContext& c)
 {
-	g_texts[kTextMods] = Text(c, "Mods");
-	g_texts[kTextAbout] = Text(c, "Play the levels in the mods folder.");
-	for (size_t i = 0; i < g_listed.size(); ++i) g_texts[kTextLevel + (uint32_t)i] = Text(c, Shown(g_listed[i]->name));
-	for (const auto& text : g_texts)
-		if (!text.second) return false;
-
-	//a level select like Conflict's: its rows before the maps, then a level a row
-	const uint32_t levels = (uint32_t)g_listed.size();
-	g_mods_row_count = kConflictHead + levels;
-	g_mods_rows = Alloc(c, g_mods_row_count * kRowSize);
-	if (!g_mods_rows) return false;
-	CopyRows(g_mods_rows, kConflictRows, kConflictHead);
-	st32(g_mods_rows + kTitleRow * kRowSize, kTextMods);
-	for (uint32_t i = 0; i < levels; ++i) Row(g_mods_rows + (kConflictHead + i) * kRowSize, kTextLevel + i, g_listed[i]->hash, kMissionStart, kKindLevel);
-	uint32_t at = 0;
+	struct Item { uint32_t text, page, about; };
+	std::vector<Item> items; //what Extras gets after the game's own
+	const uint32_t discPages[2] = { kLevelsPage, kMapsPage }, discTitles[2] = { kTextLevels, kTextMaps }, discAbouts[2] = { kTextAboutLevels, kTextAboutMaps };
+	const char* const discNames[2] = { "Level Select", "Multiplayer Maps" };
+	const char* const discSays[2] = { "Play any level of the disc, the unused ones too.", "Walk around any multiplayer map of the disc, the unused ones too." };
+	uint32_t text = kTextDisc;
+	for (int list = 0; list < 2; ++list)
+	{
+		if (g_disc[list].empty()) continue;
+		g_texts[discTitles[list]] = Text(c, discNames[list]);
+		g_texts[discAbouts[list]] = Text(c, discSays[list]);
+		g_disc_rows[list] = LevelRows(c, discTitles[list], (uint32_t)g_disc[list].size(), g_disc_row_count[list]);
+		if (!g_disc_rows[list]) return false;
+		for (size_t i = 0; i < g_disc[list].size(); ++i, ++text)
+		{
+			g_texts[text] = Text(c, g_disc[list][i].shown);
+			Row(g_disc_rows[list] + (kConflictHead + (uint32_t)i) * kRowSize, text, g_disc[list][i].hash, kMissionStart, kKindLevel);
+		}
+		items.push_back({ discTitles[list], discPages[list], discAbouts[list] });
+	}
+	if (!g_listed.empty())
+	{
+		g_texts[kTextMods] = Text(c, "Mods");
+		g_texts[kTextAbout] = Text(c, "Play the levels in the mods folder.");
+		for (size_t i = 0; i < g_listed.size(); ++i) g_texts[kTextLevel + (uint32_t)i] = Text(c, Shown(g_listed[i]->name));
+		g_mods_rows = LevelRows(c, kTextMods, (uint32_t)g_listed.size(), g_mods_row_count);
+		if (!g_mods_rows) return false;
+		for (uint32_t i = 0; i < (uint32_t)g_listed.size(); ++i) Row(g_mods_rows + (kConflictHead + i) * kRowSize, kTextLevel + i, g_listed[i]->hash, kMissionStart, kKindLevel);
+		items.push_back({ kTextMods, kModsPage, kTextAbout });
+	}
+	for (const auto& made : g_texts)
+		if (!made.second) return false;
+	if (g_mods_target != kModsPage && !items.empty()) items.back().page = g_mods_target;
 
 	for (int unused = 0; unused < 2; ++unused)
 	{
-		const uint32_t items = (unused ? kUnusedItemCount : kGameItemCount) + 1;
-		at = ListRows(c, items, ld32(kUnusedRows + kTitleRow * kRowSize), g_extras_rows[unused], g_extras_row_count[unused]);
+		const uint32_t game = unused ? kUnusedItemCount : kGameItemCount, count = game + (uint32_t)items.size();
+		const uint32_t at = ListRows(c, count, ld32(kUnusedRows + kTitleRow * kRowSize), g_extras_rows[unused], g_extras_row_count[unused]);
 		if (!at) return false;
-		CopyRows(at, kUnusedRows + kUnusedItems * kRowSize, items - 1);
-		Row(at + (items - 1) * kRowSize, kTextMods, g_mods_target, 0, kKindPage);
-		const uint32_t about = at + (items + 1) * kRowSize;
-		CopyRows(about, kUnusedRows + (kUnusedFoot + 1) * kRowSize, items - 1);
-		Row(about + (items - 1) * kRowSize, kTextAbout, 0, 0, kKindAbout);
+		CopyRows(at, kUnusedRows + kUnusedItems * kRowSize, game);
+		const uint32_t about = at + (count + 1) * kRowSize;
+		CopyRows(about, kUnusedRows + (kUnusedFoot + 1) * kRowSize, game);
+		for (uint32_t i = 0; i < (uint32_t)items.size(); ++i)
+		{
+			Row(at + (game + i) * kRowSize, items[i].text, items[i].page, 0, kKindPage);
+			Row(about + (game + i) * kRowSize, items[i].about, 0, 0, kKindAbout);
+		}
 	}
 	return true;
 }
@@ -546,9 +629,9 @@ void mods_menu_frame(PPCContext& c)
 	const uint32_t extras = FindPage(data, count, kExtrasPage);
 	if (!extras) return;
 
-	if (g_levels.empty() || g_failed)
+	if ((g_listed.empty() && g_disc[0].empty() && g_disc[1].empty()) || g_failed)
 	{
-		//no mods: the game's rows, or the code's
+		//nothing to add: the game's rows, or the code's
 		const bool unused = extras_menu();
 		const uint32_t rows = unused ? kUnusedRows : kExtrasRows;
 		const uint32_t have = ld32(extras + kPageRows);
@@ -558,33 +641,44 @@ void mods_menu_frame(PPCContext& c)
 		return;
 	}
 
-	if (!g_mods_rows && (!game_alloc || !Build(c)))
+	if (!g_built && (!game_alloc || !Build(c)))
 	{
 		g_failed = true;
-		rt_log("goldeneye: the Mods menu couldn't be made");
+		rt_log("goldeneye: the Extras menu's own pages couldn't be made");
 		return;
 	}
+	g_built = true;
 
-	if (!FindPage(data, count, kModsPage))
+	struct Own { uint32_t page, rows, count; };
+	const Own all[] = { { kLevelsPage, g_disc_rows[0], g_disc_row_count[0] }, { kMapsPage, g_disc_rows[1], g_disc_row_count[1] }, { kModsPage, g_mods_rows, g_mods_row_count } };
+	std::vector<Own> missing;
+	for (const Own& own : all)
+		if (own.rows && !FindPage(data, count, own.page)) missing.push_back(own);
+	uint32_t pages = count;
+	if (!missing.empty())
 	{
-		//one more page: the array in a new block, the game's old one is left as it is
-		const uint32_t fresh = Alloc(c, (count + 1) * kPageSize);
+		//more pages: the array in a new block, the game's old one is left as it is
+		pages = count + (uint32_t)missing.size();
+		const uint32_t fresh = Alloc(c, pages * kPageSize);
 		if (!fresh) return;
 		for (uint32_t i = 0; i < count * kPageSize; i += 4) st32(fresh + i, ld32(data + i));
-		const uint32_t page = fresh + count * kPageSize;
-		st32(page, kModsPage);
-		st32(page + kPageRows, g_mods_rows);
-		st32(page + kPageRowCount, g_mods_row_count);
-		st32(page + kPageClass, kLevelSelectClass);
+		for (size_t i = 0; i < missing.size(); ++i)
+		{
+			const uint32_t page = fresh + (count + (uint32_t)i) * kPageSize;
+			st32(page, missing[i].page);
+			st32(page + kPageRows, missing[i].rows);
+			st32(page + kPageRowCount, missing[i].count);
+			st32(page + kPageClass, kLevelSelectClass);
+		}
 		st32(kPages + kPagesData, fresh);
-		st32(kPages + kPagesCount, count + 1);
-		st32(kPages + kPagesRoom, count + 1);
+		st32(kPages + kPagesCount, pages);
+		st32(kPages + kPagesRoom, pages);
 		data = fresh;
-		rt_log("goldeneye: Extras has Mods: %zu level(s)", g_listed.size());
+		rt_log("goldeneye: Extras has Level Select: %zu level(s), Multiplayer Maps: %zu, Mods: %zu", g_disc[0].size(), g_disc[1].size(), g_listed.size());
 	}
 
 	const int unused = extras_menu() ? 1 : 0;
-	const uint32_t entry = FindPage(data, count + 1, kExtrasPage);
+	const uint32_t entry = FindPage(data, pages, kExtrasPage);
 	if (entry && ld32(entry + kPageRows) != g_extras_rows[unused])
 	{
 		st32(entry + kPageRows, g_extras_rows[unused]);
@@ -596,6 +690,7 @@ void install_mods_menu()
 {
 	g_levels = mod_levels();
 	ListLevels();
+	ListDisc();
 	game_alloc = ppc_lookup(kAlloc);
 	g_trace = std::getenv("GE_TRACE") != nullptr;
 	if (const char* e = std::getenv("GE_MODS_PAGE")) g_mods_target = (uint32_t)std::strtoul(e, nullptr, 16);
@@ -607,7 +702,7 @@ void install_mods_menu()
 		orig_session_export = ppc_hook("ge_session_export", SessionExport);
 		orig_find_query = ppc_hook("ge_find_query", FindQuery);
 	}
-	if (!g_levels.empty() && !game_alloc) rt_log("goldeneye: the game's allocator isn't in this build, no Mods menu");
+	if (!game_alloc) rt_log("goldeneye: the game's allocator isn't in this build, no Level Select and no Mods menu");
 }
 
 } //namespace ge

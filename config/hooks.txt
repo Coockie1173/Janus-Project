@@ -39,6 +39,10 @@ ge_save_write          # the save file is written: no "Saved" box to confirm for
 StartLevelChange       # a level is loaded: Restart Mission's opening gets skipped too (skip cutscenes)
 ge_frame_draw          # a frame's draw: the scene is left out of the frames a skip doesn't show
 ge_hud_update          # the hud's update: the level timer is shown outside time challenges too
+ge_hud_element_draw    # one of the hud's elements is drawn: not with the HUD option off (port/tweaks.cpp)
+ge_hud_text_draw       # one of the hud's texts is drawn: the same
+ge_waypoints_draw      # the objectives' marks and distances over the picture: the same
+Radar_Enemy_Name_FUN_8016b9b0 # the names over the people in the picture: the same
 ge_pad_confirmed       # a pad pressed select: the loading screen's "Continue" presses itself (auto start)
 ge_movie_start         # a movie is opened: one that plays once is over at once instead (skip movies)
 ge_show_tutorial       # a tutorial box is asked for: it isn't shown (no tutorials)
@@ -87,6 +91,7 @@ ge_find_query          # a search's query for the server is made: the same versi
 ge_object_step         # a physics object's step: one whose place isn't a number is left out (port/sweep.cpp)
 ge_halt                # the game's halt, a loop on itself: the game ends with a report (port/sweep.cpp)
 ge_camera_sway         # the camera's sway is two sines of the frame count: above 30 of the time in console frames (port/shake.cpp)
+ge_camera_shake        # the camera's shakes move the look-at point: scaled by Screen Shake (port/shake.cpp)
 _APPLYING_PATCH_       # the server's live patch is poked into memory: left out, recompiled code can't take it (port/net.cpp)
 bd_command_set_time    # a player's command gets the frame's time in whole milliseconds: what's cut off goes into the next (port/net.cpp)
 bd_interp_set_time     # a replica's blend time is set: a little more than the host's updates are apart (port/net.cpp)

@@ -87,6 +87,9 @@ void save_launch_settings() {
     std::snprintf(mouse_text, sizeof mouse_text, "%.2f", mouse_sens());
     std::snprintf(ads_fov_text, sizeof ads_fov_text, "%g", ads_fov());
     std::snprintf(ads_sens_text, sizeof ads_sens_text, "%.2f", ads_sens());
+    char shake_text[16], tank_text[32];
+    std::snprintf(shake_text, sizeof shake_text, "%g", shake_scale());
+    std::snprintf(tank_text, sizeof tank_text, "%d,%d,%d", tank_source(0), tank_source(1), tank_source(2));
     static const char* modes[] = {"auto", "direct", "stick"};
     std::vector<std::pair<std::string, std::string>> values = {
         {"LAUNCH_FOV", fov_text}, {"LAUNCH_MOUSE", mouse_text},
@@ -95,7 +98,9 @@ void save_launch_settings() {
         {"LAUNCH_MOUSEEVERYWHERE", mouse_everywhere() ? "1" : "0"},
         {"LAUNCH_SKIPCUTSCENES", skip_cutscenes() ? "1" : "0"}, {"LAUNCH_SKIPZUKOVSKY", skip_zukovsky() ? "1" : "0"}, {"LAUNCH_SKIPBRIGGS", skip_briggs() ? "1" : "0"}, {"LAUNCH_SKIPMOVIES", skip_movies() ? "1" : "0"}, {"LAUNCH_NOTUTORIALS", no_tutorials() ? "1" : "0"}, {"LAUNCH_NOCOLOURFILTER", no_colour_filter() ? "1" : "0"},
         {"LAUNCH_LEVELTIMER", level_timer() ? "1" : "0"}, {"LAUNCH_AUTOQTE", auto_qte() ? "1" : "0"}, {"LAUNCH_AUTOSTART", auto_start() ? "1" : "0"}, {"LAUNCH_AUTOSAVE", autosave() ? "1" : "0"}, {"LAUNCH_EXTRASMENU", extras_menu() ? "1" : "0"}, {"LAUNCH_UNLOCKALL", unlock_all() ? "1" : "0"}, {"LAUNCH_ONLINEUNLOCKS", online_unlocks() ? "1" : "0"}, {"LAUNCH_STAMINAMETER", stamina_meter() ? "1" : "0"},
-        {"LAUNCH_VSYNC", vsync() ? "1" : "0"}, {"LAUNCH_PING", show_ping() ? "1" : "0"}, {"LAUNCH_OCCLUSION", occlusion() ? "1" : "0"}, {"LAUNCH_SOUNDHEIGHT", sound_height() ? "1" : "0"}};
+        {"LAUNCH_VSYNC", vsync() ? "1" : "0"}, {"LAUNCH_PING", show_ping() ? "1" : "0"}, {"LAUNCH_OCCLUSION", occlusion() ? "1" : "0"}, {"LAUNCH_SOUNDHEIGHT", sound_height() ? "1" : "0"},
+        {"LAUNCH_HUD", hud() ? "1" : "0"}, {"LAUNCH_SHAKE", shake_text}, {"LAUNCH_TANKBUTTONS", tank_text},
+        {"LAUNCH_ANISO", std::to_string(anisotropy())}, {"LAUNCH_MSAA", std::to_string(anti_aliasing())}};
     if (g_fps_changed) values.push_back({"LAUNCH_FPS", std::to_string(fps_limit())}); //"auto" stays until it's changed
     auto lines = read_lines(GE_SETTINGS_FILE);
     if (lines.empty()) lines.push_back("# written by the launcher, read when the game is started");
@@ -233,6 +238,16 @@ int FpsStop(float fps) //the stop nearest to a rate
 const char* const kInputNames[] = {"Auto", "Pad", "Keyboard"};
 const char* const kFaceNames[] = {"Position", "Label"};
 const float kDeadZoneMax = 0.9f;
+const int kAnisotropies[] = {1, 2, 4, 8, 16}, kSampleCounts[] = {1, 2, 4, 8};
+template <class T, size_t N> int NearestOf(const T (&values)[N], T value) //which of them a value is, or is next to
+{
+	int best = 0;
+	for (size_t i = 1; i < N; ++i)
+	{
+		if (std::fabs((float)(values[i] - value)) < std::fabs((float)(values[best] - value))) best = (int)i;
+	}
+	return best;
+}
 KeyFile& Keys() //a hotkey can get here before the menu was ever opened
 {
 	if (g_keys.lines.empty()) load_keys();
@@ -336,6 +351,16 @@ void BuildSettings()
 	fps.frac = [](float v) { return (float)FpsStop(v) / (float)(kFpsStopCount - 1); };
 	fps.at = [](float f) { return (float)kFpsStops[std::clamp((int)std::lround(f * (float)(kFpsStopCount - 1)), 0, kFpsStopCount - 1)]; };
 	AddToggle(kScreen, "vsync", "VSync", "On: frames wait for the screen's refresh, so the picture doesn't tear. The game runs at the screen's rate at most.", vsync, set_vsync);
+	AddChoice(kScreen, "anisotropy", "Anisotropic Filtering", "Keeps textures sharp on floors and walls seen at a slant. Off is the console's picture.",
+		{"Off", "2x", "4x", "8x", "16x"}, [] { return NearestOf(kAnisotropies, anisotropy()); },
+		[](int v) { set_anisotropy(kAnisotropies[v]); g_dirty = true; });
+	AddChoice(kScreen, "anti_aliasing", "Anti-Aliasing", "Smooths the edges of everything drawn, with that many samples a pixel. Costs the graphics card more the higher it is.",
+		{"Off", "2x MSAA", "4x MSAA", "8x MSAA"}, [] { return NearestOf(kSampleCounts, anti_aliasing()); },
+		[](int v) { set_anti_aliasing(kSampleCounts[v]); g_dirty = true; });
+	Setting& shake = AddRange(kScreen, "screen_shake", "Screen Shake", "How much the view shakes: from explosions, on Nightclub's dance floor and the like. 1.0 is the game's own.",
+		shake_scale, [](float v) { set_shake_scale(v); g_dirty = true; }, 0, kShakeMax, 0.1f, 1);
+	shake.show = [show = shake.show](float v) { return v > 0 ? show(v) + "x" : std::string("Off"); };
+	AddToggle(kScreen, "hud", "HUD", "Off: no crosshair, radar, health, ammunition or prompts, as in the game's cutscenes.", hud, set_hud);
 	AddToggle(kScreen, "show_ping", "Show Ping", "On: in a game through Connect to WFC Modded the scoreboard has every player's ping next to their name.", show_ping, set_show_ping);
 
 	Setting& sens = AddRange(kControls, "mouse_sens", "Mouse Sensitivity", "How far the view turns for the mouse's motion. Off leaves the mouse free.",
@@ -367,6 +392,14 @@ void BuildSettings()
 	Setting& deadZone = AddRange(kControls, "dead_zone", "Stick Dead Zone", "How far a gamepad's sticks move before they count.",
 		dead_zone, set_dead_zone, 0, kDeadZoneMax, 0.01f, 2);
 	deadZone.show = [](float v) { return std::to_string((int)std::lround(v * 100)) + "%"; };
+	std::vector<const char*> tankSources;
+	for (int i = 0; i < kTankSourceCount; ++i) tankSources.push_back(tank_source_label(i));
+	static const char* const kTankIds[kTankActionCount] = {"tank_machine_gun", "tank_cannon", "tank_lock_on"};
+	for (int i = 0; i < kTankActionCount; ++i)
+	{
+		AddChoice(kControls, kTankIds[i], tank_action_label(i), (std::string(tank_action_hint(i)) + " Picked by what the button does on foot.").c_str(),
+			tankSources, [i] { return tank_source(i); }, [i](int v) { set_tank_source(i, v); g_dirty = true; });
+	}
 
 	AddToggle(kEnhancements, "skip_cutscenes", "Skip Intro Cutscenes (Experimental)", "On: a mission's opening cutscene is skipped.", skip_cutscenes, set_skip_cutscenes);
 	AddToggle(kEnhancements, "skip_zukovsky", "Skip Zukovsky (Experimental)", "On: the meeting with Zukovsky in Nightclub is skipped.", skip_zukovsky, set_skip_zukovsky);
@@ -576,7 +609,7 @@ void build_pages() {
     g_pages.resize(kPageCount);
     Page& root = g_pages[kRoot];
     root.title = "Settings";
-    root.rows.push_back({"Screen Settings", "Adjust the field of view.", {}, {}, [] { go(kScreen); }});
+    root.rows.push_back({"Screen Settings", "Adjust the field of view, the frame rate and the picture.", {}, {}, [] { go(kScreen); }});
     root.rows.push_back({"Control Settings", "Adjust the mouse and the gamepad.", {}, {}, [] { go(kControls); }});
     root.rows.push_back({"Key Bindings", "Choose the keys and mouse buttons for each action.", {}, {}, [] { go(kBindings); }});
     root.rows.push_back({"Hotkeys", "Keys that change a setting while you play.", {}, {}, [] { go(kHotkeys); }});
@@ -588,10 +621,14 @@ void build_pages() {
 
     Page& screen = g_pages[kScreen];
     screen.title = "Screen Settings";
-    screen.rows.push_back({"Restore Defaults", "Back to the game's own fields of view, and 60 frames a second.", {}, {}, [] {
+    screen.rows.push_back({"Restore Defaults", "Back to the game's own fields of view and picture, and 60 frames a second.", {}, {}, [] {
         set_fov(kGameFov);
         set_ads_fov(kGameAdsFov);
         set_fps_limit(60);
+        set_anisotropy(1);
+        set_anti_aliasing(1);
+        set_shake_scale(1.0f);
+        set_hud(true);
         g_fps_changed = g_dirty = true;
     }});
 
@@ -603,6 +640,7 @@ void build_pages() {
         set_aim_lock(false);
         set_mouse_invert(false);
         set_mouse_mode(0);
+        for (int i = 0; i < kTankActionCount; ++i) set_tank_source(i, i);
         Keys().set("Input", "Auto");
         g_keys.set("Face Buttons", "Position");
         g_keys.set("Dead Zone", "0.15");
@@ -1151,6 +1189,24 @@ void pad_down(int button) {
 #endif
 
 } //namespace
+
+std::string saved_setting(const char* env, const char* name)
+{
+	if (const char* e = std::getenv(env)) return e;
+	const char* use = std::getenv("GE_SAVED_SETTINGS"); //0: only the environment's, for a run that has to be the same every time
+	if (use && std::atoi(use) == 0) return {};
+	std::ifstream file(GE_SETTINGS_FILE);
+	const std::string key = std::string(name) + "=";
+	for (std::string line; std::getline(file, line);)
+	{
+		if (line.compare(0, key.size(), key) != 0) continue;
+		std::string value = line.substr(key.size());
+		while (!value.empty() && (value.back() == '\r' || value.back() == ' ')) value.pop_back();
+		if (value.size() >= 2 && value.front() == '"' && value.back() == '"') value = value.substr(1, value.size() - 2);
+		return value;
+	}
+	return {};
+}
 
 void settings_say(const std::string& text)
 {

@@ -150,11 +150,14 @@ do several things.
 
 ## Feature requests
 
-- [ ] Options to remap the tank controls (shooting, aiming, locking on)
-- [ ] A menu option to load any map, the unused ones too
-- [ ] Options for anisotropic filtering and anti-aliasing, if possible
-- [ ] An option to halve screen shake or turn it off
-- [ ] An option to turn the HUD off
+- [x] Options to remap the tank controls: F1 > Control Settings has the machine gun, the cannon and the
+      lock on, each on the button of an action on foot (pressed by script, not played by hand)
+- [x] A menu option to load any map, the unused ones too: Extras > Level Select and Extras > Multiplayer Maps
+      (not every unused level loads, see docs/STATUS.md)
+- [x] Options for anisotropic filtering and anti-aliasing: F1 > Screen Settings, up to 16x and 8x MSAA
+- [x] An option to halve screen shake or turn it off: F1 > Screen Settings > Screen Shake, a slider from off to 5x (measured on the
+      sway, explosions not seen)
+- [x] An option to turn the HUD off: F1 > Screen Settings > HUD
 - [ ] A speedrun timer for the whole game: resets to 0 when Dam starts, ends when input is lost at the
       end of Cradle after killing Trevelyan, adds up the in-game times so loading screens don't count
 

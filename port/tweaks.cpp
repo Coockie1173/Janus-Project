@@ -31,6 +31,22 @@
 //Kill, Team License to Kill and Classic Conflict under level 25, 30 and 35 by itself, their
 //rows' bytes are cleared after the menu's update
 //
+//hud (on by default): the hud's draw (ge_hud_update) hides nearly all of itself when the level's
+//flags (+0x198 of the object 805D5474 points to) have bit 4, which the game sets for a
+//cutscene: the elements' shown bits and the texts' shown bytes are cleared before they are
+//drawn. with the option off the bit is set for that call and put back after, so nothing else
+//the bit means happens
+//that leaves what the draw shows whatever the bit says (the tank's reticle and its targets'
+//names), so for the same call the two functions everything of the hud is drawn with,
+//ge_hud_element_draw and ge_hud_text_draw, do nothing either. the fades the hud draws over
+//the picture are neither and stay
+//the player's own view draws two more things over the world itself: the objectives' marks
+//with their distances (ge_waypoints_draw) and the names over people (the function the
+//symbols call Radar_Enemy_Name). those are left out as long as the hud's last draw was
+//the hud is drawn all the same while a tutorial box is up (the game stands still until its
+//button) and while a quick time event waits for a button
+//
+//GE_HUD=0 no hud
 //GE_LEVEL_TIMER=0 no level timer
 //GE_ONLINE_UNLOCKS=0 the loadouts' items and the game modes open at their levels
 //GE_AUTO_START=1 a loaded mission starts by itself
@@ -41,6 +57,7 @@
 #include "ge.h"
 #include <atomic>
 #include <cstdlib>
+#include <string>
 
 namespace ge
 {
@@ -64,6 +81,12 @@ MenuWrite g_unlock_writes[] = {
 	{kProgress + 0x48, 4, kAll, 0}, {kProgress + 0x4C, 4, kAll, 0}};
 
 std::atomic<bool> g_level_timer{true};
+std::atomic<bool> g_hud{true};
+const uint32_t kLevelFlagsPtr = 0x805D5474, kLevelFlags = 0x198, kFlagNoHud = 4;
+const uint32_t kHudTutorialUp = 0x2523; //a byte of the hud, a tutorial box is shown
+bool g_hud_hidden = false; //inside the hud's draw with the option off
+bool g_hud_was_hidden = false; //the hud's last draw was one
+PPCFunc orig_element_draw = nullptr, orig_text_draw = nullptr, orig_waypoints_draw = nullptr, orig_names_draw = nullptr;
 std::atomic<bool> g_extras_menu{false};
 std::atomic<bool> g_unlock_all{false};
 std::atomic<bool> g_auto_start{false};
@@ -113,7 +136,7 @@ void Keep(MenuWrite (&writes)[N], bool on, bool& written)
 	}
 }
 
-void HudUpdate(PPCContext& c)
+void HudDraw(PPCContext& c)
 {
 	if (!g_level_timer)
 	{
@@ -127,6 +150,44 @@ void HudUpdate(PPCContext& c)
 	orig_hud_update(c);
 	st8(kDisplayLevelTimer, shown);
 	st32(kMaxTimeChallenge, limit);
+}
+
+void HudUpdate(PPCContext& c)
+{
+	uint32_t hud = c.r[3], level = ld32(kLevelFlagsPtr);
+	if (g_hud || !guest_ptr(hud) || ld8(hud + kHudTutorialUp) || cutscene_input_waiting())
+	{
+		g_hud_was_hidden = false;
+		HudDraw(c);
+		return;
+	}
+	g_hud_was_hidden = true;
+	bool set = guest_ptr(level) && !(ld32(level + kLevelFlags) & kFlagNoHud);
+	if (set) st32(level + kLevelFlags, ld32(level + kLevelFlags) | kFlagNoHud);
+	g_hud_hidden = true;
+	HudDraw(c);
+	g_hud_hidden = false;
+	if (set && ld32(kLevelFlagsPtr) == level) st32(level + kLevelFlags, ld32(level + kLevelFlags) & ~kFlagNoHud);
+}
+
+void HudElementDraw(PPCContext& c)
+{
+	if (!g_hud_hidden) orig_element_draw(c);
+}
+
+void HudTextDraw(PPCContext& c)
+{
+	if (!g_hud_hidden) orig_text_draw(c);
+}
+
+void WaypointsDraw(PPCContext& c)
+{
+	if (g_hud || !g_hud_was_hidden) orig_waypoints_draw(c);
+}
+
+void NamesDraw(PPCContext& c)
+{
+	if (g_hud || !g_hud_was_hidden) orig_names_draw(c);
 }
 
 //(front end, pad) -> the pad pressed select
@@ -174,6 +235,8 @@ void MenuLocks(PPCContext& c)
 
 bool level_timer() { return g_level_timer; }
 void set_level_timer(bool on) { g_level_timer = on; }
+bool hud() { return g_hud; }
+void set_hud(bool on) { g_hud = on; }
 bool extras_menu() { return g_extras_menu; }
 void set_extras_menu(bool on) { g_extras_menu = on; }
 bool unlock_all() { return g_unlock_all; }
@@ -193,6 +256,7 @@ void tweaks_apply()
 void install_tweaks()
 {
 	if (const char* e = std::getenv("GE_LEVEL_TIMER")) g_level_timer = std::atoi(e) != 0;
+	if (std::string saved = saved_setting("GE_HUD", "LAUNCH_HUD"); !saved.empty()) g_hud = std::atoi(saved.c_str()) != 0;
 	if (const char* e = std::getenv("GE_EXTRAS_MENU")) g_extras_menu = std::atoi(e) != 0;
 	if (const char* e = std::getenv("GE_UNLOCK_ALL")) g_unlock_all = std::atoi(e) != 0;
 	if (const char* e = std::getenv("GE_AUTO_START")) g_auto_start = std::atoi(e) != 0;
@@ -201,6 +265,11 @@ void install_tweaks()
 	g_trace = std::getenv("GE_TRACE") != nullptr;
 	orig_hud_update = ppc_hook("ge_hud_update", HudUpdate);
 	if (!orig_hud_update) rt_die("goldeneye: the hud's update is not hooked in this build");
+	orig_element_draw = ppc_hook("ge_hud_element_draw", HudElementDraw);
+	orig_text_draw = ppc_hook("ge_hud_text_draw", HudTextDraw);
+	orig_waypoints_draw = ppc_hook("ge_waypoints_draw", WaypointsDraw);
+	orig_names_draw = ppc_hook("Radar_Enemy_Name_FUN_8016b9b0", NamesDraw);
+	if (!orig_element_draw || !orig_text_draw || !orig_waypoints_draw || !orig_names_draw) rt_log("goldeneye: the hud's draws are not hooked in this build, the HUD option leaves some of it");
 	orig_pad_confirmed = ppc_hook("ge_pad_confirmed", PadConfirmed);
 	if (!orig_pad_confirmed) rt_die("goldeneye: the loading screen's button is not hooked in this build");
 	orig_show_tutorial = ppc_hook("ge_show_tutorial", ShowTutorial);
