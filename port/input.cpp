@@ -763,7 +763,11 @@ void look_settings(PPCContext& c) {
         if (ldf(at) > 0) stf(at, kStickSens);
 }
 
+//the wii's home button menu (wii menu, reset) has no place here: the button never reaches the game
+const uint32_t kClHome = 0x0800;
+
 void classic_filter(int chan, ClassicState& s) {
+    s.buttons &= ~kClHome;
     if (chan != 0) return;
     s.buttons |= settings_buttons();
     mouse_stick(s);

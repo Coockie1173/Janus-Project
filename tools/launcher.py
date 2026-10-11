@@ -50,7 +50,7 @@ ACTIONS = [
     ("Cycle grenades", "X"), ("Next weapon", "Right"), ("Previous weapon", "Left"),
     ("Weapon 1", "Extra 3"), ("Weapon 2", "Extra 4"), ("Weapon 3", "Extra 5"),
     ("Firing mode", "Up"), ("Smartphone", "Down"), ("Night vision / scoreboard", "Minus"),
-    ("Pause", "Plus"), ("Home menu", "Home"),
+    ("Pause", "Plus"),
     ("Move forward", "Left Stick Up"), ("Move back", "Left Stick Down"),
     ("Move left", "Left Stick Left"), ("Move right", "Left Stick Right"),
 ]
