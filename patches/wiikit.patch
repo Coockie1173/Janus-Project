@@ -4018,7 +4018,7 @@ index 8a4e097..8b1b1a8 100644
  void ppc_mmio_write(uint32_t addr, uint32_t, int) { rt_die("mmio write %08X", addr); }
  uint64_t ppc_timebase() { return 0; }
 diff --git a/runtime/video.cpp b/runtime/video.cpp
-index 5726093..acee419 100644
+index 5726093..cb3dc5c 100644
 --- a/runtime/video.cpp
 +++ b/runtime/video.cpp
 @@ -67,7 +67,8 @@ ClassicState classic[4];
@@ -4397,10 +4397,7 @@ index 5726093..acee419 100644
 +        draw_state = ds;
 +        gl_state_stale = false;
 +    }
- 
--    int offx = s10(bp[0x59]) * 2, offy = s10(bp[0x59] >> 10) * 2;
--    float wd = std::fabs(fx(0x101A)), ht = std::fabs(fx(0x101B));
--    glViewportIndexedf(0, (fx(0x101D) - wd - (float)offx) * (float)S, (fx(0x101E) - ht - (float)offy) * (float)S,
++
 +    // room for all the blocks in this quarter of the ring, or on to the next
 +    const size_t q = ubo_off / UBO_QUARTER;
 +    if ((ubo_off + 8192) / UBO_QUARTER != q) {
@@ -4599,7 +4596,10 @@ index 5726093..acee419 100644
 +        }
 +    }
 +}
-+
+ 
+-    int offx = s10(bp[0x59]) * 2, offy = s10(bp[0x59] >> 10) * 2;
+-    float wd = std::fabs(fx(0x101A)), ht = std::fabs(fx(0x101B));
+-    glViewportIndexedf(0, (fx(0x101D) - wd - (float)offx) * (float)S, (fx(0x101E) - ht - (float)offy) * (float)S,
 +// ---- a port's debug scene -------------------------------------------------------------------------
 +// While its view is on, the game's perspective draws are left out, and the
 +// scene is drawn once in their place: before the first draw without
@@ -5421,15 +5421,21 @@ index 5726093..acee419 100644
  void video_retrace() {
      retraces.fetch_add(1);
      if (wake) SDL_SignalSemaphore(wake);
-@@ -1499,6 +2164,7 @@ void video_run(const char* title) {
+@@ -1499,13 +2164,21 @@ void video_run(const char* title) {
      int w0 = opt.window_w ? opt.window_w : (opt.widescreen ? 1280 : 960), h0 = opt.window_h ? opt.window_h : 720;
      SDL_WindowFlags wflags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE;
      if (opt.fullscreen) wflags |= SDL_WINDOW_FULLSCREEN;
 +    if (std::getenv("WIIKIT_HIDDEN")) wflags |= SDL_WINDOW_HIDDEN;   // unattended runs: drawn and dumped, never shown
      win = SDL_CreateWindow(title, w0, h0, wflags);
      if (!win) rt_die("video: SDL_CreateWindow: %s", SDL_GetError());
++    // the window keeps the screen's shape as it is dragged larger or smaller,
++    // so the picture fills it: no bars. --window with another shape is left alone
++    if (!opt.window_w && !opt.window_h) {
++        float aspect = opt.widescreen ? 16.0f / 9 : 4.0f / 3;
++        if (!SDL_SetWindowAspectRatio(win, aspect, aspect)) rt_log("video: the window's shape isn't kept: %s", SDL_GetError());
++    }
      SDL_GLContext ctx = SDL_GL_CreateContext(win);
-@@ -1506,6 +2172,7 @@ void video_run(const char* title) {
+     if (!ctx) rt_die("video: no OpenGL 4.5 context: %s", SDL_GetError());
      SDL_GL_MakeCurrent(win, ctx);
      SDL_GL_SetSwapInterval(0);                   // VI paces the presents
      if (!gl_load()) rt_die("video: OpenGL functions missing");
@@ -5437,7 +5443,7 @@ index 5726093..acee419 100644
      rt_log("video: %s, %s", (const char*)glGetString(GL_RENDERER), (const char*)glGetString(GL_VERSION));
      if (debug) {
          glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
-@@ -1529,11 +2196,15 @@ void video_run(const char* title) {
+@@ -1529,11 +2202,15 @@ void video_run(const char* title) {
      uint64_t frames_then = 0;
      uint32_t seen = retraces.load();
      std::string base_title = title;
@@ -5453,7 +5459,7 @@ index 5726093..acee419 100644
              if (e.type == SDL_EVENT_GAMEPAD_ADDED) pad_added(e.gdevice.which);
              if (e.type == SDL_EVENT_GAMEPAD_REMOVED) pad_removed(e.gdevice.which);
              // F11 or Alt+Enter: fullscreen and back
-@@ -1560,6 +2231,15 @@ void video_run(const char* title) {
+@@ -1560,6 +2237,15 @@ void video_run(const char* title) {
              }
          }
          auto now = Clock::now();
@@ -5469,7 +5475,7 @@ index 5726093..acee419 100644
          if (opt.quit_after > 0 && std::chrono::duration<double>(now - t0).count() > opt.quit_after) quit = true;
          if (quit) {
              rt_log("video: %llu frames, %llu presents, %llu draws, %llu programs (%llu linked, %llu from the shader cache)",
-@@ -1592,7 +2272,14 @@ void video_run(const char* title) {
+@@ -1592,7 +2278,14 @@ void video_run(const char* title) {
                  double vtx = ms(g_vperf.vtx), tex = ms(g_vperf.tex), wait = ms(g_vperf.wait), draw = ms(g_vperf.draw),
                         pres = ms(g_vperf.present);
                  rt_log("perf: %.1f fps; frame %.1f ms; game thread: vertices %.1f, textures %.1f, waiting for the renderer %.1f; "
@@ -5485,7 +5491,7 @@ index 5726093..acee419 100644
              }
              frames_then = cnt.frames;
              t_title = now;
-@@ -1608,6 +2295,8 @@ void video_run(const char* title) {
+@@ -1608,6 +2301,8 @@ void video_run(const char* title) {
              }
              if (c.readback) { if (c.copy) copy_readback(c.copy); else efb_readback(); busy = true; continue; }
              auto te = Clock::now();
@@ -5494,7 +5500,7 @@ index 5726093..acee419 100644
              exec(c.data);
              if (g_vperf_on) g_vperf.draw += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - te).count();
              {
-@@ -1621,8 +2310,25 @@ void video_run(const char* title) {
+@@ -1621,8 +2316,25 @@ void video_run(const char* title) {
              if (retraces.load() != seen) break;
          }
          uint32_t r = retraces.load();
