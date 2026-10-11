@@ -24,7 +24,8 @@
 //
 //a sound within kOwn of the listener is its own. one with a range past kFarthest (music, the
 //menus) or one that isn't placed in the world (the byte at +0x40: bit 7 placed, bit 6 no
-//direction) is left alone
+//direction) is left alone. in a cutscene (the player's state 0x22) every sound is: it's mixed
+//for the cutscene's camera, not for where the player stands
 //
 //GE_SOUND_HEIGHT=0 the game's own
 //GE_SOUND_HEIGHT_FORCE=1 or -1 everything in the world counts as fully above or below, to hear what it does
@@ -80,7 +81,7 @@ void Pan(PPCContext& c)
 {
 	const uint32_t sound = c.r[3], place = c.r[4], values = c.r[5];
 	orig_pan(c);
-	if (!g_on || !in_play()) return;
+	if (!g_on || !in_play() || local_in_cutscene()) return;
 	if ((ld8(sound + kSoundFlags) & (kPlaced | kNoDirection)) != kPlaced) return;
 	const float far = ldf(sound + kSoundFar);
 	if (!(far > 0.0f) || far > kFarthest) return;

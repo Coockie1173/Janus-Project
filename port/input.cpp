@@ -173,6 +173,12 @@ bool local_cutscene_locked() {
     return ld32(ctrl + kCutsceneLook) == 0 && !(ld8(ctrl + kCutsceneAim) != 0 && ld8(ctrl + kAimOn) != 0);
 }
 
+//the player is an actor in a cutscene, with or without the view or the aim
+bool local_in_cutscene() {
+    uint32_t ctrl = local_controller();
+    return ctrl && ld32(ctrl + kPlayerState) == kStateCutscene;
+}
+
 enum Look { kLookLocked, kLookView, kLookAim, kLookForced };
 Look look_mode(uint32_t ctrl) {
     uint32_t st = ld32(ctrl + kPlayerState);

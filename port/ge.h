@@ -94,6 +94,7 @@ void set_mouse_mode(int m);
 uint32_t local_controller(); //0 when there's none (menus, loading)
 bool local_player_state(uint32_t& state); //the controller's +0x704 for the local player
 bool local_cutscene_locked(); //state 0x22 with the view and the aim both the cutscene's
+bool local_in_cutscene(); //state 0x22, whatever the cutscene leaves the player
 bool mouse_invert();
 void set_mouse_invert(bool on);
 const float kAdsSensMin = 0.05f, kAdsSensMax = 2.0f;
