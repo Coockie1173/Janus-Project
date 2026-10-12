@@ -104,3 +104,5 @@ ge_player_read         # and read: the ping behind it
 MIXInitChannel         # a new sound's mixer channel is made: silent, not at 0 dB, so it doesn't click when its voice runs a frame later (port/sound.cpp)
 ge_sound_update        # a playing sound is updated: one the level is in the way of is made quieter for that update (port/occlusion.cpp)
 ge_sound_pan           # a voice's pan is worked out from where its sound is: one above the listener gets the high-pass, one below the low-pass (port/height.cpp)
+PlayerCamera?          # the angle the player's view is drawn with is worked out: the Aim Field of View right after, so a cutscene's camera has it too (port/fov.cpp)
+ge_aim_snap            # the aim snap's update: a moving mouse lets go of it as a pushed stick does (port/input.cpp)

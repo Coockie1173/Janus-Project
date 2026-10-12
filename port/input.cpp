@@ -226,11 +226,42 @@ void mouse_aim(uint32_t ctrl) {
     bool narrow = (ld32(ctrl + kStateFlags) & 0x80) != 0, cutscene = ld8(ctrl + kInCutscene) != 0;
     for (int i = 0; i < 4; ++i)
         lim[i] = kRadPerDegree * (narrow ? ldf(kAimLimitsNarrow + 4 * i) : cutscene ? ldf(ctrl + kAimLimits + 4 * i) : ldf(kAimLimitsPlay + 4 * i));
-    float pitch = ldf(ctrl + kAimPitch) + dy * kRadPerPixel * g_mouse_sens;
-    float yaw = ldf(ctrl + kAimYaw) + dx * kRadPerPixel * g_mouse_sens;
+    float sens = g_mouse_sens * aim_sens_scale(ctrl); //aimed down the sight in there (the motorbike, the truck) it zooms as on foot
+    float pitch = ldf(ctrl + kAimPitch) + dy * kRadPerPixel * sens;
+    float yaw = ldf(ctrl + kAimYaw) + dx * kRadPerPixel * sens;
     if (!std::isfinite(pitch) || !std::isfinite(yaw) || !(lim[0] <= lim[1]) || !(lim[2] <= lim[3])) return;
     stf(ctrl + kAimPitch, std::clamp(pitch, lim[0], lim[1]));
     stf(ctrl + kAimYaw, std::clamp(yaw, lim[2], lim[3]));
+}
+
+//the aim snap. with aim pressed the game holds the view where it is, or on someone near the
+//middle, while the gun comes up: ge_aim_snap (80162B70) sets the byte at +0xD25 and fn_80163340,
+//late in the controller's update, turns the yaw back to that point every frame. what lets go
+//with nobody to snap to is a stick: the move stick's size (+0x564) or the look stick (+0x518
+//across, +0x51C up and down) past 0.01, so on a console a push of the stick has the view at once
+//the mouse isn't on the stick: standing still nothing let go, and the view was locked until
+//the gun was up. for that call a moving mouse is the look stick pushed its way
+//"moving" is within the last tenth of a second, at a high frame rate a slow mouse has frames without a step
+const uint32_t kLookStickX = 0x518;
+const float kSnapStick = 0.02f; //past the game's 0.01
+const auto kMouseStill = std::chrono::milliseconds(100);
+std::chrono::steady_clock::time_point g_mouse_moved{}; //when the mouse last turned the view
+float g_mouse_way = 1; //and which way across
+PPCFunc orig_aim_snap = nullptr;
+
+void mouse_moved(float dx) {
+    g_mouse_moved = std::chrono::steady_clock::now();
+    if (dx != 0) g_mouse_way = dx;
+}
+
+void aim_snap(PPCContext& c) {
+    uint32_t ctrl = c.r[3];
+    bool moving = ctrl == g_local_ctrl && ld32(kFrameCount) == g_local_frame && std::chrono::steady_clock::now() - g_mouse_moved < kMouseStill;
+    if (!moving || std::fabs(ldf(ctrl + kLookStickX)) > kSnapStick) { orig_aim_snap(c); return; }
+    uint32_t stick = ld32(ctrl + kLookStickX);
+    stf(ctrl + kLookStickX, std::copysign(kSnapStick, g_mouse_way));
+    orig_aim_snap(c);
+    st32(ctrl + kLookStickX, stick);
 }
 
 void mouse_look(uint32_t ctrl, uint32_t player) {
@@ -239,6 +270,7 @@ void mouse_look(uint32_t ctrl, uint32_t player) {
     debug_mouse(dx, dy);
     if (g_mouse_invert) dy = -dy;
     if (dx == 0 && dy == 0) return;
+    mouse_moved(dx);
     static uint32_t seen = 0;
     if (player != seen && std::getenv("GE_TRACE")) {
         uint32_t v = ld32(player + 0x16C);
@@ -321,6 +353,7 @@ void net_command_look(uint32_t cmd, bool first) {
             video_take_mouse_motion(dx, dy);
             debug_mouse(dx, dy);
             if (g_mouse_invert) dy = -dy;
+            if (dx != 0 || dy != 0) mouse_moved(dx);
             float sens = g_mouse_sens * aim_sens_scale(ctrl);
             left_yaw += dx * kRadPerPixel * sens;
             left_pitch += dy * kRadPerPixel * sens;
@@ -554,7 +587,6 @@ void controller_update(PPCContext& c) {
     orig_controller_update(c);
     if (!again && guest_ptr(player)) net_trace_controller(ctrl, player, ctrl == g_local_ctrl);
     if (ctrl == g_local_ctrl && frame == g_local_frame && !again && !is_tank(ctrl)) { //a tank has other things where the aim's blend is
-        ads_fov_apply(ctrl);
         aim_lock_frame(ctrl);
         noclip_apply(ctrl);
         stamina_apply(ctrl);
@@ -625,7 +657,7 @@ void wheel_buttons(ClassicState& s) {
 
 
 //aim lock: a press of aim stays aimed until the next one, to the game it's held all along
-//a menu, a pause or a state the game has the view in (death, a cutscene, a vault) lets go of it
+//a menu, a pause or a state the game has the view and the aim in (death, a cutscene, a vault) lets go of it
 //and so does whatever takes the gun down with aim still held: the game lowers it for a change of
 //weapon (+0xC97, the item being changed to, isn't +0xC96, the one in the hand) and for anything
 //else the blend at +0xD10 falls after it had gone up. held, the gun would come back up after
@@ -641,12 +673,15 @@ void aim_lock_frame(uint32_t ctrl) {
     float blend = aim_blend(ctrl);
     uint32_t hand = ld8(ctrl + kItemInHand), next = ld8(ctrl + kItemNext);
     if (trace) {
-        static uint32_t said[5] = {~0u};
-        uint32_t now[5] = {ld32(ctrl + kPlayerState), ld32(ctrl + kAimBlend), hand, next, locked};
+        static uint32_t said[8] = {~0u};
+        uint32_t now[8] = {ld32(ctrl + kPlayerState), ld32(ctrl + kAimBlend), hand, next, locked, ld32(ctrl + kAimYaw), ld32(ctrl + kAimPitch),
+                           (uint32_t)ld8(ctrl + 0xD25) << 8 | ld8(ctrl + 0xD53)};
+        uint32_t player = ld32(ctrl + 4), view = guest_ptr(player) ? ld32(player + 0x16C) : 0;
         if (std::memcmp(now, said, sizeof now)) {
             std::memcpy(said, now, sizeof now);
-            rt_log("aim: frame %u state %X blend %.3f hand %02X next %02X held %d lock %d items %u, drawn at %.1f degrees", ld32(kFrameCount), now[0], blend, hand, next,
-                   ld8(ctrl + 0xD00), (int)locked, ld32(ctrl + 0xC48), ldf(ctrl + 0x71C));
+            rt_log("aim: frame %u state %X blend %.3f hand %02X next %02X held %d lock %d items %u, drawn at %.1f degrees, aim %.4f across, %.4f up and down, yaw %.4f pitch %.4f, snap %d %d by %.2f", ld32(kFrameCount), now[0], blend, hand, next,
+                   ld8(ctrl + 0xD00), (int)locked, ld32(ctrl + 0xC48), ldf(ctrl + 0x71C), ldf(ctrl + kAimYaw), ldf(ctrl + kAimPitch),
+                   guest_ptr(player) ? ldf(player + 0xDC) : 0.0f, guest_ptr(view) ? ldf(view + 0x768) : 0.0f, ld8(ctrl + 0xD25), ld8(ctrl + 0xD53), ldf(ctrl + 0xD48));
         }
     }
     if (!locked || !was_locked) rose = false;
@@ -666,7 +701,8 @@ void aim_lock_buttons(ClassicState& s) {
     bool down = (s.buttons & kClZL) != 0, pressed = down && !was_down;
     was_down = down;
     uint32_t state = 0;
-    bool free = local_player_state(state) && (state == 0 || state == 2 || state == 3 || state == 4);
+    Look look = local_player_state(state) ? look_mode(g_local_ctrl) : kLookLocked;
+    bool free = look == kLookView || look == kLookAim; //on foot, or a cutscene that leaves the look or the aim (Airfield's motorbike)
     static bool was_sprint = false;
     bool sprint = g_sprint_key && !was_sprint; //the game won't sprint with aim held, so the sprint key lets go too
     was_sprint = g_sprint_key;
@@ -841,6 +877,8 @@ void install_mouse() {
     if (!orig_look_sens[0] || !orig_look_sens[1]) rt_die("goldeneye: the sensitivity readers are not hooked in this build");
     orig_look_settings = ppc_hook("ge_look_settings", look_settings);
     if (!orig_look_settings) rt_die("goldeneye: the look settings are not hooked in this build");
+    orig_aim_snap = ppc_hook("ge_aim_snap", aim_snap);
+    if (!orig_aim_snap) rt_die("goldeneye: the aim snap is not hooked in this build");
     orig_player_modifiers = ppc_hook("ge_player_modifiers", player_modifiers);
     if (!orig_player_modifiers) rt_die("goldeneye: the pitch limit's other reader is not hooked in this build");
     orig_sprint[0] = ppc_hook("ge_sprint_update", sprint_read<0>);

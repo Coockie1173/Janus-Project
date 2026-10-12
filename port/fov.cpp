@@ -30,22 +30,24 @@ float fov() { return g_fov > 0 ? g_fov.load() : kGameFov; }
 void set_fov(float degrees) { g_fov = degrees == kGameFov ? 0 : std::clamp(degrees, kFovMin, kFovMax); }
 
 //aiming down the sight: the controller keeps the angle the view is drawn with at +0x71C
-//(+0x720 holds the same), worked out again every update as
-//    the view's angle + (the weapon's aimed angle - the view's angle) * the aim blend
-//with the blend (+0xD10) of the update before. the P99's aimed angle is 22.5
+//(+0x720 holds the same), worked out by PlayerCamera (80137690) every update as
+//    the view's angle + (the weapon's aimed angle - the view's angle) * the aim blend (+0xD10)
+//the P99's aimed angle is 22.5
 //that's the game's number whatever the view's is, so a wide view zooms a lot further than 49 did
 //the option scales the weapon's aimed angle: we work it back out of what the game wrote, and
 //write the angle it would have got with the scaled one. never wider than the view itself
+//right after PlayerCamera, not after the controller's update: where a cutscene has the player
+//(state 0x22: Airfield's motorbike, Dam's truck, a breach) the camera takes the angle inside
+//that update, and one written after it was never drawn
 const uint32_t kCtrlFov = 0x71C, kCtrlAimBlend = 0xD10;
+const uint32_t kStepAgain = 0x806EBA7C; //a byte, set while a controller's step is done again or the host's copy is stepped
 std::atomic<float> g_ads_fov{0}; //0 is the game's own
 std::atomic<float> g_host_drawn{0}; //the angle a console draws this player's aim with, 0 when it isn't aimed
+PPCFunc orig_player_camera = nullptr;
 
 void ads_fov_apply(uint32_t ctrl) {
-    static uint32_t last_ctrl = 0;
-    static float last_blend = 0, aimed = 0; //the blend the game just used, the weapon's angle as last worked out
-    float blend = last_ctrl == ctrl ? last_blend : 0;
-    last_ctrl = ctrl;
-    last_blend = ldf(ctrl + kCtrlAimBlend);
+    static float aimed = 0; //the weapon's angle as last worked out
+    float blend = ldf(ctrl + kCtrlAimBlend);
     g_host_drawn = 0;
     uint32_t o = ld32(kViewSettingsPtr);
     if (!guest_ptr(o) || !(blend > 0) || blend > 1) { if (!(blend > 0)) aimed = 0; return; }
@@ -58,6 +60,13 @@ void ads_fov_apply(uint32_t ctrl) {
     float angle = view + (want - view) * blend;
     stf(ctrl + kCtrlFov, angle);
     stf(ctrl + kCtrlFov + 4, angle);
+}
+
+//(controller): only the player on screen, a tank has other things where the aim's blend is
+void PlayerCamera(PPCContext& c) {
+    uint32_t ctrl = c.r[3];
+    orig_player_camera(c);
+    if (guest_ptr(ctrl) && ctrl == local_controller() && ld8(kStepAgain) == 0 && !is_tank(ctrl)) ads_fov_apply(ctrl);
 }
 
 //the same aim on a console, whose view is the game's 49 and whose weapon aims at its own angle:
@@ -158,6 +167,8 @@ void install_fov() {
     g_trace_filter = std::getenv("GE_TRACE") != nullptr;
     orig_draw_delayed = ppc_hook("draw_delayed?", DrawDelayed);
     if (!orig_draw_delayed) rt_die("goldeneye: the mesh draw is not hooked in this build");
+    orig_player_camera = ppc_hook("PlayerCamera?", PlayerCamera);
+    if (!orig_player_camera) rt_die("goldeneye: the player's camera is not hooked in this build");
     if (const char* a = std::getenv("GE_ADS_FOV")) {
         float f = (float)std::atof(a);
         if (f >= kAdsFovMin && f <= kFovMax) set_ads_fov(f);

@@ -131,10 +131,13 @@ Texts that still talk about the controller.
 - [x] Option for how far ADS zooms ("Aim Field of View")
 - [x] **high** The camera is locked while aiming in, until about half a second after the gun is up
       (not on the Airfield motorbike)
-- [ ] **medium** Airfield motorbike ignores Aim Field of View, zooms in too much
-- [ ] **medium** Airfield: Toggle ADS doesn't work on the motorbike
-- [ ] **medium** The mouse is still locked for a moment when first aiming in, but only when standing still
-- [ ] **medium** Dam: Aim Sensitivity and Aim Field of View do nothing on the truck
+- [x] **medium** Airfield motorbike ignores Aim Field of View, zooms in too much
+- [x] **medium** Airfield motorbike ignores Aim Sensitivity
+- [x] **medium** Airfield: Toggle ADS doesn't work on the motorbike
+- [x] **medium** The mouse is still locked for a moment when first aiming in, but only when standing still:
+      the game's aim snap held the view until a stick was pushed, a moving mouse lets go of it now
+- [ ] **medium** Dam: Aim Sensitivity and Aim Field of View do nothing on the truck (the motorbike's fix should
+      cover it, not checked)
 - [ ] **medium** Aim Sensitivity and Aim Field of View do nothing during breaches
 - [x] **medium** ACOG and reflex sights ignore Aim Field of View
 - [x] **low** Rename "Lock Aim" to "Toggle ADS"
