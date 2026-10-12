@@ -58,6 +58,7 @@ Things that only break above 60 fps.
 - [x] **low** Bond's dancing animation is too fast
 - [ ] **low** Camera shake in the Carrier ending is too fast
 - [x] **low** Breaches seem faster at higher fps (needs checking)
+- [ ] **medium** Text scrolls at a speed that follows the frame rate (mission intros, checkpoint text, objectives, ...)
 
 ### Quick time events
 
@@ -111,6 +112,18 @@ do several things.
       way except the jump
   - check for other actions that shouldn't count as vaulting
 
+### Tutorial texts
+
+Texts that still talk about the controller.
+
+- [ ] **medium** Training: "Disable Tutorials" also hides the text boxes, the mission can't be played without them
+- [ ] **low** Training: the text boxes still say to move around with the analog sticks
+- [ ] **low** Training: "Press [Right] to draw your P99."
+- [ ] **low** Training: "You can adjust your aim with the R Stick" (probably more, the reporter didn't see them all)
+- [ ] **low** Dam: "Press E while holding forward on the L Stick to climb small ledges", while the prompt on
+      screen says "[L Shift] + [W]" (at the start, under the two bridges before the first building)
+- [ ] **low** Dam: "Press [Down] To take out your Smartphone" should say [F] (both work, may not be possible)
+
 ## Aiming down sights
 
 - [x] Toggle ADS option (F1 > Control Settings)
@@ -120,6 +133,9 @@ do several things.
       (not on the Airfield motorbike)
 - [ ] **medium** Airfield motorbike ignores Aim Field of View, zooms in too much
 - [ ] **medium** Airfield: Toggle ADS doesn't work on the motorbike
+- [ ] **medium** The mouse is still locked for a moment when first aiming in, but only when standing still
+- [ ] **medium** Dam: Aim Sensitivity and Aim Field of View do nothing on the truck
+- [ ] **medium** Aim Sensitivity and Aim Field of View do nothing during breaches
 - [x] **medium** ACOG and reflex sights ignore Aim Field of View
 - [x] **low** Rename "Lock Aim" to "Toggle ADS"
 - [ ] **low** ADS snap off by default with mouse and keyboard
@@ -131,6 +147,7 @@ do several things.
 - [x] **medium** Cutscenes aren't sped through when entering from another level, in time trial mode, or from Continue Game
 - [ ] **medium** Outpost: crouch and melee the guard in front of the log, the camera stays near the ground
       for the whole takedown and you only hear it (there's a VOD, a clip on request)
+- [ ] **low** The game can be paused while a cutscene is being skipped
 
 ## Gameplay and AI
 
@@ -160,6 +177,8 @@ do several things.
 - [x] An option to turn the HUD off: F1 > Screen Settings > HUD
 - [ ] A speedrun timer for the whole game: resets to 0 when Dam starts, ends when input is lost at the
       end of Cradle after killing Trevelyan, adds up the in-game times so loading screens don't count
+- [ ] A film grain slider
+- [ ] An option to turn bloom off
 
 ## Cheats
 
