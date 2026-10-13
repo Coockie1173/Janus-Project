@@ -157,7 +157,8 @@ const uint32_t kTextDifficulty = 0x430004E1; //its title
 const uint32_t kCustomPage = 0x7D000DFC;
 const uint32_t kTextCustom = 0x4300F0E0, kTextAboutCustom = 0x4300F0E1, kTextStart = 0x4300F0E2, kTextAboutStart = 0x4300F0E3;
 const uint32_t kTextSlider = 0x4300F0E8, kTextAboutSlider = 0x4300F0EC; //one a slider from each
-const uint32_t kKindSlider = 0x00050000, kKindClassic = 0x00160000; //a slider of a setting, 007 Classic
+const uint32_t kTextHeadshots = 0x4300F0E6, kTextAboutHeadshots = 0x4300F0E7;
+const uint32_t kKindSlider = 0x00050000, kKindChoice = 0x00030000, kKindClassic = 0x00160000; //a slider of a setting, a setting with values to pick from, 007 Classic
 const uint32_t kLabelRoom = 48; //characters a slider's label has room for
 const uint32_t kAlloc = 0x803428C0; //(bytes, flags) -> a block of the game's heap
 const uint32_t kMostPages = 4096;
@@ -501,7 +502,12 @@ bool BuildCustom(const PPCContext& c)
 	g_texts[kTextAboutCustom] = Text(c, "007 Classic with the enemies' health, damage and reactions set by you.");
 	g_texts[kTextStart] = Text(c, "Start Mission");
 	g_texts[kTextAboutStart] = Text(c, "Play the mission as 007 Classic with these settings.");
-	bool made = g_texts[kTextCustom] && g_texts[kTextAboutCustom] && g_texts[kTextStart] && g_texts[kTextAboutStart];
+	g_texts[kTextHeadshots] = Text(c, "Instant Kill Headshots");
+	g_texts[kTextAboutHeadshots] = Text(c, "Off: a shot to an enemy's head does what a shot to the body does.");
+	g_texts[kCustomTextOn] = Text(c, "On");
+	g_texts[kCustomTextOff] = Text(c, "Off");
+	bool made = g_texts[kTextCustom] && g_texts[kTextAboutCustom] && g_texts[kTextStart] && g_texts[kTextAboutStart]
+		&& g_texts[kTextHeadshots] && g_texts[kTextAboutHeadshots] && g_texts[kCustomTextOn] && g_texts[kCustomTextOff];
 	for (int i = 0; i < kCustomSliders; ++i)
 	{
 		g_custom_labels[i] = Alloc(c, kLabelRoom * 2);
@@ -512,7 +518,7 @@ bool BuildCustom(const PPCContext& c)
 	}
 	if (!made) return false;
 
-	const uint32_t items = kCustomSliders + 1;
+	const uint32_t items = kCustomRows, start = kCustomSliders + 1;
 	const uint32_t at = ListRows(c, items, kTextCustom, g_custom_rows, g_custom_row_count);
 	if (!at) return false;
 	const uint32_t about = at + (items + 1) * kRowSize;
@@ -521,9 +527,11 @@ bool BuildCustom(const PPCContext& c)
 		Row(at + i * kRowSize, kTextSlider + i, kCustomSetting + i, 0, kKindSlider);
 		Row(about + i * kRowSize, kTextAboutSlider + i, 0, 0, kKindAbout);
 	}
-	g_custom_start = at + kCustomSliders * kRowSize;
+	Row(at + kCustomSliders * kRowSize, kTextHeadshots, kCustomHeadshots, 0, kKindChoice);
+	Row(about + kCustomSliders * kRowSize, kTextAboutHeadshots, 0, 0, kKindAbout);
+	g_custom_start = at + start * kRowSize;
 	Row(g_custom_start, kTextStart, 0, 0, kKindClassic);
-	Row(about + kCustomSliders * kRowSize, kTextAboutStart, 0, 0, kKindAbout);
+	Row(about + start * kRowSize, kTextAboutStart, 0, 0, kKindAbout);
 
 	for (int which = 0; which < 2; ++which)
 	{

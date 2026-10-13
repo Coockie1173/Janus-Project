@@ -413,6 +413,10 @@ Hooked (replaced, the original called from inside) unless marked *called* (throu
 | `800C0C90` | `ge_enemy_fire_wait` | (levels) -> f1 times the weapon's time a guard has its target before it fires | custom |
 | `8022F4D0` | `ge_setting_get` | (profile, setting's hash, pad, -, as it is) -> f1 a slider's value, 0 to 1 | custom |
 | `8022E2F0` | `ge_setting_step` | (profile, setting's hash, -1 or 1, pad) -> 1 when it moved | custom |
+| `8022DAE0` | `ge_choice_text` | (profile, setting's hash, pad) -> the text of its value | custom |
+| `8022D000` | `ge_choice_step` | (profile, setting's hash, -1 or 1, pad) | custom |
+| `80239240` | `ge_slider_draw` | (f1 how full, menu, x, y, width, height, colour, 1) in a screen of 640 by 448 | custom |
+| `800517E0` | `ge_npc_hit` | (guard, hit): the hit's `+0x30` attacker, `+0x3C` flags (bit 0 the head), `+0x44` damage; the guard's health `+0x3A8` of `+0x3AC` | custom |
 | `8023D200` | `ge_pad_confirmed` | (front end, pad) -> the pad pressed select | tweaks |
 | `8019A080` | `ge_show_tutorial` | (hud, tutorial's hash) -> shown | tweaks |
 | `800C2E00` | `ge_unlock_level` | (item's hash) -> the level before the one it opens at | tweaks |
@@ -695,6 +699,15 @@ level the menu loads: on from the page's Start Mission row (`custom_start_row`),
 other. `custom_label`, `custom_about` and `custom_values` are for the menu and the settings
 file. The page and Select Difficulty's item are modmenu.cpp's `BuildCustom` and `CustomFrame`.
 
+`ChoiceText` and `ChoiceStep` are the switch for headshots that kill (`kCustomHeadshots`).
+`NpcHit` (hook on `ge_npc_hit`): with the switch off a hit to the head is handed on without
+its head bit and with the least of the attacker's damages; `GE_TRACEHIT` logs every hit.
+`SliderDraw` (hook on `ge_slider_draw`) keeps where the four bars are and is where the mouse
+works: `Cursor` (wiikit's `video_mouse`, or `GE_CUSTOM_POINTER` for a test), a press on a bar
+takes hold of it, `RowAt` lights the row under a moving cursor and a click on the switch's row
+changes it. `custom_frame` frees the cursor while the page is drawn, `custom_buttons` keeps a
+press that holds a slider from being a select.
+
 ### tank.cpp
 
 The tank's controller never reaches `ge_look_apply`, so `TankLook` (hook on `ge_tank_look`)
@@ -962,7 +975,7 @@ Options (the launcher sets these from its settings):
 | `GE_MOUSE_INVERT=1`, `GE_ADS_SENS=S`, `GE_AIM_LOCK=1` | |
 | `GE_SKIP_CUTSCENES=1`, `GE_SKIP_MOVIES=1`, `GE_AUTO_QTE=1`, `GE_AUTO_START=1`, `GE_NO_TUTORIALS=1`, `GE_NO_COLOUR_FILTER=1`, `GE_UNLOCK_ALL=1`, `GE_ONLINE_UNLOCKS=0`, `GE_EXTRAS_MENU=1` | enhancements |
 | `GE_LEVEL_TIMER=0`, `GE_AUTOSAVE=0` | on by default |
-| `GE_CUSTOM=H,D,R,P`, `GE_CUSTOM_ON=1` | 007 Custom's sliders (enemy health, damage, reaction speed, hit protection), and every mission played with them |
+| `GE_CUSTOM=H,D,R,P[,K]`, `GE_CUSTOM_ON=1` | 007 Custom's sliders (enemy health, damage, reaction speed, hit protection; K 0: no headshots that kill), and every mission played with them |
 | `GE_MOUSE_EVERYWHERE=1`, `GE_NOCLIP=1`, `GE_STAMINA=1`, `GE_COLLISION=1` | cheats |
 | `GE_HOSTS=F`, `GE_NETLOG=1` | the hosts file, the network log |
 | `GE_GECKO=F`, `GE_GECKO_EXTRA=F[:F...]` | gecko code files |

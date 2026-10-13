@@ -4027,7 +4027,7 @@ index 8a4e097..8b1b1a8 100644
  void ppc_mmio_write(uint32_t addr, uint32_t, int) { rt_die("mmio write %08X", addr); }
  uint64_t ppc_timebase() { return 0; }
 diff --git a/runtime/video.cpp b/runtime/video.cpp
-index 5726093..5e81173 100644
+index 5726093..d942e85 100644
 --- a/runtime/video.cpp
 +++ b/runtime/video.cpp
 @@ -67,7 +67,8 @@ ClassicState classic[4];
@@ -4504,7 +4504,10 @@ index 5726093..5e81173 100644
 +        draw_state = ds;
 +        gl_state_stale = false;
 +    }
-+
+ 
+-    int offx = s10(bp[0x59]) * 2, offy = s10(bp[0x59] >> 10) * 2;
+-    float wd = std::fabs(fx(0x101A)), ht = std::fabs(fx(0x101B));
+-    glViewportIndexedf(0, (fx(0x101D) - wd - (float)offx) * (float)S, (fx(0x101E) - ht - (float)offy) * (float)S,
 +    // room for all the blocks in this quarter of the ring, or on to the next
 +    const size_t q = ubo_off / UBO_QUARTER;
 +    if ((ubo_off + 8192) / UBO_QUARTER != q) {
@@ -4760,10 +4763,7 @@ index 5726093..5e81173 100644
 +    glNamedBufferData(dbg_vbo, (GLsizeiptr)n * 16, vtx, GL_STATIC_DRAW);
 +    dbg_count = n;
 +}
- 
--    int offx = s10(bp[0x59]) * 2, offy = s10(bp[0x59] >> 10) * 2;
--    float wd = std::fabs(fx(0x101A)), ht = std::fabs(fx(0x101B));
--    glViewportIndexedf(0, (fx(0x101D) - wd - (float)offx) * (float)S, (fx(0x101E) - ht - (float)offy) * (float)S,
++
 +void dbg_draw() {
 +    dbg_waiting = false;
 +    if (dbg_drawn) return;
@@ -5470,10 +5470,16 @@ index 5726093..5e81173 100644
  void video_configure(const VideoOptions& o) { opt = o; S = std::max(1, o.scale); }
  
  VideoPerf g_vperf;
-@@ -1462,6 +2175,34 @@ std::atomic<bool> want_relative{false};
+@@ -1462,6 +2175,40 @@ std::atomic<bool> want_relative{false};
  std::mutex motion_mx;
  float motion_x = 0, motion_y = 0;
  void video_set_relative_mouse(bool on) { want_relative = on; }
++std::atomic<float> cursor_x{0}, cursor_y{0};
++std::atomic<bool> cursor_left{false}, cursor_there{false};
++bool video_mouse(float& x, float& y, bool& left) {
++    x = cursor_x; y = cursor_y; left = cursor_left;
++    return cursor_there;
++}
 +void video_set_overlay(const VideoOverlay& o) { overlay_cb = o; }
 +bool video_read_window(std::vector<uint8_t>& rgba, int& w, int& h, bool picture_only) {
 +    w = h = 0;
@@ -5505,7 +5511,7 @@ index 5726093..5e81173 100644
  void video_take_mouse_motion(float& dx, float& dy) {
      std::lock_guard<std::mutex> lk(motion_mx);
      dx = motion_x; dy = motion_y;
-@@ -1473,12 +2214,27 @@ PadState video_pad() {
+@@ -1473,12 +2220,27 @@ PadState video_pad() {
      return pad;
  }
  ClassicState video_classic(int chan) {
@@ -5533,7 +5539,7 @@ index 5726093..5e81173 100644
  void video_retrace() {
      retraces.fetch_add(1);
      if (wake) SDL_SignalSemaphore(wake);
-@@ -1499,13 +2255,21 @@ void video_run(const char* title) {
+@@ -1499,13 +2261,21 @@ void video_run(const char* title) {
      int w0 = opt.window_w ? opt.window_w : (opt.widescreen ? 1280 : 960), h0 = opt.window_h ? opt.window_h : 720;
      SDL_WindowFlags wflags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE;
      if (opt.fullscreen) wflags |= SDL_WINDOW_FULLSCREEN;
@@ -5555,7 +5561,7 @@ index 5726093..5e81173 100644
      rt_log("video: %s, %s", (const char*)glGetString(GL_RENDERER), (const char*)glGetString(GL_VERSION));
      if (debug) {
          glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
-@@ -1529,11 +2293,15 @@ void video_run(const char* title) {
+@@ -1529,11 +2299,15 @@ void video_run(const char* title) {
      uint64_t frames_then = 0;
      uint32_t seen = retraces.load();
      std::string base_title = title;
@@ -5571,7 +5577,7 @@ index 5726093..5e81173 100644
              if (e.type == SDL_EVENT_GAMEPAD_ADDED) pad_added(e.gdevice.which);
              if (e.type == SDL_EVENT_GAMEPAD_REMOVED) pad_removed(e.gdevice.which);
              // F11 or Alt+Enter: fullscreen and back
-@@ -1560,6 +2328,15 @@ void video_run(const char* title) {
+@@ -1560,6 +2334,15 @@ void video_run(const char* title) {
              }
          }
          auto now = Clock::now();
@@ -5587,7 +5593,26 @@ index 5726093..5e81173 100644
          if (opt.quit_after > 0 && std::chrono::duration<double>(now - t0).count() > opt.quit_after) quit = true;
          if (quit) {
              rt_log("video: %llu frames, %llu presents, %llu draws, %llu programs (%llu linked, %llu from the shader cache)",
-@@ -1592,7 +2369,14 @@ void video_run(const char* title) {
+@@ -1574,6 +2357,18 @@ void video_run(const char* title) {
+         {
+             bool rel = want_relative && (SDL_GetWindowFlags(win) & SDL_WINDOW_INPUT_FOCUS);
+             if (rel != SDL_GetWindowRelativeMouseMode(win)) SDL_SetWindowRelativeMouseMode(win, rel);
++            {
++                // where the cursor is over the picture (video_mouse)
++                float mx = 0, my = 0;
++                int ww = 0, wh = 0;
++                SDL_MouseButtonFlags held = SDL_GetMouseState(&mx, &my);
++                SDL_GetWindowSize(win, &ww, &wh);
++                Rect r = picture_rect((float)ww, (float)wh);
++                bool there = !rel && (SDL_GetWindowFlags(win) & SDL_WINDOW_INPUT_FOCUS) && r.w > 0 && r.h > 0;
++                if (there) { cursor_x = (mx - r.x) / r.w; cursor_y = (my - r.y) / r.h; }
++                cursor_left = there && (held & SDL_BUTTON_LMASK);
++                cursor_there = there;
++            }
+             float dx = 0, dy = 0;
+             SDL_GetRelativeMouseState(&dx, &dy);
+             if (rel) {
+@@ -1592,7 +2387,14 @@ void video_run(const char* title) {
                  double vtx = ms(g_vperf.vtx), tex = ms(g_vperf.tex), wait = ms(g_vperf.wait), draw = ms(g_vperf.draw),
                         pres = ms(g_vperf.present);
                  rt_log("perf: %.1f fps; frame %.1f ms; game thread: vertices %.1f, textures %.1f, waiting for the renderer %.1f; "
@@ -5603,7 +5628,7 @@ index 5726093..5e81173 100644
              }
              frames_then = cnt.frames;
              t_title = now;
-@@ -1608,6 +2392,8 @@ void video_run(const char* title) {
+@@ -1608,6 +2410,8 @@ void video_run(const char* title) {
              }
              if (c.readback) { if (c.copy) copy_readback(c.copy); else efb_readback(); busy = true; continue; }
              auto te = Clock::now();
@@ -5612,7 +5637,7 @@ index 5726093..5e81173 100644
              exec(c.data);
              if (g_vperf_on) g_vperf.draw += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - te).count();
              {
-@@ -1621,8 +2407,25 @@ void video_run(const char* title) {
+@@ -1621,8 +2425,25 @@ void video_run(const char* title) {
              if (retraces.load() != seen) break;
          }
          uint32_t r = retraces.load();
@@ -5639,7 +5664,7 @@ index 5726093..5e81173 100644
              present();
              if (g_vperf_on) g_vperf.present += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - tp).count();
 diff --git a/runtime/video.h b/runtime/video.h
-index ecfb499..11712ac 100644
+index ecfb499..8097522 100644
 --- a/runtime/video.h
 +++ b/runtime/video.h
 @@ -3,7 +3,7 @@
@@ -5741,10 +5766,16 @@ index ecfb499..11712ac 100644
  ClassicState video_classic(int chan);
  // The Remote's motor on a channel: its pad rumbles (the Remote's own on
  // channel 1 when a pad is there).
-@@ -98,6 +135,53 @@ void video_set_rumble(int chan, bool on);
+@@ -97,6 +134,58 @@ void video_set_rumble(int chan, bool on);
+ // the pause box), and the motion is summed until taken.
  void video_set_relative_mouse(bool on);
  void video_take_mouse_motion(float& dx, float& dy);
- 
++// The cursor over the game's picture, for a port with something to click in
++// it: x and y from 0 to 1 across the picture (outside it when the cursor is),
++// and the left button. False while the mouse is relative or the window has
++// no focus.
++bool video_mouse(float& x, float& y, bool& left);
++
 +// A port's overlay over the picture (a debug window, a menu): init once the
 +// window and its OpenGL context exist, event for every SDL event (true: the
 +// overlay took it, and the window's own keys, Esc and the rest, do not see
@@ -5791,7 +5822,6 @@ index ecfb499..11712ac 100644
 +int video_msaa();
 +// The mouse wheel's notches since the last call: up positive, down negative.
 +int video_take_wheel();
-+
+ 
  // WIIKIT_PERF=1: where a frame's time goes, reported every second by the
  // renderer. Nanoseconds, summed since the last report.
- struct VideoPerf {

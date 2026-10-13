@@ -138,7 +138,12 @@ uint32_t mods_menu_text(uint32_t hash); //the characters of one of the Mods menu
 std::string mod_shown_name(const std::string& file); //a mod level's name in the menus, from its file's
 void install_custom(); //custom.cpp
 const int kCustomSliders = 4; //enemy health, enemy damage, enemy reaction speed, hit protection
+const int kCustomRows = 6; //the page's items: the sliders, the headshots' switch, Start Mission
+void custom_frame(uint32_t frame); //once a frame, on the game's thread
+void custom_buttons(ClassicState& s); //in the classic's filter: a press on a slider isn't a select
 const uint32_t kCustomSetting = 0x7D01F000; //the sliders as settings of the game's menu, a hash each from here. the game's own stop at 7D0100xx
+const uint32_t kCustomHeadshots = kCustomSetting + kCustomSliders; //the switch for headshots that kill, a setting with values to pick from
+const uint32_t kCustomTextOn = 0x4300F0E4, kCustomTextOff = 0x4300F0E5; //the texts of its two values, modmenu.cpp has them
 bool custom_mode(); //the mission is played with them
 void set_custom_mode(bool on);
 std::string custom_label(int slider); //"Enemy Health: 250%"
