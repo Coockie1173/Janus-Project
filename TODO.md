@@ -136,9 +136,8 @@ Texts that still talk about the controller.
 - [x] **medium** Airfield: Toggle ADS doesn't work on the motorbike
 - [x] **medium** The mouse is still locked for a moment when first aiming in, but only when standing still:
       the game's aim snap held the view until a stick was pushed, a moving mouse lets go of it now
-- [ ] **medium** Dam: Aim Sensitivity and Aim Field of View do nothing on the truck (the motorbike's fix should
-      cover it, not checked)
-- [ ] **medium** Aim Sensitivity and Aim Field of View do nothing during breaches
+- [x] **medium** Dam: Aim Sensitivity and Aim Field of View do nothing on the truck
+- [x] **medium** Aim Sensitivity and Aim Field of View do nothing during breaches
 - [x] **medium** ACOG and reflex sights ignore Aim Field of View
 - [x] **low** Rename "Lock Aim" to "Toggle ADS"
 - [ ] **low** ADS snap off by default with mouse and keyboard
