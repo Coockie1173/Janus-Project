@@ -592,6 +592,7 @@ void controller_update(PPCContext& c) {
     if (ctrl == g_local_ctrl && frame == g_local_frame && !again && !is_tank(ctrl)) { //a tank has other things where the aim's blend is
         aim_lock_frame(ctrl);
         noclip_apply(ctrl);
+        cheats_apply(ctrl);
         stamina_apply(ctrl);
     }
     //the cheat, in a state whose update never got to ge_look_apply: turn the player's yaw directly

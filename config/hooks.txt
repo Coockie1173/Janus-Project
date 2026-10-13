@@ -122,3 +122,4 @@ ge_slider_draw         # the menu draws a slider's bar: where 007 Custom's four 
 ge_choice_text         # the menu asks for the text of a setting's value: 007 Custom's switch for the headshots answers On or Off (port/custom.cpp)
 ge_choice_step         # the menu changes a setting with values to pick from: 007 Custom's switch for the headshots (port/custom.cpp)
 ge_menu_pointer_update # the menus' pointer takes the pad's input: the mouse's cursor is its place, so every menu's items are picked with the cursor (port/pointer.cpp)
+ge_player_damage       # the player is hurt: armour, health, the reaction, the death. God Mode leaves it out for the local player (port/cheats.cpp)

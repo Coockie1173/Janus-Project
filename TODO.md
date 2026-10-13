@@ -193,10 +193,10 @@ Texts that still talk about the controller.
 
 - [ ] Turbo mode
 - [ ] Spawn any weapon
-- [ ] Infinite ammo
+- [x] Infinite ammo: F1 > Cheats, campaign only; every kind of ammo stays full (41 shots from a 16 round P99 on Dam)
 - [ ] Grenades in single player
-- [ ] Infinite sprint
-- [ ] God mode
+- [x] Infinite sprint: F1 > Cheats, campaign only (a sprint on Dam ends with all 3.1 s left)
+- [x] God mode: F1 > Cheats, campaign only; the player's damage is left out (not seen in a fight yet, no scripted run got hurt)
 - [ ] Enemy rockets
 - [x] 007 mode: Select Difficulty > 007 Custom, sliders for enemy health, enemy damage, enemy reaction speed
       and hit protection, then the mission as 007 Classic (the menu and the melee value checked, see docs/STATUS.md);

@@ -17,6 +17,7 @@
 //tank.cpp the tank: the mouse on its aim, its buttons, driving at higher frame rates
 //noclip.cpp fly through the level
 //stamina.cpp the sprint that's left as a bar
+//cheats.cpp god mode, infinite ammo, infinite sprint
 //weapons.cpp a key for each weapon slot
 //prompts.cpp the bound key in the game's prompts, where it shows a controller button
 //collision.cpp the level's collision drawn in place of the world
@@ -245,6 +246,14 @@ void set_noclip(bool on);
 void noclip_look(uint32_t controller); //before ge_look_apply, the game's own step is taken out
 void noclip_apply(uint32_t controller); //after the local controller's update
 bool player_state(uint32_t& state, float& fallen, uint32_t& bodyFlags); //the local player as of its last update, false before there is one
+void install_cheats(); //cheats.cpp
+bool god_mode(); //cheat, the campaign's player takes no hurt
+void set_god_mode(bool on);
+bool infinite_ammo(); //cheat, every kind of ammo stays at the most it holds
+void set_infinite_ammo(bool on);
+bool infinite_sprint(); //cheat, the sprint never runs out
+void set_infinite_sprint(bool on);
+void cheats_apply(uint32_t controller); //after the local controller's update
 void install_stamina(); //stamina.cpp
 bool stamina_meter(); //cheat, the sprint that's left as a bar
 void set_stamina_meter(bool on);

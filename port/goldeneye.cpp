@@ -32,6 +32,7 @@
 //GE_UNLOCK_ALL=1 every mission and difficulty unlocked
 //GE_NOCLIP=1 cheat, start flying through walls
 //GE_STAMINA=1 cheat, the sprint that's left as a bar
+//GE_GOD=1 GE_INFINITE_AMMO=1 GE_INFINITE_SPRINT=1 cheats, the campaign's player isn't hurt, the ammo and the sprint never run out
 //GE_COLLISION=1 cheat, the level's collision is drawn in place of the world
 //GE_SETTINGS=N start with the settings menu (F1) open on page N
 //GE_FPS=N frame rate the engine may reach (30 by default, auto is 60)
@@ -120,6 +121,7 @@ void install() {
     install_height();
     install_noclip();
     install_stamina();
+    install_cheats();
     install_collision();
     install_autosave();
     install_weapons();

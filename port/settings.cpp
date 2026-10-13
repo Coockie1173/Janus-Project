@@ -419,6 +419,9 @@ void BuildSettings()
 	AddToggle(kEnhancements, "extras_menu", "Unused Extras Menu", "On: Extras also lists Mission Select, Character Viewer, Movies and the Calibration Menu.", extras_menu, set_extras_menu);
 
 	AddToggle(kCheats, "mouse_everywhere", "Always Enable Mouse", "On: the mouse turns the view where the game locks it: cutscenes, melee, climbing, death.", mouse_everywhere, set_mouse_everywhere);
+	AddToggle(kCheats, "god_mode", "God Mode", "On: nothing hurts you in the campaign. A fall out of the level or a failed mission still ends it.", god_mode, set_god_mode);
+	AddToggle(kCheats, "infinite_ammo", "Infinite Ammo", "On: your ammo never runs out in the campaign.", infinite_ammo, set_infinite_ammo);
+	AddToggle(kCheats, "infinite_sprint", "Infinite Sprint", "On: the sprint never runs out in the campaign.", infinite_sprint, set_infinite_sprint);
 	AddToggle(kCheats, "noclip", "Noclip", "On: you fly where you look, through walls, and don't fall. The sprint key flies faster.", noclip, set_noclip);
 	AddToggle(kCheats, "stamina_meter", "Stamina Meter", "On: a bar shows the sprint that's left. Cancel a sprint right under the line and it's back at a second the frame after.", stamina_meter, set_stamina_meter);
 	AddToggle(kCheats, "collision_view", "Collision Viewer", "On: the level's collision is drawn in place of the world. Floors are green, walls grey, ceilings red, props orange.", collision_view, set_collision_view);
