@@ -172,36 +172,18 @@ void NpcHit(PPCContext& c)
 //height in a screen of 640 by 448) right after it asked for its value, so a bar drawn after
 //one of the four was asked for is that slider's. the cursor is free in a menu (input.cpp):
 //a press on a bar takes hold of the slider and it follows the cursor until the button is let
-//go, and the row under a moving cursor is the lit one (the menu's +0x220, the lit item's number)
-const float kScreenWide = 640.0f, kScreenHigh = 448.0f;
+//go. lighting the row under the cursor and select are the menus' own pointer's (pointer.cpp)
 const float kGrabAcross = 6.0f, kGrabDown = 6.0f; //how far outside a bar a press still takes hold of it
 const float kRowLeft = 125.0f, kRowRight = 500.0f; //a row of the list, across
-const uint32_t kMenuLit = 0x220;
 const uint32_t kUpFrames = 3; //the page is up when a bar was drawn this many frames ago at most
 struct Bar { float x, y, wide, high; };
 Bar g_bars[kCustomSliders] = {};
 int g_asked = -1; //the slider ge_setting_get was asked for last
 int g_held = -1; //the slider the mouse has hold of
+uint32_t g_stepped_frame = 0, g_clicked_frame = 0; //the frames the switch was changed through the menu, and by a click on its row
 uint32_t g_drawn_frame = 0, g_mouse_frame = 0;
-bool g_up = false, g_pressed = false, g_was_left = false, g_moved = false;
-float g_last_x = 0, g_last_y = 0;
+bool g_up = false, g_pressed = false, g_was_left = false;
 std::atomic<bool> g_on_bar{false}; //the button went down on a bar and is still down: not the menu's select
-
-//GE_CUSTOM_POINTER="33-34:0.62,0.33,1 34-35:0.7,0.33,1" a cursor for a test: seconds from start, where across and down the picture, the button
-struct Fake { double from, to; float x, y; bool left; };
-std::vector<Fake> g_fakes;
-const auto g_began = std::chrono::steady_clock::now();
-
-bool Cursor(float& x, float& y, bool& left)
-{
-	const double now = std::chrono::duration<double>(std::chrono::steady_clock::now() - g_began).count();
-	for (const Fake& fake : g_fakes)
-		if (now >= fake.from && now < fake.to) { x = fake.x * kScreenWide; y = fake.y * kScreenHigh; left = fake.left; return true; }
-	if (!g_fakes.empty() || overlay_open() || !video_mouse(x, y, left)) return false;
-	x *= kScreenWide;
-	y *= kScreenHigh;
-	return true;
-}
 
 //the page's row at a place of the screen, -1 for none
 int RowAt(float x, float y)
@@ -224,18 +206,17 @@ void SliderDraw(PPCContext& c)
 		Bar& bar = g_bars[slider];
 		bar = { float((int32_t)c.r[4]), float((int32_t)c.r[5]), float((int32_t)c.r[6]), float((int32_t)c.r[7]) };
 		g_drawn_frame = frame;
+		static bool said[kCustomSliders] = {};
+		if (g_trace && !said[slider] && (said[slider] = true)) rt_log("goldeneye: 007 Custom: slider %d's bar is at %g %g, %g by %g", slider, bar.x, bar.y, bar.wide, bar.high);
 		float x = 0, y = 0;
 		bool left = false;
-		const bool cursor = Cursor(x, y, left);
+		const bool cursor = menu_cursor(x, y, left);
 		if (frame != g_mouse_frame)
 		{
 			//once a frame: a press, and whether the cursor moved
 			g_mouse_frame = frame;
 			g_pressed = cursor && left && !g_was_left;
 			g_was_left = cursor && left;
-			g_moved = cursor && (x != g_last_x || y != g_last_y);
-			g_last_x = x;
-			g_last_y = y;
 			if (!g_was_left) g_held = -1;
 			g_on_bar = g_held >= 0;
 		}
@@ -250,14 +231,13 @@ void SliderDraw(PPCContext& c)
 				g_value[slider] = std::clamp(int(part * s.most / s.step + 0.5f) * s.step, 0, s.most);
 				c.f[1] = double(g_value[slider]) / s.most;
 			}
-			//the row under a cursor that moves is the lit one. the rows are as far apart as the bars
-			if (g_moved && g_held < 0 && slider == 0 && guest_ptr(menu))
-			{
-				const int row = RowAt(x, y);
-				if (row >= 0 && row < kCustomRows && ld32(menu + kMenuLit) < (uint32_t)kCustomRows && ld32(menu + kMenuLit) != (uint32_t)row) st32(menu + kMenuLit, (uint32_t)row);
-			}
 			//a click on the switch's row is the switch
-			if (g_pressed && slider == 0 && RowAt(x, y) == kCustomSliders) g_headshots = !g_headshots;
+			//(not when the press was on one of its arrows, which the menu's pointer has just taken as a step)
+			if (g_pressed && slider == 0 && RowAt(x, y) == kCustomSliders && frame - g_stepped_frame > 1)
+			{
+				g_headshots = !g_headshots;
+				g_clicked_frame = frame;
+			}
 		}
 	}
 	orig_slider_draw(c);
@@ -306,7 +286,10 @@ void ChoiceText(PPCContext& c)
 void ChoiceStep(PPCContext& c)
 {
 	if (c.r[4] != kCustomHeadshots) { orig_choice_step(c); return; }
+	const uint32_t frame = ld32(kFrameCount);
+	if (frame - g_clicked_frame <= 1) return; //that press has changed it already
 	g_headshots = !g_headshots;
+	g_stepped_frame = frame;
 }
 
 } //namespace
@@ -388,16 +371,6 @@ void install_custom()
 	orig_npc_hit = ppc_hook("ge_npc_hit", NpcHit);
 	orig_slider_draw = ppc_hook("ge_slider_draw", SliderDraw);
 	g_tracehit = std::getenv("GE_TRACEHIT") != nullptr;
-	if (const char* e = std::getenv("GE_CUSTOM_POINTER"))
-	{
-		Fake fake{};
-		int left = 0, read = 0;
-		for (const char* at = e; std::sscanf(at, " %lf-%lf:%f,%f,%d%n", &fake.from, &fake.to, &fake.x, &fake.y, &left, &read) == 5; at += read)
-		{
-			fake.left = left != 0;
-			g_fakes.push_back(fake);
-		}
-	}
 	if (!orig_bullet || !orig_shot || !orig_fight_wait || !orig_protection || !orig_melee || !orig_fire_wait || !orig_setting_get || !orig_setting_step)
 		rt_log("goldeneye: 007 Custom: a function of it isn't in this build, some of it won't work");
 }

@@ -71,6 +71,7 @@ void each_frame(uint32_t frame) {
     cutscenes_frame();
     mouse_frame(frame);
     custom_frame(frame);
+    pointer_frame(frame);
     net_frame();
     heap_frame();
 }
@@ -88,6 +89,7 @@ void install() {
     install_mods();
     install_mods_menu();
     install_custom();
+    install_pointer();
     install_pictures();
     install_fov();
     install_gecko();

@@ -121,3 +121,4 @@ ge_npc_hit             # a guard is hit by a shot: with 007 Custom's Instant Kil
 ge_slider_draw         # the menu draws a slider's bar: where 007 Custom's four are on screen, for the mouse (port/custom.cpp)
 ge_choice_text         # the menu asks for the text of a setting's value: 007 Custom's switch for the headshots answers On or Off (port/custom.cpp)
 ge_choice_step         # the menu changes a setting with values to pick from: 007 Custom's switch for the headshots (port/custom.cpp)
+ge_menu_pointer_update # the menus' pointer takes the pad's input: the mouse's cursor is its place, so every menu's items are picked with the cursor (port/pointer.cpp)

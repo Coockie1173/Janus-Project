@@ -180,6 +180,8 @@ Texts that still talk about the controller.
 - [x] An option to halve screen shake or turn it off: F1 > Screen Settings > Screen Shake, a slider from off to 5x (measured on the
       sway, explosions not seen)
 - [x] An option to turn the HUD off: F1 > Screen Settings > HUD
+- [x] The cursor is free in the menus and picks their items (the game's own menu pointer on the mouse;
+      checked with a cursor for tests, not with a real mouse)
 - [ ] A speedrun timer for the whole game: resets to 0 when Dam starts, ends when input is lost at the
       end of Cradle after killing Trevelyan, adds up the in-game times so loading screens don't count
 - [ ] A film grain slider

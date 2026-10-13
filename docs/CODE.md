@@ -417,6 +417,7 @@ Hooked (replaced, the original called from inside) unless marked *called* (throu
 | `8022D000` | `ge_choice_step` | (profile, setting's hash, -1 or 1, pad) | custom |
 | `80239240` | `ge_slider_draw` | (f1 how full, menu, x, y, width, height, colour, 1) in a screen of 640 by 448 | custom |
 | `800517E0` | `ge_npc_hit` | (guard, hit): the hit's `+0x30` attacker, `+0x3C` flags (bit 0 the head), `+0x44` damage; the guard's health `+0x3A8` of `+0x3AC` | custom |
+| `8023D740` | `ge_menu_pointer_update` | (the menus' pointer, -, pad) its input, once a frame | pointer |
 | `8023D200` | `ge_pad_confirmed` | (front end, pad) -> the pad pressed select | tweaks |
 | `8019A080` | `ge_show_tutorial` | (hud, tutorial's hash) -> shown | tweaks |
 | `800C2E00` | `ge_unlock_level` | (item's hash) -> the level before the one it opens at | tweaks |
@@ -703,10 +704,20 @@ file. The page and Select Difficulty's item are modmenu.cpp's `BuildCustom` and 
 `NpcHit` (hook on `ge_npc_hit`): with the switch off a hit to the head is handed on without
 its head bit and with the least of the attacker's damages; `GE_TRACEHIT` logs every hit.
 `SliderDraw` (hook on `ge_slider_draw`) keeps where the four bars are and is where the mouse
-works: `Cursor` (wiikit's `video_mouse`, or `GE_CUSTOM_POINTER` for a test), a press on a bar
-takes hold of it, `RowAt` lights the row under a moving cursor and a click on the switch's row
-changes it. `custom_frame` lets go of a held slider when the page goes, `custom_buttons` keeps a
+works: a press on a bar (`menu_cursor`, pointer.cpp) takes hold of it, and a click on the
+switch's row (`RowAt`) changes it. `custom_frame` lets go of a held slider when the page goes, `custom_buttons` keeps a
 press that holds a slider from being a select.
+
+### pointer.cpp
+
+The mouse's cursor picks the menus' items. The menus have a pointer of their own
+(MenuPointer, the menu's `+0x1A98`: `+0`, `+4` its place from 0 to 1, `+0x24` in use, `+0x38`
+and `+0x3C` the arrow and the item under it, hotspots from `+0x44`), fed only from a Wii
+Remote. `PointerUpdate` (hook on `ge_menu_pointer_update`) writes the cursor's place into it
+after the game's input and puts it in use when the cursor moves; the lit item, select and the
+crosshair are the game's. `pointer_frame` leaves the system's cursor out while the game draws
+its own (`video_keep_cursor`). `menu_cursor` is the cursor in the menus' screen for custom.cpp;
+`Cursor` reads wiikit's `video_mouse`, or `GE_POINTER` for a test.
 
 ### tank.cpp
 

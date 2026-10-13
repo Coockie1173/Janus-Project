@@ -38,6 +38,7 @@
 //settings.cpp the settings menu (F1)
 //render.cpp anisotropic filtering and anti-aliasing, the renderer's
 //hotkeys.cpp keys that change the menu's settings in play (hotkeys.h)
+//pointer.cpp the mouse's cursor picks the menus' items
 //custom.cpp 007 Custom: a mission as 007 Classic with the guards set by sliders
 //crashdump.cpp crash, die and stall dumps into build/crashes
 //diagnostics.cpp the sampling profiler
@@ -136,6 +137,9 @@ std::string game_text(const PPCContext& c, uint32_t hash); //prompts.cpp: one of
 std::string mod_side_file(const ModLevel& mod, const char* extension); //mods.cpp: mt_yard.png for mt_yard.edb, next to it or in the mods folder
 uint32_t mods_menu_text(uint32_t hash); //the characters of one of the Mods menu's texts, 0 for any other
 std::string mod_shown_name(const std::string& file); //a mod level's name in the menus, from its file's
+void install_pointer(); //pointer.cpp
+void pointer_frame(uint32_t frame); //once a frame
+bool menu_cursor(float& x, float& y, bool& left); //the cursor in the menus' screen of 640 by 448, false when it isn't free
 void install_custom(); //custom.cpp
 const int kCustomSliders = 4; //enemy health, enemy damage, enemy reaction speed, hit protection
 const int kCustomRows = 6; //the page's items: the sliders, the headshots' switch, Start Mission
