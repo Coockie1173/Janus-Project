@@ -19,8 +19,8 @@
 //  fires (fn_80086430; XItemHandler_NPC's target time +0x728). 1 on every difficulty
 //
 //the sliders, a hundred being 007 Classic as the game has it:
-//Enemy Health      0 to 1000: the player's shot is divided by it, at 0 any shot kills
-//Enemy Damage      0 to 1000: a guard's bullet and its melee times it
+//Enemy Health      0 to 2000: the player's shot is divided by it, at 0 any shot kills
+//Enemy Damage      0 to 2000: a guard's bullet and its melee times it
 //Enemy Reactions   0 to 100: both waits are longer the lower it is, twice as long at 0
 //Hit Protection    0 to 1000: the time after a hit times it
 //
@@ -45,8 +45,8 @@ namespace
 enum { Health, Damage, Reaction, Protection };
 struct Slider { const char* label; const char* about; int most, step; };
 const Slider kSliders[kCustomSliders] = {
-	{"Enemy Health", "How much it takes to bring an enemy down. At 0% one shot does.", 1000, 10},
-	{"Enemy Damage", "How hard an enemy's bullets and melee hit you.", 1000, 10},
+	{"Enemy Health", "How much it takes to bring an enemy down. At 0% one shot does.", 2000, 10},
+	{"Enemy Damage", "How hard an enemy's bullets and melee hit you.", 2000, 10},
 	{"Enemy Reactions", "How fast an enemy that has seen you starts to fight and to fire. At 0% it takes twice as long.", 100, 5},
 	{"Hit Protection", "How long after a hit weaker hits don't hurt you.", 1000, 10}};
 const int kNormal = 100;

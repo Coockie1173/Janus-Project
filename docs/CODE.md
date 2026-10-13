@@ -687,8 +687,8 @@ read by a function a value; six are hooked and scale what the game read while th
 
 | Hook | Slider | How |
 |---|---|---|
-| `Bullet`, `Melee` | Enemy Damage, 0 to 1000 | times it |
-| `Shot` | Enemy Health, 0 to 1000 | the player's shot divided by it, times a million at 0 |
+| `Bullet`, `Melee` | Enemy Damage, 0 to 2000 | times it |
+| `Shot` | Enemy Health, 0 to 2000 | the player's shot divided by it, times a million at 0 |
 | `FightWait`, `FireWait` | Enemy Reaction Speed, 0 to 100 | times `Slow()`, 2 at 0 and 1 at 100 |
 | `ProtectionTime` | Hit Protection, 0 to 1000 | times it |
 
