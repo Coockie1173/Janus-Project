@@ -153,6 +153,8 @@ std::atomic<bool> g_mouse_everywhere{false}; //cheat, the mouse turns the view i
 //while aim is held). found with a scan over two holds of aim in the training level
 //the mouse turns slower by that much of the way to the aim sensitivity, so a zoomed view
 //doesn't swing as far for the same motion
+//that's for a sight like the pistol's. a scope zooms a lot further, and at the same sensitivity
+//its picture went by two or more times as fast: fully aimed it's times aim_zoom (fov.cpp) as well
 const uint32_t kAimBlend = 0xD10;
 std::atomic<float> g_ads_sens{0.5f}; //the mouse's sensitivity fully aimed, times the normal one
 float aim_blend(uint32_t ctrl) {
@@ -165,7 +167,8 @@ bool local_aim_blend(float& blend) {
     blend = aim_blend(g_local_ctrl);
     return true;
 }
-float aim_sens_scale(uint32_t ctrl) { return 1.0f + (g_ads_sens - 1.0f) * aim_blend(ctrl); }
+float aim_sens_at(float blend) { return 1.0f + (g_ads_sens * aim_zoom() - 1.0f) * blend; }
+float aim_sens_scale(uint32_t ctrl) { return aim_sens_at(aim_blend(ctrl)); }
 
 uint32_t local_controller() {
     uint32_t ctrl = g_local_ctrl;
@@ -679,8 +682,8 @@ void aim_lock_frame(uint32_t ctrl) {
         uint32_t player = ld32(ctrl + 4), view = guest_ptr(player) ? ld32(player + 0x16C) : 0;
         if (std::memcmp(now, said, sizeof now)) {
             std::memcpy(said, now, sizeof now);
-            rt_log("aim: frame %u state %X blend %.3f hand %02X next %02X held %d lock %d items %u, drawn at %.1f degrees, aim %.4f across, %.4f up and down, yaw %.4f pitch %.4f, snap %d %d by %.2f", ld32(kFrameCount), now[0], blend, hand, next,
-                   ld8(ctrl + 0xD00), (int)locked, ld32(ctrl + 0xC48), ldf(ctrl + 0x71C), ldf(ctrl + kAimYaw), ldf(ctrl + kAimPitch),
+            rt_log("aim: frame %u state %X blend %.3f hand %02X next %02X held %d lock %d items %u, drawn at %.1f degrees, the mouse times %.3f, aim %.4f across, %.4f up and down, yaw %.4f pitch %.4f, snap %d %d by %.2f", ld32(kFrameCount), now[0], blend, hand, next,
+                   ld8(ctrl + 0xD00), (int)locked, ld32(ctrl + 0xC48), ldf(ctrl + 0x71C), aim_sens_at(blend), ldf(ctrl + kAimYaw), ldf(ctrl + kAimPitch),
                    guest_ptr(player) ? ldf(player + 0xDC) : 0.0f, guest_ptr(view) ? ldf(view + 0x768) : 0.0f, ld8(ctrl + 0xD25), ld8(ctrl + 0xD53), ldf(ctrl + 0xD48));
         }
     }
@@ -760,7 +763,7 @@ void mouse_stick(ClassicState& s) {
     if (dt >= 0.004f) {
         defl_x = defl_y = 0;
         if (dt <= 0.25f) {
-            float blend = 0, aim = local_aim_blend(blend) ? 1.0f + (g_ads_sens - 1.0f) * blend : 1.0f;
+            float blend = 0, aim = local_aim_blend(blend) ? aim_sens_at(blend) : 1.0f;
             float k = kRadPerPixel * g_mouse_sens * aim / dt / kStickRate;
             float across = g_stick_sens[0], up = g_stick_sens[1]; //0 is an axis the game has turned off
             //the game takes the dead zone off each axis by itself, so each gets past it by itself

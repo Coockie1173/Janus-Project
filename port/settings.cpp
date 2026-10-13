@@ -367,7 +367,7 @@ void BuildSettings()
 	Setting& sens = AddRange(kControls, "mouse_sens", "Mouse Sensitivity", "How far the view turns for the mouse's motion. Off leaves the mouse free.",
 		mouse_sens, [](float v) { set_mouse_sens(v); g_dirty = true; }, 0, kMouseSensMax, 0.05f, 2);
 	sens.show = [show = sens.show](float v) { return v > 0 ? show(v) : std::string("Off"); };
-	AddRange(kControls, "ads_sens", "Aim Sensitivity", "The mouse's sensitivity aiming down the sight, times the one above. 1.00 turns as far as without aiming.",
+	AddRange(kControls, "ads_sens", "Aim Sensitivity", "The mouse's sensitivity aiming down the sight, times the one above. 1.00 turns as far as without aiming. A scope turns less by its zoom.",
 		ads_sens, [](float v) { set_ads_sens(v); g_dirty = true; }, kAdsSensMin, kAdsSensMax, 0.05f, 2);
 	AddToggle(kControls, "aim_lock", "Toggle ADS", "On: a press of Aim stays aimed down the sight until the next press.", aim_lock, set_aim_lock);
 	AddToggle(kControls, "mouse_invert", "Invert Mouse", "On: pushing the mouse forward looks down.", mouse_invert, set_mouse_invert);

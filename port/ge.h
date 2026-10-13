@@ -171,6 +171,7 @@ void set_fov(float degrees);
 const float kGameAdsFov = 22.5f, kAdsFovMin = 10.0f; //the pistol's, aimed down the sight
 float ads_fov(); //degrees for a weapon the game aims at 22.5, the others in proportion
 void set_ads_fov(float degrees);
+float aim_zoom(); //the aimed picture's size next to the pistol's sight, 1 or less: what a scope turns the mouse down by
 float host_drawn_fov(); //the angle a console draws the local player's aim with, 0 when it isn't aimed
 bool no_colour_filter(); //a level's colour filter (a mesh on the eye) isn't drawn
 void set_no_colour_filter(bool on);

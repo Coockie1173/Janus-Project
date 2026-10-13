@@ -143,6 +143,8 @@ Texts that still talk about the controller.
 - [x] **medium** Aim Sensitivity and Aim Field of View do nothing during breaches
 - [x] **medium** ACOG and reflex sights ignore Aim Field of View
 - [x] **low** Rename "Lock Aim" to "Toggle ADS"
+- [x] **medium** Aimed with the sniper the mouse feels twice as fast: a scope turns the mouse down by
+      its zoom now (the pistol unchanged on Dam, a scope not tried by script, see docs/STATUS.md)
 - [ ] **low** ADS snap off by default with mouse and keyboard
 - [ ] **low** Maybe show Aim Field of View as a fraction of the FOV (0.75 = 75%) like the sensitivity scale, it's an angle now
 

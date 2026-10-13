@@ -43,20 +43,28 @@ const uint32_t kCtrlFov = 0x71C, kCtrlAimBlend = 0xD10;
 const uint32_t kStepAgain = 0x806EBA7C; //a byte, set while a controller's step is done again or the host's copy is stepped
 std::atomic<float> g_ads_fov{0}; //0 is the game's own
 std::atomic<float> g_host_drawn{0}; //the angle a console draws this player's aim with, 0 when it isn't aimed
+std::atomic<float> g_aim_zoom{1}; //how much further than the pistol's sight the weapon in the hand zooms, 1 or less
+const float kHalfRadPerDegree = 0.00872665f, kSightFov = 20.0f; //anything aimed narrower than that counts as a scope
 PPCFunc orig_player_camera = nullptr;
 
 void ads_fov_apply(uint32_t ctrl) {
     static float aimed = 0; //the weapon's angle as last worked out
     float blend = ldf(ctrl + kCtrlAimBlend);
     g_host_drawn = 0;
+    g_aim_zoom = 1;
     uint32_t o = ld32(kViewSettingsPtr);
     if (!guest_ptr(o) || !(blend > 0) || blend > 1) { if (!(blend > 0)) aimed = 0; return; }
     float view = ldf(o + 0x328), now = ldf(ctrl + kCtrlFov);
     if (!std::isfinite(view) || !std::isfinite(now) || view < 1 || now < 1 || now > view) return;
     if (blend > 0.2f || aimed == 0) aimed = view + (now - view) / blend; //early in the blend it's mostly rounding
     g_host_drawn = kGameFov + (aimed - kGameFov) * blend;
+    //a scope's angle is a few degrees (the sniper's goes on with its zoom, +0xCF4), and the same
+    //turn crosses that much more of the screen: the mouse turns by the two pictures' sizes less
+    //a plain sight stays as it was, the pistol aims at 22.5 in training and at 21 on Dam
+    float option = g_ads_fov > 0 ? g_ads_fov / kGameAdsFov : 1.0f;
+    float want = std::min(view, aimed * option), sight = std::min(view, kSightFov * option);
+    if (want >= 1 && want < sight) g_aim_zoom = std::tan(want * kHalfRadPerDegree) / std::tan(sight * kHalfRadPerDegree);
     if (g_ads_fov <= 0) return;
-    float want = std::min(view, aimed * g_ads_fov / kGameAdsFov);
     float angle = view + (want - view) * blend;
     stf(ctrl + kCtrlFov, angle);
     stf(ctrl + kCtrlFov + 4, angle);
@@ -66,8 +74,12 @@ void ads_fov_apply(uint32_t ctrl) {
 void PlayerCamera(PPCContext& c) {
     uint32_t ctrl = c.r[3];
     orig_player_camera(c);
-    if (guest_ptr(ctrl) && ctrl == local_controller() && ld8(kStepAgain) == 0 && !is_tank(ctrl)) ads_fov_apply(ctrl);
+    if (!guest_ptr(ctrl) || ctrl != local_controller() || ld8(kStepAgain) != 0) return;
+    if (is_tank(ctrl)) g_aim_zoom = 1;
+    else ads_fov_apply(ctrl);
 }
+
+float aim_zoom() { return g_aim_zoom; }
 
 //the same aim on a console, whose view is the game's 49 and whose weapon aims at its own angle:
 //what the host of a network game works this player's aimed turning out with (input.cpp)
