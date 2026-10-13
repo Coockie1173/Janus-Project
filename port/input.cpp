@@ -887,7 +887,8 @@ void install_mouse() {
     orig_sprint[2] = ppc_hook("PlayerSprint", sprint_read<2>);
     orig_action_update = ppc_hook("ge_action_update", action_update);
     if (!orig_sprint[0] || !orig_sprint[1] || !orig_sprint[2] || !orig_action_update) rt_die("goldeneye: the sprint is not hooked in this build");
-    video_set_relative_mouse(g_mouse_sens > 0);
+    video_keep_cursor(true); //the game draws no pointer, a free cursor is the system's
+    mouse_capture(true);
 }
 
 float mouse_sens() { return g_mouse_sens; }
@@ -907,6 +908,7 @@ void set_mouse_everywhere(bool on) { g_mouse_everywhere = on; }
 //once a game frame, with nobody to turn (a menu, a pause) the mouse's motion is dropped
 void mouse_applied(uint32_t frame) { g_look_frame = frame; }
 void mouse_frame(uint32_t f) {
+    mouse_capture(!overlay_open());
     if (!g_stick_took && g_look_frame != f - 1 && g_look_frame != f) {
         float dx, dy;
         video_take_mouse_motion(dx, dy);
@@ -914,6 +916,12 @@ void mouse_frame(uint32_t f) {
 }
 
 //the cursor is the game's while it plays and free while an overlay (F1, F3) is up
-void mouse_capture(bool on) { video_set_relative_mouse(on && g_mouse_sens > 0); }
+//the cursor is captured and hidden in play only: in a menu, a pause or a load it is free and seen
+void mouse_capture(bool on) {
+    const bool captured = on && g_mouse_sens > 0 && in_play();
+    static std::atomic<int> was{-1};
+    if (was.exchange(captured) != (int)captured && std::getenv("GE_TRACE")) rt_log("goldeneye: the cursor is %s", captured ? "captured and hidden" : "free");
+    video_set_relative_mouse(captured);
+}
 
 } //namespace ge

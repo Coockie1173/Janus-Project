@@ -170,7 +170,7 @@ void NpcHit(PPCContext& c)
 
 //the mouse on the sliders. the menu draws a slider's bar (ge_slider_draw: the menu, x, y, width,
 //height in a screen of 640 by 448) right after it asked for its value, so a bar drawn after
-//one of the four was asked for is that slider's. while the page is drawn the cursor is free:
+//one of the four was asked for is that slider's. the cursor is free in a menu (input.cpp):
 //a press on a bar takes hold of the slider and it follows the cursor until the button is let
 //go, and the row under a moving cursor is the lit one (the menu's +0x220, the lit item's number)
 const float kScreenWide = 640.0f, kScreenHigh = 448.0f;
@@ -311,18 +311,16 @@ void ChoiceStep(PPCContext& c)
 
 } //namespace
 
-//once a frame: the cursor is free while the page with the sliders is drawn
+//once a frame: the page with the sliders went, nothing is held any more
 void custom_frame(uint32_t frame)
 {
 	const bool up = g_drawn_frame != 0 && frame - g_drawn_frame <= kUpFrames;
-	if (up && !overlay_open()) video_set_relative_mouse(false);
 	if (up == g_up) return;
 	g_up = up;
 	if (up) return;
 	g_held = -1;
 	g_on_bar = false;
 	g_was_left = false;
-	mouse_capture(!overlay_open());
 }
 
 //in the classic's filter: a press that has hold of a slider isn't the menu's select too

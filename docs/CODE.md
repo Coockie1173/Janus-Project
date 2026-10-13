@@ -533,7 +533,7 @@ view's angles once a frame.
 | `look_sens<I>` | hooks: the four sensitivities read as 100 for the call while the mouse is on the stick |
 | `classic_filter(chan, s)` | channel 0 only, in this order: settings, mouse stick, wheel, debug, sprint, weapons, aim lock, menu, tank |
 | `install_mouse` | environment, the filter, all the hooks |
-| `mouse_frame`, `mouse_applied`, `mouse_capture` | unused motion dropped once a frame; the cursor freed while an overlay is up |
+| `mouse_frame`, `mouse_applied`, `mouse_capture` | unused motion dropped once a frame; the cursor captured and hidden only in play (`in_play()`, no overlay up), free and seen in a menu, a pause or a load (`video_keep_cursor`) |
 
 ### fov.cpp
 
@@ -705,7 +705,7 @@ its head bit and with the least of the attacker's damages; `GE_TRACEHIT` logs ev
 `SliderDraw` (hook on `ge_slider_draw`) keeps where the four bars are and is where the mouse
 works: `Cursor` (wiikit's `video_mouse`, or `GE_CUSTOM_POINTER` for a test), a press on a bar
 takes hold of it, `RowAt` lights the row under a moving cursor and a click on the switch's row
-changes it. `custom_frame` frees the cursor while the page is drawn, `custom_buttons` keeps a
+changes it. `custom_frame` lets go of a held slider when the page goes, `custom_buttons` keeps a
 press that holds a slider from being a select.
 
 ### tank.cpp
