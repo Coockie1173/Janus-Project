@@ -59,6 +59,12 @@
 //the same two lists are grids in the settings menu (F1 > Level Select, F1 > Multiplayer Maps,
 //port/settings.cpp), which is where 150 levels are easier to pick from
 //
+//Select Difficulty (rows 80582248 with Time Trial, 805823D8 without: slots, then an item of
+//kind 0x13 to 0x17 each, which is what starts the mission) gets rows made here with one more
+//item under the last, "007 Custom", to a page made here: four of the game's sliders (kind 5,
+//the row's hash a setting's; port/custom.cpp answers for these four) and "Start Mission", a
+//row of 007 Classic's kind. a slider's bar has no number, so its label is rewritten with it
+//
 //GE_MODS_PAGE=7D000045 Extras > Mods opens that page instead (to look at a page without going
 //through the menus that lead to it)
 #include "ge.h"
@@ -146,6 +152,13 @@ const uint32_t kSplitScreenRow = 6, kSplitScreenAboutRow = 9;
 const uint32_t kTextMultiplayer = 0x43000C88; //the page's title, the game's
 const uint32_t kOnlinePage = 0x7D000049; //Nintendo Wi-Fi Connection
 const uint32_t kTextWfc = 0x4300F0F0, kTextWfcModded = 0x4300F0F1, kTextAboutWfc = 0x4300F0F2, kTextAboutModded = 0x4300F0F3;
+const uint32_t kDifficultyRows[] = { 0x80582248, 0x805823D8 }, kDifficultyItems[] = { 5, 4 }; //Select Difficulty, the game's: with Time Trial and without
+const uint32_t kTextDifficulty = 0x430004E1; //its title
+const uint32_t kCustomPage = 0x7D000DFC;
+const uint32_t kTextCustom = 0x4300F0E0, kTextAboutCustom = 0x4300F0E1, kTextStart = 0x4300F0E2, kTextAboutStart = 0x4300F0E3;
+const uint32_t kTextSlider = 0x4300F0E8, kTextAboutSlider = 0x4300F0EC; //one a slider from each
+const uint32_t kKindSlider = 0x00050000, kKindClassic = 0x00160000; //a slider of a setting, 007 Classic
+const uint32_t kLabelRoom = 48; //characters a slider's label has room for
 const uint32_t kAlloc = 0x803428C0; //(bytes, flags) -> a block of the game's heap
 const uint32_t kMostPages = 4096;
 
@@ -172,6 +185,12 @@ bool g_pool_failed = false;
 uint32_t g_pool_version = 0; //a network game's version with those maps
 bool g_trace = false;
 uint32_t g_mods_target = kModsPage; //GE_MODS_PAGE
+
+uint32_t g_difficulty_rows[2] = {}, g_difficulty_row_count[2] = {}; //Select Difficulty with 007 Custom
+uint32_t g_custom_rows = 0, g_custom_row_count = 0, g_custom_start = 0; //its page, and the row that starts the mission
+uint32_t g_custom_labels[kCustomSliders] = {};
+uint32_t g_custom_class = 0;
+bool g_custom_failed = false;
 
 uint32_t Alloc(const PPCContext& c, uint32_t bytes)
 {
@@ -469,6 +488,100 @@ void MultiplayerFrame(const PPCContext& c, uint32_t data, uint32_t count)
 	st32(page + kPageRowCount, g_multiplayer_row_count);
 }
 
+void Write(uint32_t at, const std::string& text, uint32_t room)
+{
+	const size_t count = std::min(text.size(), size_t(room - 1));
+	for (size_t i = 0; i <= count; ++i) st16(at + uint32_t(i) * 2, i < count ? (uint8_t)text[i] : 0);
+}
+
+//007 Custom's page and Select Difficulty's rows with the item for it, made once
+bool BuildCustom(const PPCContext& c)
+{
+	g_texts[kTextCustom] = Text(c, "007 Custom");
+	g_texts[kTextAboutCustom] = Text(c, "007 Classic with the enemies' health, damage and reactions set by you.");
+	g_texts[kTextStart] = Text(c, "Start Mission");
+	g_texts[kTextAboutStart] = Text(c, "Play the mission as 007 Classic with these settings.");
+	bool made = g_texts[kTextCustom] && g_texts[kTextAboutCustom] && g_texts[kTextStart] && g_texts[kTextAboutStart];
+	for (int i = 0; i < kCustomSliders; ++i)
+	{
+		g_custom_labels[i] = Alloc(c, kLabelRoom * 2);
+		if (g_custom_labels[i]) Write(g_custom_labels[i], custom_label(i), kLabelRoom);
+		g_texts[kTextSlider + i] = g_custom_labels[i];
+		g_texts[kTextAboutSlider + i] = Text(c, custom_about(i));
+		made = made && g_custom_labels[i] && g_texts[kTextAboutSlider + i];
+	}
+	if (!made) return false;
+
+	const uint32_t items = kCustomSliders + 1;
+	const uint32_t at = ListRows(c, items, kTextCustom, g_custom_rows, g_custom_row_count);
+	if (!at) return false;
+	const uint32_t about = at + (items + 1) * kRowSize;
+	for (uint32_t i = 0; i < kCustomSliders; ++i)
+	{
+		Row(at + i * kRowSize, kTextSlider + i, kCustomSetting + i, 0, kKindSlider);
+		Row(about + i * kRowSize, kTextAboutSlider + i, 0, 0, kKindAbout);
+	}
+	g_custom_start = at + kCustomSliders * kRowSize;
+	Row(g_custom_start, kTextStart, 0, 0, kKindClassic);
+	Row(about + kCustomSliders * kRowSize, kTextAboutStart, 0, 0, kKindAbout);
+
+	for (int which = 0; which < 2; ++which)
+	{
+		const uint32_t game = kDifficultyRows[which], had = kDifficultyItems[which], count = had + 1;
+		const uint32_t to = ListRows(c, count, kTextDifficulty, g_difficulty_rows[which], g_difficulty_row_count[which]);
+		if (!to) return false;
+		CopyRows(to, game + (kLayoutTop + had) * kRowSize, had);
+		Row(to + had * kRowSize, kTextCustom, kCustomPage, 0, kKindPage);
+		const uint32_t line = to + (count + 1) * kRowSize;
+		CopyRows(line, game + (kLayoutTop + had + had + 1) * kRowSize, had);
+		Row(line + had * kRowSize, kTextAboutCustom, 0, 0, kKindAbout);
+	}
+	return true;
+}
+
+//once a frame: Select Difficulty has 007 Custom, whose page is one more of the array
+void CustomFrame(const PPCContext& c, uint32_t& data, uint32_t& count)
+{
+	if (g_custom_failed || !game_alloc) return;
+	if (!g_custom_rows && !BuildCustom(c))
+	{
+		g_custom_failed = true;
+		rt_log("goldeneye: 007 Custom's page couldn't be made");
+		return;
+	}
+	for (int i = 0; i < kCustomSliders; ++i) Write(g_custom_labels[i], custom_label(i), kLabelRoom);
+	for (uint32_t i = 0; i < count; ++i)
+	{
+		const uint32_t page = data + i * kPageSize, rows = ld32(page + kPageRows);
+		for (int which = 0; which < 2; ++which)
+		{
+			if (rows != kDifficultyRows[which]) continue;
+			if (!g_custom_class)
+			{
+				g_custom_class = ld32(page + kPageClass);
+				rt_log("goldeneye: Select Difficulty (page %08X, class %08X) has 007 Custom", ld32(page), g_custom_class);
+			}
+			st32(page + kPageRows, g_difficulty_rows[which]);
+			st32(page + kPageRowCount, g_difficulty_row_count[which]);
+		}
+	}
+	if (!g_custom_class || FindPage(data, count, kCustomPage)) return;
+	//the array in a new block with one more page, the game's old one is left as it is
+	const uint32_t fresh = Alloc(c, (count + 1) * kPageSize);
+	if (!fresh) return;
+	for (uint32_t i = 0; i < count * kPageSize; i += 4) st32(fresh + i, ld32(data + i));
+	const uint32_t page = fresh + count * kPageSize;
+	st32(page, kCustomPage);
+	st32(page + kPageRows, g_custom_rows);
+	st32(page + kPageRowCount, g_custom_row_count);
+	st32(page + kPageClass, g_custom_class);
+	data = fresh;
+	count += 1;
+	st32(kPages + kPagesData, data);
+	st32(kPages + kPagesCount, count);
+	st32(kPages + kPagesRoom, count);
+}
+
 bool Modded() { return g_map_pool && g_any_pool && !g_pool_failed; }
 
 //a gamemode's page gets its pool's rows after Connect to WFC Modded, the game's own otherwise
@@ -618,6 +731,7 @@ std::string map_shown_name(const std::string& file, int& mode) { return MapOf(fi
 const char* map_mode_name(int mode) { return kMapKinds[mode].mode; }
 bool level_loads(uint32_t hash) { return std::find(std::begin(kBrokenLevels), std::end(kBrokenLevels), hash) == std::end(kBrokenLevels); }
 bool modded_lobby() { return Modded(); }
+bool custom_start_row(uint32_t row) { return row != 0 && row == g_custom_start; }
 
 uint32_t mods_menu_text(uint32_t hash)
 {
@@ -634,9 +748,10 @@ uint32_t mods_menu_text(uint32_t hash)
 //once a frame, on the game's thread (the limiter's hook)
 void mods_menu_frame(PPCContext& c)
 {
-	const uint32_t count = ld32(kPages + kPagesCount);
+	uint32_t count = ld32(kPages + kPagesCount);
 	uint32_t data = ld32(kPages + kPagesData);
 	if (!guest_ptr(data) || count == 0 || count > kMostPages) return;
+	CustomFrame(c, data, count);
 	MultiplayerFrame(c, data, count);
 	for (int mode = 0; mode < kModeCount; ++mode) PoolFrame(c, data, count, mode);
 	for (int which = 0; which < 2; ++which) ChooseFrame(c, data, count, which);

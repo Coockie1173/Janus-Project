@@ -38,6 +38,7 @@
 //settings.cpp the settings menu (F1)
 //render.cpp anisotropic filtering and anti-aliasing, the renderer's
 //hotkeys.cpp keys that change the menu's settings in play (hotkeys.h)
+//custom.cpp 007 Custom: a mission as 007 Classic with the guards set by sliders
 //crashdump.cpp crash, die and stall dumps into build/crashes
 //diagnostics.cpp the sampling profiler
 //debug.cpp aids for finding things in the running game
@@ -135,6 +136,15 @@ std::string game_text(const PPCContext& c, uint32_t hash); //prompts.cpp: one of
 std::string mod_side_file(const ModLevel& mod, const char* extension); //mods.cpp: mt_yard.png for mt_yard.edb, next to it or in the mods folder
 uint32_t mods_menu_text(uint32_t hash); //the characters of one of the Mods menu's texts, 0 for any other
 std::string mod_shown_name(const std::string& file); //a mod level's name in the menus, from its file's
+void install_custom(); //custom.cpp
+const int kCustomSliders = 4; //enemy health, enemy damage, enemy reaction speed, hit protection
+const uint32_t kCustomSetting = 0x7D01F000; //the sliders as settings of the game's menu, a hash each from here. the game's own stop at 7D0100xx
+bool custom_mode(); //the mission is played with them
+void set_custom_mode(bool on);
+std::string custom_label(int slider); //"Enemy Health: 250%"
+const char* custom_about(int slider); //the line that says what it is
+std::string custom_values(); //the four as the settings file keeps them
+bool custom_start_row(uint32_t row); //modmenu.cpp: the menu row is 007 Custom's "Start Mission"
 void install_pictures(); //pictures.cpp, after install_mods
 void pictures_shoot(); //F12: the picture on screen becomes the loaded mod level's .png
 bool pictures_hiding(); //the hud and the gun are left out for a picture
@@ -258,6 +268,7 @@ bool sprint_key(); //input.cpp, the sprint key is down this frame
 void install_overlay(); //overlay.cpp
 bool overlay_open(); //the watches or the settings menu are up, so the mouse is free
 bool settings_open(); //settings.cpp
+void save_settings(); //the settings file is written
 std::string saved_setting(const char* env, const char* name); //a setting as the game starts: the environment's, or what the menu saved under name in the launcher's file. empty for neither
 void install_render(); //render.cpp: anisotropic filtering and anti-aliasing
 int anisotropy(); //1 is off, up to 16

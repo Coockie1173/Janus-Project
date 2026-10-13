@@ -100,7 +100,8 @@ void save_launch_settings() {
         {"LAUNCH_LEVELTIMER", level_timer() ? "1" : "0"}, {"LAUNCH_AUTOQTE", auto_qte() ? "1" : "0"}, {"LAUNCH_AUTOSTART", auto_start() ? "1" : "0"}, {"LAUNCH_AUTOSAVE", autosave() ? "1" : "0"}, {"LAUNCH_EXTRASMENU", extras_menu() ? "1" : "0"}, {"LAUNCH_UNLOCKALL", unlock_all() ? "1" : "0"}, {"LAUNCH_ONLINEUNLOCKS", online_unlocks() ? "1" : "0"}, {"LAUNCH_STAMINAMETER", stamina_meter() ? "1" : "0"},
         {"LAUNCH_VSYNC", vsync() ? "1" : "0"}, {"LAUNCH_PING", show_ping() ? "1" : "0"}, {"LAUNCH_OCCLUSION", occlusion() ? "1" : "0"}, {"LAUNCH_SOUNDHEIGHT", sound_height() ? "1" : "0"},
         {"LAUNCH_HUD", hud() ? "1" : "0"}, {"LAUNCH_SHAKE", shake_text}, {"LAUNCH_TANKBUTTONS", tank_text},
-        {"LAUNCH_ANISO", std::to_string(anisotropy())}, {"LAUNCH_MSAA", std::to_string(anti_aliasing())}};
+        {"LAUNCH_ANISO", std::to_string(anisotropy())}, {"LAUNCH_MSAA", std::to_string(anti_aliasing())},
+        {"LAUNCH_CUSTOM", custom_values()}};
     if (g_fps_changed) values.push_back({"LAUNCH_FPS", std::to_string(fps_limit())}); //"auto" stays until it's changed
     auto lines = read_lines(GE_SETTINGS_FILE);
     if (lines.empty()) lines.push_back("# written by the launcher, read when the game is started");
@@ -1420,6 +1421,13 @@ void pad_down(int button) {
 #endif
 
 } //namespace
+
+void save_settings()
+{
+#ifdef GE_IMGUI
+	save_launch_settings();
+#endif
+}
 
 std::string saved_setting(const char* env, const char* name)
 {

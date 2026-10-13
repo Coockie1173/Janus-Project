@@ -86,6 +86,7 @@ void install() {
     install_ping();
     install_mods();
     install_mods_menu();
+    install_custom();
     install_pictures();
     install_fov();
     install_gecko();

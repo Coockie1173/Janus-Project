@@ -405,6 +405,14 @@ Hooked (replaced, the original called from inside) unless marked *called* (throu
 | `800AF650` | `ge_save_game` | (manager, slot, delete, rename, checkpoint) -> 0 busy, 1 written, 5 failed, 6 no room, *called* | autosave |
 | `802B1330` | `ge_save_write` | (save file, slot, buffer, flags); flag bit 0: no "Saved" box | autosave |
 | `8018CD40` | `ge_hud_update` | (hud) | tweaks |
+| `800C0B70` | `ge_enemy_bullet_scale` | (levels) -> f1 the mission's value by difficulty for a guard's bullet | custom |
+| `800C0B90` | `ge_player_shot_scale` | (levels) -> f1 the same for the player's shot at a guard | custom |
+| `800C0BB0` | `ge_enemy_fight_wait` | (levels) -> f1 seconds a guard that saw the player waits before it fights | custom |
+| `800C0BD0` | `ge_hit_protection_time` | (levels) -> f1 seconds after a hit in which a weaker one doesn't hurt | custom |
+| `800C0C70` | `ge_enemy_melee_damage` | (levels) -> f1 a guard's melee, read as the guard is made | custom |
+| `800C0C90` | `ge_enemy_fire_wait` | (levels) -> f1 times the weapon's time a guard has its target before it fires | custom |
+| `8022F4D0` | `ge_setting_get` | (profile, setting's hash, pad, -, as it is) -> f1 a slider's value, 0 to 1 | custom |
+| `8022E2F0` | `ge_setting_step` | (profile, setting's hash, -1 or 1, pad) -> 1 when it moved | custom |
 | `8023D200` | `ge_pad_confirmed` | (front end, pad) -> the pad pressed select | tweaks |
 | `8019A080` | `ge_show_tutorial` | (hud, tutorial's hash) -> shown | tweaks |
 | `800C2E00` | `ge_unlock_level` | (item's hash) -> the level before the one it opens at | tweaks |
@@ -665,6 +673,27 @@ Nothing is hooked when `GE_PORTAL_NEAR=0` and there is no log.
 
 `Keep(writes, on, written)` remembers what the game had and puts it back when the option is
 turned off. `tweaks_apply()` runs both once a frame.
+
+### custom.cpp
+
+007 Custom: a mission as 007 Classic with the guards set by four sliders. A mission's row of
+values by difficulty (levels `805D1804` `+0x34`, the difficulty the short at `805DE6CC`) is
+read by a function a value; six are hooked and scale what the game read while the mode is on
+(`Active()`: on and not multiplayer):
+
+| Hook | Slider | How |
+|---|---|---|
+| `Bullet`, `Melee` | Enemy Damage, 0 to 1000 | times it |
+| `Shot` | Enemy Health, 0 to 1000 | the player's shot divided by it, times a million at 0 |
+| `FightWait`, `FireWait` | Enemy Reaction Speed, 0 to 100 | times `Slow()`, 2 at 0 and 1 at 100 |
+| `ProtectionTime` | Hit Protection, 0 to 1000 | times it |
+
+`SettingGet` and `SettingStep` (hooks on `ge_setting_get`, `ge_setting_step`) answer the
+game's menu for the four sliders' hashes (`kCustomSetting` on): how full the bar is, and a
+step every 40 ms. `set_custom_mode` is called by cutscenes.cpp's `MenuPending` for every
+level the menu loads: on from the page's Start Mission row (`custom_start_row`), off from any
+other. `custom_label`, `custom_about` and `custom_values` are for the menu and the settings
+file. The page and Select Difficulty's item are modmenu.cpp's `BuildCustom` and `CustomFrame`.
 
 ### tank.cpp
 
@@ -933,6 +962,7 @@ Options (the launcher sets these from its settings):
 | `GE_MOUSE_INVERT=1`, `GE_ADS_SENS=S`, `GE_AIM_LOCK=1` | |
 | `GE_SKIP_CUTSCENES=1`, `GE_SKIP_MOVIES=1`, `GE_AUTO_QTE=1`, `GE_AUTO_START=1`, `GE_NO_TUTORIALS=1`, `GE_NO_COLOUR_FILTER=1`, `GE_UNLOCK_ALL=1`, `GE_ONLINE_UNLOCKS=0`, `GE_EXTRAS_MENU=1` | enhancements |
 | `GE_LEVEL_TIMER=0`, `GE_AUTOSAVE=0` | on by default |
+| `GE_CUSTOM=H,D,R,P`, `GE_CUSTOM_ON=1` | 007 Custom's sliders (enemy health, damage, reaction speed, hit protection), and every mission played with them |
 | `GE_MOUSE_EVERYWHERE=1`, `GE_NOCLIP=1`, `GE_STAMINA=1`, `GE_COLLISION=1` | cheats |
 | `GE_HOSTS=F`, `GE_NETLOG=1` | the hosts file, the network log |
 | `GE_GECKO=F`, `GE_GECKO_EXTRA=F[:F...]` | gecko code files |

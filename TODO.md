@@ -194,7 +194,9 @@ Texts that still talk about the controller.
 - [ ] Infinite sprint
 - [ ] God mode
 - [ ] Enemy rockets
-- [ ] 007 mode (sliders for enemy health, damage, accuracy and reaction speed)
+- [x] 007 mode: Select Difficulty > 007 Custom, sliders for enemy health, enemy damage, enemy reaction speed
+      and hit protection, then the mission as 007 Classic (the menu and the melee value checked, see docs/STATUS.md)
+- [ ] 007 mode: a slider for enemy accuracy (the game has no value for it by difficulty)
 - [ ] Invisible enemies
 - [ ] Invisible player (enemies never see you)
 - [ ] Fly mode (noclip that doesn't go through walls)

@@ -310,6 +310,8 @@ void MenuPending(PPCContext& c)
 	}
 	if (acts && ld32(menu + kPendingAction) == kActionLoadLevel)
 	{
+		//a level started from 007 Custom's page is played with its sliders, one started from anywhere else isn't
+		set_custom_mode(custom_start_row(ld32(menu + kMenuPages + ld32(menu + kMenuPage) * 4)));
 		if (g_forced_level && StartsCampaignLevel(menu))
 		{
 			rt_log("goldeneye: level %08X loads in place of %08X (GE_LEVEL)", g_forced_level, ld32(menu + kPendingLevel));
