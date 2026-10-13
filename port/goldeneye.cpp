@@ -109,6 +109,7 @@ void install() {
     install_timeline();
     install_flipbooks();
     install_shake();
+    install_typing();
     install_render();
     install_sound();
     install_occlusion();

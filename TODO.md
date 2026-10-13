@@ -58,7 +58,8 @@ Things that only break above 60 fps.
 - [x] **low** Bond's dancing animation is too fast
 - [ ] **low** Camera shake in the Carrier ending is too fast
 - [x] **low** Breaches seem faster at higher fps (needs checking)
-- [ ] **medium** Text scrolls at a speed that follows the frame rate (mission intros, checkpoint text, objectives, ...)
+- [x] **medium** Text scrolls at a speed that follows the frame rate (mission intros, checkpoint text, objectives, ...):
+      a character a console frame now (Dam's intro 2.8 s at 30 and at 144, see docs/STATUS.md)
 
 ### Quick time events
 
@@ -91,7 +92,8 @@ Things that only break above 60 fps.
 - [x] **critical** crunchy audio at higher fps: a new sound played 3 ms at full volume (to be confirmed by ear)
 - [ ] **medium** Online: a static noise plays when another player fires the Golden Gun
 - [ ] **medium** Multiplayer: a player above you should have the low frequencies cut, not the high ones
-- [ ] **medium** Double audio on reloads
+- [x] **medium** Double audio on reloads: a reload's sounds played up to five times over at 144, once now
+      (counted on the P99 at 30, 60 and 144, to be confirmed by ear)
 - [ ] **medium** Main menu cursor sound is sometimes a loud click
 - [ ] **medium** Nightclub: the score keeps playing over the breach music
 - [ ] **low** Nightclub: occlusion of the song and crowd transitions harshly around Zukovsky's office (needs checking)
@@ -116,7 +118,8 @@ do several things.
 
 Texts that still talk about the controller.
 
-- [ ] **medium** Training: "Disable Tutorials" also hides the text boxes, the mission can't be played without them
+- [x] **medium** Training: "Disable Tutorials" also hides the text boxes, the mission can't be played without them:
+      the option leaves the training mission alone now
 - [ ] **low** Training: the text boxes still say to move around with the analog sticks
 - [ ] **low** Training: "Press [Right] to draw your P99."
 - [ ] **low** Training: "You can adjust your aim with the R Stick" (probably more, the reporter didn't see them all)

@@ -395,7 +395,7 @@ def run_gui():
               foreground="gray", wraplength=520, justify="left").grid(row=9, column=0, sticky="w", padx=(30, 8))
     no_tutorials = tk.BooleanVar(value=settings["notutorials"] == "1")
     ttk.Checkbutton(en, text="Disable Tutorials", variable=no_tutorials).grid(row=10, column=0, sticky="w", **pad)
-    ttk.Label(en, text="The tutorial boxes in the missions aren't shown.",
+    ttk.Label(en, text="The tutorial boxes in the missions aren't shown, but for the training mission's.",
               foreground="gray", wraplength=520, justify="left").grid(row=11, column=0, sticky="w", padx=(30, 8))
 
     skip_zukovsky = tk.BooleanVar(value=settings["skipzukovsky"] == "1")

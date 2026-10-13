@@ -77,6 +77,9 @@ ge_cutscene_release    # and lets go: GE_TRACECUT logs it
 ge_file_update         # a file of the file manager is updated: one being unloaded waits the console's time (port/unload.cpp)
 ge_timeline_event      # a timeline's type 0xB event: one that waits stays at the event's frame (port/timeline.cpp)
 ge_texture_animate     # a texture's animator: it counts the whole frame's length at any rate (port/flipbooks.cpp)
+ge_typed_text_update   # a typed text gets its next character: one a console frame at any rate (port/typing.cpp)
+ge_sound_details       # a sound's details are looked up by its hash: GE_TRACESOUND logs it and who asked (port/sound.cpp)
+ge_player_event_sound  # an animation event's sound played at the player: once for the frames a console frame lasts (port/sound.cpp)
 draw_delayed?          # a mesh glued to the eye is widened with the field of view
 ge_geofile_onload      # a file is given its memory: one that gets none is logged (port/mods.cpp)
 ge_pick_next_maps      # a network game picks its next two maps: with a short map list it gives up on them being new ones (port/modmenu.cpp)

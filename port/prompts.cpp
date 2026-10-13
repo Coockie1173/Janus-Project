@@ -407,7 +407,7 @@ void TextMsg(PPCContext& c)
 	if (!g_trace) return;
 	static std::set<uint32_t> seen;
 	if (!guest_ptr(out) || !guest_ptr(ld32(out)) || !seen.insert(hash).second) return;
-	rt_log("text: %08X \"%s\"", hash, Readable(ld32(out)).c_str());
+	rt_log("text: %08X \"%s\" %s", hash, Readable(ld32(out)).c_str(), call_chain(c).c_str());
 }
 
 } //namespace

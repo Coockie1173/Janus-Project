@@ -25,6 +25,7 @@
 //timeline.cpp a timeline that waits at an event stays at its frame, so doors are shut after a skipped cutscene
 //flipbooks.cpp animated textures (fire, screens) play at the console's speed at any frame rate
 //shake.cpp the camera's sway (Nightclub's dance floor) goes by time, not by frames
+//typing.cpp a typed text (a mission's place and time, an objective) comes at the console's speed at any frame rate
 //sound.cpp a sound starts silent, so it doesn't click at higher frame rates
 //occlusion.cpp a sound behind a wall or a floor is quieter
 //height.cpp a sound above or below the listener is muffled
@@ -239,6 +240,7 @@ void install_shake(); //shake.cpp
 const float kShakeMax = 5.0f;
 float shake_scale(); //the game's screen shake times this, 0 is none
 void set_shake_scale(float scale);
+void install_typing(); //typing.cpp
 void install_sound(); //sound.cpp
 void install_occlusion(); //occlusion.cpp, after install_mods
 bool occlusion(); //sounds behind a wall or a floor are quieter
