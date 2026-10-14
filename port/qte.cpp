@@ -97,9 +97,10 @@ void BashStep(uint32_t input, bool pressed, bool held)
 
 void Trace(uint32_t input, bool wasDone)
 {
-	static uint32_t seen = 0;
+	static uint32_t seen = 0; //the input that waits, logged when it starts to
 	bool done = ld8(input + kDone) != 0;
-	if (!done && seen != input)
+	if (!done && !Wanted(input) && seen == input) seen = 0; //an object used again
+	if (!done && Wanted(input) && seen != input)
 	{
 		seen = input;
 		rt_log("cut: t %.3f qte: kind %u, buttons %X %X %X %X, bash time %.2f climb %.2f", level_time(), ld32(input + kKind) - kKindBase, ld32(input + kButtons),

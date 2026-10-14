@@ -70,6 +70,8 @@ const uint32_t kAppPtr = 0x806EB694, kAppEntrance = 0x338; //the entrance StartL
 
 const uint32_t kNextMissionCall = 0x80009334; //where fn_800092F0 (the app's update) returns to from StartLevelChange(app, the level at app+0x35C, 0)
 const uint32_t kWaitFrames = 150; //a level that gives the player the controls for this long has no opening
+const float kWaitSeconds = 5; //a listed cutscene that took the player has this long to take the mouse as well
+const float kHoldSeconds = 1; //of level time the black stays up after an ending's skip ran into another map, for its cutscene
 const uint32_t kCountingFrames = 3; //the level's time went up this many frames in a row: it runs
 const double kMaxSeconds = 600; //ten minutes of cutscene, then something is wrong
 const float kFadeSeconds = 0.5f; //the picture and the sound going out, and coming back
@@ -102,6 +104,9 @@ uint32_t g_counting = 0; //frames in a row the level's time went up
 float g_played = 0;
 float g_ends = 0; //the level time this cutscene ends at, 0 if we don't know it
 float g_armed_ends = 0; //the same for the cutscene that is waited for
+float g_wait_until = 0; //the level time a cutscene of config/cutscenes.txt is waited for until, 0 an opening (kWaitFrames)
+bool g_holding = false; //the black and the mute are kept up after a level change, for the next map's cutscene
+float g_hold_from = -1; //the level time the next map was first seen at
 std::map<uint32_t, float> g_openings; //level hash -> the level time its opening ends at
 
 //lines of "level hash (hex), seconds"
@@ -169,7 +174,9 @@ bool StartsCampaignLevel(uint32_t menu)
 	return item >= kItemOperative && item <= kItemTimeTrial;
 }
 
-void Stop(const char* why)
+//hold: the black and the mute stay up, the next map's cutscene is skipped under them (or they
+//come off kHoldSeconds after its player is there)
+void Stop(const char* why, bool hold = false)
 {
 	if (g_state == Skip::Running)
 	{
@@ -182,7 +189,12 @@ void Stop(const char* why)
 	}
 	else if (g_state == Skip::FadingOut) rt_log("goldeneye: skip cutscenes: not skipped, %s", why);
 	else if (g_state == Skip::Waiting && g_trace) rt_log("goldeneye: skip cutscenes: not waiting any more, %s", why);
-	if (g_state == Skip::Running || g_state == Skip::FadingOut)
+	if ((g_state == Skip::Running || g_state == Skip::FadingOut) && hold)
+	{
+		g_holding = true;
+		g_hold_from = -1;
+	}
+	else if (g_state == Skip::Running || g_state == Skip::FadingOut)
 	{
 		audio_mute(false, kFadeSeconds);
 		FadeTo(0.0f);
@@ -199,6 +211,7 @@ void Arm(uint32_t level)
 	g_state = Skip::Waiting;
 	g_option = &g_skip_cutscenes;
 	g_frames = g_counting = 0;
+	g_wait_until = 0;
 	auto known = g_openings.find(level);
 	g_armed_ends = known != g_openings.end() ? known->second : 0.0f;
 	if (g_trace) rt_log("goldeneye: skip cutscenes: level %08X starts, waiting for its opening", level);
@@ -214,6 +227,7 @@ void ArmCutscene(uint32_t cutscene)
 	g_option = known->second.option;
 	g_frames = g_counting = 0;
 	g_armed_ends = known->second.seconds > 0 ? ldf(kLevelTimer) + known->second.seconds : 0.0f;
+	g_wait_until = ldf(kLevelTimer) + kWaitSeconds;
 	if (g_trace) rt_log("goldeneye: skip cutscenes: cutscene %08X of level %08X starts", cutscene, ld32(kCurrentLevel));
 }
 
@@ -228,6 +242,7 @@ void StartFade()
 	}
 	g_state = Skip::FadingOut;
 	g_running = true;
+	g_holding = false;
 	FadeTo(1.0f);
 	audio_mute(true, kFadeSeconds);
 	rt_log("goldeneye: skip cutscenes: skipping a cutscene of level %08X", ld32(kCurrentLevel));
@@ -367,7 +382,8 @@ void LevelChange(PPCContext& c)
 		rt_log("goldeneye: level %08X won, the player was kept by cutscene%s", ld32(kCurrentLevel), g_takes.empty() ? " none" : g_takes.c_str());
 		Arm(level);
 	}
-	else if (g_state == Skip::Running || g_state == Skip::FadingOut) Stop("a level change");
+	//an ending that runs into another map of the same mission (Cradle's), not the next mission
+	else if (g_state == Skip::Running || g_state == Skip::FadingOut) Stop("a level change", g_option == &g_skip_endings && c.lr == kNextMissionCall);
 	g_takes.clear();
 	orig_level_change(c);
 }
@@ -424,6 +440,18 @@ void cutscenes_frame()
 		rt_log("cut: t %.3f level %08X the mouse is %s (state %X)", ldf(kLevelTimer), ld32(kCurrentLevel), now ? "lost to the cutscene" : "back", state);
 	locked = now;
 	g_fade_hidden = ld8(kPaused) != 0;
+	if (g_holding && now >= 0)
+	{
+		if (g_hold_from < 0) g_hold_from = ldf(kLevelTimer);
+		if (ldf(kLevelTimer) - g_hold_from > kHoldSeconds)
+		{
+			if (g_trace) rt_log("goldeneye: skip cutscenes: no cutscene to skip in the next map");
+			g_holding = false;
+			g_running = false;
+			audio_mute(false, kFadeSeconds);
+			FadeTo(0.0f);
+		}
+	}
 	if (g_state == Skip::Running) { Run(); return; }
 	if (g_state == Skip::FadingOut) { FadeOut(); return; }
 	if (g_state != Skip::Waiting) return;
@@ -435,7 +463,7 @@ void cutscenes_frame()
 	g_played = played;
 	if (g_counting < kCountingFrames) return;
 	if (local_cutscene_locked()) StartFade();
-	else if (++g_frames > kWaitFrames)
+	else if (g_wait_until > 0 ? played > g_wait_until : ++g_frames > kWaitFrames)
 	{
 		g_state = Skip::Idle;
 		if (g_trace) rt_log("goldeneye: skip cutscenes: no opening, the player has the controls");
