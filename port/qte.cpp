@@ -18,7 +18,7 @@
 //for that one call the wanted bits are put into the pressed actions and taken out after
 //
 //GE_AUTO_QTE=1 on
-//GE_TRACE=1 log every input a cutscene starts and how it ends
+//every input a cutscene starts and how it ends is logged, with the level's time
 #include "ge.h"
 #include <algorithm>
 #include <atomic>
@@ -49,7 +49,6 @@ const float kBashTop = 100.0f;
 
 std::atomic<bool> g_auto_qte{false};
 PPCFunc orig_cutscene_input = nullptr;
-bool g_trace = false;
 std::atomic<uint32_t> g_waiting_frame{~0u}; //the last frame an input waited for a button in
 
 uint32_t ButtonBit(uint32_t button)
@@ -103,12 +102,12 @@ void Trace(uint32_t input, bool wasDone)
 	if (!done && seen != input)
 	{
 		seen = input;
-		rt_log("goldeneye: qte: kind %u, buttons %X %X %X %X, bash time %.2f climb %.2f", ld32(input + kKind) - kKindBase, ld32(input + kButtons),
+		rt_log("cut: t %.3f qte: kind %u, buttons %X %X %X %X, bash time %.2f climb %.2f", level_time(), ld32(input + kKind) - kKindBase, ld32(input + kButtons),
 			ld32(input + kButtons + 4), ld32(input + kButtons + 8), ld32(input + kButtons + 12), ldf(input + kBashTimeLeft), ldf(input + kBashClimb));
 	}
 	if (done && !wasDone)
 	{
-		rt_log("goldeneye: qte: %s", ld8(input + kSucceeded) ? "passed" : "over");
+		rt_log("cut: t %.3f qte: %s", level_time(), ld8(input + kSucceeded) ? "passed" : "over");
 		seen = 0;
 	}
 }
@@ -124,14 +123,14 @@ void CutsceneInput(PPCContext& c)
 	if (!wanted)
 	{
 		orig_cutscene_input(c);
-		if (g_trace) Trace(input, wasDone);
+		Trace(input, wasDone);
 		return;
 	}
 	uint32_t pressed = ld32(ctrl + kActPressed);
 	st32(ctrl + kActPressed, pressed | wanted);
 	orig_cutscene_input(c);
 	st32(ctrl + kActPressed, pressed);
-	if (g_trace) Trace(input, wasDone);
+	Trace(input, wasDone);
 }
 
 } //namespace
@@ -144,7 +143,6 @@ void set_auto_qte(bool on) { g_auto_qte = on; }
 void install_qte()
 {
 	if (const char* e = std::getenv("GE_AUTO_QTE")) g_auto_qte = std::atoi(e) != 0;
-	g_trace = std::getenv("GE_TRACE") != nullptr;
 	orig_cutscene_input = ppc_hook("ge_cutscene_input", CutsceneInput);
 	if (!orig_cutscene_input) rt_die("goldeneye: the cutscene input is not hooked in this build");
 }

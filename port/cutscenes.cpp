@@ -33,6 +33,8 @@
 //entrances (0 is one too). nothing is skipped then
 //GE_TRACE=1 log every checkpoint
 //GE_TRACECUT=1 log what a cutscene's timeline tells its player
+//always logged ("cut: t ..."): a cutscene taking the player and letting go, the mouse lost to a
+//cutscene and given back, quick time events (port/qte.cpp) and level changes, with the level's time
 #include "ge.h"
 #include <algorithm>
 #include <atomic>
@@ -343,9 +345,8 @@ void MenuPending(PPCContext& c)
 void LevelChange(PPCContext& c)
 {
 	uint32_t app = ld32(kAppPtr), level = c.r[4];
-	if (g_trace)
-		rt_log("goldeneye: skip cutscenes: level change to %08X, entrance %u, %s, from %08X", level, guest_ptr(app) ? ld32(app + kAppEntrance) : 0,
-			g_restarting ? "a restart" : "not a restart", c.lr);
+	rt_log("cut: t %.3f level change from %08X to %08X, entrance %u, %s, from %08X", ldf(kLevelTimer), ld32(kCurrentLevel), level,
+		guest_ptr(app) ? ld32(app + kAppEntrance) : 0, g_restarting ? "a restart" : "not a restart", c.lr);
 	if (g_restarting)
 	{
 		if (guest_ptr(app) && ld32(app + kAppEntrance) <= kMissionStart)
@@ -389,6 +390,7 @@ void set_skip_briggs(bool on) { g_skip_briggs = on; }
 bool skip_endings() { return g_skip_endings; }
 void set_skip_endings(bool on) { g_skip_endings = on; }
 bool skipping_cutscene() { return g_running; }
+float level_time() { return ldf(kLevelTimer); }
 float cutscene_fade() { return g_fade_hidden ? 0.0f : FadeNow(); }
 
 //GE_TRACE: how long each frame took from the last long steps on to a while after the skip
@@ -414,12 +416,18 @@ void cutscenes_frame()
 {
 	if (g_trace) TraceFrames();
 	if (cutscene_input_waiting() && !g_takes.empty() && g_takes.back() != '*') g_takes += " *"; //a quick time event, the ending comes after
+	//the mouse taken by a cutscene and given back: a cutscene with the view or the aim open counts as given back
+	static int locked = -1;
+	uint32_t state;
+	int now = local_player_state(state) ? local_cutscene_locked() : -1;
+	if (now != locked && now >= 0 && locked >= 0)
+		rt_log("cut: t %.3f level %08X the mouse is %s (state %X)", ldf(kLevelTimer), ld32(kCurrentLevel), now ? "lost to the cutscene" : "back", state);
+	locked = now;
 	g_fade_hidden = ld8(kPaused) != 0;
 	if (g_state == Skip::Running) { Run(); return; }
 	if (g_state == Skip::FadingOut) { FadeOut(); return; }
 	if (g_state != Skip::Waiting) return;
-	uint32_t state;
-	if (!local_player_state(state)) return; //still loading
+	if (now < 0) return; //still loading
 	//the level is there but stands still behind the loading screen until its "Continue" is
 	//pressed: the mission has begun once its time counts
 	float played = ldf(kLevelTimer);
@@ -452,7 +460,7 @@ void CutsceneMessage(PPCContext& c)
 void PlayerTake(PPCContext& c)
 {
 	uint32_t cutscene = guest_ptr(g_sender) ? ld32(g_sender + kTimelineHash) : 0;
-	if (g_tracecut || g_trace) rt_log("cut: t %.3f frame %u the player %08X is taken by cutscene %08X", ldf(kLevelTimer), ld32(kFrameCount), c.r[3], cutscene);
+	rt_log("cut: t %.3f level %08X the player is taken by cutscene %08X", ldf(kLevelTimer), ld32(kCurrentLevel), cutscene);
 	char take[48];
 	std::snprintf(take, sizeof take, " %08X at %.1f", cutscene, ldf(kLevelTimer));
 	g_takes += take;
@@ -461,7 +469,7 @@ void PlayerTake(PPCContext& c)
 }
 void PlayerRelease(PPCContext& c)
 {
-	if (g_tracecut || g_trace) rt_log("cut: t %.3f frame %u the player %08X is let go", ldf(kLevelTimer), ld32(kFrameCount), c.r[3]);
+	rt_log("cut: t %.3f level %08X the player is let go", ldf(kLevelTimer), ld32(kCurrentLevel));
 	g_takes.clear();
 	orig_player_release(c);
 }
