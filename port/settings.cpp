@@ -96,7 +96,7 @@ void save_launch_settings() {
         {"LAUNCH_MOUSEMODE", modes[mouse_mode()]}, {"LAUNCH_MOUSEINVERT", mouse_invert() ? "1" : "0"},
         {"LAUNCH_ADSFOV", ads_fov_text}, {"LAUNCH_ADSSENS", ads_sens_text}, {"LAUNCH_AIMLOCK", aim_lock() ? "1" : "0"},
         {"LAUNCH_MOUSEEVERYWHERE", mouse_everywhere() ? "1" : "0"},
-        {"LAUNCH_SKIPCUTSCENES", skip_cutscenes() ? "1" : "0"}, {"LAUNCH_SKIPZUKOVSKY", skip_zukovsky() ? "1" : "0"}, {"LAUNCH_SKIPBRIGGS", skip_briggs() ? "1" : "0"}, {"LAUNCH_SKIPMOVIES", skip_movies() ? "1" : "0"}, {"LAUNCH_NOTUTORIALS", no_tutorials() ? "1" : "0"}, {"LAUNCH_NOCOLOURFILTER", no_colour_filter() ? "1" : "0"},
+        {"LAUNCH_SKIPCUTSCENES", skip_cutscenes() ? "1" : "0"}, {"LAUNCH_SKIPZUKOVSKY", skip_zukovsky() ? "1" : "0"}, {"LAUNCH_SKIPBRIGGS", skip_briggs() ? "1" : "0"}, {"LAUNCH_SKIPENDINGS", skip_endings() ? "1" : "0"}, {"LAUNCH_SKIPMOVIES", skip_movies() ? "1" : "0"}, {"LAUNCH_NOTUTORIALS", no_tutorials() ? "1" : "0"}, {"LAUNCH_NOCOLOURFILTER", no_colour_filter() ? "1" : "0"},
         {"LAUNCH_LEVELTIMER", level_timer() ? "1" : "0"}, {"LAUNCH_AUTOQTE", auto_qte() ? "1" : "0"}, {"LAUNCH_AUTOSTART", auto_start() ? "1" : "0"}, {"LAUNCH_AUTOSAVE", autosave() ? "1" : "0"}, {"LAUNCH_EXTRASMENU", extras_menu() ? "1" : "0"}, {"LAUNCH_UNLOCKALL", unlock_all() ? "1" : "0"}, {"LAUNCH_ONLINEUNLOCKS", online_unlocks() ? "1" : "0"}, {"LAUNCH_STAMINAMETER", stamina_meter() ? "1" : "0"},
         {"LAUNCH_VSYNC", vsync() ? "1" : "0"}, {"LAUNCH_PING", show_ping() ? "1" : "0"}, {"LAUNCH_OCCLUSION", occlusion() ? "1" : "0"}, {"LAUNCH_SOUNDHEIGHT", sound_height() ? "1" : "0"},
         {"LAUNCH_HUD", hud() ? "1" : "0"}, {"LAUNCH_SHAKE", shake_text}, {"LAUNCH_TANKBUTTONS", tank_text},
@@ -405,6 +405,7 @@ void BuildSettings()
 	AddToggle(kEnhancements, "skip_cutscenes", "Skip Intro Cutscenes (Experimental)", "On: a mission's opening cutscene is skipped.", skip_cutscenes, set_skip_cutscenes);
 	AddToggle(kEnhancements, "skip_zukovsky", "Skip Zukovsky (Experimental)", "On: the meeting with Zukovsky in Nightclub is skipped.", skip_zukovsky, set_skip_zukovsky);
 	AddToggle(kEnhancements, "skip_briggs", "Skip Sky Briggs (Experimental)", "On: the meeting with Sky Briggs in Carrier is skipped.", skip_briggs, set_skip_briggs);
+	AddToggle(kEnhancements, "skip_endings", "Skip Ending Cutscenes (Experimental)", "On: a mission's ending cutscene is skipped, after its quick time events if it has any.", skip_endings, set_skip_endings);
 	AddToggle(kEnhancements, "skip_movies", "Skip Movies", "On: briefings, the movies between missions and the logos are skipped.", skip_movies, set_skip_movies);
 	AddToggle(kEnhancements, "level_timer", "Level Timer", "On: the hud shows the time played in the level.", level_timer, set_level_timer);
 	AddToggle(kEnhancements, "auto_qte", "Auto Quick Time Events", "On: quick time events press their own buttons.", auto_qte, set_auto_qte);

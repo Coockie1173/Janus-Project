@@ -20,6 +20,7 @@
 //GE_SKIP_CUTSCENES=1 a mission's opening cutscene is skipped
 //GE_SKIP_ZUKOVSKY=1 the meeting with Zukovsky in Nightclub is skipped
 //GE_SKIP_BRIGGS=1 the meeting with Sky Briggs in Carrier is skipped
+//GE_SKIP_ENDINGS=1 a mission's ending cutscene is skipped
 //GE_AUTO_QTE=1 quick time events press their own buttons
 //GE_LEVEL_TIMER=0 no level timer in the hud
 //GE_AUTO_START=1 a loaded mission starts without its "Continue" being pressed

@@ -25,6 +25,9 @@
 //GE_SKIP_CUTSCENES=1 on
 //GE_SKIP_ZUKOVSKY=1, GE_SKIP_BRIGGS=1 the cutscenes of config/cutscenes.txt are skipped the same
 //way (Nightclub's meeting with Zukovsky, Carrier's with Sky Briggs), each an option of its own
+//GE_SKIP_ENDINGS=1 a mission's ending is skipped (config/cutscenes.txt's "ending" lines): the
+//long steps run until the game changes to the next level, the player isn't let go before it.
+//in a level with quick time events in its ending that is the cutscene after the last of them
 //GE_SKIP_RATE=N the frames a second of game time while skipping (3)
 //GE_ENTRANCE=N start every mission at entrance N instead of 1, for trying out a level's
 //entrances (0 is one too). nothing is skipped then
@@ -79,6 +82,7 @@ enum class Skip { Idle, Waiting, FadingOut, Running };
 std::atomic<bool> g_skip_cutscenes{false};
 std::atomic<bool> g_skip_zukovsky{false};
 std::atomic<bool> g_skip_briggs{false};
+std::atomic<bool> g_skip_endings{false};
 std::atomic<bool>* g_option = &g_skip_cutscenes; //the option what is waited for or skipped belongs to
 std::atomic<bool> g_running{false};
 PPCFunc orig_menu_pending = nullptr;
@@ -111,7 +115,7 @@ void LoadOpenings(const std::string& path)
 }
 //a cutscene in the middle of a level that is skipped as well: lines of "level hash (hex),
 //the hash of the timeline that takes the player (hex), how long the player is kept in
-//seconds, the option it is skipped with (zukovsky, briggs)"
+//seconds, the option it is skipped with (zukovsky, briggs, ending)"
 struct Inside
 {
 	float seconds;
@@ -129,9 +133,11 @@ void LoadCutscenes(const std::string& path)
 		if (std::sscanf(l.c_str(), "%x %x %f %31s", &level, &cutscene, &seconds, option) != 4) continue;
 		if (std::string(option) == "zukovsky") g_cutscenes[{level, cutscene}] = {seconds, &g_skip_zukovsky};
 		else if (std::string(option) == "briggs") g_cutscenes[{level, cutscene}] = {seconds, &g_skip_briggs};
+		else if (std::string(option) == "ending") g_cutscenes[{level, cutscene}] = {seconds, &g_skip_endings};
 	}
 }
 Clock::time_point g_started, g_started_guest;
+std::string g_takes; //the cutscenes that took the player since it was last let go, for the line a won level logs, * a quick time event
 
 //the black over the picture, read by the renderer's thread
 std::atomic<float> g_fade_from{0.0f}, g_fade_to{0.0f};
@@ -353,9 +359,15 @@ void LevelChange(PPCContext& c)
 		}
 		else Stop("a level change");
 	}
-	//"Save and Continue": the next mission is loaded by the app's update, not by the menu
-	else if (c.lr == kNextMissionCall && guest_ptr(app) && ld32(app + kAppEntrance) == kMissionStart) Arm(level);
+	//"Save and Continue": the next mission is loaded by the app's update, not by the menu. the
+	//level before it was won, its ending is the last cutscene that had the player
+	else if (c.lr == kNextMissionCall && guest_ptr(app) && ld32(app + kAppEntrance) == kMissionStart)
+	{
+		rt_log("goldeneye: level %08X won, the player was kept by cutscene%s", ld32(kCurrentLevel), g_takes.empty() ? " none" : g_takes.c_str());
+		Arm(level);
+	}
 	else if (g_state == Skip::Running || g_state == Skip::FadingOut) Stop("a level change");
+	g_takes.clear();
 	orig_level_change(c);
 }
 
@@ -374,6 +386,8 @@ bool skip_zukovsky() { return g_skip_zukovsky; }
 void set_skip_zukovsky(bool on) { g_skip_zukovsky = on; }
 bool skip_briggs() { return g_skip_briggs; }
 void set_skip_briggs(bool on) { g_skip_briggs = on; }
+bool skip_endings() { return g_skip_endings; }
+void set_skip_endings(bool on) { g_skip_endings = on; }
 bool skipping_cutscene() { return g_running; }
 float cutscene_fade() { return g_fade_hidden ? 0.0f : FadeNow(); }
 
@@ -399,6 +413,7 @@ void TraceFrames()
 void cutscenes_frame()
 {
 	if (g_trace) TraceFrames();
+	if (cutscene_input_waiting() && !g_takes.empty() && g_takes.back() != '*') g_takes += " *"; //a quick time event, the ending comes after
 	g_fade_hidden = ld8(kPaused) != 0;
 	if (g_state == Skip::Running) { Run(); return; }
 	if (g_state == Skip::FadingOut) { FadeOut(); return; }
@@ -438,12 +453,16 @@ void PlayerTake(PPCContext& c)
 {
 	uint32_t cutscene = guest_ptr(g_sender) ? ld32(g_sender + kTimelineHash) : 0;
 	if (g_tracecut || g_trace) rt_log("cut: t %.3f frame %u the player %08X is taken by cutscene %08X", ldf(kLevelTimer), ld32(kFrameCount), c.r[3], cutscene);
+	char take[48];
+	std::snprintf(take, sizeof take, " %08X at %.1f", cutscene, ldf(kLevelTimer));
+	g_takes += take;
 	orig_player_take(c);
 	ArmCutscene(cutscene);
 }
 void PlayerRelease(PPCContext& c)
 {
-	rt_log("cut: t %.3f frame %u the player %08X is let go", ldf(kLevelTimer), ld32(kFrameCount), c.r[3]);
+	if (g_tracecut || g_trace) rt_log("cut: t %.3f frame %u the player %08X is let go", ldf(kLevelTimer), ld32(kFrameCount), c.r[3]);
+	g_takes.clear();
 	orig_player_release(c);
 }
 
@@ -454,6 +473,7 @@ void install_cutscenes()
 	if (const char* e = std::getenv("GE_SKIP_CUTSCENES")) g_skip_cutscenes = std::atoi(e) != 0;
 	if (const char* e = std::getenv("GE_SKIP_ZUKOVSKY")) g_skip_zukovsky = std::atoi(e) != 0;
 	if (const char* e = std::getenv("GE_SKIP_BRIGGS")) g_skip_briggs = std::atoi(e) != 0;
+	if (const char* e = std::getenv("GE_SKIP_ENDINGS")) g_skip_endings = std::atoi(e) != 0;
 	if (const char* e = std::getenv("GE_ENTRANCE")) g_forced_entrance = std::atoi(e);
 	if (const char* e = std::getenv("GE_LEVEL")) g_forced_level = (uint32_t)std::strtoul(e, nullptr, 16);
 	g_trace = std::getenv("GE_TRACE") != nullptr;
@@ -467,8 +487,8 @@ void install_cutscenes()
 	LoadCutscenes(std::string(GE_ROOT) + "/config/cutscenes.txt");
 	orig_cutscene_message = ppc_hook("ge_cutscene_message", CutsceneMessage);
 	orig_player_take = ppc_hook("ge_cutscene_take", PlayerTake);
-	if (g_tracecut) orig_player_release = ppc_hook("ge_cutscene_release", PlayerRelease);
-	if (!orig_menu_pending || !orig_level_change || !orig_frame_draw || !orig_cutscene_message || !orig_player_take) rt_die("goldeneye: the menu's pending action is not hooked in this build");
+	orig_player_release = ppc_hook("ge_cutscene_release", PlayerRelease);
+	if (!orig_menu_pending || !orig_level_change || !orig_frame_draw || !orig_cutscene_message || !orig_player_take || !orig_player_release) rt_die("goldeneye: the menu's pending action is not hooked in this build");
 }
 
 } //namespace ge

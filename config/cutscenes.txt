@@ -1,7 +1,10 @@
-# Skip Zukovsky, Skip Sky Briggs (port/cutscenes.cpp): cutscenes in the middle of a level that
-# are skipped like an opening with their option on. level hash, the hash of the timeline that
+# Skip Zukovsky, Skip Sky Briggs, Skip Ending Cutscenes (port/cutscenes.cpp): cutscenes after the
+# opening that are skipped like it with their option on. level hash, the hash of the timeline that
 # takes the player (GE_TRACE=1: "the player is taken by cutscene"), the seconds until the player
 # is let go again (0: not known, the picture then fades back in after the cutscene instead
-# of before its end), the option: zukovsky or briggs.
+# of before its end; an ending is 0, it runs into the next level), the option: zukovsky, briggs or
+# ending. A won level logs which cutscenes had the player ("level ... won, the player was kept by
+# cutscene ...", * a quick time event): an ending is the first of them after the last quick time event.
 01810144 04002580 113.0 zukovsky    # Nightclub, the meeting with Zukovsky (three timelines in a row)
 01810147 04002807 59.2  briggs      # Carrier, the meeting with Sky Briggs (four timelines in a row)
+0181013C 04002CE0 0     ending      # Airfield, after the plane's two quick time events
