@@ -5,10 +5,12 @@
 #     ./Play.sh --fps 120 --fov 70 --mouse 1.5 --fullscreen --fast-start --cheats
 #     ./Play.sh --offline              no hosts file: the game does not find its servers
 #     ./Play.sh --always-mouse         the cheat "Always Enable Mouse": mouse look in every player state
-#     ./Play.sh --skip-cutscenes       a mission's opening cutscene is skipped
+#     ./Play.sh --skip dam-intro,...   those cutscenes are skipped as well: a mission's name and
+#                                      intro, middle or ending; all, intros, middles, endings
+#     ./Play.sh --skip-cutscenes       every mission's opening is skipped as well (intros)
 #     ./Play.sh --skip-zukovsky        the meeting with Zukovsky in Nightclub is skipped
 #     ./Play.sh --skip-briggs          the meeting with Sky Briggs in Carrier is skipped
-#     ./Play.sh --skip-endings         a mission's ending cutscene is skipped
+#     ./Play.sh --skip-endings         every mission's ending is skipped as well (endings)
 #     ./Play.sh --skip-movies          briefings, the movies between missions and the logos are skipped
 #     ./Play.sh --no-tutorials         the tutorial boxes in the missions aren't shown
 #     ./Play.sh --no-colour-filter     the tint some levels lay over the picture isn't drawn

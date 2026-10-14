@@ -183,15 +183,17 @@ bool level_loads(uint32_t hash); //modmenu.cpp: not one of the disc's levels tha
 std::string map_shown_name(const std::string& file, int& mode); //a multiplayer level's map ("Airfield") and which gamemode it is for, -1 for none
 const char* map_mode_name(int mode);
 const int kMapModeCount = 8;
-bool skip_cutscenes(); //a mission's opening cutscene is skipped
-void set_skip_cutscenes(bool on);
-bool skip_zukovsky(); //Nightclub's meeting with Zukovsky is skipped (config/cutscenes.txt)
-void set_skip_zukovsky(bool on);
-bool skip_briggs(); //Carrier's meeting with Sky Briggs is skipped (config/cutscenes.txt)
-void set_skip_briggs(bool on);
-bool skip_endings(); //a mission's ending cutscene is skipped (config/cutscenes.txt)
+//the cutscenes that can be skipped, each on its own: a mission a row (config/openings.txt), its
+//intro, a cutscene in its middle and its ending (config/cutscenes.txt)
+enum SkipPart { kSkipIntro, kSkipMiddle, kSkipEnding, kSkipParts };
+int skip_missions();
+const char* skip_mission_name(int mission);
+bool skip_exists(int mission, int part); //the mission has that cutscene
+bool skip_on(int mission, int part);
+void set_skip_on(int mission, int part, bool on);
+void set_skip_all(bool on);
+std::string skip_list(); //the ones on, as GE_SKIP_LIST takes them
 float level_time(); //seconds played in the level
-void set_skip_endings(bool on);
 void cutscenes_frame(); //once a frame, on the game's thread
 bool skipping_cutscene(); //an opening is being skipped right now
 float cutscene_fade(); //how black the picture is for it, 0 to 1

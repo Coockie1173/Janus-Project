@@ -22,12 +22,15 @@
 //stop half a second before it and the picture is back when the cutscene ends. a level that
 //isn't in there fades in after its cutscene
 //
-//GE_SKIP_CUTSCENES=1 on
-//GE_SKIP_ZUKOVSKY=1, GE_SKIP_BRIGGS=1 the cutscenes of config/cutscenes.txt are skipped the same
-//way (Nightclub's meeting with Zukovsky, Carrier's with Sky Briggs), each an option of its own
-//GE_SKIP_ENDINGS=1 a mission's ending is skipped (config/cutscenes.txt's "ending" lines): the
-//long steps run until the game changes to the next level, the player isn't let go before it.
-//in a level with quick time events in its ending that is the cutscene after the last of them
+//which cutscenes are skipped is a choice for each: a mission's intro (config/openings.txt, which
+//names the missions), a cutscene in its middle (Nightclub's meeting with Zukovsky, Carrier's with
+//Sky Briggs) and its ending (config/cutscenes.txt). an ending's long steps run until the game
+//changes to the next level, the player isn't let go before it; in a level with quick time events
+//in its ending that is the cutscene after the last of them. the settings menu's Skip Cutscenes grid
+//GE_SKIP_LIST=dam-intro,nightclub-ending,... the ones skipped, the others aren't; "all", "none",
+//"intros", "middles" and "endings" stand for those
+//without it: GE_SKIP_CUTSCENES=1 every intro, GE_SKIP_ZUKOVSKY=1 and GE_SKIP_BRIGGS=1 the two
+//middles, GE_SKIP_ENDINGS=1 every ending
 //GE_SKIP_RATE=N the frames a second of game time while skipping (3)
 //GE_ENTRANCE=N start every mission at entrance N instead of 1, for trying out a level's
 //entrances (0 is one too). nothing is skipped then
@@ -37,6 +40,7 @@
 //cutscene and given back, quick time events (port/qte.cpp) and level changes, with the level's time
 #include "ge.h"
 #include <algorithm>
+#include <cctype>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -44,6 +48,7 @@
 #include <fstream>
 #include <map>
 #include <string>
+#include <vector>
 
 #ifndef GE_ROOT
 #define GE_ROOT "."
@@ -83,11 +88,20 @@ using Clock = std::chrono::steady_clock;
 
 enum class Skip { Idle, Waiting, FadingOut, Running };
 
-std::atomic<bool> g_skip_cutscenes{false};
-std::atomic<bool> g_skip_zukovsky{false};
-std::atomic<bool> g_skip_briggs{false};
-std::atomic<bool> g_skip_endings{false};
-std::atomic<bool>* g_option = &g_skip_cutscenes; //the option what is waited for or skipped belongs to
+//the missions, in the order of config/openings.txt, and which of their cutscenes are skipped
+const int kMaxMissions = 32;
+const char* const kPartNames[kSkipParts] = {"intro", "middle", "ending"};
+struct Mission
+{
+	uint32_t level;
+	std::string name;
+	bool has[kSkipParts];
+};
+std::vector<Mission> g_missions;
+std::atomic<bool> g_on[kMaxMissions][kSkipParts];
+std::atomic<bool> g_never{false};
+std::atomic<bool>* g_option = &g_never; //the choice what is waited for or skipped belongs to
+int g_part = kSkipIntro; //and which part it is
 std::atomic<bool> g_running{false};
 PPCFunc orig_menu_pending = nullptr;
 PPCFunc orig_level_change = nullptr;
@@ -107,9 +121,18 @@ float g_armed_ends = 0; //the same for the cutscene that is waited for
 float g_wait_until = 0; //the level time a cutscene of config/cutscenes.txt is waited for until, 0 an opening (kWaitFrames)
 bool g_holding = false; //the black and the mute are kept up after a level change, for the next map's cutscene
 float g_hold_from = -1; //the level time the next map was first seen at
-std::map<uint32_t, float> g_openings; //level hash -> the level time its opening ends at
+std::map<uint32_t, float> g_openings; //level hash -> the level time its opening ends at, 0 not known
 
-//lines of "level hash (hex), seconds"
+int MissionOf(uint32_t level)
+{
+	for (size_t m = 0; m < g_missions.size(); ++m)
+	{
+		if (g_missions[m].level == level) return (int)m;
+	}
+	return -1;
+}
+
+//lines of "level hash (hex), seconds, the mission's name"
 void LoadOpenings(const std::string& path)
 {
 	std::ifstream f(path);
@@ -117,16 +140,19 @@ void LoadOpenings(const std::string& path)
 	{
 		unsigned level = 0;
 		float seconds = 0;
-		if (std::sscanf(l.c_str(), "%x %f", &level, &seconds) == 2) g_openings[level] = seconds;
+		char name[32] = "";
+		if (std::sscanf(l.c_str(), "%x %f %31s", &level, &seconds, name) != 3 || g_missions.size() >= kMaxMissions) continue;
+		g_openings[level] = seconds;
+		g_missions.push_back({level, name, {true, false, false}});
 	}
 }
-//a cutscene in the middle of a level that is skipped as well: lines of "level hash (hex),
-//the hash of the timeline that takes the player (hex), how long the player is kept in
-//seconds, the option it is skipped with (zukovsky, briggs, ending)"
+//a cutscene after the opening that is skipped as well: lines of "level hash (hex), the hash of
+//the timeline that takes the player (hex), the seconds until the picture is back, the part of
+//the mission it is (middle, ending), and the mission's level when it's another map of it"
 struct Inside
 {
 	float seconds;
-	std::atomic<bool>* option;
+	int mission, part;
 };
 std::map<std::pair<uint32_t, uint32_t>, Inside> g_cutscenes;
 void LoadCutscenes(const std::string& path)
@@ -134,15 +160,52 @@ void LoadCutscenes(const std::string& path)
 	std::ifstream f(path);
 	for (std::string l; std::getline(f, l);)
 	{
-		unsigned level = 0, cutscene = 0;
+		unsigned level = 0, cutscene = 0, mission = 0;
 		float seconds = 0;
-		char option[32] = "";
-		if (std::sscanf(l.c_str(), "%x %x %f %31s", &level, &cutscene, &seconds, option) != 4) continue;
-		if (std::string(option) == "zukovsky") g_cutscenes[{level, cutscene}] = {seconds, &g_skip_zukovsky};
-		else if (std::string(option) == "briggs") g_cutscenes[{level, cutscene}] = {seconds, &g_skip_briggs};
-		else if (std::string(option) == "ending") g_cutscenes[{level, cutscene}] = {seconds, &g_skip_endings};
+		char part[32] = "";
+		int n = std::sscanf(l.c_str(), "%x %x %f %31s %x", &level, &cutscene, &seconds, part, &mission);
+		if (n < 4) continue;
+		int m = MissionOf(n == 5 ? mission : level);
+		int p = std::find(kPartNames, kPartNames + kSkipParts, std::string(part)) - kPartNames;
+		if (m < 0 || p == kSkipIntro || p == kSkipParts) continue;
+		g_cutscenes[{level, cutscene}] = {seconds, m, p};
+		g_missions[m].has[p] = true;
 	}
 }
+
+//an id of the list: the mission's name in lower case, a dash, the part
+std::string SkipId(int m, int p)
+{
+	std::string id = g_missions[m].name;
+	for (char& ch : id) ch = (char)std::tolower((unsigned char)ch);
+	return id + "-" + kPartNames[p];
+}
+//ids, or every one (all), none, a part of every mission (intros, middles, endings), apart by commas or spaces
+void SetList(const std::string& list)
+{
+	for (size_t m = 0; m < g_missions.size(); ++m)
+	{
+		for (int p = 0; p < kSkipParts; ++p) g_on[m][p] = false;
+	}
+	std::string word;
+	for (size_t i = 0; i <= list.size(); ++i)
+	{
+		if (i < list.size() && list[i] != ',' && list[i] != ' ')
+		{
+			word += (char)std::tolower((unsigned char)list[i]);
+			continue;
+		}
+		for (size_t m = 0; m < g_missions.size(); ++m)
+		{
+			for (int p = 0; p < kSkipParts; ++p)
+			{
+				if (word == "all" || word == std::string(kPartNames[p]) + "s" || word == SkipId((int)m, p)) g_on[m][p] = g_missions[m].has[p];
+			}
+		}
+		word.clear();
+	}
+}
+
 Clock::time_point g_started, g_started_guest;
 std::string g_takes; //the cutscenes that took the player since it was last let go, for the line a won level logs, * a quick time event
 
@@ -207,9 +270,11 @@ void Stop(const char* why, bool hold = false)
 void Arm(uint32_t level)
 {
 	Stop("a level change");
-	if (!g_skip_cutscenes) return;
+	int m = MissionOf(level);
+	if (m < 0 || !g_on[m][kSkipIntro]) return;
 	g_state = Skip::Waiting;
-	g_option = &g_skip_cutscenes;
+	g_option = &g_on[m][kSkipIntro];
+	g_part = kSkipIntro;
 	g_frames = g_counting = 0;
 	g_wait_until = 0;
 	auto known = g_openings.find(level);
@@ -222,9 +287,10 @@ void ArmCutscene(uint32_t cutscene)
 {
 	if (g_state != Skip::Idle) return;
 	auto known = g_cutscenes.find({ld32(kCurrentLevel), cutscene});
-	if (known == g_cutscenes.end() || !*known->second.option) return;
+	if (known == g_cutscenes.end() || !g_on[known->second.mission][known->second.part]) return;
 	g_state = Skip::Waiting;
-	g_option = known->second.option;
+	g_option = &g_on[known->second.mission][known->second.part];
+	g_part = known->second.part;
 	g_frames = g_counting = 0;
 	g_armed_ends = known->second.seconds > 0 ? ldf(kLevelTimer) + known->second.seconds : 0.0f;
 	g_wait_until = ldf(kLevelTimer) + kWaitSeconds;
@@ -383,7 +449,7 @@ void LevelChange(PPCContext& c)
 		Arm(level);
 	}
 	//an ending that runs into another map of the same mission (Cradle's), not the next mission
-	else if (g_state == Skip::Running || g_state == Skip::FadingOut) Stop("a level change", g_option == &g_skip_endings && c.lr == kNextMissionCall);
+	else if (g_state == Skip::Running || g_state == Skip::FadingOut) Stop("a level change", g_part == kSkipEnding && c.lr == kNextMissionCall);
 	g_takes.clear();
 	orig_level_change(c);
 }
@@ -397,14 +463,33 @@ void FrameDraw(PPCContext& c)
 
 } //namespace
 
-bool skip_cutscenes() { return g_skip_cutscenes; }
-void set_skip_cutscenes(bool on) { g_skip_cutscenes = on; }
-bool skip_zukovsky() { return g_skip_zukovsky; }
-void set_skip_zukovsky(bool on) { g_skip_zukovsky = on; }
-bool skip_briggs() { return g_skip_briggs; }
-void set_skip_briggs(bool on) { g_skip_briggs = on; }
-bool skip_endings() { return g_skip_endings; }
-void set_skip_endings(bool on) { g_skip_endings = on; }
+int skip_missions() { return (int)g_missions.size(); }
+const char* skip_mission_name(int m) { return m >= 0 && m < skip_missions() ? g_missions[m].name.c_str() : ""; }
+bool skip_exists(int m, int part) { return m >= 0 && m < skip_missions() && part >= 0 && part < kSkipParts && g_missions[m].has[part]; }
+bool skip_on(int m, int part) { return skip_exists(m, part) && g_on[m][part]; }
+void set_skip_on(int m, int part, bool on)
+{
+	if (skip_exists(m, part)) g_on[m][part] = on;
+}
+void set_skip_all(bool on)
+{
+	for (int m = 0; m < skip_missions(); ++m)
+	{
+		for (int p = 0; p < kSkipParts; ++p) set_skip_on(m, p, on);
+	}
+}
+std::string skip_list()
+{
+	std::string list;
+	for (int m = 0; m < skip_missions(); ++m)
+	{
+		for (int p = 0; p < kSkipParts; ++p)
+		{
+			if (skip_on(m, p)) list += (list.empty() ? "" : ",") + SkipId(m, p);
+		}
+	}
+	return list;
+}
 bool skipping_cutscene() { return g_running; }
 float level_time() { return ldf(kLevelTimer); }
 float cutscene_fade() { return g_fade_hidden ? 0.0f : FadeNow(); }
@@ -506,21 +591,26 @@ void load_level(uint32_t hash) { g_asked_level = hash; }
 
 void install_cutscenes()
 {
-	if (const char* e = std::getenv("GE_SKIP_CUTSCENES")) g_skip_cutscenes = std::atoi(e) != 0;
-	if (const char* e = std::getenv("GE_SKIP_ZUKOVSKY")) g_skip_zukovsky = std::atoi(e) != 0;
-	if (const char* e = std::getenv("GE_SKIP_BRIGGS")) g_skip_briggs = std::atoi(e) != 0;
-	if (const char* e = std::getenv("GE_SKIP_ENDINGS")) g_skip_endings = std::atoi(e) != 0;
 	if (const char* e = std::getenv("GE_ENTRANCE")) g_forced_entrance = std::atoi(e);
 	if (const char* e = std::getenv("GE_LEVEL")) g_forced_level = (uint32_t)std::strtoul(e, nullptr, 16);
 	g_trace = std::getenv("GE_TRACE") != nullptr;
 	LoadOpenings(std::string(GE_ROOT) + "/config/openings.txt");
+	LoadCutscenes(std::string(GE_ROOT) + "/config/cutscenes.txt");
+	auto on = [](const char* name) { const char* e = std::getenv(name); return e && std::atoi(e) != 0; };
+	for (int m = 0; m < skip_missions(); ++m)
+	{
+		set_skip_on(m, kSkipIntro, on("GE_SKIP_CUTSCENES"));
+		set_skip_on(m, kSkipEnding, on("GE_SKIP_ENDINGS"));
+	}
+	set_skip_on(MissionOf(0x01810144), kSkipMiddle, on("GE_SKIP_ZUKOVSKY")); //Nightclub
+	set_skip_on(MissionOf(0x01810147), kSkipMiddle, on("GE_SKIP_BRIGGS")); //Carrier
+	if (const char* e = std::getenv("GE_SKIP_LIST")) SetList(e);
 	orig_menu_pending = ppc_hook("ge_menu_pending", MenuPending);
 	orig_menu_update = ppc_hook("WIFI_FUN_80234a60", MenuUpdate);
 	if (!orig_menu_update) rt_log("goldeneye: the menu's update is not hooked in this build, the settings menu's level grids load nothing");
 	orig_level_change = ppc_hook("StartLevelChange", LevelChange);
 	orig_frame_draw = ppc_hook("ge_frame_draw", FrameDraw);
 	g_tracecut = std::getenv("GE_TRACECUT") != nullptr;
-	LoadCutscenes(std::string(GE_ROOT) + "/config/cutscenes.txt");
 	orig_cutscene_message = ppc_hook("ge_cutscene_message", CutsceneMessage);
 	orig_player_take = ppc_hook("ge_cutscene_take", PlayerTake);
 	orig_player_release = ppc_hook("ge_cutscene_release", PlayerRelease);

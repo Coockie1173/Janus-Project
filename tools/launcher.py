@@ -55,7 +55,7 @@ ACTIONS = [
     ("Move left", "Left Stick Left"), ("Move right", "Left Stick Right"),
 ]
 DEFAULTS = {"fps": "auto", "fov": "49", "mouse": "1.0", "online": "1", "fullscreen": "0", "faststart": "0", "mousemode": "auto",
-            "mouseinvert": "0", "adsfov": "22.5", "adssens": "0.5", "aimlock": "0", "mouseeverywhere": "0", "skipcutscenes": "0", "skipzukovsky": "0", "skipbriggs": "0", "skipendings": "0", "skipmovies": "0", "notutorials": "0", "nocolourfilter": "0", "autosave": "1", "leveltimer": "1", "autoqte": "0", "autostart": "0", "extrasmenu": "0", "onlineunlocks": "1", "unlockall": "0", "staminameter": "0", "vsync": "0", "ping": "1",
+            "mouseinvert": "0", "adsfov": "22.5", "adssens": "0.5", "aimlock": "0", "mouseeverywhere": "0", "skiplist": "", "skipmovies": "0", "notutorials": "0", "nocolourfilter": "0", "autosave": "1", "leveltimer": "1", "autoqte": "0", "autostart": "0", "extrasmenu": "0", "onlineunlocks": "1", "unlockall": "0", "staminameter": "0", "vsync": "0", "ping": "1",
             "crashdump": "1", "crashmem": "0"}
 
 #Tk's key names -> SDL's (the key file's)
@@ -87,15 +87,54 @@ def sdl_name(keysym):
 #---- the files ------------------------------------------------------------------------------------
 def load_settings():
     s = dict(DEFAULTS)
+    read = set()
     try:
         for line in open(SETTINGS, encoding="utf-8"):
             if "=" in line and not line.startswith("#"):
                 k, v = line.strip().split("=", 1)
                 if k.startswith("LAUNCH_"):
                     s[k[7:].lower()] = v.strip('"')
+                    read.add(k[7:].lower())
     except OSError:
         pass
+    if "skiplist" not in read: #a file from before the list: the four options it replaced
+        old = (("skipcutscenes", "intros"), ("skipzukovsky", "nightclub-middle"), ("skipbriggs", "carrier-middle"), ("skipendings", "endings"))
+        s["skiplist"] = ",".join(word for key, word in old if s.get(key) == "1")
     return s
+
+
+#the cutscenes that can be skipped (port/cutscenes.cpp reads the same files): a mission a row,
+#config/openings.txt names them and has their intros, config/cutscenes.txt the middles and endings
+SKIP_PARTS = ("intro", "middle", "ending")
+
+
+def skip_missions():
+    """[(name, level, {part: True})] in the game's order."""
+    missions = []
+    try:
+        for line in open(os.path.join(ROOT, "config", "openings.txt"), encoding="utf-8"):
+            f = line.split("#")[0].split()
+            if len(f) >= 3:
+                missions.append((f[2], f[0].upper(), {"intro": True}))
+        levels = {level: parts for _, level, parts in missions}
+        for line in open(os.path.join(ROOT, "config", "cutscenes.txt"), encoding="utf-8"):
+            f = line.split("#")[0].split()
+            if len(f) >= 4 and f[3] in SKIP_PARTS[1:]:
+                parts = levels.get((f[4] if len(f) >= 5 else f[0]).upper())
+                if parts is not None:
+                    parts[f[3]] = True
+    except OSError:
+        pass
+    return missions
+
+
+def skip_id(name, part):
+    return f"{name.lower()}-{part}"
+
+
+def skip_listed(words, name, part):
+    """The cutscene is in a list as GE_SKIP_LIST takes it."""
+    return "all" in words or part + "s" in words or skip_id(name, part) in words
 
 
 def save_settings(s):
@@ -373,9 +412,36 @@ def run_gui():
     #the F1 menu's Enhancements page has the same ones
     en = ttk.Frame(book)
     book.add(en, text="Enhancements")
-    skip_cutscenes = tk.BooleanVar(value=settings["skipcutscenes"] == "1")
-    ttk.Checkbutton(en, text="Skip Intro Cutscenes (Experimental)", variable=skip_cutscenes).grid(row=0, column=0, sticky="w", **pad)
-    ttk.Label(en, text="A mission's opening cutscene is skipped.",
+    #Skip Cutscenes: a window with a box for each cutscene, as the F1 menu's grid
+    missions = skip_missions()
+    words = set(settings["skiplist"].replace(" ", ",").lower().split(","))
+    skip_vars = {(name, part): tk.BooleanVar(value=parts.get(part, False) and skip_listed(words, name, part))
+                 for name, _, parts in missions for part in SKIP_PARTS}
+
+    def skip_window():
+        box = tk.Toplevel(root)
+        box.title("Skip Cutscenes")
+        box.transient(root)
+        for col, part in enumerate(SKIP_PARTS):
+            ttk.Label(box, text=part.capitalize()).grid(row=0, column=col + 1, padx=12, pady=(10, 4))
+        for row, (name, _, parts) in enumerate(missions):
+            ttk.Label(box, text=name).grid(row=row + 1, column=0, sticky="w", padx=(12, 8))
+            for col, part in enumerate(SKIP_PARTS):
+                if parts.get(part):
+                    ttk.Checkbutton(box, variable=skip_vars[(name, part)]).grid(row=row + 1, column=col + 1)
+
+        def all_to(on):
+            for (name, part), var in skip_vars.items():
+                var.set(on and dict((n, p) for n, _, p in missions)[name].get(part, False))
+
+        buttons = ttk.Frame(box)
+        buttons.grid(row=len(missions) + 1, column=0, columnspan=4, sticky="we", padx=12, pady=10)
+        ttk.Button(buttons, text="Enable All", command=lambda: all_to(True)).pack(side="left")
+        ttk.Button(buttons, text="Disable All", command=lambda: all_to(False)).pack(side="left", padx=6)
+        ttk.Button(buttons, text="Close", command=box.destroy).pack(side="right")
+
+    ttk.Button(en, text="Skip Cutscenes (Experimental)...", command=skip_window).grid(row=0, column=0, sticky="w", **pad)
+    ttk.Label(en, text="Choose which cutscenes are skipped: each mission's intro, the one in its middle and its ending.",
               foreground="gray", wraplength=520, justify="left").grid(row=1, column=0, sticky="w", padx=(30, 8))
     level_timer = tk.BooleanVar(value=settings["leveltimer"] == "1")
     ttk.Checkbutton(en, text="Level Timer", variable=level_timer).grid(row=2, column=0, sticky="w", **pad)
@@ -398,20 +464,6 @@ def run_gui():
     ttk.Label(en, text="The tutorial boxes in the missions aren't shown, but for the training mission's.",
               foreground="gray", wraplength=520, justify="left").grid(row=11, column=0, sticky="w", padx=(30, 8))
 
-    skip_zukovsky = tk.BooleanVar(value=settings["skipzukovsky"] == "1")
-    ttk.Checkbutton(en, text="Skip Zukovsky (Experimental)", variable=skip_zukovsky).grid(row=12, column=0, sticky="w", **pad)
-    ttk.Label(en, text="The meeting with Zukovsky in Nightclub is skipped.",
-              foreground="gray", wraplength=520, justify="left").grid(row=13, column=0, sticky="w", padx=(30, 8))
-
-    skip_briggs = tk.BooleanVar(value=settings["skipbriggs"] == "1")
-    ttk.Checkbutton(en, text="Skip Sky Briggs (Experimental)", variable=skip_briggs).grid(row=14, column=0, sticky="w", **pad)
-    ttk.Label(en, text="The meeting with Sky Briggs in Carrier is skipped.",
-              foreground="gray", wraplength=520, justify="left").grid(row=15, column=0, sticky="w", padx=(30, 8))
-
-    skip_endings = tk.BooleanVar(value=settings["skipendings"] == "1")
-    ttk.Checkbutton(en, text="Skip Ending Cutscenes (Experimental)", variable=skip_endings).grid(row=16, column=0, sticky="w", **pad)
-    ttk.Label(en, text="A mission's ending cutscene is skipped, after its quick time events if it has any.",
-              foreground="gray", wraplength=520, justify="left").grid(row=17, column=0, sticky="w", padx=(30, 8))
     no_colour_filter = tk.BooleanVar(value=settings["nocolourfilter"] == "1")
     ttk.Checkbutton(en, text="Disable Colour Filter", variable=no_colour_filter).grid(row=18, column=0, sticky="w", **pad)
     ttk.Label(en, text="The tint some levels lay over the picture (Facility's blue-green, Tank's, Solar's) isn't drawn.",
@@ -469,10 +521,7 @@ def run_gui():
         settings["crashdump"] = "1" if crashdump.get() else "0"
         settings["crashmem"] = "1" if crashmem.get() else "0"
         settings["mouseeverywhere"] = "1" if always_mouse.get() else "0"
-        settings["skipcutscenes"] = "1" if skip_cutscenes.get() else "0"
-        settings["skipzukovsky"] = "1" if skip_zukovsky.get() else "0"
-        settings["skipbriggs"] = "1" if skip_briggs.get() else "0"
-        settings["skipendings"] = "1" if skip_endings.get() else "0"
+        settings["skiplist"] = ",".join(skip_id(name, part) for (name, part), var in skip_vars.items() if var.get())
         settings["leveltimer"] = "1" if level_timer.get() else "0"
         settings["autoqte"] = "1" if auto_qte.get() else "0"
         settings["autostart"] = "1" if auto_start.get() else "0"
@@ -605,14 +654,12 @@ def run_game(args):
             s["ping"] = "0"
         elif a == "--always-mouse":
             s["mouseeverywhere"] = "1"
-        elif a == "--skip-cutscenes":
-            s["skipcutscenes"] = "1"
-        elif a == "--skip-zukovsky":
-            s["skipzukovsky"] = "1"
-        elif a == "--skip-briggs":
-            s["skipbriggs"] = "1"
-        elif a == "--skip-endings":
-            s["skipendings"] = "1"
+        elif a == "--skip" and i + 1 < len(args):
+            s["skiplist"] += "," + args[i + 1]
+            i += 1
+        elif a in ("--skip-cutscenes", "--skip-zukovsky", "--skip-briggs", "--skip-endings"):
+            s["skiplist"] += "," + {"--skip-cutscenes": "intros", "--skip-zukovsky": "nightclub-middle",
+                                    "--skip-briggs": "carrier-middle", "--skip-endings": "endings"}[a]
         elif a == "--no-level-timer":
             s["leveltimer"] = "0"
         elif a == "--auto-qte":
@@ -657,7 +704,7 @@ def run_game(args):
     for var, key in (("GE_FPS", "fps"), ("GE_FOV", "fov"), ("GE_MOUSE", "mouse"), ("GE_MOUSE_MODE", "mousemode"),
                      ("GE_MOUSE_INVERT", "mouseinvert"), ("GE_ADS_FOV", "adsfov"),
                      ("GE_ADS_SENS", "adssens"), ("GE_AIM_LOCK", "aimlock"), ("GE_MOUSE_EVERYWHERE", "mouseeverywhere"),
-                     ("GE_SKIP_CUTSCENES", "skipcutscenes"), ("GE_SKIP_ZUKOVSKY", "skipzukovsky"), ("GE_SKIP_BRIGGS", "skipbriggs"), ("GE_SKIP_ENDINGS", "skipendings"), ("GE_LEVEL_TIMER", "leveltimer"), ("GE_AUTO_QTE", "autoqte"), ("GE_AUTO_START", "autostart"), ("GE_SKIP_MOVIES", "skipmovies"), ("GE_NO_TUTORIALS", "notutorials"), ("GE_NO_COLOUR_FILTER", "nocolourfilter"), ("GE_AUTOSAVE", "autosave"),
+                     ("GE_SKIP_LIST", "skiplist"), ("GE_LEVEL_TIMER", "leveltimer"), ("GE_AUTO_QTE", "autoqte"), ("GE_AUTO_START", "autostart"), ("GE_SKIP_MOVIES", "skipmovies"), ("GE_NO_TUTORIALS", "notutorials"), ("GE_NO_COLOUR_FILTER", "nocolourfilter"), ("GE_AUTOSAVE", "autosave"),
                      ("GE_EXTRAS_MENU", "extrasmenu"), ("GE_UNLOCK_ALL", "unlockall"), ("GE_ONLINE_UNLOCKS", "onlineunlocks"), ("GE_STAMINA", "staminameter"),
                      ("GE_VSYNC", "vsync"), ("GE_PING", "ping")):
         env.setdefault(var, s[key])

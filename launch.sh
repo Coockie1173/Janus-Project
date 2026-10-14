@@ -19,11 +19,13 @@
 #                                      else hosts; direct never does)
 #     ./launch.sh --always-mouse       the cheat "Always Enable Mouse": mouse look in every player state
 #                                      (cutscenes, melee, climbing...), also in the F1 menu's Cheats
-#     ./launch.sh --skip-cutscenes     a mission's opening cutscene is skipped (also in
-#                                      the F1 menu's Enhancements)
-#     ./launch.sh --skip-zukovsky      the meeting with Zukovsky in Nightclub is skipped (the F1 menu's Enhancements)
-#     ./launch.sh --skip-briggs        the meeting with Sky Briggs in Carrier is skipped (the F1 menu's Enhancements)
-#     ./launch.sh --skip-endings       a mission's ending cutscene is skipped (the F1 menu's Enhancements)
+#     ./launch.sh --skip dam-intro,nightclub-ending   these cutscenes are skipped as well (the F1 menu's
+#                                      Enhancements > Skip Cutscenes): a mission's name and intro, middle or
+#                                      ending; all, intros, middles, endings
+#     ./launch.sh --skip-cutscenes     every mission's opening cutscene is skipped as well (--skip intros)
+#     ./launch.sh --skip-zukovsky      the meeting with Zukovsky in Nightclub as well (--skip nightclub-middle)
+#     ./launch.sh --skip-briggs        the meeting with Sky Briggs in Carrier as well (--skip carrier-middle)
+#     ./launch.sh --skip-endings       every mission's ending cutscene as well (--skip endings)
 #     ./launch.sh --no-level-timer     the hud without the level's time (on by default, the F1 menu's Enhancements)
 #     ./launch.sh --auto-qte           quick time events press their own buttons (the F1 menu's Enhancements)
 #     ./launch.sh --skip-movies        briefings, the movies between missions and the logos are skipped
@@ -64,7 +66,7 @@ LAUNCH_FPS=auto; LAUNCH_FOV=49; LAUNCH_MOUSE=1.0; LAUNCH_ONLINE=1; LAUNCH_FULLSC
 LAUNCH_CRASHDUMP=1; LAUNCH_CRASHMEM=0; LAUNCH_MOUSEINVERT=0; LAUNCH_MOUSEEVERYWHERE=0; LAUNCH_SKIPCUTSCENES=0; LAUNCH_SKIPZUKOVSKY=0; LAUNCH_SKIPBRIGGS=0; LAUNCH_SKIPENDINGS=0
 LAUNCH_LEVELTIMER=1; LAUNCH_AUTOQTE=0; LAUNCH_AUTOSTART=0; LAUNCH_SKIPMOVIES=0; LAUNCH_NOTUTORIALS=0; LAUNCH_NOCOLOURFILTER=0; LAUNCH_AUTOSAVE=1; LAUNCH_EXTRASMENU=0; LAUNCH_UNLOCKALL=0; LAUNCH_ONLINEUNLOCKS=1; LAUNCH_STAMINAMETER=0; LAUNCH_ADSFOV=22.5; LAUNCH_ADSSENS=0.5; LAUNCH_AIMLOCK=0; LAUNCH_VSYNC=0; LAUNCH_PING=1; LAUNCH_OCCLUSION=1; LAUNCH_SOUNDHEIGHT=1
 [ -f build/settings.env ] && . ./build/settings.env
-ARGS=
+ARGS=; SKIP_MORE=
 while [ $# -gt 0 ]; do
     case $1 in
         --no-gui) shift ;;
@@ -77,10 +79,11 @@ while [ $# -gt 0 ]; do
         --mouse) LAUNCH_MOUSE=$2; shift 2 ;;
         --mouse-mode) LAUNCH_MOUSEMODE=$2; shift 2 ;;
         --always-mouse) LAUNCH_MOUSEEVERYWHERE=1; shift ;;
-        --skip-cutscenes) LAUNCH_SKIPCUTSCENES=1; shift ;;
-        --skip-zukovsky) LAUNCH_SKIPZUKOVSKY=1; shift ;;
-        --skip-briggs) LAUNCH_SKIPBRIGGS=1; shift ;;
-        --skip-endings) LAUNCH_SKIPENDINGS=1; shift ;;
+        --skip) SKIP_MORE="$SKIP_MORE,$2"; shift 2 ;;
+        --skip-cutscenes) SKIP_MORE="$SKIP_MORE,intros"; shift ;;
+        --skip-zukovsky) SKIP_MORE="$SKIP_MORE,nightclub-middle"; shift ;;
+        --skip-briggs) SKIP_MORE="$SKIP_MORE,carrier-middle"; shift ;;
+        --skip-endings) SKIP_MORE="$SKIP_MORE,endings"; shift ;;
         --no-level-timer) LAUNCH_LEVELTIMER=0; shift ;;
         --auto-qte) LAUNCH_AUTOQTE=1; shift ;;
         --auto-start) LAUNCH_AUTOSTART=1; shift ;;
@@ -105,15 +108,24 @@ done
 case $LAUNCH_FPS in auto) ;; *) [ "$LAUNCH_FPS" -gt 275 ] 2>/dev/null && LAUNCH_FPS=275 ;; esac
 GE_FPS=${GE_FPS:-$LAUNCH_FPS}; GE_FOV=${GE_FOV:-$LAUNCH_FOV}; GE_MOUSE=${GE_MOUSE:-$LAUNCH_MOUSE}
 GE_MOUSE_MODE=${GE_MOUSE_MODE:-$LAUNCH_MOUSEMODE}; GE_MOUSE_INVERT=${GE_MOUSE_INVERT:-$LAUNCH_MOUSEINVERT}
-GE_MOUSE_EVERYWHERE=${GE_MOUSE_EVERYWHERE:-$LAUNCH_MOUSEEVERYWHERE}; GE_SKIP_CUTSCENES=${GE_SKIP_CUTSCENES:-$LAUNCH_SKIPCUTSCENES}
+GE_MOUSE_EVERYWHERE=${GE_MOUSE_EVERYWHERE:-$LAUNCH_MOUSEEVERYWHERE}
+# the cutscenes skipped: the F1 menu's list, from a settings file older than it the four options it replaced
+if [ -z "${LAUNCH_SKIPLIST+x}" ]; then
+    LAUNCH_SKIPLIST=
+    [ "$LAUNCH_SKIPCUTSCENES" = 1 ] && LAUNCH_SKIPLIST="$LAUNCH_SKIPLIST,intros"
+    [ "$LAUNCH_SKIPZUKOVSKY" = 1 ] && LAUNCH_SKIPLIST="$LAUNCH_SKIPLIST,nightclub-middle"
+    [ "$LAUNCH_SKIPBRIGGS" = 1 ] && LAUNCH_SKIPLIST="$LAUNCH_SKIPLIST,carrier-middle"
+    [ "$LAUNCH_SKIPENDINGS" = 1 ] && LAUNCH_SKIPLIST="$LAUNCH_SKIPLIST,endings"
+fi
+GE_SKIP_LIST=${GE_SKIP_LIST-$LAUNCH_SKIPLIST$SKIP_MORE}; export GE_SKIP_LIST
 GE_LEVEL_TIMER=${GE_LEVEL_TIMER:-$LAUNCH_LEVELTIMER}; GE_EXTRAS_MENU=${GE_EXTRAS_MENU:-$LAUNCH_EXTRASMENU}; GE_UNLOCK_ALL=${GE_UNLOCK_ALL:-$LAUNCH_UNLOCKALL}; GE_ONLINE_UNLOCKS=${GE_ONLINE_UNLOCKS:-$LAUNCH_ONLINEUNLOCKS}; GE_STAMINA=${GE_STAMINA:-$LAUNCH_STAMINAMETER}
 GE_ADS_FOV=${GE_ADS_FOV:-$LAUNCH_ADSFOV}; GE_ADS_SENS=${GE_ADS_SENS:-$LAUNCH_ADSSENS}; GE_AIM_LOCK=${GE_AIM_LOCK:-$LAUNCH_AIMLOCK}
 GE_AUTO_QTE=${GE_AUTO_QTE:-$LAUNCH_AUTOQTE}; GE_AUTO_START=${GE_AUTO_START:-$LAUNCH_AUTOSTART}
-GE_SKIP_MOVIES=${GE_SKIP_MOVIES:-$LAUNCH_SKIPMOVIES}; GE_SKIP_ZUKOVSKY=${GE_SKIP_ZUKOVSKY:-$LAUNCH_SKIPZUKOVSKY}; GE_SKIP_BRIGGS=${GE_SKIP_BRIGGS:-$LAUNCH_SKIPBRIGGS}; GE_SKIP_ENDINGS=${GE_SKIP_ENDINGS:-$LAUNCH_SKIPENDINGS}
+GE_SKIP_MOVIES=${GE_SKIP_MOVIES:-$LAUNCH_SKIPMOVIES}
 GE_NO_TUTORIALS=${GE_NO_TUTORIALS:-$LAUNCH_NOTUTORIALS}; GE_NO_COLOUR_FILTER=${GE_NO_COLOUR_FILTER:-$LAUNCH_NOCOLOURFILTER}; GE_AUTOSAVE=${GE_AUTOSAVE:-$LAUNCH_AUTOSAVE}
 GE_VSYNC=${GE_VSYNC:-$LAUNCH_VSYNC}; GE_PING=${GE_PING:-$LAUNCH_PING}; GE_OCCLUSION=${GE_OCCLUSION:-$LAUNCH_OCCLUSION}; GE_SOUND_HEIGHT=${GE_SOUND_HEIGHT:-$LAUNCH_SOUNDHEIGHT}; export GE_VSYNC GE_PING GE_OCCLUSION GE_SOUND_HEIGHT
-export GE_ADS_FOV GE_ADS_SENS GE_AIM_LOCK GE_AUTO_QTE GE_AUTO_START GE_SKIP_MOVIES GE_SKIP_ZUKOVSKY GE_SKIP_BRIGGS GE_SKIP_ENDINGS GE_NO_TUTORIALS GE_NO_COLOUR_FILTER GE_AUTOSAVE
-export GE_FPS GE_FOV GE_MOUSE GE_MOUSE_MODE GE_MOUSE_INVERT GE_MOUSE_EVERYWHERE GE_SKIP_CUTSCENES GE_LEVEL_TIMER GE_EXTRAS_MENU GE_UNLOCK_ALL GE_ONLINE_UNLOCKS GE_STAMINA
+export GE_ADS_FOV GE_ADS_SENS GE_AIM_LOCK GE_AUTO_QTE GE_AUTO_START GE_SKIP_MOVIES GE_NO_TUTORIALS GE_NO_COLOUR_FILTER GE_AUTOSAVE
+export GE_FPS GE_FOV GE_MOUSE GE_MOUSE_MODE GE_MOUSE_INVERT GE_MOUSE_EVERYWHERE GE_LEVEL_TIMER GE_EXTRAS_MENU GE_UNLOCK_ALL GE_ONLINE_UNLOCKS GE_STAMINA
 # through X11 when there is one: a present on Wayland costs the renderer 2 ms, 0.3 there
 # (SDL_VIDEODRIVER in the environment overrides)
 if [ -z "$SDL_VIDEODRIVER" ] && [ -n "$DISPLAY" ]; then SDL_VIDEODRIVER=x11,wayland; export SDL_VIDEODRIVER; fi

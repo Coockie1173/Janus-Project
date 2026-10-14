@@ -1,17 +1,19 @@
-# Skip Intro Cutscenes (port/cutscenes.cpp): the level time each mission's opening ends at, so
-# the picture can fade back in before it. level hash, seconds. Measured with the level left
+# The missions the settings menu's Skip Cutscenes grid lists, in its order (port/cutscenes.cpp), and
+# the level time each one's opening ends at, so the picture can fade back in before it. level hash,
+# seconds (0: not known, it fades in after the opening), the name. Measured with the level left
 # out of here and the skip at 30 frames a second (GE_SKIP_RATE=30, GE_TRACE=1: "cutscene left
-# at"). A level that is not in here fades back in after its opening. Tank (01810145) has no opening.
-0181013F 65.21     # Dam
-0181014A 46.15     # Facility
-0181013C 23.14     # Airfield
-01810144 20.85     # Nightclub
-01810147 42.94     # Carrier
-01810150 23.97     # Outpost
-0181014F 53.97     # Bunker
-01810146 86.26     # Archives
-01810151 46.74     # Station
-0181014E 54.15     # Memorial
-01810149 71.69     # Jungle
-0181014D 56.29     # Solar
-0181014B 121.77    # Cradle
+# at"). A level that is not in here has no row, its opening isn't skipped. Tank (01810145) and
+# the training (0181016B) have no opening.
+0181013F 65.21     Dam
+0181014A 46.15     Facility
+0181013C 23.14     Airfield
+01810144 20.85     Nightclub
+01810147 42.94     Carrier
+01810150 23.97     Outpost
+0181014F 53.97     Bunker
+01810146 86.26     Archives
+01810151 46.74     Station
+0181014E 54.15     Memorial
+01810149 71.69     Jungle
+0181014D 56.29     Solar
+0181014B 121.77    Cradle

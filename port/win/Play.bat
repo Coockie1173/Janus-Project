@@ -4,10 +4,12 @@ rem     Play.bat --no-gui               straight to the game, with the saved set
 rem     Play.bat --extract GAME.rvz     take the game's files out of a disc image (.rvz .iso .wbfs) into "game"
 rem     Play.bat --fps 120 --fov 70 --mouse 1.5 --fullscreen --fast-start --cheats
 rem     Play.bat --always-mouse         the cheat "Always Enable Mouse": mouse look in every player state
-rem     Play.bat --skip-cutscenes       a mission's opening cutscene is skipped
+rem     Play.bat --skip dam-intro,...   those cutscenes are skipped as well: a mission's name and
+rem                                     intro, middle or ending; all, intros, middles, endings
+rem     Play.bat --skip-cutscenes       every mission's opening is skipped as well (intros)
 rem     Play.bat --skip-zukovsky        the meeting with Zukovsky in Nightclub is skipped
 rem     Play.bat --skip-briggs          the meeting with Sky Briggs in Carrier is skipped
-rem     Play.bat --skip-endings         a mission's ending cutscene is skipped
+rem     Play.bat --skip-endings         every mission's ending is skipped as well (endings)
 rem     Play.bat --skip-movies          briefings, the movies between missions and the logos are skipped
 rem     Play.bat --no-tutorials         the tutorial boxes in the missions aren't shown
 rem     Play.bat --no-colour-filter     the tint some levels lay over the picture isn't drawn

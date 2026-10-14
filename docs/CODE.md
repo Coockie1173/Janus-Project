@@ -561,8 +561,10 @@ serial write, `20..2E` conditions (an odd address is an endif first), `CC` on/of
 
 ### cutscenes.cpp
 
-Skip Intro Cutscenes: the opening plays through in very long steps (the engine held at 3
-frames a second of game time, nothing waits for a frame), muted, one frame in four drawn.
+Skip Cutscenes: a cutscene plays through in very long steps (the engine held at 3 frames a
+second of game time, nothing waits for a frame), muted, one frame in four drawn. Each one is
+its own choice: a mission's intro, a cutscene in its middle and its ending (`g_on[mission][part]`,
+the settings menu's grid, `GE_SKIP_LIST`).
 
 State machine (`Skip::Idle`, `Waiting`, `Running`):
 
@@ -576,8 +578,9 @@ State machine (`Skip::Idle`, `Waiting`, `Running`):
 | `cutscenes_frame()` | waiting: the level's time has to count 3 frames in a row, then a locked cutscene starts the skip; 150 frames with the controls means no opening |
 | `Run()` | stops when the option is turned off, after 600 s, when a button is wanted, the player is gone or has anything back; with the opening's end known it stops half a second before it, the last long steps before that at the engine's own rate |
 | `FrameDraw` | hook: `r3 = 1` for the frames the skip does not show |
-| `LoadOpenings` | `config/openings.txt`: level hash, the level time its opening ends at |
-| `LoadCutscenes`, `ArmCutscene` | `config/cutscenes.txt`: level hash, timeline hash, seconds; level hash, timeline hash, seconds, option (`zukovsky`: `skip_zukovsky`, `GE_SKIP_ZUKOVSKY`; `briggs`: `skip_briggs`, `GE_SKIP_BRIGGS`); with its option on a cutscene of it that takes the player is skipped like an opening; `g_option` is the option the running skip belongs to |
+| `LoadOpenings` | `config/openings.txt`: level hash, the level time its opening ends at, the mission's name; the missions of the grid, in its order |
+| `LoadCutscenes`, `ArmCutscene` | `config/cutscenes.txt`: level hash, timeline hash, seconds until the picture is back, part (`middle`, `ending`), the mission's level for another map of it; with its cell on a cutscene of it that takes the player is skipped like an opening; `g_option` is the cell the running skip belongs to, `g_part` its part. An ending that runs into another map of the mission keeps the black up (`Stop(why, hold)`) |
+| `SetList`, `skip_list()` | `GE_SKIP_LIST`, `LAUNCH_SKIPLIST`: ids `mission-part` (`dam-intro`), or `all`, `none`, `intros`, `middles`, `endings`; without it `GE_SKIP_CUTSCENES`, `GE_SKIP_ZUKOVSKY`, `GE_SKIP_BRIGGS`, `GE_SKIP_ENDINGS` |
 | `CutsceneMessage`, `PlayerTake` | hooks: the last timeline that sent the cutscene player a message (its hash at `+0x20`) names the cutscene the player is taken by; `GE_TRACECUT` logs every message |
 | `TraceFrames` | `GE_TRACE`: frame times through the easing |
 
@@ -891,7 +894,7 @@ Everything the pages change is one list of `Setting` (`hotkeys.h`: id, label, hi
 |---|---|
 | Screen | `fov`, `ads_fov`, `fps` (stops 30 to 275), `vsync`, `show_ping` |
 | Controls | `mouse_sens`, `ads_sens`, `aim_lock`, `mouse_invert`, `mouse_mode`, `input`, `face_buttons`, `dead_zone` |
-| Enhancements | `skip_cutscenes`, `skip_movies`, `level_timer`, `auto_qte`, `auto_start`, `autosave`, `no_tutorials`, `no_colour_filter`, `unlock_all`, `online_unlocks`, `extras_menu` |
+| Enhancements | (a row to the Skip Cutscenes grid, `kSkips`), `skip_movies`, `level_timer`, `auto_qte`, `auto_start`, `autosave`, `no_tutorials`, `no_colour_filter`, `unlock_all`, `online_unlocks`, `extras_menu` |
 | Cheats | `mouse_everywhere`, `noclip`, `stamina_meter`, `collision_view` |
 
 Key bindings (`kActions`): Fire ZR, Aim ZL, Melee L, Throw Grenade R, Reload Y, Crouch A,
@@ -984,7 +987,7 @@ Options (the launcher sets these from its settings):
 | `GE_MOUSE=S` | mouse sensitivity, 0 leaves the mouse free |
 | `GE_MOUSE_MODE=auto\|direct\|stick` | how the mouse turns the view |
 | `GE_MOUSE_INVERT=1`, `GE_ADS_SENS=S`, `GE_AIM_LOCK=1` | |
-| `GE_SKIP_CUTSCENES=1`, `GE_SKIP_MOVIES=1`, `GE_AUTO_QTE=1`, `GE_AUTO_START=1`, `GE_NO_TUTORIALS=1`, `GE_NO_COLOUR_FILTER=1`, `GE_UNLOCK_ALL=1`, `GE_ONLINE_UNLOCKS=0`, `GE_EXTRAS_MENU=1` | enhancements |
+| `GE_SKIP_LIST=ids`, `GE_SKIP_MOVIES=1`, `GE_AUTO_QTE=1`, `GE_AUTO_START=1`, `GE_NO_TUTORIALS=1`, `GE_NO_COLOUR_FILTER=1`, `GE_UNLOCK_ALL=1`, `GE_ONLINE_UNLOCKS=0`, `GE_EXTRAS_MENU=1` | enhancements |
 | `GE_LEVEL_TIMER=0`, `GE_AUTOSAVE=0` | on by default |
 | `GE_CUSTOM=H,D,R,P[,K]`, `GE_CUSTOM_ON=1` | 007 Custom's sliders (enemy health, damage, reaction speed, hit protection; K 0: no headshots that kill), and every mission played with them |
 | `GE_MOUSE_EVERYWHERE=1`, `GE_NOCLIP=1`, `GE_STAMINA=1`, `GE_COLLISION=1` | cheats |

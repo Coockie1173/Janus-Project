@@ -96,7 +96,7 @@ void save_launch_settings() {
         {"LAUNCH_MOUSEMODE", modes[mouse_mode()]}, {"LAUNCH_MOUSEINVERT", mouse_invert() ? "1" : "0"},
         {"LAUNCH_ADSFOV", ads_fov_text}, {"LAUNCH_ADSSENS", ads_sens_text}, {"LAUNCH_AIMLOCK", aim_lock() ? "1" : "0"},
         {"LAUNCH_MOUSEEVERYWHERE", mouse_everywhere() ? "1" : "0"},
-        {"LAUNCH_SKIPCUTSCENES", skip_cutscenes() ? "1" : "0"}, {"LAUNCH_SKIPZUKOVSKY", skip_zukovsky() ? "1" : "0"}, {"LAUNCH_SKIPBRIGGS", skip_briggs() ? "1" : "0"}, {"LAUNCH_SKIPENDINGS", skip_endings() ? "1" : "0"}, {"LAUNCH_SKIPMOVIES", skip_movies() ? "1" : "0"}, {"LAUNCH_NOTUTORIALS", no_tutorials() ? "1" : "0"}, {"LAUNCH_NOCOLOURFILTER", no_colour_filter() ? "1" : "0"},
+        {"LAUNCH_SKIPLIST", skip_list()}, {"LAUNCH_SKIPMOVIES", skip_movies() ? "1" : "0"}, {"LAUNCH_NOTUTORIALS", no_tutorials() ? "1" : "0"}, {"LAUNCH_NOCOLOURFILTER", no_colour_filter() ? "1" : "0"},
         {"LAUNCH_LEVELTIMER", level_timer() ? "1" : "0"}, {"LAUNCH_AUTOQTE", auto_qte() ? "1" : "0"}, {"LAUNCH_AUTOSTART", auto_start() ? "1" : "0"}, {"LAUNCH_AUTOSAVE", autosave() ? "1" : "0"}, {"LAUNCH_EXTRASMENU", extras_menu() ? "1" : "0"}, {"LAUNCH_UNLOCKALL", unlock_all() ? "1" : "0"}, {"LAUNCH_ONLINEUNLOCKS", online_unlocks() ? "1" : "0"}, {"LAUNCH_STAMINAMETER", stamina_meter() ? "1" : "0"},
         {"LAUNCH_VSYNC", vsync() ? "1" : "0"}, {"LAUNCH_PING", show_ping() ? "1" : "0"}, {"LAUNCH_OCCLUSION", occlusion() ? "1" : "0"}, {"LAUNCH_SOUNDHEIGHT", sound_height() ? "1" : "0"},
         {"LAUNCH_HUD", hud() ? "1" : "0"}, {"LAUNCH_SHAKE", shake_text}, {"LAUNCH_TANKBUTTONS", tank_text},
@@ -203,7 +203,7 @@ struct Row {
 };
 struct Page { std::string title; std::vector<Row> rows; };
 
-enum { kRoot, kScreen, kControls, kBindings, kEnhancements, kCheats, kHotkeys, kHotkeyEdit, kLevels, kMaps, kPageCount };
+enum { kRoot, kScreen, kControls, kBindings, kEnhancements, kCheats, kHotkeys, kHotkeyEdit, kLevels, kMaps, kSkips, kPageCount };
 std::vector<Page> g_pages;
 int g_page = kRoot, g_row = 0, g_scroll = 0;
 int g_root_row = 0; //where the cursor was on the first page
@@ -402,10 +402,6 @@ void BuildSettings()
 			tankSources, [i] { return tank_source(i); }, [i](int v) { set_tank_source(i, v); g_dirty = true; });
 	}
 
-	AddToggle(kEnhancements, "skip_cutscenes", "Skip Intro Cutscenes (Experimental)", "On: a mission's opening cutscene is skipped.", skip_cutscenes, set_skip_cutscenes);
-	AddToggle(kEnhancements, "skip_zukovsky", "Skip Zukovsky (Experimental)", "On: the meeting with Zukovsky in Nightclub is skipped.", skip_zukovsky, set_skip_zukovsky);
-	AddToggle(kEnhancements, "skip_briggs", "Skip Sky Briggs (Experimental)", "On: the meeting with Sky Briggs in Carrier is skipped.", skip_briggs, set_skip_briggs);
-	AddToggle(kEnhancements, "skip_endings", "Skip Ending Cutscenes (Experimental)", "On: a mission's ending cutscene is skipped, after its quick time events if it has any.", skip_endings, set_skip_endings);
 	AddToggle(kEnhancements, "skip_movies", "Skip Movies", "On: briefings, the movies between missions and the logos are skipped.", skip_movies, set_skip_movies);
 	AddToggle(kEnhancements, "level_timer", "Level Timer", "On: the hud shows the time played in the level.", level_timer, set_level_timer);
 	AddToggle(kEnhancements, "auto_qte", "Auto Quick Time Events", "On: quick time events press their own buttons.", auto_qte, set_auto_qte);
@@ -447,22 +443,26 @@ Row SettingRow(int i)
 //the two level grids: every level the disc has. Level Select is the missions and the test
 //levels by name, four to a row; Multiplayer Maps a row a map and a column a gamemode, a cell
 //where the disc has that map's level for the gamemode. Enter or a click loads the level
+//Skip Cutscenes is a grid too: a mission a row, its intro, middle and ending the columns, a cell
+//where it has that cutscene, Enter or a click turns it on or off
 struct Grid
 {
 	std::vector<std::string> columns, rowNames; //the headings, none for a grid of names
 	int cols{ 1 };
-	std::vector<uint32_t> hash; //a row after the other, 0 where there's no level
+	std::vector<uint32_t> hash; //a row after the other, 0 where there's no level (no cell)
 	std::vector<std::string> label, about; //what a cell shows, and what the foot says for it
+	std::function<void(int)> pick; //what Enter on a cell does, when it doesn't load a level
+	std::function<int(int)> lit; //a toggle's cell: 1 on, 0 off, -1 not a toggle
 	int Rows() const { return (int)hash.size() / cols; }
 };
-Grid g_grids[2];
+Grid g_grids[3];
 int g_gridAt = 0, g_gridScroll = 0; //the cell under the cursor, the first row shown
 const int kGridVisible = 9, kLevelColumns = 4;
 const float kGridLeft = 150, kGridRight = 1130, kGridTop = 190, kGridPitch = 38, kGridNames = 190;
 const uint32_t kMissionFiles = 0x0181; //the top of an mt_ level's hash
 
-bool OnGrid() { return g_page == kLevels || g_page == kMaps; }
-Grid& CurrentGrid() { return g_grids[g_page == kMaps ? 1 : 0]; }
+bool OnGrid() { return g_page == kLevels || g_page == kMaps || g_page == kSkips; }
+Grid& CurrentGrid() { return g_grids[g_page == kSkips ? 2 : g_page == kMaps ? 1 : 0]; }
 
 //made when a grid is first opened: the disc's list is read as the game starts
 void BuildGrids()
@@ -518,9 +518,41 @@ void BuildGrids()
 	}
 }
 
+//the cutscenes, from config/openings.txt and config/cutscenes.txt; the first row turns them all on or off
+const char* const kSkipColumns[kSkipParts] = {"Intro", "Middle", "Ending"};
+void BuildSkipGrid()
+{
+	Grid& grid = g_grids[2];
+	grid = Grid();
+	grid.cols = kSkipParts;
+	grid.columns.assign(kSkipColumns, kSkipColumns + kSkipParts);
+	grid.rowNames.push_back("All");
+	grid.hash = {1, 1, 0};
+	grid.label = {"Enable All", "Disable All", ""};
+	grid.about = {"Skip every cutscene listed", "Skip none of them", ""};
+	for (int m = 0; m < skip_missions(); ++m)
+	{
+		grid.rowNames.push_back(skip_mission_name(m));
+		for (int p = 0; p < kSkipParts; ++p)
+		{
+			grid.hash.push_back(skip_exists(m, p) ? 1 : 0);
+			grid.label.emplace_back();
+			grid.about.push_back(std::string(skip_mission_name(m)) + ", " + kSkipColumns[p]);
+		}
+	}
+	grid.pick = [](int i)
+	{
+		if (i < kSkipParts) set_skip_all(i == 0);
+		else set_skip_on(i / kSkipParts - 1, i % kSkipParts, !skip_on(i / kSkipParts - 1, i % kSkipParts));
+		g_dirty = true;
+	};
+	grid.lit = [](int i) { return i < kSkipParts ? -1 : skip_on(i / kSkipParts - 1, i % kSkipParts) ? 1 : 0; };
+}
+
 void OpenGrid()
 {
-	BuildGrids();
+	if (g_page == kSkips) BuildSkipGrid();
+	else BuildGrids();
 	const Grid& grid = CurrentGrid();
 	g_gridAt = g_gridScroll = 0;
 	while (g_gridAt + 1 < (int)grid.hash.size() && !grid.hash[g_gridAt]) ++g_gridAt;
@@ -547,6 +579,11 @@ void GridLoad()
 {
 	const Grid& grid = CurrentGrid();
 	if (g_gridAt >= (int)grid.hash.size() || !grid.hash[g_gridAt]) return;
+	if (grid.pick)
+	{
+		grid.pick(g_gridAt);
+		return;
+	}
 	if (guest_ptr(ld32(kPlayerPtr))) //the menu's load ends the game when a level is running already
 	{
 		g_toast = "Quit to the main menu first, a level loads from there";
@@ -740,15 +777,17 @@ void build_pages() {
     root.rows.push_back({"Level Select", "Load any level of the disc, the unused ones too.", {}, {}, [] { go(kLevels); }});
     root.rows.push_back({"Multiplayer Maps", "Load any multiplayer map of the disc to walk around in, the unused ones too.", {}, {}, [] { go(kMaps); }});
     //a grid's one row is what the foot reads: the cell under the cursor (settings_draw)
-    for (int page : {kLevels, kMaps}) {
+    for (int page : {kLevels, kMaps, kSkips}) {
         Row cell;
         cell.select = [] { GridLoad(); };
-        cell.does = "Load";
+        cell.does = page == kSkips ? "Toggle" : "Load";
         g_pages[page].rows.push_back(cell);
     }
     g_pages[kLevels].title = "Level Select";
     g_pages[kMaps].title = "Multiplayer Maps";
+    g_pages[kSkips].title = "Skip Cutscenes";
 
+    g_pages[kEnhancements].rows.push_back({"Skip Cutscenes (Experimental)", "Choose which cutscenes are skipped: each mission's intro, the one in its middle and its ending.", {}, {}, [] { go(kSkips); }});
     BuildSettings();
     for (size_t i = 0; i < g_settings.size(); ++i) g_pages[g_settings[i].page].rows.push_back(SettingRow((int)i));
 
@@ -893,6 +932,7 @@ void back() {
     else if (g_listening >= 0) g_listening = -1;
     else if (g_page == kRoot) open(false);
     else if (g_page == kHotkeyEdit) go(kHotkeys, std::max(0, g_edit));
+    else if (g_page == kSkips) go(kEnhancements, 0);
     else go(kRoot, g_root_row);
 }
 
@@ -1176,9 +1216,11 @@ void DrawGrid(ImDrawList* dl, const Layout& L)
 				continue;
 			}
 			bool sel = i == g_gridAt;
-			dl->AddRectFilled(a, b, sel ? kSelected : kBar);
-			float size = fit(grid.label[i], 26 * u, cw - 18 * u);
-			text(dl, ImVec2((a.x + b.x - text_width(grid.label[i], size)) / 2, y0 + 3 * u + (26 * u - size) * 0.55f), size, sel ? kSelectedText : kCream, grid.label[i], !sel);
+			int lit = grid.lit ? grid.lit(i) : -1;
+			const std::string label = lit < 0 ? grid.label[i] : lit ? "On" : "Off";
+			dl->AddRectFilled(a, b, sel ? kSelected : lit == 0 ? fade(kBar, 0.45f) : kBar);
+			float size = fit(label, 26 * u, cw - 18 * u);
+			text(dl, ImVec2((a.x + b.x - text_width(label, size)) / 2, y0 + 3 * u + (26 * u - size) * 0.55f), size, sel ? kSelectedText : lit == 0 ? fade(kCream, 0.6f) : kCream, label, !sel);
 		}
 	}
 	//more above, more below
@@ -1604,7 +1646,11 @@ void settings_draw() {
         RefreshHotkeyPages();
         if (OnGrid()) { //the foot says which level the cursor is on
             const Grid& grid = CurrentGrid();
-            g_pages[g_page].rows[0].hint = !(g_gridAt < (int)grid.about.size() && grid.hash[g_gridAt]) ? "The disc's levels couldn't be listed."
+            bool cell = g_gridAt < (int)grid.about.size() && grid.hash[g_gridAt];
+            int lit = cell && grid.lit ? grid.lit(g_gridAt) : -1;
+            g_pages[g_page].rows[0].hint = g_page == kSkips ? (!cell ? "No missions are listed (config/openings.txt)."
+                    : lit < 0 ? grid.about[g_gridAt] + "." : grid.about[g_gridAt] + (lit ? ": skipped." : ": played."))
+                : !cell ? "The disc's levels couldn't be listed."
                 : guest_ptr(ld32(kPlayerPtr)) ? grid.about[g_gridAt] + ". Levels load from the main menu: quit this one first." : "Load " + grid.about[g_gridAt] + ".";
         }
         const Page& page = g_pages[g_page];
