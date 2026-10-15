@@ -165,7 +165,8 @@ Texts that still talk about the controller.
 - [ ] **medium** Outpost: crouch and melee the guard in front of the log, the camera stays near the ground
       for the whole takedown and you only hear it (there's a VOD, a clip on request)
 - [ ] **low** The game can be paused while a cutscene is being skipped
-- [ ] **medium** Cradle: the opening skip goes slightly too far, leave a little more time before the slow motion part
+- [x] **medium** Cradle: the opening skip goes slightly too far, leave a little more time before the slow motion part
+      (fades back in 2 s earlier now, to be played)
 - [ ] **low** An option to turn off the fade out when skipping a cutscene, to follow where it goes
 - [ ] **low** Cradle: the Natalya cutscene in the first area could be skipped
 - [ ] **low** Cradle: the last Trevelyan encounter could be skipped up to "For England, James?" (leaves time to get
