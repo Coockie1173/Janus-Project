@@ -256,8 +256,6 @@ void install_cheats(); //cheats.cpp
 void install_randomizer(); //randomizer.cpp
 bool weapon_randomizer(); //for fun, the campaign's weapons and the guards' guns are random, with a random attachment
 void set_weapon_randomizer(bool on);
-bool unrestricted_attachments(); //experimental, any attachment on any weapon the randomizer gives
-void set_unrestricted_attachments(bool on);
 bool no_attachment_limit(); //experimental, the randomizer's weapons may have more than one attachment
 void set_no_attachment_limit(bool on);
 bool god_mode(); //cheat, the campaign's player takes no hurt
