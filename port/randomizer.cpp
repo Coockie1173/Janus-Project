@@ -21,7 +21,9 @@
 //  weapons table (805D1A4C: the count at +8, the rows at +0xC, 0x254 each; the id at +0x174,
 //  +0xD the clip, +0xE the clips, +0x178 the model a guard holds, none for the Golden Gun)
 //
-//GE_WEAPON_RANDOMIZER=1 starts with it on, GE_RANDOMIZER_SEED=n the same picks every run,
+//Unrestricted Attachments (experimental): any of the six on any weapon, also past a guard's
+//  ge_attachment_mask (80169310). No Attachment Limit (experimental): any of them together
+//GE_WEAPON_RANDOMIZER=1 starts with it on, GE_UNRESTRICTED_ATTACHMENTS=1 and GE_NO_ATTACHMENT_LIMIT=1 those, GE_RANDOMIZER_SEED=n the same picks every run,
 //GE_RANDOMIZER_WEAPON=id[:flags] the player always gets that weapon (the model flags in hex), GE_TRACE=1 logs every swap
 #include "ge.h"
 #include <algorithm>
@@ -49,6 +51,7 @@ const uint32_t kGiveAll[] = { //fn_800C02A0's weapons, in its order
 	0x02000489, 0x0200031F, 0x02000938, 0x02000750, 0x02000939, 0x0200093A, 0x0200048B, 0x0200077C, 0x02000828};
 const uint32_t kSilencer = 1, kReflex = 2, kAcog = 4, kLaser = 8, kThermal = 0x10, kLauncher = 0x20;
 const uint32_t kInventoryShift = 3;
+const uint32_t kItems = 0xC4C, kItemCount = 0xC48, kItemSize = 0x10; //the inventory: an item's id at +0
 const int32_t kPlenty = 999999; //what the game gives for "as much as it holds"
 
 const uint32_t kLoadedFiles = 0x806425F0, kLoadedFileCount = 0x806425EC, kFileSystem = 0x806EC2D0;
@@ -58,9 +61,10 @@ const uint32_t kWeaponFiles[] = {0x01020016, 0x0109000F}; //cp_bondfp.edb, o_gun
 
 struct Pick { uint32_t id, row, flags; };
 
-std::atomic<bool> g_on{false};
+std::atomic<bool> g_on{false}, g_unrestricted{false}, g_unlimited{false};
 bool g_trace = false;
 PPCFunc file_info = nullptr, request_section = nullptr;
+PPCFunc orig_select = nullptr, orig_mask = nullptr;
 PPCFunc orig_give = nullptr, orig_attach = nullptr, attachment_allowed = nullptr;
 std::mt19937 g_rng{std::random_device{}()};
 std::map<uint32_t, Pick> g_swapped; //the level's weapon -> what the player got for it
@@ -98,10 +102,20 @@ uint32_t Allowed(const PPCContext& c, uint32_t id)
 	return allowed;
 }
 
-//one random attachment of those the weapon can carry, or none
+//one random attachment of those the weapon can carry, or none. Unrestricted Attachments: of all
+//six. No Attachment Limit: any of them together
 uint32_t RandomFlags(const PPCContext& c, uint32_t id)
 {
-	const uint32_t allowed{ Allowed(c, id) };
+	const uint32_t allowed{ g_unrestricted ? kSilencer | kReflex | kAcog | kLaser | kThermal | kLauncher : Allowed(c, id) };
+	if (g_unlimited) //each of them or not
+	{
+		uint32_t flags = 0;
+		for (uint32_t one : {kSilencer, kReflex, kAcog, kLaser, kThermal, kLauncher})
+		{
+			if ((allowed & one) && std::uniform_int_distribution<int>(0, 1)(g_rng)) flags |= one;
+		}
+		return flags;
+	}
 	std::vector<uint32_t> choices{0};
 	for (uint32_t one : {kSilencer, kReflex, kAcog, kLaser, kThermal, kLauncher})
 	{
@@ -210,6 +224,39 @@ void TraceAllowed(const PPCContext& c)
 	for (uint32_t id : kGiveAll) rt_log("goldeneye: randomizer: %08X may carry %s", id, Describe(Allowed(c, id)).c_str());
 }
 
+bool Holds(uint32_t ctrl, uint32_t id)
+{
+	const uint32_t items{ ld32(ctrl + kItems) }, count{ ld32(ctrl + kItemCount) };
+	for (uint32_t i = 0; guest_ptr(items) && i < count && i < 64; ++i)
+	{
+		if (ld32(items + i * kItemSize) == id) return true;
+	}
+	return false;
+}
+
+//(player, weapon id, inventory index or -1, ...): the level asks for its own weapon (the P99 in
+//the hand as a level starts), the one it was swapped for is taken out. else the weapon isn't
+//held, it's given again (another of the swapped one) and nothing is taken out
+void Select(PPCContext& c)
+{
+	if (Active() && c.r[3] == g_swappedPlayer && ld32(kCurrentLevel) == g_swappedLevel)
+	{
+		if (const auto found = g_swapped.find(c.r[4]); found != g_swapped.end())
+		{
+			if (g_trace) rt_log("goldeneye: randomizer: %08X taken out for %08X", found->second.id, c.r[4]);
+			c.r[4] = found->second.id;
+			c.r[5] = 0xFFFFFFFF;
+		}
+	}
+	orig_select(c);
+}
+
+//(weapon id, the model flags' address): a guard's attachments stay as picked
+void Mask(PPCContext& c)
+{
+	if (!(Active() && g_unrestricted)) orig_mask(c);
+}
+
 //(controller, weapon id, ammo, rounds in the clip, the launcher's ammo, flags, from a pickup)
 void Give(PPCContext& c)
 {
@@ -243,6 +290,12 @@ void Give(PPCContext& c)
 	}
 	TraceAllowed(c);
 	const Pick& pick{ found->second };
+	//one of each: the give adds an item even for a weapon that's held
+	if (Holds(ctrl, pick.id))
+	{
+		if (g_trace) rt_log("goldeneye: randomizer: the player's %08X is %08X, already held", id, pick.id);
+		return;
+	}
 	const int32_t ammo{ (int32_t)c.r[5] };
 	//a give of a weapon the player has sets its ammo as it is, the game's 999999 too (a level's
 	//script gives its weapon again that way when it's missing): no more than the new one holds
@@ -278,11 +331,17 @@ void Attach(PPCContext& c)
 
 bool weapon_randomizer() { return g_on; }
 void set_weapon_randomizer(bool on) { g_on = on; }
+bool unrestricted_attachments() { return g_unrestricted; }
+void set_unrestricted_attachments(bool on) { g_unrestricted = on; }
+bool no_attachment_limit() { return g_unlimited; }
+void set_no_attachment_limit(bool on) { g_unlimited = on; }
 
 void install_randomizer()
 {
 	g_on = std::atoi(saved_setting("GE_WEAPON_RANDOMIZER", "LAUNCH_WEAPONRANDOMIZER").c_str()) != 0;
 	g_trace = std::getenv("GE_TRACE") != nullptr;
+	g_unrestricted = std::atoi(saved_setting("GE_UNRESTRICTED_ATTACHMENTS", "LAUNCH_UNRESTRICTEDATTACHMENTS").c_str()) != 0;
+	g_unlimited = std::atoi(saved_setting("GE_NO_ATTACHMENT_LIMIT", "LAUNCH_NOATTACHMENTLIMIT").c_str()) != 0;
 	if (const char* forced = std::getenv("GE_RANDOMIZER_WEAPON"))
 	{
 		char* rest = nullptr;
@@ -293,10 +352,12 @@ void install_randomizer()
 	if (g_on) rt_log("goldeneye: weapon randomizer on");
 	orig_give = ppc_hook("ge_give_weapon", Give);
 	orig_attach = ppc_hook("ge_npc_attach_gun", Attach);
+	orig_select = ppc_hook("ge_select_weapon", Select);
+	orig_mask = ppc_hook("ge_attachment_mask", Mask);
 	file_info = ppc_lookup(kFileInfo);
 	request_section = ppc_lookup(kRequestSection);
 	attachment_allowed = ppc_lookup(kAttachmentAllowed);
-	if (!orig_give || !orig_attach || !attachment_allowed || !file_info || !request_section) rt_die("goldeneye: the weapon randomizer is not hooked in this build");
+	if (!orig_give || !orig_attach || !attachment_allowed || !file_info || !request_section || !orig_select || !orig_mask) rt_die("goldeneye: the weapon randomizer is not hooked in this build");
 }
 
 } //namespace ge

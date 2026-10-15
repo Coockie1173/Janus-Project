@@ -103,7 +103,8 @@ void save_launch_settings() {
         {"LAUNCH_ANISO", std::to_string(anisotropy())}, {"LAUNCH_MSAA", std::to_string(anti_aliasing())},
         {"LAUNCH_CUSTOM", custom_values()},
         {"LAUNCH_GOD", god_mode() ? "1" : "0"}, {"LAUNCH_INFINITEAMMO", infinite_ammo() ? "1" : "0"}, {"LAUNCH_INFINITESPRINT", infinite_sprint() ? "1" : "0"},
-        {"LAUNCH_WEAPONRANDOMIZER", weapon_randomizer() ? "1" : "0"}};
+        {"LAUNCH_WEAPONRANDOMIZER", weapon_randomizer() ? "1" : "0"}, {"LAUNCH_UNRESTRICTEDATTACHMENTS", unrestricted_attachments() ? "1" : "0"},
+        {"LAUNCH_NOATTACHMENTLIMIT", no_attachment_limit() ? "1" : "0"}};
     if (g_fps_changed) values.push_back({"LAUNCH_FPS", std::to_string(fps_limit())}); //"auto" stays until it's changed
     auto lines = read_lines(GE_SETTINGS_FILE);
     if (lines.empty()) lines.push_back("# written by the launcher, read when the game is started");
@@ -426,6 +427,8 @@ void BuildSettings()
 	AddToggle(kCheats, "collision_view", "Collision Viewer", "On: the level's collision is drawn in place of the world. Floors are green, walls grey, ceilings red, props orange.", collision_view, set_collision_view);
 
 	AddToggle(kForFun, "weapon_randomizer", "Weapon Randomizer", "On: in the campaign every guard and you start with a random weapon, with one random attachment or none. From the next spawn on.", weapon_randomizer, set_weapon_randomizer);
+	AddToggle(kForFun, "unrestricted_attachments", "Unrestricted Attachments (Experimental)", "On: the Weapon Randomizer puts any attachment on any weapon, also ones the game never allows on it. Some may break the view or the gun.", unrestricted_attachments, set_unrestricted_attachments);
+	AddToggle(kForFun, "no_attachment_limit", "No Attachment Limit (Experimental)", "On: the Weapon Randomizer's weapons may have several attachments at once, each one a chance of its own. Some may break the view.", no_attachment_limit, set_no_attachment_limit);
 }
 
 Row SettingRow(int i)
