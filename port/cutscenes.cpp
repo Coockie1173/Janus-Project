@@ -118,6 +118,8 @@ uint32_t g_counting = 0; //frames in a row the level's time went up
 float g_played = 0;
 float g_ends = 0; //the level time this cutscene ends at, 0 if we don't know it
 float g_armed_ends = 0; //the same for the cutscene that is waited for
+bool g_through = false, g_armed_through = false; //it runs to its end even where the mouse is given back
+bool g_back_first = false; //the mouse has to be given back before the cutscene that is waited for takes it
 float g_wait_until = 0; //the level time a cutscene of config/cutscenes.txt is waited for until, 0 an opening (kWaitFrames)
 bool g_holding = false; //the black and the mute are kept up after a level change, for the next map's cutscene
 float g_hold_from = -1; //the level time the next map was first seen at
@@ -149,10 +151,14 @@ void LoadOpenings(const std::string& path)
 //a cutscene after the opening that is skipped as well: lines of "level hash (hex), the hash of
 //the timeline that takes the player (hex), the seconds until the picture is back, the part of
 //the mission it is (middle, ending), and the mission's level when it's another map of it"
+//"through" after them: the skip runs to its seconds even where the mouse is given back on the way
+//"again": the mouse is still lost to the cutscene before when it takes the player, the skip waits
+//for it to come back and be lost again
 struct Inside
 {
 	float seconds;
 	int mission, part;
+	bool through, again;
 };
 std::map<std::pair<uint32_t, uint32_t>, Inside> g_cutscenes;
 void LoadCutscenes(const std::string& path)
@@ -162,13 +168,21 @@ void LoadCutscenes(const std::string& path)
 	{
 		unsigned level = 0, cutscene = 0, mission = 0;
 		float seconds = 0;
-		char part[32] = "";
-		int n = std::sscanf(l.c_str(), "%x %x %f %31s %x", &level, &cutscene, &seconds, part, &mission);
+		char part[32] = "", more[2][32] = {"", ""};
+		l = l.substr(0, l.find('#'));
+		int n = std::sscanf(l.c_str(), "%x %x %f %31s %31s %31s", &level, &cutscene, &seconds, part, more[0], more[1]);
 		if (n < 4) continue;
-		int m = MissionOf(n == 5 ? mission : level);
+		bool through = false, again = false;
+		for (int i = 0; i < n - 4; ++i)
+		{
+			if (std::string(more[i]) == "through") through = seconds > 0;
+			else if (std::string(more[i]) == "again") again = true;
+			else mission = (unsigned)std::strtoul(more[i], nullptr, 16);
+		}
+		int m = MissionOf(mission ? mission : level);
 		int p = std::find(kPartNames, kPartNames + kSkipParts, std::string(part)) - kPartNames;
 		if (m < 0 || p == kSkipIntro || p == kSkipParts) continue;
-		g_cutscenes[{level, cutscene}] = {seconds, m, p};
+		g_cutscenes[{level, cutscene}] = {seconds, m, p, through, again};
 		g_missions[m].has[p] = true;
 	}
 }
@@ -277,6 +291,7 @@ void Arm(uint32_t level)
 	g_part = kSkipIntro;
 	g_frames = g_counting = 0;
 	g_wait_until = 0;
+	g_armed_through = g_back_first = false;
 	auto known = g_openings.find(level);
 	g_armed_ends = known != g_openings.end() ? known->second : 0.0f;
 	if (g_trace) rt_log("goldeneye: skip cutscenes: level %08X starts, waiting for its opening", level);
@@ -293,7 +308,10 @@ void ArmCutscene(uint32_t cutscene)
 	g_part = known->second.part;
 	g_frames = g_counting = 0;
 	g_armed_ends = known->second.seconds > 0 ? ldf(kLevelTimer) + known->second.seconds : 0.0f;
-	g_wait_until = ldf(kLevelTimer) + kWaitSeconds;
+	g_armed_through = known->second.through;
+	g_back_first = known->second.again;
+	//one that keeps the mouse a while longer is waited for until shortly before its end
+	g_wait_until = std::max(ldf(kLevelTimer) + kWaitSeconds, g_armed_ends - kFadeSeconds * 3);
 	if (g_trace) rt_log("goldeneye: skip cutscenes: cutscene %08X of level %08X starts", cutscene, ld32(kCurrentLevel));
 }
 
@@ -301,6 +319,7 @@ void ArmCutscene(uint32_t cutscene)
 void StartFade()
 {
 	g_ends = g_armed_ends;
+	g_through = g_armed_through;
 	if (g_ends > 0 && g_ends - ldf(kLevelTimer) < kFadeSeconds * 3)
 	{
 		g_state = Skip::Idle; //too short to fade out of and back into
@@ -321,7 +340,7 @@ bool Over()
 	if (!*g_option) Stop("turned off");
 	else if (cutscene_input_waiting()) Stop("a button is wanted");
 	else if (!local_player_state(state)) Stop("the player is gone");
-	else if (!local_cutscene_locked()) Stop("done");
+	else if (!local_cutscene_locked() && !g_through) Stop("done");
 	return g_state == Skip::Idle;
 }
 
@@ -547,7 +566,8 @@ void cutscenes_frame()
 	g_counting = played > g_played ? g_counting + 1 : 0;
 	g_played = played;
 	if (g_counting < kCountingFrames) return;
-	if (local_cutscene_locked()) StartFade();
+	if (g_back_first && !local_cutscene_locked()) g_back_first = false;
+	if (local_cutscene_locked() && !g_back_first) StartFade();
 	else if (g_wait_until > 0 ? played > g_wait_until : ++g_frames > kWaitFrames)
 	{
 		g_state = Skip::Idle;

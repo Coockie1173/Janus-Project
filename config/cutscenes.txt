@@ -3,10 +3,17 @@
 # "cut: t ... the player is taken by cutscene"), the seconds from then until the picture is back
 # (0: not known, it fades back in when the mouse is back, a button is wanted or the level changes),
 # the part of the mission (middle or ending), and the mission's level when it's another map of it
-# (config/openings.txt names them). The log has the level time of every take, the mouse lost and
+# (config/openings.txt names them). After them "through": it runs to its seconds even where the mouse is
+# given back on the way, "again": the mouse is still lost to the one before when it takes the player, it
+# waits for the mouse to come back and go again. The log has the level time of every take, the mouse lost and
 # back, each quick time event and level change ("cut: t ...").
 01810144 04002580 113.0 middle      # Nightclub, the meeting with Zukovsky (three timelines in a row)
 01810147 04002807 59.2  middle      # Carrier, the meeting with Sky Briggs (four timelines in a row)
+0181013F 04002615 59.4  middle through # Dam, into the truck until the mouse is back for good (187.2 s in, given back on the way at 138.4)
+0181013F 04002627 17.5  middle      # Dam, the mouse lost 12.4 s after it takes the player, until a second before the R prompt (passed 18.6 s in)
+0181013F 04002633 60.1  middle again # Dam, the mouse lost 12.5 s after it takes the player, until a second before the B prompt (passed 61.1 s in)
+0181013F 04002728 27.3  middle again # Dam, after the quick time event, the mouse lost 8.7 s in until the player is let go (27.4 s in)
+0181014D 04002B0F 19.8  middle      # Solar, in the middle, until the player is let go (19.9 s in)
 0181013C 04002CE0 0     ending      # Airfield, after the plane's two quick time events
 0181013F 04002380 0     ending      # Dam
 01810144 0400274B 0     ending      # Nightclub
