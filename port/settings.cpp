@@ -298,7 +298,7 @@ void AddToggle(int page, const char* id, const char* label, const char* hint, bo
 	s.show = [](float v) { return std::string(v > 0.5f ? "On" : "Off"); };
 }
 
-void AddChoice(int page, const char* id, const char* label, const char* hint, std::vector<const char*> names,
+Setting& AddChoice(int page, const char* id, const char* label, const char* hint, std::vector<const char*> names,
 	std::function<int()> get, std::function<void(int)> set)
 {
 	Setting& s = AddSetting(page, Setting::kChoice, id, label, hint);
@@ -308,6 +308,7 @@ void AddChoice(int page, const char* id, const char* label, const char* hint, st
 	s.step = [count](float v, int d) { return (float)(((int)std::lround(v) + d + count) % count); };
 	s.show = [names, count](float v) { return std::string(names[std::clamp((int)std::lround(v), 0, count - 1)]); };
 	s.count = count;
+	return s;
 }
 
 //from lo to hi in steps of by, shown with that many decimals
@@ -433,7 +434,7 @@ void BuildSettings()
 	std::vector<const char*> weapons;
 	for (int i = 0; i < forced_weapon_count(); ++i) weapons.push_back(forced_weapon_name(i));
 	AddChoice(kForFun, "forced_weapon", "Forced Weapon", "In the campaign you and every guard start with this weapon. Attachments are random with the Weapon Randomizer on, else none. Guards can't hold the Golden Gun. From the next spawn on.",
-		weapons, forced_weapon, [](int v) { set_forced_weapon(v); g_dirty = true; });
+		weapons, forced_weapon, [](int v) { set_forced_weapon(v); g_dirty = true; }).dropdown = true;
 	AddToggle(kForFun, "no_attachment_limit", "No Attachment Limit (Experimental)", "On: the Weapon Randomizer's weapons may have several attachments at once, each one a chance of its own. Some may break the view.", no_attachment_limit, set_no_attachment_limit);
 }
 
@@ -449,6 +450,17 @@ Row SettingRow(int i)
 	{
 		r.slider = [i] { return g_settings[i].frac(g_settings[i].get()); };
 		r.slide = [i](float f) { g_settings[i].set(g_settings[i].at(f)); };
+	}
+	if (s.dropdown)
+	{
+		r.options = [i]
+		{
+			std::vector<std::string> names;
+			for (int v = 0; v < g_settings[i].count; ++v) names.push_back(g_settings[i].show((float)v));
+			return names;
+		};
+		r.chosen = [i] { return (int)std::lround(g_settings[i].get()); };
+		r.choose = [i](int v) { g_settings[i].set((float)v); };
 	}
 	return r;
 }
