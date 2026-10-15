@@ -21,9 +21,8 @@
 //no tutorials (off by default): a level's triggers ask the hud for a tutorial box by its
 //hash (message 0x22 -> ge_show_tutorial), and the hud shows it, most of them with the game
 //paused until a button. nothing reads the answer or waits for the box, so with the option on
-//the hud is never asked: the box, its pause and the boxes chained after it don't happen
-//not in the training mission (level 0181016B): its boxes say what to do next, without them
-//there's nothing to go by, so there they are shown whatever the option says
+//the hud is never asked: the box, its pause and the boxes chained after it don't happen,
+//in the training mission too (its boxes say what to do next, the player asked for them gone)
 //
 //online unlocks (on by default): a loadout's weapons, attachments and gadgets open at a level,
 //and so do three game modes
@@ -94,7 +93,6 @@ std::atomic<bool> g_unlock_all{false};
 std::atomic<bool> g_auto_start{false};
 std::atomic<bool> g_no_tutorials{false};
 const uint32_t kCurrentLevel = 0x805D1804; //the hash of the level that is loaded
-const uint32_t kTrainingLevel = 0x0181016B; //MI6 Ops Training, its boxes are the mission
 std::atomic<bool> g_online_unlocks{true};
 const uint32_t kProximityMine = 0x7D060005; //the gadget's hash (the loadout items' table at 80585C80)
 const uint32_t kMenuPage = 0x214, kMenuRowLocked = 0x548; //the menu's page, a byte a row: it is locked
@@ -206,7 +204,7 @@ void PadConfirmed(PPCContext& c)
 void ShowTutorial(PPCContext& c)
 {
 	uint32_t level = ld32(kCurrentLevel);
-	bool skip = g_no_tutorials && level != kTrainingLevel;
+	bool skip = g_no_tutorials;
 	if (g_trace || skip) rt_log("goldeneye: tutorial %08X of level %08X%s", c.r[4], level, skip ? ", not shown" : "");
 	if (!skip)
 	{

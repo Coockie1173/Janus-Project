@@ -132,9 +132,9 @@ Texts that still talk about the controller.
 - [ ] **low** Dam: "Press E while holding forward on the L Stick to climb small ledges", while the prompt on
       screen says "[L Shift] + [W]" (at the start, under the two bridges before the first building)
 - [ ] **low** Dam: "Press [Down] To take out your Smartphone" should say [F] (both work, may not be possible)
-- [ ] **medium** Disable Tutorials no longer hides the tutorial pop-ups (it did once); the reporter would like them
-      fully gone, the training mission too
-- [ ] **low** The Disable Tutorials text is unclear
+- [x] **medium** Disable Tutorials no longer hides the tutorial pop-ups (it did once); the reporter would like them
+      fully gone, the training mission too: the training exception is gone, the option hides them everywhere
+- [x] **low** The Disable Tutorials text is unclear
 
 ## Aiming down sights
 

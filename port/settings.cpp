@@ -408,7 +408,7 @@ void BuildSettings()
 	AddToggle(kEnhancements, "auto_qte", "Auto Quick Time Events", "On: quick time events press their own buttons.", auto_qte, set_auto_qte);
 	AddToggle(kEnhancements, "auto_start", "Auto Start Mission", "On: a loaded mission starts by itself, without Continue being pressed.", auto_start, set_auto_start);
 	AddToggle(kEnhancements, "autosave", "Save At Checkpoints", "On: reaching a checkpoint saves the game, as Save and Quit does. After a crash Continue Game starts there.", autosave, set_autosave);
-	AddToggle(kEnhancements, "no_tutorials", "Disable Tutorials", "On: the tutorial boxes in the missions aren't shown, but for the training mission's.", no_tutorials, set_no_tutorials);
+	AddToggle(kEnhancements, "no_tutorials", "Disable Tutorials", "On: the pop-up boxes that explain the controls are never shown, in any mission, training included.", no_tutorials, set_no_tutorials);
 	AddToggle(kEnhancements, "no_colour_filter", "Disable Colour Filter", "On: the tint some levels lay over the picture (Facility's blue-green, Tank's, Solar's) isn't drawn.", no_colour_filter, set_no_colour_filter);
 	AddToggle(kEnhancements, "unlock_all", "Unlock Everything", "On: every mission and every difficulty can be picked. A save made with it on may keep them.", unlock_all, set_unlock_all);
 	AddToggle(kEnhancements, "online_unlocks", "Online Unlocks", "On: online, every weapon, attachment, gadget and game mode is open at any level, but for the Proximity Mine.", online_unlocks, set_online_unlocks);
