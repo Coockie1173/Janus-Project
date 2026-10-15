@@ -35,11 +35,14 @@
 //unloads it with the rest, the next level asks again
 //
 //No Attachment Limit (experimental): any of them together
-//Forced Weapon: one of the weapons in place of the random one, for the player and every guard that
-//can hold it (not the Golden Gun: a guard keeps its own, or a random one with the randomizer on).
-//it works with the randomizer off too, then without attachments. the names are the rows' +0x190 texts
+//Forced Weapon: with the randomizer off, one of the weapons for the player and every guard, without
+//attachments. the names are the rows' +0x190 texts
+//the Golden Gun has no model a guard holds (+0x178 FFFFFFFF). it gets the one Golden Gun mode lays
+//in the level, 0400293D of o_guns.edb, so guards can have it, forced or random. 0400256D (what the
+//multiplayer loadout's entry 80578BE4 puts where a character holds the P99's 04001DAC, as the
+//others' put their +0x178) attaches but isn't drawn
 //GE_WEAPON_RANDOMIZER=1 starts with it on, GE_NO_ATTACHMENT_LIMIT=1 that, GE_RANDOMIZER_SEED=n the same picks every run,
-//GE_RANDOMIZER_WEAPON=id[:flags] the forced weapon (the model flags in hex), GE_TRACE=1 logs every swap
+//GE_RANDOMIZER_WEAPON=id[:flags] the forced weapon (the model flags in hex), GE_TRACE=1 logs every swap and a guard that didn't take its gun
 #include "ge.h"
 #include <algorithm>
 #include <atomic>
@@ -56,6 +59,8 @@ namespace
 
 const uint32_t kWeapons = 0x805D1A4C, kRowSize = 0x254;
 const uint32_t kRowId = 0x174, kRowClip = 0xD, kRowClips = 0xE, kRowModel = 0x178;
+const uint32_t kGuardGun = 0x754; //the row of the gun AttachGun gave (the silenced one's with flag 1), 0 when it failed
+const uint32_t kGoldenGun = 0x02000827, kGoldenGunModel = 0x0400293D;
 const uint32_t kCurrentLevel = 0x805D1804;
 const uint32_t kAttachmentAllowed = 0x801691D0; //(weapon id, attachment hash) -> 1 when the loadout menu allows it
 struct Attachment { uint32_t hash, flag; };
@@ -104,7 +109,7 @@ std::mt19937 g_rng{std::random_device{}()};
 std::map<uint32_t, Pick> g_swapped; //the level's weapon -> what the player got for it
 uint32_t g_swappedLevel = 0, g_swappedPlayer = 0;
 std::atomic<uint32_t> g_forced{0}; //Forced Weapon's id, 0 for none
-uint32_t g_forcedFlags = 0xFFFFFFFF; //GE_RANDOMIZER_WEAPON's flags, else the randomizer's
+uint32_t g_forcedFlags = 0; //GE_RANDOMIZER_WEAPON's flags
 
 bool Active() { return (g_on || g_forced) && !multiplayer_game(); }
 
@@ -159,22 +164,25 @@ uint32_t RandomFlags(const PPCContext& c, uint32_t id)
 	return choices[std::uniform_int_distribution<size_t>(0, choices.size() - 1)(g_rng)];
 }
 
+//the model a guard holds; the Golden Gun's row gets its own first
 bool HasModel(uint32_t row)
 {
+	if (ld32(row + kRowId) == kGoldenGun && ld32(row + kRowModel) == 0xFFFFFFFF) st32(row + kRowModel, kGoldenGunModel);
 	const uint32_t model{ ld32(row + kRowModel) };
 	return model != 0 && model != 0xFFFFFFFF;
 }
 
 //a random weapon of the give-all's, not one of those taken; a guard's needs a model to hold. the
-//forced one when there is one. none: the weapon is left as it is
+//forced one with the randomizer off. none: the weapon is left as it is
 Pick RandomWeapon(const PPCContext& c, bool guard, const std::vector<uint32_t>& taken)
 {
-	if (const uint32_t forced{ g_forced }, row{ forced ? RowOf(forced) : 0 }; row && (!guard || HasModel(row)))
+	if (!g_on)
 	{
-		const uint32_t flags{ g_forcedFlags != 0xFFFFFFFF ? g_forcedFlags : g_on ? RandomFlags(c, forced) : 0 };
-		return {forced, row, flags};
+		const uint32_t forced{ g_forced }, row{ forced ? RowOf(forced) : 0 };
+		if (!row) return {0, 0, 0};
+		if (guard && !HasModel(row)) return {0, 0, 0};
+		return {forced, row, g_forcedFlags};
 	}
-	if (!g_on) return {0, 0, 0};
 	std::vector<Pick> pool;
 	for (uint32_t id : kGiveAll)
 	{
@@ -441,7 +449,9 @@ void Attach(PPCContext& c)
 			c.r[5] = pick.flags;
 		}
 	}
+	const uint32_t guard{ c.r[3] }, given{ c.r[4] };
 	orig_attach(c);
+	if (g_trace && given != row && !ld32(guard + kGuardGun)) rt_log("goldeneye: randomizer: guard %08X didn't take its gun", guard);
 }
 
 } //namespace

@@ -433,7 +433,7 @@ void BuildSettings()
 	AddToggle(kForFun, "weapon_randomizer", "Weapon Randomizer", "On: in the campaign every guard and you start with a random weapon, with one random attachment or none. From the next spawn on.", weapon_randomizer, set_weapon_randomizer);
 	std::vector<const char*> weapons;
 	for (int i = 0; i < forced_weapon_count(); ++i) weapons.push_back(forced_weapon_name(i));
-	AddChoice(kForFun, "forced_weapon", "Forced Weapon", "In the campaign you and every guard start with this weapon. Attachments are random with the Weapon Randomizer on, else none. Guards can't hold the Golden Gun. From the next spawn on.",
+	AddChoice(kForFun, "forced_weapon", "Forced Weapon", "In the campaign you and every guard start with this weapon, without attachments. Only while the Weapon Randomizer is off. From the next spawn on.",
 		weapons, forced_weapon, [](int v) { set_forced_weapon(v); g_dirty = true; }).dropdown = true;
 	AddToggle(kForFun, "no_attachment_limit", "No Attachment Limit (Experimental)", "On: the Weapon Randomizer's weapons may have several attachments at once, each one a chance of its own. Some may break the view.", no_attachment_limit, set_no_attachment_limit);
 }
