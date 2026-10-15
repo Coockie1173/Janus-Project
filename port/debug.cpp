@@ -29,6 +29,8 @@
 //"64:*806EB698+FC" watches the word that far into what the pointer holds at that time
 //GE_TRACEW="80776B10" log that word whenever it changes (checked 200 times a second)
 //GE_PEEK="80ABCDEF,80ABCDF0" log those floats every half second
+//GE_DEBUGPRINT=1 logs what the game's debugPrint is given (the sound layer's "Loaded soundbank
+//%08X", "Element %08X not found in soundbank %08X"...): integers and strings, floats as ?
 //GE_RECORD=F writes the classic controller's state, the mouse's motion and what the hotkeys
 //set (noclip, the frame rate...) as played into F
 //GE_REPLAY=F plays F back in their place, then hands the controls back. with it every time
@@ -576,6 +578,34 @@ void look_trace(PPCContext& c) {
     }
 }
 
+//(format, ...)
+PPCFunc orig_debug_print = nullptr;
+void debug_print(PPCContext& c) {
+    std::string out;
+    int arg = 4;
+    for (uint32_t p = c.r[3]; ge::guest_ptr(p) && ld8(p) && out.size() < 512; ++p) {
+        const char ch = (char)ld8(p);
+        if (ch != '%') { out += ch; continue; }
+        std::string spec{"%"};
+        while (ge::guest_ptr(p + 1) && ld8(p + 1) && std::strchr("0123456789.-lh", (char)ld8(p + 1))) spec += (char)ld8(++p);
+        const char kind = (char)ld8(++p);
+        if (!kind) break;
+        if (kind == '%') { out += '%'; continue; }
+        if (arg > 10) { out += '?'; continue; }
+        if (kind == 's') {
+            for (uint32_t q = c.r[arg++], n = 0; ge::guest_ptr(q) && ld8(q) && n < 80; ++q, ++n) out += (char)ld8(q);
+        } else if (std::strchr("dixXuc", kind)) {
+            char buf[48];
+            std::snprintf(buf, sizeof buf, (spec + kind).c_str(), c.r[arg++]);
+            out += buf;
+        } else {
+            out += '?';
+        }
+    }
+    if (!out.empty()) rt_log("debugPrint: %s", out.c_str());
+    orig_debug_print(c);
+}
+
 void debug_install() {
     if (const char* e = std::getenv("GE_REPLAY")) {
         if (!load_recording(e)) rt_die("debug: no recording %s", e);
@@ -588,6 +618,7 @@ void debug_install() {
         rt_log("debug: recording input into %s", e);
     }
     if (std::getenv("GE_TRACELOOK")) orig_look_trace = ppc_hook("ge_look_input", look_trace);
+    if (std::getenv("GE_DEBUGPRINT")) orig_debug_print = ppc_hook("debugPrint", debug_print);
     if (const char* e = std::getenv("GE_BUTTONS")) {
         for (const char* q = e; *q;) {
             Press p{};

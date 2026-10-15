@@ -21,6 +21,19 @@
 //  weapons table (805D1A4C: the count at +8, the rows at +0xC, 0x254 each; the id at +0x174,
 //  +0xD the clip, +0xE the clips, +0x178 the model a guard holds, none for the Golden Gun)
 //
+//the sounds: a gun's own shots are in its bank (+0x244: sb_wpn_ak47...), which the game loads into
+//one of two slots for the gun the player holds (fn_80227AD0 from the player's update fn_801312C0).
+//all else, a guard's shots, the reload, the shell, the shot from afar, is only in the banks of
+//the levels that have the gun (sb_lvl_01_dam...) and in sb_multiplayer_weapons (2D500019, every
+//gun, what a network game loads in the level's place): a gun the level doesn't have is quiet.
+//so that bank is loaded too, as a weapon is given or a guard gets one. a bank needs a slot, a
+//piece of the sound memory (the memory maps: 8 slots each, the level's map has all 8 taken), so
+//it gets one no map has, answered here: ge_soundbank_slot lets it load there, the memory comes
+//from ge_soundbank_slot_memory, 4.6 MB of the sound heap (the Large Data Heap, from its top
+//like the game's own slots) taken once and kept. the banks' sounds are looked up in every
+//loaded bank (fn_803A0260), the level's first. a bank of another memory map (the menus)
+//unloads it with the rest, the next level asks again
+//
 //No Attachment Limit (experimental): any of them together
 //GE_WEAPON_RANDOMIZER=1 starts with it on, GE_NO_ATTACHMENT_LIMIT=1 that, GE_RANDOMIZER_SEED=n the same picks every run,
 //GE_RANDOMIZER_WEAPON=id[:flags] the player always gets that weapon (the model flags in hex), GE_TRACE=1 logs every swap
@@ -58,6 +71,15 @@ const uint32_t kFileInfo = 0x802DDC50; //GetFileInfo
 const uint32_t kFilesManager = 0x805D36A4, kRequestSection = 0x800E3A90;
 const uint32_t kWeaponFiles[] = {0x01020016, 0x0109000F}; //cp_bondfp.edb, o_guns.edb
 
+const uint32_t kSoundManager = 0x806EC3F8, kSoundbanks = 0x806474BC; //the sound layer, its soundbanks
+const uint32_t kLoadSoundbank = 0x80371770, kSoundAlloc = 0x80372F50; //(manager, bank, slot), (bytes, alignment, heap)
+const uint32_t kWeaponsBank = 0x2D500019, kWeaponsSlot = 0x2D9000F0; //sb_multiplayer_weapons, a slot of no map
+const uint32_t kWeaponsBankSize = 4861952; //its wav data, as big as the level bank's slot
+const uint32_t kSoundHeap = 1, kSoundAlign = 0x40;
+const uint32_t kBanks = 0x14, kBankNext = 0, kBankState = 8, kBankHash = 0x18, kBankSlot = 0x1C; //the requests and loaded banks
+const uint32_t kBankUnloading = 5, kBankGone = 7;
+const uint32_t kAskAgain = 300; //frames: a load is a command for the sound thread, it shows in the list later
+
 struct Pick { uint32_t id, row, flags; };
 
 std::atomic<bool> g_on{false}, g_unlimited{false};
@@ -65,6 +87,10 @@ bool g_trace = false;
 PPCFunc file_info = nullptr, request_section = nullptr;
 PPCFunc orig_select = nullptr;
 PPCFunc orig_give = nullptr, orig_attach = nullptr, attachment_allowed = nullptr;
+PPCFunc orig_slot = nullptr, orig_slot_memory = nullptr, load_soundbank = nullptr, sound_alloc = nullptr;
+uint32_t g_slotMemory = 0; //the weapons bank's slot, once taken
+uint32_t g_bankAsked = 0; //the frame it was last asked for
+bool g_noSlot = false;
 std::mt19937 g_rng{std::random_device{}()};
 std::map<uint32_t, Pick> g_swapped; //the level's weapon -> what the player got for it
 uint32_t g_swappedLevel = 0, g_swappedPlayer = 0;
@@ -214,6 +240,78 @@ void LoadSections(const PPCContext& c)
 	}
 }
 
+//the weapons bank's request in the manager's list, one that isn't going
+uint32_t WeaponsBank()
+{
+	for (uint32_t q = ld32(kSoundbanks) ? ld32(ld32(kSoundbanks) + kBanks) : 0, n = 0; guest_ptr(q) && n < 64; q = ld32(q + kBankNext), ++n)
+	{
+		const uint32_t state{ ld32(q + kBankState) };
+		if (ld32(q + kBankHash) == kWeaponsBank && ld32(q + kBankSlot) == kWeaponsSlot && (state < kBankUnloading || state > kBankGone)) return q;
+	}
+	return 0;
+}
+
+//sb_multiplayer_weapons into its own slot, when it isn't there or on its way
+void LoadWeaponSounds(const PPCContext& c)
+{
+	if (g_noSlot || !guest_ptr(ld32(kSoundbanks)) || WeaponsBank()) return;
+	const uint32_t frame{ ld32(kFrameCount) };
+	if (g_bankAsked && frame - g_bankAsked < kAskAgain) return;
+	if (!g_slotMemory)
+	{
+		PPCContext call = c;
+		call.r[3] = kWeaponsBankSize;
+		call.r[4] = kSoundAlign;
+		call.r[5] = kSoundHeap;
+		sound_alloc(call);
+		if (!guest_ptr(call.r[3]))
+		{
+			g_noSlot = true;
+			rt_log("goldeneye: randomizer: no %u bytes of sound memory for the weapons' sounds, guns the level doesn't have stay quiet", kWeaponsBankSize);
+			return;
+		}
+		g_slotMemory = call.r[3];
+	}
+	PPCContext call = c;
+	call.r[3] = kSoundManager;
+	call.r[4] = kWeaponsBank;
+	call.r[5] = kWeaponsSlot;
+	load_soundbank(call);
+	g_bankAsked = frame;
+	rt_log("goldeneye: randomizer: the weapons' sounds (%08X) asked for, into %08X", kWeaponsBank, g_slotMemory);
+}
+
+//(soundbank manager, a bank's request) -> 1 when it may load into its slot. the weapons
+//bank's slot is no map's and only that bank's: 0 when it's there already
+void Slot(PPCContext& c)
+{
+	const uint32_t manager{ c.r[3] }, request{ c.r[4] };
+	if (ld32(request + kBankSlot) != kWeaponsSlot)
+	{
+		orig_slot(c);
+		return;
+	}
+	c.r[3] = 1;
+	for (uint32_t q = ld32(manager + kBanks), n = 0; guest_ptr(q) && n < 64; q = ld32(q + kBankNext), ++n)
+	{
+		const uint32_t state{ ld32(q + kBankState) };
+		if (q != request && ld32(q + kBankSlot) == kWeaponsSlot && (state < kBankUnloading || state > kBankGone)) c.r[3] = 0;
+	}
+}
+
+//(soundbank manager, a slot, &address, &size) -> 1 when it has memory
+void SlotMemory(PPCContext& c)
+{
+	if (c.r[4] != kWeaponsSlot)
+	{
+		orig_slot_memory(c);
+		return;
+	}
+	st32(c.r[5], g_slotMemory);
+	st32(c.r[6], g_slotMemory ? kWeaponsBankSize : 0);
+	c.r[3] = g_slotMemory ? 1 : 0;
+}
+
 //GE_TRACE: what each weapon may carry, once
 void TraceAllowed(const PPCContext& c)
 {
@@ -255,7 +353,11 @@ void Give(PPCContext& c)
 {
 	const uint32_t ctrl{ c.r[3] }, id{ c.r[4] };
 	const bool pickup{ (c.r[9] & 0xFF) != 0 };
-	if (Active()) LoadSections(c);
+	if (Active())
+	{
+		LoadSections(c);
+		LoadWeaponSounds(c);
+	}
 	if (!Active() || pickup || !IsWeapon(id))
 	{
 		orig_give(c);
@@ -309,6 +411,7 @@ void Attach(PPCContext& c)
 	if (Active() && IsWeapon(id))
 	{
 		LoadSections(c);
+		LoadWeaponSounds(c);
 		const Pick pick{ RandomWeapon(c, true, {}) };
 		if (pick.id)
 		{
@@ -346,7 +449,11 @@ void install_randomizer()
 	file_info = ppc_lookup(kFileInfo);
 	request_section = ppc_lookup(kRequestSection);
 	attachment_allowed = ppc_lookup(kAttachmentAllowed);
-	if (!orig_give || !orig_attach || !attachment_allowed || !file_info || !request_section || !orig_select) rt_die("goldeneye: the weapon randomizer is not hooked in this build");
+	orig_slot = ppc_hook("ge_soundbank_slot", Slot);
+	orig_slot_memory = ppc_hook("ge_soundbank_slot_memory", SlotMemory);
+	load_soundbank = ppc_lookup(kLoadSoundbank);
+	sound_alloc = ppc_lookup(kSoundAlloc);
+	if (!orig_give || !orig_attach || !attachment_allowed || !file_info || !request_section || !orig_select || !orig_slot || !orig_slot_memory || !load_soundbank || !sound_alloc) rt_die("goldeneye: the weapon randomizer is not hooked in this build");
 }
 
 } //namespace ge

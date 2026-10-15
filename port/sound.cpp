@@ -30,7 +30,9 @@
 //so an event's sound that played on the frame before isn't played again, for as many frames
 //as a console frame lasts and one more. at 30 too: there the animation is now and then still
 //at the event's frame a second time (seen: the magazine's sound on frames 2386 and 2387)
-//GE_TRACESOUND=1 log every sound whose details are looked up, with who asked
+//GE_TRACESOUND=1 log every sound whose details are looked up, with who asked ("(no details)" when
+//none are loaded, "(in no bank)" when no loaded soundbank has it: it plays nothing), and every
+//soundbank that is asked for
 #include "ge.h"
 #include <cstdlib>
 #include <unordered_map>
@@ -41,8 +43,9 @@ namespace
 {
 
 const uint32_t kSilent = 0xFFFFFC40; //-96.0 dB, MIX counts in tenths
-PPCFunc orig_init_channel = nullptr, orig_sound_details = nullptr;
-PPCFunc orig_player_event_sound = nullptr;
+PPCFunc orig_init_channel = nullptr, orig_sound_details = nullptr, orig_load_soundbank = nullptr;
+PPCFunc orig_player_event_sound = nullptr, find_in_banks = nullptr;
+const uint32_t kSoundbanks = 0x806474BC, kFindInBanks = 0x803A0260; //(soundbanks, sound, &bank, &its row) -> 1 when a loaded bank has it
 const uint32_t kEventGap = 2; //frames apart that are still the same run: one in a run was seen left out
 struct EventSound { uint32_t first, last; }; //the frames it played on and was last asked for
 std::unordered_map<uint64_t, EventSound> g_event_sounds; //the player's sounds and the event -> its last run
@@ -76,15 +79,39 @@ void PlayerEventSound(PPCContext& c)
 //(sound manager, a sound's hash) -> its details
 void SoundDetails(PPCContext& c)
 {
-	rt_log("sound: %08X frame %u: %s", c.r[4], ld32(kFrameCount), call_chain(c).c_str());
+	const uint32_t manager{ c.r[3] }, hash{ c.r[4] };
+	const std::string chain{ call_chain(c) };
+	const uint32_t stack{ c.r[1] }, frame{ stack - 0x60 }, out{ frame + 0x20 };
+	PPCContext call = c;
 	orig_sound_details(c);
+	st32(frame, stack);
+	call.r[1] = frame;
+	call.r[3] = ld32(kSoundbanks);
+	call.r[4] = hash;
+	call.r[5] = out;
+	call.r[6] = out + 4;
+	find_in_banks(call);
+	const bool inBank{ (call.r[3] & 0xFF) != 0 };
+	rt_log("sound: %08X frame %u%s%s: %s", hash, ld32(kFrameCount), c.r[3] == manager ? " (no details)" : "", inBank ? "" : " (in no bank)", chain.c_str());
+}
+
+//(sound manager, a soundbank's hash, its slot or 0 for its own)
+void LoadSoundbank(PPCContext& c)
+{
+	rt_log("sound: soundbank %08X into %08X: %s", c.r[4], c.r[5], call_chain(c).c_str());
+	orig_load_soundbank(c);
 }
 
 } //namespace
 
 void install_sound()
 {
-	if (std::getenv("GE_TRACESOUND")) orig_sound_details = ppc_hook("ge_sound_details", SoundDetails);
+	if (std::getenv("GE_TRACESOUND"))
+	{
+		orig_sound_details = ppc_hook("ge_sound_details", SoundDetails);
+		orig_load_soundbank = ppc_hook("ge_load_soundbank", LoadSoundbank);
+		find_in_banks = ppc_lookup(kFindInBanks);
+	}
 	if (!std::getenv("GE_SOUND_REPEATS")) //the game's own, to compare
 	{
 		orig_player_event_sound = ppc_hook("ge_player_event_sound", PlayerEventSound);
