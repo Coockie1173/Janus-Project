@@ -87,11 +87,12 @@ Things that only break above 60 fps.
 - [ ] **low** Halo around characters' hair (needs checking, may be the original game or the resolution)
 - [ ] **low** Dam: the sniper's lower body is visible below the window through the thermal scope (needs checking)
 - [ ] **low** Other missing or different effects compared to the console (go through the levels next to Dolphin)
-- [ ] **medium** Colour filter option only works on Facility: on Dam, Airfield, Nightclub (kitchen), Archives,
+- [x] **medium** Colour filter option only works on Facility: on Dam, Airfield, Nightclub (kitchen), Archives,
       Memorial and Solar the filter is always on, whatever the option, and only goes away while hipfiring an
-      automatic weapon
+      automatic weapon: those levels tint with an orb round the camera, left out now too (seen on Dam, logged on
+      Airfield, Nightclub and 01810146; Archives, Memorial and Solar not reached by script)
 - [ ] **low** Tank: the colour filter option changes nothing (the option's text lists Tank, may have no filter at all)
-- [ ] **low** The colour filter option's text only names Facility, Tank and Solar
+- [x] **low** The colour filter option's text only names Facility, Tank and Solar
 
 ## Audio
 

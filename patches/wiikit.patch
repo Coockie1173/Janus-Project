@@ -4027,7 +4027,7 @@ index 8a4e097..8b1b1a8 100644
  void ppc_mmio_write(uint32_t addr, uint32_t, int) { rt_die("mmio write %08X", addr); }
  uint64_t ppc_timebase() { return 0; }
 diff --git a/runtime/video.cpp b/runtime/video.cpp
-index 5726093..6bf1446 100644
+index 5726093..1b55be5 100644
 --- a/runtime/video.cpp
 +++ b/runtime/video.cpp
 @@ -67,7 +67,8 @@ ClassicState classic[4];
@@ -4894,8 +4894,9 @@ index 5726093..6bf1446 100644
 +    if (!draw_prepare(prim, vflags, false)) return;
  
      if (efb_dumping() && std::getenv("WIIKIT_DRAWLOG")) {         // debugging: where each draw lands
-         static FILE* lf = std::fopen("drawlog.txt", "w");
+-        static FILE* lf = std::fopen("drawlog.txt", "w");
 -        const GVtx& v0 = *reinterpret_cast<const GVtx*>(vtx);
++        static FILE* lf = [] { FILE* f = std::fopen("drawlog.txt", "w"); setvbuf(f, nullptr, _IOLBF, 1 << 16); return f; }(); // whole lines: the game may end without closing it
 +        struct { float pos[3]; uint8_t mtx[12]; } v0;
 +        std::memcpy(&v0, vtx, sizeof v0);
          uint32_t pm = v0.mtx[0] * 4u;
@@ -4979,7 +4980,7 @@ index 5726093..6bf1446 100644
 +    if (dbg_hides()) return;
 +    if (!draw_prepare(prim, vflags, true)) return;
 +    if (efb_dumping() && std::getenv("WIIKIT_DRAWLOG")) {         // debugging: a kept list's draw, its state and matrix 0
-+        static FILE* lf = std::fopen("drawlog-static.txt", "w");
++        static FILE* lf = [] { FILE* f = std::fopen("drawlog-static.txt", "w"); setvbuf(f, nullptr, _IOLBF, 1 << 16); return f; }(); // whole lines: the game may end without closing it
 +        std::fprintf(lf, "%ld prim %02X pieces %u vflags %X zm %X cm %X pix %X at %X fog %X | proj%u %g %g %g %g %g %g | tev %u chans %u | mtx0",
 +                     (long)cnt.draws, prim, npieces, vflags, bp[0x40], bp[0x41], bp[0x43], bp[0xF3], bp[0xF1],
 +                     xf[0x1026], fx(0x1020), fx(0x1021), fx(0x1022), fx(0x1023), fx(0x1024), fx(0x1025),

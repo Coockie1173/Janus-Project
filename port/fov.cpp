@@ -102,8 +102,11 @@ void set_ads_fov(float degrees) { g_ads_fov = degrees == kGameAdsFov ? 0 : std::
 //entry +0x10 is the mesh: +4 its flags (0x1000 it follows the camera, 4 on every overlay),
 //+0x10 and +0x20 the corners of its box. the dish's box is a unit wide and from 0.397 behind to
 //0.48 or more ahead. the flat pieces Tank draws on the eye next to it aren't the filter and stay
+//Dam, Airfield, Nightclub and the others tint the picture with an orb instead: a mesh with a box of
+//exactly -1 to 1, following the camera, drawn round the eye and turned with the world (so not on
+//the eye the way the dish is). it surrounds the eye, so it covers any view and isn't widened
 const uint32_t kEntryDrawMtx = 0x4, kEntryMesh = 0x10;
-const uint32_t kMeshFlags = 0x4, kMeshBoxMin = 0x10, kMeshBoxMax = 0x20, kMeshOnCameraOverlay = 0x1004;
+const uint32_t kMeshFlags = 0x4, kMeshBoxMin = 0x10, kMeshBoxMax = 0x20, kMeshOnCameraOverlay = 0x1004, kMeshFollowsCamera = 0x1000;
 PPCFunc orig_draw_delayed = nullptr;
 std::atomic<bool> g_no_colour_filter{false};
 bool g_trace_filter = false;
@@ -115,6 +118,15 @@ bool OnTheEye(uint32_t mtx) {
             if (r != c || r == 2) { if (!(std::fabs(now - (r == c ? -1.0f : 0.0f)) < 0.01f)) return false; }
             else if (!(now > 0.1f && now < 10)) return false;
         }
+    return true;
+}
+
+bool IsColourOrb(uint32_t mesh, uint32_t mtx) {
+    if (!guest_ptr(mesh) || !guest_ptr(mtx) || !(ld32(mesh + kMeshFlags) & kMeshFollowsCamera)) return false;
+    for (int i = 0; i < 3; ++i) {
+        float lo = ldf(mesh + kMeshBoxMin + i * 4), hi = ldf(mesh + kMeshBoxMax + i * 4);
+        if (!(std::fabs(lo + 1) < 0.01f && std::fabs(hi - 1) < 0.01f && std::fabs(ldf(mtx + i * 16 + 12)) < 0.01f)) return false;
+    }
     return true;
 }
 
@@ -132,7 +144,7 @@ bool IsColourFilter(uint32_t mesh) {
 //parts are within a unit of it
 //the arms and the body are a character's skinned parts (3 in the flags), all drawn from the
 //body's own place: 0.86 from the eye at the game's frame rate, 1.53 at 144
-const uint32_t kMeshOnHud = 0x40000000, kMeshFollowsCamera = 0x1000, kMeshSkinned = 0x3;
+const uint32_t kMeshOnHud = 0x40000000, kMeshSkinned = 0x3;
 const float kHudAhead = 28.0f, kOwnReach = 1.0f, kBodyReach = 2.5f;
 bool OutOfPicture(uint32_t entry) {
     if (!guest_ptr(entry)) return false;
@@ -152,11 +164,15 @@ void DrawDelayed(PPCContext& c) {
     float angle = guest_ptr(settings) ? ldf(settings + 0x328) : 0;
     bool wide = angle > kGameFov && angle <= kFovMax, hidden = g_no_colour_filter;
     if ((!wide && !hidden) || !guest_ptr(entry)) { orig_draw_delayed(c); return; }
-    uint32_t mtx = ld32(entry + kEntryDrawMtx);
+    uint32_t mtx = ld32(entry + kEntryDrawMtx), mesh = ld32(entry + kEntryMesh);
+    if (hidden && IsColourOrb(mesh, mtx)) {
+        static std::set<uint32_t> said; //GE_TRACE: each orb once
+        if (g_trace_filter && said.size() < 64 && said.insert(mesh).second) rt_log("goldeneye: colour filter orb %08X left out", mesh);
+        return;
+    }
     if (!guest_ptr(mtx) || !OnTheEye(mtx)) { orig_draw_delayed(c); return; }
-    if (hidden && IsColourFilter(ld32(entry + kEntryMesh))) {
+    if (hidden && IsColourFilter(mesh)) {
         static std::set<uint32_t> said; //GE_TRACE: each dish once
-        uint32_t mesh = ld32(entry + kEntryMesh);
         if (g_trace_filter && said.size() < 64 && said.insert(mesh).second)
             rt_log("goldeneye: colour filter %08X left out, drawn %.2f by %.2f", mesh, ldf(mtx), ldf(mtx + 16 + 4));
         return;
