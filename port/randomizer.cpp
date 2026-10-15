@@ -38,9 +38,10 @@
 //Forced Weapon: with the randomizer off, one of the weapons for the player and every guard, without
 //attachments. the names are the rows' +0x190 texts
 //the Golden Gun has no model a guard holds (+0x178 FFFFFFFF). it gets the one Golden Gun mode lays
-//in the level, 0400293D of o_guns.edb, so guards can have it, forced or random. 0400256D (what the
-//multiplayer loadout's entry 80578BE4 puts where a character holds the P99's 04001DAC, as the
-//others' put their +0x178) attaches but isn't drawn
+//in the level, 0400293D of o_guns.edb, so guards can have it, forced or random. ge_gun_parts shows
+//the parts of a gun model its list names (805730D0: the body, the attachments by the flags) and
+//hides the others when a guard's AttachGun asks it to (its last argument, 1 for most guards): the
+//world model names none of its seven, so they're all shown again after it
 //GE_WEAPON_RANDOMIZER=1 starts with it on, GE_NO_ATTACHMENT_LIMIT=1 that, GE_RANDOMIZER_SEED=n the same picks every run,
 //GE_RANDOMIZER_WEAPON=id[:flags] the forced weapon (the model flags in hex), GE_TRACE=1 logs every swap and a guard that didn't take its gun
 #include "ge.h"
@@ -61,6 +62,9 @@ const uint32_t kWeapons = 0x805D1A4C, kRowSize = 0x254;
 const uint32_t kRowId = 0x174, kRowClip = 0xD, kRowClips = 0xE, kRowModel = 0x178;
 const uint32_t kGuardGun = 0x754; //the row of the gun AttachGun gave (the silenced one's with flag 1), 0 when it failed
 const uint32_t kGoldenGun = 0x02000827, kGoldenGunModel = 0x0400293D;
+const uint32_t kAttachedModel = 0x80302A60; //(entity, model hash) -> the model attached to it
+const uint32_t kModelParts = 0x114, kModelPartCount = 0x128, kPartSize = 0x20; //a part's node at +8
+const uint32_t kNodeFlags = 0xC, kNodeShown = 1, kNodeFade = 0x8E;
 const uint32_t kCurrentLevel = 0x805D1804;
 const uint32_t kAttachmentAllowed = 0x801691D0; //(weapon id, attachment hash) -> 1 when the loadout menu allows it
 struct Attachment { uint32_t hash, flag; };
@@ -101,6 +105,7 @@ bool g_trace = false;
 PPCFunc file_info = nullptr, request_section = nullptr;
 PPCFunc orig_select = nullptr;
 PPCFunc orig_give = nullptr, orig_attach = nullptr, attachment_allowed = nullptr;
+PPCFunc orig_gun_parts = nullptr, attached_model = nullptr;
 PPCFunc orig_slot = nullptr, orig_slot_memory = nullptr, load_soundbank = nullptr, sound_alloc = nullptr;
 uint32_t g_slotMemory = 0; //the weapons bank's slot, once taken
 uint32_t g_bankAsked = 0; //the frame it was last asked for
@@ -432,7 +437,29 @@ void Give(PPCContext& c)
 	orig_give(c);
 }
 
-//(guard, weapon row, flags, ?)
+//(weapon row, entity, model flags, hide the unnamed parts)
+void GunParts(PPCContext& c)
+{
+	const uint32_t row{ c.r[3] }, entity{ c.r[4] };
+	orig_gun_parts(c);
+	if (!guest_ptr(row) || ld32(row + kRowId) != kGoldenGun || ld32(row + kRowModel) != kGoldenGunModel) return;
+	PPCContext call = c;
+	call.r[3] = entity;
+	call.r[4] = kGoldenGunModel;
+	attached_model(call);
+	const uint32_t model{ call.r[3] };
+	if (!guest_ptr(model)) return;
+	for (uint32_t i = 0; i < ld8(model + kModelPartCount); ++i)
+	{
+		const uint32_t node{ ld32(ld32(model + kModelParts) + i * kPartSize + 8) };
+		if (!guest_ptr(node)) continue;
+		st16(node + kNodeFlags, ld16(node + kNodeFlags) | kNodeShown);
+		st8(node + kNodeFade, 0);
+	}
+	if (g_trace) rt_log("goldeneye: randomizer: the Golden Gun's %u parts shown on %08X", ld8(model + kModelPartCount), entity);
+}
+
+//(guard, weapon row, flags, hide the gun model's unnamed parts)
 void Attach(PPCContext& c)
 {
 	const uint32_t row{ c.r[4] };
@@ -489,6 +516,8 @@ void install_randomizer()
 	orig_give = ppc_hook("ge_give_weapon", Give);
 	orig_attach = ppc_hook("ge_npc_attach_gun", Attach);
 	orig_select = ppc_hook("ge_select_weapon", Select);
+	orig_gun_parts = ppc_hook("ge_gun_parts", GunParts);
+	attached_model = ppc_lookup(kAttachedModel);
 	file_info = ppc_lookup(kFileInfo);
 	request_section = ppc_lookup(kRequestSection);
 	attachment_allowed = ppc_lookup(kAttachmentAllowed);
@@ -496,7 +525,7 @@ void install_randomizer()
 	orig_slot_memory = ppc_hook("ge_soundbank_slot_memory", SlotMemory);
 	load_soundbank = ppc_lookup(kLoadSoundbank);
 	sound_alloc = ppc_lookup(kSoundAlloc);
-	if (!orig_give || !orig_attach || !attachment_allowed || !file_info || !request_section || !orig_select || !orig_slot || !orig_slot_memory || !load_soundbank || !sound_alloc) rt_die("goldeneye: the weapon randomizer is not hooked in this build");
+	if (!orig_give || !orig_attach || !attachment_allowed || !file_info || !request_section || !orig_select || !orig_gun_parts || !attached_model || !orig_slot || !orig_slot_memory || !load_soundbank || !sound_alloc) rt_die("goldeneye: the weapon randomizer is not hooked in this build");
 }
 
 } //namespace ge

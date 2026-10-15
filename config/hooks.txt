@@ -126,6 +126,7 @@ ge_player_damage       # the player is hurt: armour, health, the reaction, the d
 ge_give_weapon         # a weapon goes into an inventory: Weapon Randomizer swaps it for a random one with random attachments (port/randomizer.cpp)
 ge_npc_attach_gun      # a guard is given its gun: Weapon Randomizer swaps the row for a random weapon with random attachments (port/randomizer.cpp)
 ge_select_weapon       # a weapon is taken out by its id: Weapon Randomizer takes out what the level's weapon was swapped for (port/randomizer.cpp)
+ge_gun_parts           # a gun model's parts are shown or hidden: the Golden Gun's world model is shown whole in a guard's hand (port/randomizer.cpp)
 ge_load_soundbank      # a soundbank is loaded: GE_TRACESOUND logs it (port/sound.cpp)
 ge_soundbank_slot      # a soundbank is checked for its slot: Weapon Randomizer's weapons bank has a slot of its own (port/randomizer.cpp)
 ge_soundbank_slot_memory # a soundbank slot's memory: the randomizer's slot is the port's (port/randomizer.cpp)
