@@ -12,8 +12,11 @@
 //the flags: the inventory's are the model's shifted up by 3 (fn_800CA680), the low three bits
 //  the firing mode. the model's: 1 Silencer, 2 Reflex Sight, 4 ACOG Scope, 8 Laser Pointer,
 //  0x10 Thermal Scope, 0x20 Grenade Launcher (the loadout's attachments by ge_attachment_flags
-//  and their texts 43001235..4300123B). fn_80169310 (weapon id, the flags' address) takes away
-//  what a weapon can't carry, the guard's AttachGun calls it too. one attachment at most
+//  and their texts 43001235..4300123B). what a weapon may carry is what the multiplayer loadout
+//  menu allows (fn_80256EB0 greys out, fn_80256A80 takes away the rest): fn_801691D0 (weapon id,
+//  attachment hash) -> 1 when the weapon's entry has the hash's bit. a weapon without an entry
+//  carries none (the Golden Gun, the MJR-409). fn_80169310, the guard's AttachGun's mask, leaves
+//  everything on for those: a sight on one breaks the view. one attachment at most
 //the weapons: the ones the game's own give-all (fn_800C02A0) hands out, by their row of the
 //  weapons table (805D1A4C: the count at +8, the rows at +0xC, 0x254 each; the id at +0x174,
 //  +0xD the clip, +0xE the clips, +0x178 the model a guard holds, none for the Golden Gun)
@@ -35,7 +38,9 @@ namespace
 const uint32_t kWeapons = 0x805D1A4C, kRowSize = 0x254;
 const uint32_t kRowId = 0x174, kRowClip = 0xD, kRowClips = 0xE, kRowModel = 0x178;
 const uint32_t kCurrentLevel = 0x805D1804;
-const uint32_t kAttachmentsAllowed = 0x80169310; //(weapon id, the model flags' address)
+const uint32_t kAttachmentAllowed = 0x801691D0; //(weapon id, attachment hash) -> 1 when the loadout menu allows it
+struct Attachment { uint32_t hash, flag; };
+const Attachment kAttachments[] = {{0x7D070002, 1}, {0x7D070004, 2}, {0x7D070007, 4}, {0x7D070005, 8}, {0x7D070003, 0x10}, {0x7D070006, 0x20}};
 const uint32_t kGiveAll[] = { //fn_800C02A0's weapons, in its order
 	0x0200016E, 0x0200092E, 0x0200031D, 0x0200092F, 0x0200074E, 0x02000827, 0x02000930, 0x0200031E, 0x02000931,
 	0x0200048A, 0x02000932, 0x02000933, 0x0200074F, 0x02000934, 0x02000935, 0x02000936, 0x02000319, 0x02000937,
@@ -48,7 +53,7 @@ struct Pick { uint32_t id, row, flags; };
 
 std::atomic<bool> g_on{false};
 bool g_trace = false;
-PPCFunc orig_give = nullptr, orig_attach = nullptr, attachments_allowed = nullptr;
+PPCFunc orig_give = nullptr, orig_attach = nullptr, attachment_allowed = nullptr;
 std::mt19937 g_rng{std::random_device{}()};
 std::map<uint32_t, Pick> g_swapped; //the level's weapon -> what the player got for it
 uint32_t g_swappedLevel = 0, g_swappedPlayer = 0;
@@ -69,24 +74,25 @@ uint32_t RowOf(uint32_t id)
 
 bool IsWeapon(uint32_t id) { return std::find(std::begin(kGiveAll), std::end(kGiveAll), id) != std::end(kGiveAll); }
 
-//the model flags the weapon can carry, of those asked for
-uint32_t Allowed(const PPCContext& c, uint32_t id, uint32_t flags)
+//the model flags of the attachments the loadout menu allows on the weapon
+uint32_t Allowed(const PPCContext& c, uint32_t id)
 {
-	PPCContext call = c;
-	const uint32_t stack{ c.r[1] }, frame{ stack - 0x40 }, at{ frame + 0x10 };
-	st32(frame, stack);
-	st32(at, flags);
-	call.r[1] = frame;
-	call.r[3] = id;
-	call.r[4] = at;
-	attachments_allowed(call);
-	return ld32(at);
+	uint32_t allowed = 0;
+	for (const Attachment& a : kAttachments)
+	{
+		PPCContext call = c;
+		call.r[3] = id;
+		call.r[4] = a.hash;
+		attachment_allowed(call);
+		if (call.r[3] & 0xFF) allowed |= a.flag;
+	}
+	return allowed;
 }
 
 //one random attachment of those the weapon can carry, or none
 uint32_t RandomFlags(const PPCContext& c, uint32_t id)
 {
-	const uint32_t allowed{ Allowed(c, id, kSilencer | kReflex | kAcog | kLaser | kThermal | kLauncher) };
+	const uint32_t allowed{ Allowed(c, id) };
 	std::vector<uint32_t> choices{0};
 	for (uint32_t one : {kSilencer, kReflex, kAcog, kLaser, kThermal, kLauncher})
 	{
@@ -124,6 +130,15 @@ std::string Describe(uint32_t flags)
 	return s.empty() ? "no attachments" : s;
 }
 
+//GE_TRACE: what each weapon may carry, once
+void TraceAllowed(const PPCContext& c)
+{
+	static bool said = false;
+	if (!g_trace || said) return;
+	said = true;
+	for (uint32_t id : kGiveAll) rt_log("goldeneye: randomizer: %08X may carry %s", id, Describe(Allowed(c, id)).c_str());
+}
+
 //(controller, weapon id, ammo, rounds in the clip, the launcher's ammo, flags, from a pickup)
 void Give(PPCContext& c)
 {
@@ -154,6 +169,7 @@ void Give(PPCContext& c)
 		}
 		found = g_swapped.emplace(id, pick).first;
 	}
+	TraceAllowed(c);
 	const Pick& pick{ found->second };
 	const int32_t ammo{ (int32_t)c.r[5] };
 	//a give of a weapon the player has sets its ammo as it is, the game's 999999 too (a level's
@@ -198,8 +214,8 @@ void install_randomizer()
 	if (g_on) rt_log("goldeneye: weapon randomizer on");
 	orig_give = ppc_hook("ge_give_weapon", Give);
 	orig_attach = ppc_hook("ge_npc_attach_gun", Attach);
-	attachments_allowed = ppc_lookup(kAttachmentsAllowed);
-	if (!orig_give || !orig_attach || !attachments_allowed) rt_die("goldeneye: the weapon randomizer is not hooked in this build");
+	attachment_allowed = ppc_lookup(kAttachmentAllowed);
+	if (!orig_give || !orig_attach || !attachment_allowed) rt_die("goldeneye: the weapon randomizer is not hooked in this build");
 }
 
 } //namespace ge
