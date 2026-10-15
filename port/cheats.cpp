@@ -12,12 +12,14 @@
 //  (fn_8010B7A0 reads one, ammo_FUN_8010b960 adds to one). every one that holds more than one
 //  is kept at its most: the rounds in the gun are taken out of it as they are fired
 //
+//they stay on from one start to the next (LAUNCH_GOD, _INFINITEAMMO, _INFINITESPRINT in the settings file)
 //GE_GOD=1 GE_INFINITE_AMMO=1 GE_INFINITE_SPRINT=1 start with them on
 //GE_TRACE=1 logs the inventory when it changes and the first hurts not taken
 #include "ge.h"
 #include <atomic>
 #include <cmath>
 #include <cstdlib>
+#include <string>
 #include <vector>
 
 namespace ge
@@ -101,9 +103,10 @@ void cheats_apply(uint32_t ctrl)
 
 void install_cheats()
 {
-	if (const char* e = std::getenv("GE_GOD")) g_god = std::atoi(e) != 0;
-	if (const char* e = std::getenv("GE_INFINITE_AMMO")) g_ammo = std::atoi(e) != 0;
-	if (const char* e = std::getenv("GE_INFINITE_SPRINT")) g_sprint = std::atoi(e) != 0;
+	g_god = std::atoi(saved_setting("GE_GOD", "LAUNCH_GOD").c_str()) != 0;
+	g_ammo = std::atoi(saved_setting("GE_INFINITE_AMMO", "LAUNCH_INFINITEAMMO").c_str()) != 0;
+	g_sprint = std::atoi(saved_setting("GE_INFINITE_SPRINT", "LAUNCH_INFINITESPRINT").c_str()) != 0;
+	if (g_god || g_ammo || g_sprint) rt_log("goldeneye: cheats on:%s%s%s", g_god ? " god mode" : "", g_ammo ? " infinite ammo" : "", g_sprint ? " infinite sprint" : "");
 	g_trace = std::getenv("GE_TRACE") != nullptr;
 	orig_damage = ppc_hook("ge_player_damage", Damage);
 	if (!orig_damage) rt_die("goldeneye: ge_player_damage is not hooked in this build");

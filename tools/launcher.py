@@ -141,7 +141,7 @@ def save_settings(s):
     os.makedirs(os.path.dirname(SETTINGS), exist_ok=True)
     with open(SETTINGS, "w", encoding="utf-8") as f:
         f.write("# written by the launcher, read when the game is started\n")
-        for k in DEFAULTS:
+        for k in list(DEFAULTS) + [k for k in s if k not in DEFAULTS]: #the game's own (F1) are kept too
             f.write(f'LAUNCH_{k.upper()}="{s[k]}"\n')
 
 

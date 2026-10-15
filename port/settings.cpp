@@ -101,7 +101,8 @@ void save_launch_settings() {
         {"LAUNCH_VSYNC", vsync() ? "1" : "0"}, {"LAUNCH_PING", show_ping() ? "1" : "0"}, {"LAUNCH_OCCLUSION", occlusion() ? "1" : "0"}, {"LAUNCH_SOUNDHEIGHT", sound_height() ? "1" : "0"},
         {"LAUNCH_HUD", hud() ? "1" : "0"}, {"LAUNCH_SHAKE", shake_text}, {"LAUNCH_TANKBUTTONS", tank_text},
         {"LAUNCH_ANISO", std::to_string(anisotropy())}, {"LAUNCH_MSAA", std::to_string(anti_aliasing())},
-        {"LAUNCH_CUSTOM", custom_values()}};
+        {"LAUNCH_CUSTOM", custom_values()},
+        {"LAUNCH_GOD", god_mode() ? "1" : "0"}, {"LAUNCH_INFINITEAMMO", infinite_ammo() ? "1" : "0"}, {"LAUNCH_INFINITESPRINT", infinite_sprint() ? "1" : "0"}};
     if (g_fps_changed) values.push_back({"LAUNCH_FPS", std::to_string(fps_limit())}); //"auto" stays until it's changed
     auto lines = read_lines(GE_SETTINGS_FILE);
     if (lines.empty()) lines.push_back("# written by the launcher, read when the game is started");
@@ -1524,6 +1525,7 @@ void settings_init() {
     cfg.FontDataOwnedByAtlas = false;
     g_font = ImGui::GetIO().Fonts->AddFontFromMemoryTTF((void*)kMenuFont, (int)sizeof kMenuFont, kFontSize, &cfg);
     build_pages();
+    std::atexit([] { if (g_dirty) save_launch_settings(); }); //a change made with the menu still up
     LoadHotkeys();
     g_hotkeysChanged = true;
     rt_log("goldeneye: settings menu on F1");

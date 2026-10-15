@@ -20,6 +20,7 @@ Importance:
 - [x] **high** Tank: the cars are broken: not seen any more, played at 144 on 2026-10-11 with every car riding right
 - [X] **high** Flickering issue
 - [x] **high** Animated textures break above 60 fps
+- [x] **high** Settings reset (see Settings)
 
 ## High FPS
 
@@ -86,6 +87,11 @@ Things that only break above 60 fps.
 - [ ] **low** Halo around characters' hair (needs checking, may be the original game or the resolution)
 - [ ] **low** Dam: the sniper's lower body is visible below the window through the thermal scope (needs checking)
 - [ ] **low** Other missing or different effects compared to the console (go through the levels next to Dolphin)
+- [ ] **medium** Colour filter option only works on Facility: on Dam, Airfield, Nightclub (kitchen), Archives,
+      Memorial and Solar the filter is always on, whatever the option, and only goes away while hipfiring an
+      automatic weapon
+- [ ] **low** Tank: the colour filter option changes nothing (the option's text lists Tank, may have no filter at all)
+- [ ] **low** The colour filter option's text only names Facility, Tank and Solar
 
 ## Audio
 
@@ -126,6 +132,9 @@ Texts that still talk about the controller.
 - [ ] **low** Dam: "Press E while holding forward on the L Stick to climb small ledges", while the prompt on
       screen says "[L Shift] + [W]" (at the start, under the two bridges before the first building)
 - [ ] **low** Dam: "Press [Down] To take out your Smartphone" should say [F] (both work, may not be possible)
+- [ ] **medium** Disable Tutorials no longer hides the tutorial pop-ups (it did once); the reporter would like them
+      fully gone, the training mission too
+- [ ] **low** The Disable Tutorials text is unclear
 
 ## Aiming down sights
 
@@ -147,6 +156,7 @@ Texts that still talk about the controller.
       its zoom now (the pistol unchanged on Dam, a scope not tried by script, see docs/STATUS.md)
 - [ ] **low** ADS snap off by default with mouse and keyboard
 - [ ] **low** Maybe show Aim Field of View as a fraction of the FOV (0.75 = 75%) like the sensitivity scale, it's an angle now
+- [ ] **medium** ADS values still differ between single player and multiplayer, at least on the P99 (reported before)
 
 ## Cutscenes
 
@@ -155,6 +165,13 @@ Texts that still talk about the controller.
 - [ ] **medium** Outpost: crouch and melee the guard in front of the log, the camera stays near the ground
       for the whole takedown and you only hear it (there's a VOD, a clip on request)
 - [ ] **low** The game can be paused while a cutscene is being skipped
+- [ ] **medium** Cradle: the opening skip goes slightly too far, leave a little more time before the slow motion part
+- [ ] **low** An option to turn off the fade out when skipping a cutscene, to follow where it goes
+- [ ] **low** Cradle: the Natalya cutscene in the first area could be skipped
+- [ ] **low** Cradle: the last Trevelyan encounter could be skipped up to "For England, James?" (leaves time to get
+      ready to shoot and keeps that line)
+- [ ] **low** Solar: the cutscene going up the stairs, first looking at the big tower, could be skipped
+- [ ] **low** With Auto Quick Time Events on, skip QTE cutscenes too (Cradle: the first Trevelyan encounter)
 
 ## Gameplay and AI
 
@@ -166,11 +183,21 @@ Texts that still talk about the controller.
 - [x] **high** ADS broken on online
 - [x] **low** "Cheats Active" shows when only the Extras menu is enabled, which isn't much of a cheat
 
+## Settings
+
+- [x] **high** Settings reset now and then: anisotropic filtering, anti-aliasing and screen shake often; infinite
+      ammo and infinite sprint sometimes, seemingly per map (maybe only on test maps, not every campaign level tried):
+      the launcher's window wrote back only its own settings, and the cheats were never saved (a restart turned
+      them off); both kept now (see docs/STATUS.md)
+
 ## Performance
 
 - [ ] **medium** Choppy at times, not a steady 144; the Memorial sewers are the one place that is really
       smooth. A later message says the newest build feels much better (Airfield), so measure
       frame pacing again before chasing it
+- [ ] **medium** Anisotropic filtering costs far too much (the biggest hit the reporter has seen, at only 4x)
+- [ ] **medium** Pauses at 0 fps now and then, more than in other games on the same machine (shader
+      compiles? check the shader cache)
 
 ## Feature requests
 
@@ -188,11 +215,14 @@ Texts that still talk about the controller.
       end of Cradle after killing Trevelyan, adds up the in-game times so loading screens don't count
 - [ ] A film grain slider
 - [ ] An option to turn bloom off
+- [ ] The in-game menus scroll with the mouse wheel, like the F1 menus
 
 ## Cheats
 
 - [ ] Turbo mode
 - [ ] Spawn any weapon
+- [ ] All weapons (unless it breaks the way multiplayer maps do in single player, and whether that can be fixed)
+- [ ] Force Sgt Garcia's best spawn point
 - [x] Infinite ammo: F1 > Cheats, campaign only; every kind of ammo stays full (41 shots from a 16 round P99 on Dam)
 - [ ] Grenades in single player
 - [x] Infinite sprint: F1 > Cheats, campaign only (a sprint on Dam ends with all 3.1 s left)
