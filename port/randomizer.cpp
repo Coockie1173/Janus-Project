@@ -25,13 +25,11 @@
 //GE_RANDOMIZER_WEAPON=id[:flags] the player always gets that weapon (the model flags in hex), GE_TRACE=1 logs every swap
 #include "ge.h"
 #include <algorithm>
-#include <iterator>
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <map>
 #include <random>
-#include <set>
 #include <vector>
 
 namespace ge
@@ -54,17 +52,15 @@ const uint32_t kInventoryShift = 3;
 const int32_t kPlenty = 999999; //what the game gives for "as much as it holds"
 
 const uint32_t kLoadedFiles = 0x806425F0, kLoadedFileCount = 0x806425EC, kFileSystem = 0x806EC2D0;
-const uint32_t kFileInfo = 0x802DDC50, kFpFile = 0x01020016; //GetFileInfo, cp_bondfp.edb
-const uint32_t kDefs = 0x80578AB0, kDefSize = 0x2C; //the weapons' definitions, by id
-const uint32_t kFind = 0x802E2A00; //(hash or index, a list of a file, its rows' size) -> the row, -1 when it isn't there
-const uint32_t kNoParent = 0x02000001;
-const uint32_t kStartCommands[] = {0x0C000002, 0x0C000003}; //a mode's commands to start an animation set, its index after them
+const uint32_t kFileInfo = 0x802DDC50; //GetFileInfo
+const uint32_t kFilesManager = 0x805D36A4, kRequestSection = 0x800E3A90;
+const uint32_t kWeaponFiles[] = {0x01020016, 0x0109000F}; //cp_bondfp.edb, o_guns.edb
 
 struct Pick { uint32_t id, row, flags; };
 
 std::atomic<bool> g_on{false};
 bool g_trace = false;
-PPCFunc find = nullptr, file_info = nullptr;
+PPCFunc file_info = nullptr, request_section = nullptr;
 PPCFunc orig_give = nullptr, orig_attach = nullptr, attachment_allowed = nullptr;
 std::mt19937 g_rng{std::random_device{}()};
 std::map<uint32_t, Pick> g_swapped; //the level's weapon -> what the player got for it
@@ -102,14 +98,6 @@ uint32_t Allowed(const PPCContext& c, uint32_t id)
 	return allowed;
 }
 
-const std::vector<uint32_t>& Loaded(const PPCContext& c);
-std::string Hex(uint32_t v)
-{
-	char b[12];
-	std::snprintf(b, sizeof b, "%08X", v);
-	return b;
-}
-
 //one random attachment of those the weapon can carry, or none
 uint32_t RandomFlags(const PPCContext& c, uint32_t id)
 {
@@ -122,12 +110,11 @@ uint32_t RandomFlags(const PPCContext& c, uint32_t id)
 	return choices[std::uniform_int_distribution<size_t>(0, choices.size() - 1)(g_rng)];
 }
 
-//a random weapon of the give-all's whose animations the level has (a guard's is dropped for the
-//player to pick up), not one of those taken; a guard's needs a model to hold
+//a random weapon of the give-all's, not one of those taken; a guard's needs a model to hold
 Pick RandomWeapon(const PPCContext& c, bool guard, const std::vector<uint32_t>& taken)
 {
 	std::vector<Pick> pool;
-	for (uint32_t id : Loaded(c))
+	for (uint32_t id : kGiveAll)
 	{
 		const uint32_t row{ RowOf(id) };
 		if (!row || std::find(taken.begin(), taken.end(), id) != taken.end()) continue;
@@ -153,11 +140,11 @@ std::string Describe(uint32_t flags)
 	return s.empty() ? "no attachments" : s;
 }
 
-//cp_bondfp.edb's data when it is loaded, 0 when not. found as GeoFile_Load (802EC760) finds a
+//a file's data when it is loaded, 0 when not. found as GeoFile_Load (802EC760) finds a
 //file, without making or loading one: in its table sorted by hash (806425F0, the count at
 //806425EC, a hash and a file each) when there is one, else by GetFileInfo (802DDC50: the file
 //system 806EC2D0, a hash -> the file's entry), the file at the entry's +0x28. the data at +0x24
-uint32_t FpFile(const PPCContext& c)
+uint32_t FileData(const PPCContext& c, uint32_t hash)
 {
 	uint32_t file = 0;
 	if (const uint32_t table{ ld32(kLoadedFiles) }; guest_ptr(table))
@@ -165,182 +152,53 @@ uint32_t FpFile(const PPCContext& c)
 		const uint32_t count{ ld32(kLoadedFileCount) };
 		for (uint32_t i = 0; i < count && i < 4096 && !file; ++i)
 		{
-			if (ld32(table + i * 8) == kFpFile) file = ld32(table + i * 8 + 4);
+			if (ld32(table + i * 8) == hash) file = ld32(table + i * 8 + 4);
 		}
 	}
 	else if (guest_ptr(ld32(kFileSystem)))
 	{
 		PPCContext call = c;
 		call.r[3] = ld32(kFileSystem);
-		call.r[4] = kFpFile;
+		call.r[4] = hash;
 		file_info(call);
 		if (guest_ptr(call.r[3])) file = ld32(call.r[3] + 0x28);
 	}
 	return guest_ptr(file) && guest_ptr(ld32(file + 0x24)) ? ld32(file + 0x24) : 0;
 }
 
-uint32_t DefOf(uint32_t id)
+//the sections of the weapons' files: a level loads the sections of what its own weapons do (only
+//section 0 stays loaded), an animation of another one has nothing behind it and the first-person
+//view breaks when it plays (the SLY 2020, the WA2000, the Sigmus, the Toros on Facility, as it's
+//drawn or after a shot). a multiplayer game has them all. so do the levels here, while the
+//randomizer is on: every section of cp_bondfp.edb (the first-person animations) and o_guns.edb
+//(the guns) that isn't loaded is asked for as a weapon is given. fn_800E3A90 (the files manager
+//805D36A4, file, section, flags 0: now) is the game's own request of a section (fn_800E27D0 the
+//preloader's). a file's sections are listed at its data's +0x40 (a count, a relative pointer;
+//0x10 each: the hash 0800000N, start, end, the section's file when it is loaded)
+void LoadSections(const PPCContext& c)
 {
-	for (uint32_t def = kDefs; ld32(def); def += kDefSize)
+	for (uint32_t hash : kWeaponFiles)
 	{
-		if (ld32(def) == id) return def;
-	}
-	return 0;
-}
-
-//the four lists of the first-person file a weapon's animations go through, by the hash's top byte
-struct List { uint32_t type, at, stride; };
-const List kLists[] = {{0x03, 0x58, 0x20}, {0x04, 0x68, 0x10}, {0x09, 0x78, 0x14}, {0x0A, 0x80, 0x14}};
-const List* ListOf(uint32_t ref)
-{
-	for (const List& l : kLists)
-	{
-		if ((ref >> 24 & 0x7F) == l.type) return &l;
-	}
-	return nullptr;
-}
-
-//the sections of cp_bondfp.edb a weapon's first-person animations are in. a level loads the
-//sections of what its own weapons do (only section 0 stays loaded), an animation of another one
-//has nothing behind it and the first-person view breaks when it plays (the SLY 2020 or the
-//WA2000 on Facility, as it's drawn or after a shot). a weapon's modes (its definition's lists at
-//+0xC, +0x14 and +0x18, a row of five: the generic mode, then one for each firing mode) and
-//those of its parents (+8, +0x10), as fn_80168C50 falls back to them, lead to the file's modes
-//(09), which start animation sets (0A, by index after 0C000002 or 0C000003), which play blends
-//(04) and animations (03). a row's second word has the section in its top half (bit 31 set on an
-//animation that is loaded), the fourth the object's address when it is loaded. an object's data
-//is scanned for references as far as the next object
-class Walk
-{
-public:
-	Walk(const PPCContext& c, uint32_t file) : m_c(c), m_file(file)
-	{
-		for (const List& l : kLists)
+		const uint32_t data{ FileData(c, hash) };
+		if (!data) continue;
+		const uint32_t rows{ data + 0x44 + ld32(data + 0x44) };
+		const int count{ (int16_t)ld16(data + 0x40) };
+		int asked = 0;
+		for (int i = 1; i < count && i < 256; ++i)
 		{
-			const uint32_t rows{ Rows(l) };
-			for (int i = 0; i < Count(l); ++i) m_starts.push_back(ld32(rows + i * l.stride + 8));
+			if (ld32(rows + i * 16 + 12)) continue;
+			PPCContext call = c;
+			call.r[3] = kFilesManager;
+			call.r[4] = hash;
+			call.r[5] = ld32(rows + i * 16);
+			call.r[6] = 0;
+			request_section(call);
+			++asked;
 		}
-		std::sort(m_starts.begin(), m_starts.end());
+		int loaded = 0;
+		for (int i = 1; i < count && i < 256; ++i) loaded += ld32(rows + i * 16 + 12) != 0;
+		if (asked) rt_log("goldeneye: randomizer: %08X: %d section(s) asked for, %d of %d loaded", hash, asked, loaded, count - 1);
 	}
-
-	std::set<int> Weapon(uint32_t id)
-	{
-		m_sections.clear();
-		m_seen.clear();
-		m_weapons.clear();
-		Weapons(id);
-		return m_sections;
-	}
-
-private:
-	int Count(const List& l) const { return (int16_t)ld16(m_file + l.at); }
-	uint32_t Rows(const List& l) const { return m_file + l.at + 4 + ld32(m_file + l.at + 4); }
-
-	void Weapons(uint32_t id)
-	{
-		const uint32_t def{ DefOf(id) };
-		if (!def || !m_weapons.insert(id).second) return;
-		for (uint32_t parent : {ld32(def + 8), ld32(def + 0x10)})
-		{
-			if (parent && parent != kNoParent) Weapons(parent);
-		}
-		for (uint32_t at : {0xCu, 0x14u, 0x18u})
-		{
-			uint32_t list{ ld32(def + at) };
-			for (int row = 0; guest_ptr(list) && ld32(list) && row < 256; ++row, list += 0x14)
-			{
-				for (uint32_t mode = 1; mode <= 4; ++mode)
-				{
-					if (const uint32_t hash{ ld32(list + mode * 4) }) Object(hash);
-				}
-			}
-		}
-	}
-
-	void Object(uint32_t ref, const List* list = nullptr)
-	{
-		if (!list) list = ListOf(ref);
-		if (!list) return;
-		PPCContext call = m_c;
-		call.r[3] = ref;
-		call.r[4] = m_file + list->at;
-		call.r[5] = list->stride;
-		find(call);
-		const int32_t index{ (int32_t)call.r[3] };
-		if (index < 0 || index >= Count(*list) || !m_seen.insert((uint64_t)list->type << 32 | (uint32_t)index).second) return;
-		const uint32_t row{ Rows(*list) + (uint32_t)index * list->stride };
-		m_sections.insert(ld32(row + 4) >> 16 & 0x7FFF);
-		const uint32_t data{ ld32(row + 12) };
-		if (list->type == 0x03 || !guest_ptr(data)) return;
-		const auto next = std::upper_bound(m_starts.begin(), m_starts.end(), ld32(row + 8));
-		const uint32_t size{ std::min<uint32_t>(next == m_starts.end() ? 0x200 : *next - ld32(row + 8), 0x1000) };
-		for (uint32_t at = 0; at + 4 <= size; at += 4)
-		{
-			const uint32_t v{ ld32(data + at) };
-			if ((v == kStartCommands[0] || v == kStartCommands[1]) && at + 8 <= size) Object(ld32(data + at + 4), &kLists[3]);
-			else if (v > 0xFFFFFF && ListOf(v)) Object(v);
-		}
-	}
-
-	const PPCContext& m_c;
-	uint32_t m_file;
-	std::vector<uint32_t> m_starts;
-	std::set<int> m_sections;
-	std::set<uint64_t> m_seen;
-	std::set<uint32_t> m_weapons;
-};
-
-//the weapons whose first-person animations the level has loaded, none before it's loaded.
-//worked out once a frame: the guards are set up a lot at a time
-const std::vector<uint32_t>& Loaded(const PPCContext& c)
-{
-	static std::vector<uint32_t> loaded;
-	static uint32_t frame = 0, file = 0;
-	const uint32_t now{ FpFile(c) };
-	if (frame == ld32(kFrameCount) && file == now) return loaded;
-	frame = ld32(kFrameCount);
-	file = now;
-	loaded.clear();
-	if (!now) return loaded;
-	//what every weapon has is Bond's own (moving, climbing), the level has what it needs of that
-	Walk walk(c, now);
-	std::vector<std::set<int>> sections;
-	std::set<int> common;
-	for (uint32_t id : kGiveAll)
-	{
-		sections.push_back(walk.Weapon(id));
-		if (sections.size() == 1) common = sections.back();
-		std::set<int> both;
-		std::set_intersection(common.begin(), common.end(), sections.back().begin(), sections.back().end(), std::inserter(both, both.begin()));
-		common = both;
-	}
-	const uint32_t rows{ now + 0x44 + ld32(now + 0x44) };
-	const int count{ (int16_t)ld16(now + 0x40) };
-	for (size_t i = 0; i < std::size(kGiveAll); ++i)
-	{
-		bool ok = true;
-		for (int section : sections[i])
-		{
-			if (section != 0 && !common.count(section) && (section >= count || !ld32(rows + section * 16 + 12))) ok = false;
-		}
-		if (ok) loaded.push_back(kGiveAll[i]);
-	}
-	if (g_trace)
-	{
-		std::string list;
-		for (uint32_t id : loaded) list += " " + Hex(id);
-		std::string sections;
-		if (now)
-		{
-			const uint32_t rows{ now + 0x44 + ld32(now + 0x44) };
-			for (int i = 0; i < (int16_t)ld16(now + 0x40) && i < 64; ++i)
-			{
-				if (ld32(rows + i * 16 + 12)) sections += " " + std::to_string(i);
-			}
-		}
-		rt_log("goldeneye: randomizer: %zu weapon(s) with their animations loaded:%s (sections in:%s)", loaded.size(), list.c_str(), sections.c_str());
-	}
-	return loaded;
 }
 
 //GE_TRACE: what each weapon may carry, once
@@ -357,6 +215,7 @@ void Give(PPCContext& c)
 {
 	const uint32_t ctrl{ c.r[3] }, id{ c.r[4] };
 	const bool pickup{ (c.r[9] & 0xFF) != 0 };
+	if (Active()) LoadSections(c);
 	if (!Active() || pickup || !IsWeapon(id))
 	{
 		orig_give(c);
@@ -403,6 +262,7 @@ void Attach(PPCContext& c)
 	const uint32_t id{ guest_ptr(row) ? ld32(row + kRowId) : 0 };
 	if (Active() && IsWeapon(id))
 	{
+		LoadSections(c);
 		const Pick pick{ RandomWeapon(c, true, {}) };
 		if (pick.id)
 		{
@@ -433,10 +293,10 @@ void install_randomizer()
 	if (g_on) rt_log("goldeneye: weapon randomizer on");
 	orig_give = ppc_hook("ge_give_weapon", Give);
 	orig_attach = ppc_hook("ge_npc_attach_gun", Attach);
-	find = ppc_lookup(kFind);
 	file_info = ppc_lookup(kFileInfo);
+	request_section = ppc_lookup(kRequestSection);
 	attachment_allowed = ppc_lookup(kAttachmentAllowed);
-	if (!orig_give || !orig_attach || !attachment_allowed || !find || !file_info) rt_die("goldeneye: the weapon randomizer is not hooked in this build");
+	if (!orig_give || !orig_attach || !attachment_allowed || !file_info || !request_section) rt_die("goldeneye: the weapon randomizer is not hooked in this build");
 }
 
 } //namespace ge
