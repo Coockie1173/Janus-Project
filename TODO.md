@@ -162,8 +162,6 @@ Texts that still talk about the controller.
 
 - [x] **high** Doors break when the intro skip is used
 - [x] **medium** Cutscenes aren't sped through when entering from another level, in time trial mode, or from Continue Game
-- [ ] **medium** Outpost: crouch and melee the guard in front of the log, the camera stays near the ground
-      for the whole takedown and you only hear it (there's a VOD, a clip on request)
 - [ ] **low** The game can be paused while a cutscene is being skipped
 - [x] **medium** Cradle: the opening skip goes slightly too far, leave a little more time before the slow motion part
       (fades back in 2 s earlier now, to be played)
