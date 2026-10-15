@@ -35,8 +35,11 @@
 //unloads it with the rest, the next level asks again
 //
 //No Attachment Limit (experimental): any of them together
+//Forced Weapon: one of the weapons in place of the random one, for the player and every guard that
+//can hold it (not the Golden Gun: a guard keeps its own, or a random one with the randomizer on).
+//it works with the randomizer off too, then without attachments. the names are the rows' +0x190 texts
 //GE_WEAPON_RANDOMIZER=1 starts with it on, GE_NO_ATTACHMENT_LIMIT=1 that, GE_RANDOMIZER_SEED=n the same picks every run,
-//GE_RANDOMIZER_WEAPON=id[:flags] the player always gets that weapon (the model flags in hex), GE_TRACE=1 logs every swap
+//GE_RANDOMIZER_WEAPON=id[:flags] the forced weapon (the model flags in hex), GE_TRACE=1 logs every swap
 #include "ge.h"
 #include <algorithm>
 #include <atomic>
@@ -61,6 +64,12 @@ const uint32_t kGiveAll[] = { //fn_800C02A0's weapons, in its order
 	0x0200016E, 0x0200092E, 0x0200031D, 0x0200092F, 0x0200074E, 0x02000827, 0x02000930, 0x0200031E, 0x02000931,
 	0x0200048A, 0x02000932, 0x02000933, 0x0200074F, 0x02000934, 0x02000935, 0x02000936, 0x02000319, 0x02000937,
 	0x02000489, 0x0200031F, 0x02000938, 0x02000750, 0x02000939, 0x0200093A, 0x0200048B, 0x0200077C, 0x02000828};
+const char* const kNames[] = { //their texts, the row's +0x190
+	"P99", "Torka T3", "Hawksman M5A", "Kunara V", "Wolfe .44", "Golden Gun", "Sigmus", "Sigmus 9", "Stauger UA-1",
+	"Vargen FH-7", "Strata SV-400", "SLY 2020", "SEGS 550", "Drumhead Type-12", "PT-9 Interdictus", "Masterton M-557", "AK-47", "Kallos-TT9",
+	"Anova DP3", "Terralite III", "Ivana Spec-R", "Pavlov ASR", "Toros AV-400", "Talon HL 450", "WA2000", "Gambit CP-208", "MJR-409"};
+const int kWeaponCount = (int)std::size(kGiveAll);
+static_assert(std::size(kNames) == std::size(kGiveAll));
 const uint32_t kSilencer = 1, kReflex = 2, kAcog = 4, kLaser = 8, kThermal = 0x10, kLauncher = 0x20;
 const uint32_t kInventoryShift = 3;
 const uint32_t kItems = 0xC4C, kItemCount = 0xC48, kItemSize = 0x10; //the inventory: an item's id at +0
@@ -94,9 +103,10 @@ bool g_noSlot = false;
 std::mt19937 g_rng{std::random_device{}()};
 std::map<uint32_t, Pick> g_swapped; //the level's weapon -> what the player got for it
 uint32_t g_swappedLevel = 0, g_swappedPlayer = 0;
-uint32_t g_forced = 0, g_forcedFlags = 0; //GE_RANDOMIZER_WEAPON, the player's pick
+std::atomic<uint32_t> g_forced{0}; //Forced Weapon's id, 0 for none
+uint32_t g_forcedFlags = 0xFFFFFFFF; //GE_RANDOMIZER_WEAPON's flags, else the randomizer's
 
-bool Active() { return g_on && !multiplayer_game(); }
+bool Active() { return (g_on || g_forced) && !multiplayer_game(); }
 
 //the first row with the id, as ge_give_weapon finds it (fn_800CCE80)
 uint32_t RowOf(uint32_t id)
@@ -149,20 +159,31 @@ uint32_t RandomFlags(const PPCContext& c, uint32_t id)
 	return choices[std::uniform_int_distribution<size_t>(0, choices.size() - 1)(g_rng)];
 }
 
-//a random weapon of the give-all's, not one of those taken; a guard's needs a model to hold
+bool HasModel(uint32_t row)
+{
+	const uint32_t model{ ld32(row + kRowModel) };
+	return model != 0 && model != 0xFFFFFFFF;
+}
+
+//a random weapon of the give-all's, not one of those taken; a guard's needs a model to hold. the
+//forced one when there is one. none: the weapon is left as it is
 Pick RandomWeapon(const PPCContext& c, bool guard, const std::vector<uint32_t>& taken)
 {
+	if (const uint32_t forced{ g_forced }, row{ forced ? RowOf(forced) : 0 }; row && (!guard || HasModel(row)))
+	{
+		const uint32_t flags{ g_forcedFlags != 0xFFFFFFFF ? g_forcedFlags : g_on ? RandomFlags(c, forced) : 0 };
+		return {forced, row, flags};
+	}
+	if (!g_on) return {0, 0, 0};
 	std::vector<Pick> pool;
 	for (uint32_t id : kGiveAll)
 	{
 		const uint32_t row{ RowOf(id) };
 		if (!row || std::find(taken.begin(), taken.end(), id) != taken.end()) continue;
-		const uint32_t model{ ld32(row + kRowModel) };
-		if (guard && (model == 0 || model == 0xFFFFFFFF)) continue;
+		if (guard && !HasModel(row)) continue;
 		pool.push_back({id, row, 0});
 	}
 	if (pool.empty()) return {0, 0, 0};
-	if (!guard && g_forced && RowOf(g_forced)) return {g_forced, RowOf(g_forced), g_forcedFlags};
 	Pick pick{ pool[std::uniform_int_distribution<size_t>(0, pool.size() - 1)(g_rng)] };
 	pick.flags = RandomFlags(c, pick.id);
 	return pick;
@@ -429,20 +450,32 @@ bool weapon_randomizer() { return g_on; }
 void set_weapon_randomizer(bool on) { g_on = on; }
 bool no_attachment_limit() { return g_unlimited; }
 void set_no_attachment_limit(bool on) { g_unlimited = on; }
+int forced_weapon()
+{
+	const uint32_t* found{ std::find(std::begin(kGiveAll), std::end(kGiveAll), g_forced.load()) };
+	return found == std::end(kGiveAll) ? 0 : (int)(found - std::begin(kGiveAll)) + 1;
+}
+void set_forced_weapon(int weapon) { g_forced = weapon > 0 && weapon <= kWeaponCount ? kGiveAll[weapon - 1] : 0; }
+int forced_weapon_count() { return kWeaponCount + 1; }
+const char* forced_weapon_name(int weapon) { return weapon > 0 && weapon <= kWeaponCount ? kNames[weapon - 1] : "Off"; }
+uint32_t forced_weapon_id() { return g_forced; }
 
 void install_randomizer()
 {
 	g_on = std::atoi(saved_setting("GE_WEAPON_RANDOMIZER", "LAUNCH_WEAPONRANDOMIZER").c_str()) != 0;
 	g_trace = std::getenv("GE_TRACE") != nullptr;
 	g_unlimited = std::atoi(saved_setting("GE_NO_ATTACHMENT_LIMIT", "LAUNCH_NOATTACHMENTLIMIT").c_str()) != 0;
-	if (const char* forced = std::getenv("GE_RANDOMIZER_WEAPON"))
 	{
+		const std::string forced{ saved_setting("GE_RANDOMIZER_WEAPON", "LAUNCH_FORCEDWEAPON") };
 		char* rest = nullptr;
-		g_forced = (uint32_t)std::strtoul(forced, &rest, 16);
+		const uint32_t id{ (uint32_t)std::strtoul(forced.c_str(), &rest, 16) };
 		if (rest && *rest == ':') g_forcedFlags = (uint32_t)std::strtoul(rest + 1, nullptr, 16);
+		if (id && IsWeapon(id)) g_forced = id;
+		else if (id) rt_log("goldeneye: randomizer: %08X is not one of the weapons, nothing is forced", id);
 	}
 	if (const char* seed = std::getenv("GE_RANDOMIZER_SEED")) g_rng.seed((uint32_t)std::strtoul(seed, nullptr, 0));
 	if (g_on) rt_log("goldeneye: weapon randomizer on");
+	if (g_forced) rt_log("goldeneye: forced weapon %08X (%s)", g_forced.load(), forced_weapon_name(forced_weapon()));
 	orig_give = ppc_hook("ge_give_weapon", Give);
 	orig_attach = ppc_hook("ge_npc_attach_gun", Attach);
 	orig_select = ppc_hook("ge_select_weapon", Select);

@@ -105,6 +105,9 @@ void save_launch_settings() {
         {"LAUNCH_GOD", god_mode() ? "1" : "0"}, {"LAUNCH_INFINITEAMMO", infinite_ammo() ? "1" : "0"}, {"LAUNCH_INFINITESPRINT", infinite_sprint() ? "1" : "0"},
         {"LAUNCH_WEAPONRANDOMIZER", weapon_randomizer() ? "1" : "0"},
         {"LAUNCH_NOATTACHMENTLIMIT", no_attachment_limit() ? "1" : "0"}};
+    char forced_text[16];
+    std::snprintf(forced_text, sizeof forced_text, "%08X", forced_weapon_id());
+    values.push_back({"LAUNCH_FORCEDWEAPON", forced_text});
     if (g_fps_changed) values.push_back({"LAUNCH_FPS", std::to_string(fps_limit())}); //"auto" stays until it's changed
     auto lines = read_lines(GE_SETTINGS_FILE);
     if (lines.empty()) lines.push_back("# written by the launcher, read when the game is started");
@@ -427,6 +430,10 @@ void BuildSettings()
 	AddToggle(kCheats, "collision_view", "Collision Viewer", "On: the level's collision is drawn in place of the world. Floors are green, walls grey, ceilings red, props orange.", collision_view, set_collision_view);
 
 	AddToggle(kForFun, "weapon_randomizer", "Weapon Randomizer", "On: in the campaign every guard and you start with a random weapon, with one random attachment or none. From the next spawn on.", weapon_randomizer, set_weapon_randomizer);
+	std::vector<const char*> weapons;
+	for (int i = 0; i < forced_weapon_count(); ++i) weapons.push_back(forced_weapon_name(i));
+	AddChoice(kForFun, "forced_weapon", "Forced Weapon", "In the campaign you and every guard start with this weapon. Attachments are random with the Weapon Randomizer on, else none. Guards can't hold the Golden Gun. From the next spawn on.",
+		weapons, forced_weapon, [](int v) { set_forced_weapon(v); g_dirty = true; });
 	AddToggle(kForFun, "no_attachment_limit", "No Attachment Limit (Experimental)", "On: the Weapon Randomizer's weapons may have several attachments at once, each one a chance of its own. Some may break the view.", no_attachment_limit, set_no_attachment_limit);
 }
 

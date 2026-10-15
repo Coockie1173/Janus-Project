@@ -258,6 +258,11 @@ bool weapon_randomizer(); //for fun, the campaign's weapons and the guards' guns
 void set_weapon_randomizer(bool on);
 bool no_attachment_limit(); //experimental, the randomizer's weapons may have more than one attachment
 void set_no_attachment_limit(bool on);
+int forced_weapon(); //for fun, everyone gets this weapon in the campaign: 0 none, else 1 + its place in the list
+void set_forced_weapon(int weapon);
+int forced_weapon_count(); //"Off" and the weapons
+const char* forced_weapon_name(int weapon);
+uint32_t forced_weapon_id(); //its id, 0 for none
 bool god_mode(); //cheat, the campaign's player takes no hurt
 void set_god_mode(bool on);
 bool infinite_ammo(); //cheat, every kind of ammo stays at the most it holds
