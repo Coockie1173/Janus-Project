@@ -123,3 +123,5 @@ ge_choice_text         # the menu asks for the text of a setting's value: 007 Cu
 ge_choice_step         # the menu changes a setting with values to pick from: 007 Custom's switch for the headshots (port/custom.cpp)
 ge_menu_pointer_update # the menus' pointer takes the pad's input: the mouse's cursor is its place, so every menu's items are picked with the cursor (port/pointer.cpp)
 ge_player_damage       # the player is hurt: armour, health, the reaction, the death. God Mode leaves it out for the local player (port/cheats.cpp)
+ge_give_weapon         # a weapon goes into an inventory: Weapon Randomizer swaps it for a random one with random attachments (port/randomizer.cpp)
+ge_npc_attach_gun      # a guard is given its gun: Weapon Randomizer swaps the row for a random weapon with random attachments (port/randomizer.cpp)

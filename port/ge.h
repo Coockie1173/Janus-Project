@@ -18,6 +18,7 @@
 //noclip.cpp fly through the level
 //stamina.cpp the sprint that's left as a bar
 //cheats.cpp god mode, infinite ammo, infinite sprint
+//randomizer.cpp the weapon randomizer
 //weapons.cpp a key for each weapon slot
 //prompts.cpp the bound key in the game's prompts, where it shows a controller button
 //collision.cpp the level's collision drawn in place of the world
@@ -252,6 +253,9 @@ void noclip_look(uint32_t controller); //before ge_look_apply, the game's own st
 void noclip_apply(uint32_t controller); //after the local controller's update
 bool player_state(uint32_t& state, float& fallen, uint32_t& bodyFlags); //the local player as of its last update, false before there is one
 void install_cheats(); //cheats.cpp
+void install_randomizer(); //randomizer.cpp
+bool weapon_randomizer(); //for fun, the campaign's weapons and the guards' guns are random, with a random attachment
+void set_weapon_randomizer(bool on);
 bool god_mode(); //cheat, the campaign's player takes no hurt
 void set_god_mode(bool on);
 bool infinite_ammo(); //cheat, every kind of ammo stays at the most it holds

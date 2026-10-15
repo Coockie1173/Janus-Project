@@ -102,7 +102,8 @@ void save_launch_settings() {
         {"LAUNCH_HUD", hud() ? "1" : "0"}, {"LAUNCH_SHAKE", shake_text}, {"LAUNCH_TANKBUTTONS", tank_text},
         {"LAUNCH_ANISO", std::to_string(anisotropy())}, {"LAUNCH_MSAA", std::to_string(anti_aliasing())},
         {"LAUNCH_CUSTOM", custom_values()},
-        {"LAUNCH_GOD", god_mode() ? "1" : "0"}, {"LAUNCH_INFINITEAMMO", infinite_ammo() ? "1" : "0"}, {"LAUNCH_INFINITESPRINT", infinite_sprint() ? "1" : "0"}};
+        {"LAUNCH_GOD", god_mode() ? "1" : "0"}, {"LAUNCH_INFINITEAMMO", infinite_ammo() ? "1" : "0"}, {"LAUNCH_INFINITESPRINT", infinite_sprint() ? "1" : "0"},
+        {"LAUNCH_WEAPONRANDOMIZER", weapon_randomizer() ? "1" : "0"}};
     if (g_fps_changed) values.push_back({"LAUNCH_FPS", std::to_string(fps_limit())}); //"auto" stays until it's changed
     auto lines = read_lines(GE_SETTINGS_FILE);
     if (lines.empty()) lines.push_back("# written by the launcher, read when the game is started");
@@ -204,7 +205,7 @@ struct Row {
 };
 struct Page { std::string title; std::vector<Row> rows; };
 
-enum { kRoot, kScreen, kControls, kBindings, kEnhancements, kCheats, kHotkeys, kHotkeyEdit, kLevels, kMaps, kSkips, kPageCount };
+enum { kRoot, kScreen, kControls, kBindings, kEnhancements, kCheats, kForFun, kHotkeys, kHotkeyEdit, kLevels, kMaps, kSkips, kPageCount };
 std::vector<Page> g_pages;
 int g_page = kRoot, g_row = 0, g_scroll = 0;
 int g_root_row = 0; //where the cursor was on the first page
@@ -423,6 +424,8 @@ void BuildSettings()
 	AddToggle(kCheats, "noclip", "Noclip", "On: you fly where you look, through walls, and don't fall. The sprint key flies faster.", noclip, set_noclip);
 	AddToggle(kCheats, "stamina_meter", "Stamina Meter", "On: a bar shows the sprint that's left. Cancel a sprint right under the line and it's back at a second the frame after.", stamina_meter, set_stamina_meter);
 	AddToggle(kCheats, "collision_view", "Collision Viewer", "On: the level's collision is drawn in place of the world. Floors are green, walls grey, ceilings red, props orange.", collision_view, set_collision_view);
+
+	AddToggle(kForFun, "weapon_randomizer", "Weapon Randomizer", "On: in the campaign every guard and you start with a random weapon, with one random attachment or none. From the next spawn on.", weapon_randomizer, set_weapon_randomizer);
 }
 
 Row SettingRow(int i)
@@ -775,6 +778,7 @@ void build_pages() {
     root.rows.push_back({"Hotkeys", "Keys that change a setting while you play.", {}, {}, [] { go(kHotkeys); }});
     root.rows.push_back({"Enhancements", "Things the port adds to the game.", {}, {}, [] { go(kEnhancements); }});
     root.rows.push_back({"Cheats", "Things the game itself would not let you do.", {}, {}, [] { go(kCheats); }});
+    root.rows.push_back({"For Fun", "Things that change how the game plays, just for fun.", {}, {}, [] { go(kForFun); }});
     root.rows.push_back({"Level Select", "Load any level of the disc, the unused ones too.", {}, {}, [] { go(kLevels); }});
     root.rows.push_back({"Multiplayer Maps", "Load any multiplayer map of the disc to walk around in, the unused ones too.", {}, {}, [] { go(kMaps); }});
     //a grid's one row is what the foot reads: the cell under the cursor (settings_draw)
@@ -843,6 +847,7 @@ void build_pages() {
 
     g_pages[kEnhancements].title = "Enhancements";
     g_pages[kCheats].title = "Cheats";
+    g_pages[kForFun].title = "For Fun";
     g_pages[kHotkeys].title = "Hotkeys";
     g_pages[kHotkeyEdit].title = "Hotkey";
     BuildHotkeyPages();
@@ -1514,7 +1519,7 @@ bool cheats_active()
 	if (gecko_cheats()) return true;
 	for (const Setting& s : g_settings)
 	{
-		if (s.page == kCheats && s.get() > 0.5f) return true;
+		if ((s.page == kCheats || s.page == kForFun) && s.get() > 0.5f) return true;
 	}
 	return false;
 }

@@ -123,6 +123,7 @@ void install() {
     install_noclip();
     install_stamina();
     install_cheats();
+    install_randomizer();
     install_collision();
     install_autosave();
     install_weapons();
