@@ -42,6 +42,9 @@
 //the parts of a gun model its list names (805730D0: the body, the attachments by the flags) and
 //hides the others when a guard's AttachGun asks it to (its last argument, 1 for most guards): the
 //world model names none of its seven, so they're all shown again after it
+//a bullet gets its damage from the row by the distance (fn_800B2C60, into the bullet's +0x1D0): the
+//player's from +0x44..+0x50 (the Golden Gun's 1000), a guard's from +0x14C..+0x158 (near damage, near
+//and far range, far damage), a pistol's 13.125 for the Golden Gun. the guard's damages are made a kill
 //GE_WEAPON_RANDOMIZER=1 starts with it on, GE_NO_ATTACHMENT_LIMIT=1 that, GE_RANDOMIZER_SEED=n the same picks every run,
 //GE_RANDOMIZER_WEAPON=id[:flags] the forced weapon (the model flags in hex), GE_TRACE=1 logs every swap and a guard that didn't take its gun
 #include "ge.h"
@@ -62,6 +65,8 @@ const uint32_t kWeapons = 0x805D1A4C, kRowSize = 0x254;
 const uint32_t kRowId = 0x174, kRowClip = 0xD, kRowClips = 0xE, kRowModel = 0x178;
 const uint32_t kGuardGun = 0x754; //the row of the gun AttachGun gave (the silenced one's with flag 1), 0 when it failed
 const uint32_t kGoldenGun = 0x02000827, kGoldenGunModel = 0x0400293D;
+const uint32_t kRowGuardNear = 0x14C, kRowGuardFar = 0x158; //a guard's bullet's damage up close and far off
+const float kGoldenGunKill = 100000.0f; //times the place's factor (0.9 at least) and the difficulty's (0.2 at least): more than health and armour
 const uint32_t kAttachedModel = 0x80302A60; //(entity, model hash) -> the model attached to it
 const uint32_t kModelParts = 0x114, kModelPartCount = 0x128, kPartSize = 0x20; //a part's node at +8
 const uint32_t kNodeFlags = 0xC, kNodeShown = 1, kNodeFade = 0x8E;
@@ -169,10 +174,15 @@ uint32_t RandomFlags(const PPCContext& c, uint32_t id)
 	return choices[std::uniform_int_distribution<size_t>(0, choices.size() - 1)(g_rng)];
 }
 
-//the model a guard holds; the Golden Gun's row gets its own first
+//the model a guard holds; the Golden Gun's row gets its own first, and a guard's shot with it kills
 bool HasModel(uint32_t row)
 {
-	if (ld32(row + kRowId) == kGoldenGun && ld32(row + kRowModel) == 0xFFFFFFFF) st32(row + kRowModel, kGoldenGunModel);
+	if (ld32(row + kRowId) == kGoldenGun)
+	{
+		if (ld32(row + kRowModel) == 0xFFFFFFFF) st32(row + kRowModel, kGoldenGunModel);
+		stf(row + kRowGuardNear, kGoldenGunKill);
+		stf(row + kRowGuardFar, kGoldenGunKill);
+	}
 	const uint32_t model{ ld32(row + kRowModel) };
 	return model != 0 && model != 0xFFFFFFFF;
 }
