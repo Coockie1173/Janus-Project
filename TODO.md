@@ -57,7 +57,7 @@ Things that only break above 60 fps.
 - [x] **high** Animated textures break above 60 fps (fire, the Nightclub screens): they stood still from 64 fps on,
       now they play at the console's speed (measured on a Nightclub flipbook at 144, see docs/STATUS.md)
 - [x] **low** Bond's dancing animation is too fast
-- [ ] **low** Camera shake in the Carrier ending is too fast
+- [x] **low** Camera shake in the Carrier ending is too fast
 - [x] **low** Breaches seem faster at higher fps (needs checking)
 - [x] **medium** Text scrolls at a speed that follows the frame rate (mission intros, checkpoint text, objectives, ...):
       a character a console frame now (Dam's intro 2.8 s at 30 and at 144, see docs/STATUS.md)
@@ -84,9 +84,8 @@ Things that only break above 60 fps.
 - [x] **medium** Black bars at the top and bottom in windowed mode: to avoid stretching, it must always be 16:9 or 4:3
 - [ ] **medium** Dam: the opening scene isn't as foggy as it should be
 - [ ] **medium** Vertigo: the skybox is black in one corner of the map
-- [ ] **low** Halo around characters' hair (needs checking, may be the original game or the resolution)
+- [x] ~~**low** Halo around characters' hair (needs checking, may be the original game or the resolution)~~
 - [ ] **low** Dam: the sniper's lower body is visible below the window through the thermal scope (needs checking)
-- [ ] **low** Other missing or different effects compared to the console (go through the levels next to Dolphin)
 - [x] **medium** Colour filter option only works on Facility: on Dam, Airfield, Nightclub (kitchen), Archives,
       Memorial and Solar the filter is always on, whatever the option, and only goes away while hipfiring an
       automatic weapon: those levels tint with an orb round the camera, left out now too (seen on Dam, logged on
@@ -98,10 +97,10 @@ Things that only break above 60 fps.
 
 - [x] **critical** crunchy audio at higher fps: a new sound played 3 ms at full volume (to be confirmed by ear)
 - [ ] **medium** Online: a static noise plays when another player fires the Golden Gun
-- [ ] **medium** Multiplayer: a player above you should have the low frequencies cut, not the high ones
+- [x] **medium** Multiplayer: a player above you should have the high frequencies cut, not the low ones
 - [x] **medium** Double audio on reloads: a reload's sounds played up to five times over at 144, once now
       (counted on the P99 at 30, 60 and 144, to be confirmed by ear)
-- [ ] **medium** Main menu cursor sound is sometimes a loud click
+- [x] **medium** Main menu cursor sound is sometimes a loud click
 - [ ] **medium** Nightclub: the score keeps playing over the breach music
 - [ ] **low** Nightclub: occlusion of the song and crowd transitions harshly around Zukovsky's office (needs checking)
 
@@ -128,8 +127,8 @@ Texts that still talk about the controller.
 - [x] **medium** Training: "Disable Tutorials" also hides the text boxes, the mission can't be played without them:
       the option leaves the training mission alone now
 - [ ] **low** Training: the text boxes still say to move around with the analog sticks
-- [ ] **low** Training: "Press [Right] to draw your P99."
-- [ ] **low** Training: "You can adjust your aim with the R Stick" (probably more, the reporter didn't see them all)
+- [x] ~~**low** Training: "Press [Right] to draw your P99."~~
+- [ ] **low** Training: "You can adjust your aim with the R Stick"
 - [ ] **low** Dam: "Press E while holding forward on the L Stick to climb small ledges", while the prompt on
       screen says "[L Shift] + [W]" (at the start, under the two bridges before the first building)
 - [ ] **low** Dam: "Press [Down] To take out your Smartphone" should say [F] (both work, may not be possible)
@@ -167,10 +166,10 @@ Texts that still talk about the controller.
 - [x] **medium** Cradle: the opening skip goes slightly too far, leave a little more time before the slow motion part
       (fades back in 2 s earlier now, to be played)
 - [ ] **low** An option to turn off the fade out when skipping a cutscene, to follow where it goes
-- [ ] **low** Cradle: the Natalya cutscene in the first area could be skipped
+- [ ] ~~**low** Cradle: the Natalya cutscene in the first area could be skipped~~
 - [ ] **low** Cradle: the last Trevelyan encounter could be skipped up to "For England, James?" (leaves time to get
       ready to shoot and keeps that line)
-- [ ] **low** Solar: the cutscene going up the stairs, first looking at the big tower, could be skipped
+- [x] **low** Solar: the cutscene going up the stairs, first looking at the big tower, could be skipped
 - [ ] **low** With Auto Quick Time Events on, skip QTE cutscenes too (Cradle: the first Trevelyan encounter)
 
 ## Gameplay and AI
@@ -196,8 +195,8 @@ Texts that still talk about the controller.
       smooth. A later message says the newest build feels much better (Airfield), so measure
       frame pacing again before chasing it
 - [ ] **medium** Anisotropic filtering costs far too much (the biggest hit the reporter has seen, at only 4x)
-- [ ] **medium** Pauses at 0 fps now and then, more than in other games on the same machine (shader
-      compiles? check the shader cache)
+- [ ] ~~**medium** Pauses at 0 fps now and then, more than in other games on the same machine (shader
+      compiles? check the shader cache)~~
 
 ## Feature requests
 
@@ -220,14 +219,15 @@ Texts that still talk about the controller.
 ## Cheats
 
 - [ ] Turbo mode
-- [ ] Spawn any weapon
+- [ ] Jumping
+- [x]-ish Spawn any weapon
 - [ ] All weapons (unless it breaks the way multiplayer maps do in single player, and whether that can be fixed)
-- [ ] Force Sgt Garcia's best spawn point
+- ~~[ ] Force Sgt Garcia's best spawn point~~
 - [x] Infinite ammo: F1 > Cheats, campaign only; every kind of ammo stays full (41 shots from a 16 round P99 on Dam)
 - [ ] Grenades in single player
 - [x] Infinite sprint: F1 > Cheats, campaign only (a sprint on Dam ends with all 3.1 s left)
 - [x] God mode: F1 > Cheats, campaign only; the player's damage is left out (not seen in a fight yet, no scripted run got hurt)
-- [ ] Enemy rockets
+- [x] Enemy rockets
 - [x] 007 mode: Select Difficulty > 007 Custom, sliders for enemy health, enemy damage, enemy reaction speed
       and hit protection, then the mission as 007 Classic (the menu and the melee value checked, see docs/STATUS.md);
       the sliders take the mouse, and a switch turns instant kill headshots off (the switch not seen in a fight yet)
