@@ -465,7 +465,7 @@ void BuildSettings()
 		weapons, forced_weapon, [](int v) { set_forced_weapon(v); g_dirty = true; }).dropdown = true;
 	AddToggle(kForFun, "no_attachment_limit", "No Attachment Limit (Experimental)", "On: the Weapon Randomizer's weapons may have several attachments at once, each one a chance of its own. Some may break the view.", no_attachment_limit, set_no_attachment_limit);
 
-	AddToggle(kBhop, "bunnyhop", "Bunnyhopping", "On: holding Jump hops whenever you touch the floor, and strafing in the air while turning adds speed, as in Half-Life. Steep ramps can be surfed. Not online.", bunnyhop, set_bunnyhop);
+	AddToggle(kBhop, "bunnyhop", "Bunnyhopping", "On: holding Jump hops whenever you touch the floor, and strafing in the air while turning adds speed, as in Half-Life. Steep ramps can be surfed. There is no sprint, you run at the base speed. Not online.", bunnyhop, set_bunnyhop);
 	for (int i = 0; i < kBhopValueCount; ++i)
 	{
 		const BhopValue& v = bhop_value(i);

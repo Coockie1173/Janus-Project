@@ -31,9 +31,14 @@
 //distance at +0xE90, PlayerLand: past 40 dead, past 2 a landing hurts) counts each frame's fall
 //at half, so it takes twice the drop
 //
+//and there's no sprint: ge_sprint_update asks ge_sprint_allowed whether one may start and,
+//sprinting, whether it goes on, and for the local player the answer is no (its other caller,
+//ge_action_update's vault and climb, still gets the game's). the run is kBaseSpeed instead:
+//ge_move_speed's 4.2 standing up (806E947C), the sprint's is 6.6, aimed and crouched stay the game's
+//
 //GE_BUNNYHOP=1 start with it on, else what the menu saved
 //the speed goes in the log twice a second, and what walls take (GE_BHOP_LOG=0 not)
-//GE_BHOP_HEIGHT, GE_BHOP_AIRCAP, GE_BHOP_AIRACCEL, GE_BHOP_WISH, GE_BHOP_MAX, GE_BHOP_GRAVITY,
+//GE_BHOP_SPEED, GE_BHOP_HEIGHT, GE_BHOP_AIRCAP, GE_BHOP_AIRACCEL, GE_BHOP_WISH, GE_BHOP_MAX, GE_BHOP_GRAVITY,
 //GE_BHOP_FALL, GE_BHOP_DROP over what the menu saved
 #include "ge.h"
 #include <algorithm>
@@ -50,9 +55,13 @@ const uint32_t kEntity = 0x4, kPos = 0xF8, kYaw = 0xDC;
 const uint32_t kBody = 0x158, kBodyStep = 0xBC, kBodyFloor = 0xA, kBodyHit = 0xA, kBodyPush = 0xEC, kBodyFallSpeed = 0x15C, kBodyGravity = 0x160;
 const uint32_t kFallen = 0xE90;
 const uint32_t kMoveStick = 0x500, kTimeStep = 0x578, kPlayerState = 0x704;
+const uint32_t kSprinting = 0xE59, kCrouched = 0xC54, kSlowed = 0xD00;
+const uint32_t kAskStart = 0x8010D9B0, kAskGoOn = 0x8010DA8C; //ge_sprint_update's calls of ge_sprint_allowed
+const float kGameRun = 4.2f; //806E947C
 const uint32_t kStateStanding = 0, kStateMoving = 2, kStateSprinting = 3, kStateFalling = 4;
 //the tunables, F1 > For Fun > Bunnyhopping, saved as LAUNCH_BHOP_*
 BhopValue g_values[kBhopValueCount]{
+	{"Base Speed", "How fast you run, in metres a second: there's no sprint while bunnyhopping. 4.2 is the game's run, 6.6 its sprint.", "GE_BHOP_SPEED", "LAUNCH_BHOP_SPEED", 6.6f, 1.0f, 15.0f, 0.1f, 1},
 	{"Hop Height", "How high a hop goes, in metres.", "GE_BHOP_HEIGHT", "LAUNCH_BHOP_HEIGHT", 1.5f, 0.1f, 5.0f, 0.05f, 2},
 	{"Gravity", "Of the game's gravity while bunnyhopping. 1.0 is the game's own.", "GE_BHOP_GRAVITY", "LAUNCH_BHOP_GRAVITY", 0.5f, 0.1f, 1.5f, 0.05f, 2},
 	{"Air Cap", "How much speed the stick adds along itself in the air. Half-Life's is 0.76: higher gains speed faster and turns sharper.", "GE_BHOP_AIRCAP", "LAUNCH_BHOP_AIRCAP", 2.5f, 0.1f, 10.0f, 0.05f, 2},
@@ -62,6 +71,7 @@ BhopValue g_values[kBhopValueCount]{
 	{"Fall Damage", "Of each fall that counts towards hurting and killing you. 0.5 takes twice the drop.", "GE_BHOP_FALL", "LAUNCH_BHOP_FALL", 0.5f, 0.05f, 1.0f, 0.05f, 2},
 	{"Free Drop", "How far under where you jumped you fall before the game's own fall (and its landing) takes over, in metres.", "GE_BHOP_DROP", "LAUNCH_BHOP_DROP", 4.0f, 1.0f, 50.0f, 0.5f, 1},
 };
+float& kBaseSpeed = g_values[kBhopSpeed].value;
 float& kHopHeight = g_values[kBhopHeight].value;
 float& kGravity = g_values[kBhopGravity].value;
 float& kAirCap = g_values[kBhopAirCap].value; //half-life's 30 units a second is 0.76
@@ -89,7 +99,7 @@ uint32_t g_gravityBody = 0; //the body whose gravity is ours, its own and what w
 float g_gravityGame = 0, g_gravityOurs = 0;
 float g_fallen = 0; //the deadly fall as we left it
 float g_floorY = 0, g_topY = 0; //where the player left the floor, and the highest since
-PPCFunc orig_fall_start = nullptr, orig_move_grab = nullptr;
+PPCFunc orig_fall_start = nullptr, orig_move_grab = nullptr, orig_sprint_allowed = nullptr, orig_move_speed = nullptr;
 
 //the body's gravity back to the game's
 void GameGravity()
@@ -162,6 +172,34 @@ void MoveGrab(PPCContext& c)
 		return;
 	}
 	orig_move_grab(c);
+}
+
+//ours: bunnyhopping, the local player's, offline
+bool Ours(uint32_t ctrl)
+{
+	return g_bunnyhop && ctrl == g_ctrl && guest_ptr(ctrl) && !network_game();
+}
+
+void SprintAllowed(PPCContext& c)
+{
+	if ((c.lr == kAskStart || c.lr == kAskGoOn) && Ours(c.r[3]))
+	{
+		c.r[3] = 0;
+		return;
+	}
+	orig_sprint_allowed(c);
+}
+
+//the speed (or one over it, the last argument 0) standing up and not sprinting is the base speed's
+void MoveSpeed(PPCContext& c)
+{
+	const uint32_t ctrl{ c.r[3] }, out{ c.r[4] };
+	const bool speed{ (c.r[6] & 0xFF) != 0 };
+	orig_move_speed(c);
+	if (!Ours(ctrl) || !guest_ptr(out) || ld8(ctrl + kSprinting) || ld8(ctrl + kCrouched) || ld8(ctrl + kSlowed)) return;
+	const float now{ ldf(out) };
+	if (!std::isfinite(now) || now == 0) return;
+	stf(out, speed ? now * kBaseSpeed / kGameRun : now * kGameRun / kBaseSpeed);
 }
 } //namespace
 
@@ -335,6 +373,9 @@ void install_bunnyhop()
 	}
 	orig_fall_start = ppc_hook("ge_fall_start", FallStart);
 	orig_move_grab = ppc_hook("ge_move_grab", MoveGrab);
+	orig_sprint_allowed = ppc_hook("ge_sprint_allowed", SprintAllowed);
+	orig_move_speed = ppc_hook("ge_move_speed", MoveSpeed);
+	if (!orig_sprint_allowed || !orig_move_speed) rt_log("goldeneye: bunnyhop: ge_sprint_allowed or ge_move_speed isn't hooked, the sprint and the run are the game's");
 	if (!orig_fall_start || !orig_move_grab) rt_log("goldeneye: bunnyhop: ge_fall_start or ge_move_grab isn't hooked, hops over 0.5 are the walk's");
 }
 
