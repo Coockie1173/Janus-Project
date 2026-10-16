@@ -19,6 +19,7 @@
 //speed only up to kAirCap along it, so turning towards the stick keeps adding
 //a wall, a ceiling or a ramp takes the speed into it and leaves the speed along it, which
 //surfs a ramp too steep to stand on, and landing without the key held gives the game its player back
+//once pre-strafing (below) is no faster than its walk
 //
 //a hop over 0.5 or 1.25 would have the walk take the player: there it looks for a ladder or a
 //ledge (ge_move_grab), and the fall (ge_fall_start) has its own air and half a second of landing.
@@ -36,10 +37,16 @@
 //ge_action_update's vault and climb, still gets the game's). the run is kBaseSpeed instead:
 //ge_move_speed's 4.2 standing up (806E947C), the sprint's is 6.6, aimed and crouched stay the game's
 //
+//pre-strafing: on the floor without the key it's half-life's ground move, friction (sv_friction,
+//stopspeed) then the accelerate (sv_accelerate) up to the game's walk speed along the stick. that only
+//caps the speed along the stick, so strafing while turning gains speed on the floor as in the air,
+//and friction takes it back. while that's no faster than the game's walk the player is the game's,
+//and a landing without the key slides on it instead of stopping dead
+//
 //GE_BUNNYHOP=1 start with it on, else what the menu saved
 //the speed goes in the log twice a second, and what walls take (GE_BHOP_LOG=0 not)
-//GE_BHOP_SPEED, GE_BHOP_HEIGHT, GE_BHOP_AIRCAP, GE_BHOP_AIRACCEL, GE_BHOP_WISH, GE_BHOP_MAX, GE_BHOP_GRAVITY,
-//GE_BHOP_FALL, GE_BHOP_DROP over what the menu saved
+//GE_BHOP_PRESTRAFE=0 without pre-strafing, GE_BHOP_SPEED, GE_BHOP_HEIGHT, GE_BHOP_AIRCAP, GE_BHOP_AIRACCEL, GE_BHOP_WISH, GE_BHOP_MAX, GE_BHOP_GRAVITY,
+//GE_BHOP_FALL, GE_BHOP_DROP, GE_BHOP_ACCEL, GE_BHOP_FRICTION over what the menu saved
 #include "ge.h"
 #include <algorithm>
 #include <atomic>
@@ -70,6 +77,8 @@ BhopValue g_values[kBhopValueCount]{
 	{"Top Speed", "The fastest you can go, in metres a second. Very high speeds can go through thin walls.", "GE_BHOP_MAX", "LAUNCH_BHOP_MAX", 25.0f, 5.0f, 60.0f, 1.0f, 0},
 	{"Fall Damage", "Of each fall that counts towards hurting and killing you. 0.5 takes twice the drop.", "GE_BHOP_FALL", "LAUNCH_BHOP_FALL", 0.5f, 0.05f, 1.0f, 0.05f, 2},
 	{"Free Drop", "How far under where you jumped you fall before the game's own fall (and its landing) takes over, in metres.", "GE_BHOP_DROP", "LAUNCH_BHOP_DROP", 4.0f, 1.0f, 50.0f, 0.5f, 1},
+	{"Ground Accelerate", "Pre-strafing: how fast the run's speed is reached on the floor, Half-Life's sv_accelerate. Higher gains more speed turning.", "GE_BHOP_ACCEL", "LAUNCH_BHOP_ACCEL", 10.0f, 1.0f, 30.0f, 0.5f, 1},
+	{"Friction", "Pre-strafing: how fast the floor takes speed back, Half-Life's sv_friction. Lower keeps more.", "GE_BHOP_FRICTION", "LAUNCH_BHOP_FRICTION", 4.0f, 0.5f, 12.0f, 0.25f, 2},
 };
 float& kBaseSpeed = g_values[kBhopSpeed].value;
 float& kHopHeight = g_values[kBhopHeight].value;
@@ -80,12 +89,17 @@ float& kWishSpeed = g_values[kBhopWish].value;
 float& kMaxSpeed = g_values[kBhopMax].value; //more and a step goes through walls
 float& kFall = g_values[kBhopFall].value; //of each frame's fall that counts towards the deadly one
 float& kFreeDrop = g_values[kBhopDrop].value; //how far under the floor it left the player falls before the game's fall
+float& kGroundAccel = g_values[kBhopGroundAccel].value;
+float& kFriction = g_values[kBhopFriction].value;
+const float kStopSpeed = 2.0f; //under this friction takes as if it were this, half-life's stopspeed of its run
+const float kGain = 0.1f; //the floor's speed is ours this much over the game's walk
 const float kDeadZone = 0.2f;
 const float kWalkable = 0.7f; //a normal this far up is a floor, half-life's
 const float kRamp = 0.05f; //and this far up a ramp, not a wall
 const uint32_t kExtraJump = 1u << 5;
 
 std::atomic<bool> g_bunnyhop{false};
+std::atomic<bool> g_prestrafe{true};
 std::atomic<bool> g_jump{false}; //as the pad was last read
 std::atomic<float> g_speed{0}; //the speedometer's, read by the renderer's thread
 std::atomic<uint32_t> g_speedFrame{~0u};
@@ -94,6 +108,8 @@ bool g_log = true; //the speed in the log, twice a second
 uint32_t g_ctrl = 0; //the local controller as of its last update
 bool g_active = false; //the speed is ours
 float g_vel[2]{}; //x and z, a second
+float g_ground[2]{}; //pre-strafing's on the floor, kept while the walk is still the game's
+bool g_groundOn = false; //it went on last frame
 uint32_t g_entity = 0;
 uint32_t g_gravityBody = 0; //the body whose gravity is ours, its own and what we made it
 float g_gravityGame = 0, g_gravityOurs = 0;
@@ -201,9 +217,46 @@ void MoveSpeed(PPCContext& c)
 	if (!std::isfinite(now) || now == 0) return;
 	stf(out, speed ? now * kBaseSpeed / kGameRun : now * kGameRun / kBaseSpeed);
 }
+//on the floor without the key, half-life's ground move from the speed we had, its own of last frame
+//or the game's walk. each frame's gain off a turn is small, so it goes on under the walk until
+//it's faster: true then, g_vel is the speed
+bool PreStrafe(uint32_t ctrl, float gameX, float gameZ, float wishX, float wishZ, float stick, float dt, bool groundOn)
+{
+	if (!g_prestrafe || ld8(ctrl + kSprinting) || ld8(ctrl + kCrouched) || ld8(ctrl + kSlowed)) return false;
+	float v[2]{ gameX, gameZ };
+	if (g_active) v[0] = g_vel[0], v[1] = g_vel[1];
+	else if (groundOn) v[0] = g_ground[0], v[1] = g_ground[1];
+	const float speed{ std::hypot(v[0], v[1]) };
+	if (speed > 0)
+	{
+		const float keep{ std::max(0.0f, speed - std::max(speed, kStopSpeed) * kFriction * dt) / speed };
+		v[0] *= keep;
+		v[1] *= keep;
+	}
+	if (stick >= kDeadZone)
+	{
+		const float wishSpeed{ std::hypot(gameX, gameZ) }; //the game's own run, slower on a diagonal stick
+		const float add{ wishSpeed - (v[0] * wishX + v[1] * wishZ) };
+		if (add > 0)
+		{
+			const float accel{ std::min(add, kGroundAccel * wishSpeed * dt) };
+			v[0] += accel * wishX;
+			v[1] += accel * wishZ;
+		}
+	}
+	g_ground[0] = v[0];
+	g_ground[1] = v[1];
+	g_groundOn = true;
+	if (std::hypot(v[0], v[1]) <= std::hypot(gameX, gameZ) + kGain) return false;
+	g_vel[0] = v[0];
+	g_vel[1] = v[1];
+	return true;
+}
 } //namespace
 
 bool bunnyhop() { return g_bunnyhop; }
+bool bhop_prestrafe() { return g_prestrafe; }
+void set_bhop_prestrafe(bool on) { g_prestrafe = on; }
 BhopValue& bhop_value(int which) { return g_values[which]; }
 
 void bhop_defaults()
@@ -241,6 +294,8 @@ void bunnyhop_look(uint32_t ctrl)
 	const uint32_t entity{ ld32(ctrl + kEntity) };
 	const uint32_t body{ guest_ptr(entity) ? ld32(entity + kBody) : 0 };
 	const float dt{ ldf(ctrl + kTimeStep) };
+	const bool groundOn{ g_groundOn };
+	g_groundOn = false;
 	if (!g_bunnyhop || ctrl != g_ctrl || !guest_ptr(body) || noclip() || network_game() || !Free(ld32(ctrl + kPlayerState)) ||
 		!(dt > 0.0005f && dt < 0.2f))
 	{
@@ -268,6 +323,9 @@ void bunnyhop_look(uint32_t ctrl)
 		else g_topY = std::max(g_topY, posY);
 	}
 	const float stick{ std::min(1.0f, std::hypot(stickX, stickY)) };
+	//the stick in the world, as noclip.cpp has it
+	const float wishX{ stick > 0 ? (std::cos(yaw) * stickX + std::sin(yaw) * stickY) / stick : 0 };
+	const float wishZ{ stick > 0 ? (-std::sin(yaw) * stickX + std::cos(yaw) * stickY) / stick : 0 };
 
 	//a wall, a ceiling or a ramp the body touched takes the speed into it, as half-life's
 	//ClipVelocity: the push out of it (+0xEC) is its normal, and the speed is ours across and the
@@ -305,19 +363,25 @@ void bunnyhop_look(uint32_t ctrl)
 	{
 		if (!g_jump) //a landing from the game's fall with the key held hops on: the hurt is done, its stall runs out in the air
 		{
-			g_active = false;
-			if (g_trace || g_log) Trace(gameX, gameZ, floor);
-			return;
+			g_active = PreStrafe(ctrl, gameX, gameZ, wishX, wishZ, stick, dt, groundOn);
+			if (!g_active)
+			{
+				if (g_trace || g_log) Trace(gameX, gameZ, floor);
+				return;
+			}
 		}
-		//a hop off the floor: the speed we had, or the game's walk if that's faster
-		if (!g_active || std::hypot(g_vel[0], g_vel[1]) < std::hypot(gameX, gameZ))
+		else
 		{
-			g_vel[0] = gameX;
-			g_vel[1] = gameZ;
+			//a hop off the floor: the speed we had, or the game's walk if that's faster
+			if (!g_active || std::hypot(g_vel[0], g_vel[1]) < std::hypot(gameX, gameZ))
+			{
+				g_vel[0] = gameX;
+				g_vel[1] = gameZ;
+			}
+			g_active = true;
+			const float gravity{ ldf(body + kBodyGravity) };
+			if (std::isfinite(gravity) && gravity > 0) stf(body + kBodyFallSpeed, std::sqrt(2.0f * gravity * kHopHeight));
 		}
-		g_active = true;
-		const float gravity{ ldf(body + kBodyGravity) };
-		if (std::isfinite(gravity) && gravity > 0) stf(body + kBodyFallSpeed, std::sqrt(2.0f * gravity * kHopHeight));
 	}
 	else
 	{
@@ -334,9 +398,6 @@ void bunnyhop_look(uint32_t ctrl)
 		}
 		if (stick >= kDeadZone)
 		{
-			//the stick in the world, as noclip.cpp has it
-			const float wishX{ (std::cos(yaw) * stickX + std::sin(yaw) * stickY) / stick };
-			const float wishZ{ (-std::sin(yaw) * stickX + std::cos(yaw) * stickY) / stick };
 			const float wishSpeed{ kWishSpeed * stick };
 			const float add{ std::min(wishSpeed, kAirCap) - (g_vel[0] * wishX + g_vel[1] * wishZ) };
 			if (add > 0)
@@ -363,6 +424,8 @@ void bunnyhop_look(uint32_t ctrl)
 void install_bunnyhop()
 {
 	g_bunnyhop = std::atoi(saved_setting("GE_BUNNYHOP", "LAUNCH_BUNNYHOP").c_str()) != 0;
+	const std::string prestrafe{ saved_setting("GE_BHOP_PRESTRAFE", "LAUNCH_BHOP_PRESTRAFE") };
+	if (!prestrafe.empty()) g_prestrafe = std::atoi(prestrafe.c_str()) != 0;
 	g_trace = std::getenv("GE_TRACE") != nullptr;
 	if (const char* e = std::getenv("GE_BHOP_LOG")) g_log = std::atoi(e) != 0;
 	for (BhopValue& v : g_values)

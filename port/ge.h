@@ -266,10 +266,12 @@ void bunnyhop_look(uint32_t controller); //after ge_look_apply, the body's step 
 void bunnyhop_apply(uint32_t controller); //after the local controller's update
 void bunnyhop_buttons(const ClassicState& s); //the jump key, as the pad was read
 bool bunnyhop_speed(float& speed); //the speedometer's, false with it off or nobody in play
-enum { kBhopSpeed, kBhopHeight, kBhopGravity, kBhopAirCap, kBhopAirAccel, kBhopWish, kBhopMax, kBhopFall, kBhopDrop, kBhopValueCount };
+enum { kBhopSpeed, kBhopHeight, kBhopGravity, kBhopAirCap, kBhopAirAccel, kBhopWish, kBhopMax, kBhopFall, kBhopDrop, kBhopGroundAccel, kBhopFriction, kBhopValueCount };
 struct BhopValue { const char* label; const char* hint; const char* env; const char* launch; float value, lo, hi, by; int decimals; float initial = 0; };
 BhopValue& bhop_value(int which); //its tunables, by the enum above
 void bhop_defaults(); //every tunable back to its own
+bool bhop_prestrafe(); //half-life's ground move on the floor, so turning while strafing gains speed there too
+void set_bhop_prestrafe(bool on);
 int forced_weapon(); //for fun, everyone gets this weapon in the campaign: 0 none, else 1 + its place in the list
 void set_forced_weapon(int weapon);
 int forced_weapon_count(); //"Off" and the weapons

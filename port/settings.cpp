@@ -104,7 +104,8 @@ void save_launch_settings() {
         {"LAUNCH_CUSTOM", custom_values()},
         {"LAUNCH_GOD", god_mode() ? "1" : "0"}, {"LAUNCH_INFINITEAMMO", infinite_ammo() ? "1" : "0"}, {"LAUNCH_INFINITESPRINT", infinite_sprint() ? "1" : "0"},
         {"LAUNCH_WEAPONRANDOMIZER", weapon_randomizer() ? "1" : "0"},
-        {"LAUNCH_NOATTACHMENTLIMIT", no_attachment_limit() ? "1" : "0"}, {"LAUNCH_BUNNYHOP", bunnyhop() ? "1" : "0"}};
+        {"LAUNCH_NOATTACHMENTLIMIT", no_attachment_limit() ? "1" : "0"}, {"LAUNCH_BUNNYHOP", bunnyhop() ? "1" : "0"},
+        {"LAUNCH_BHOP_PRESTRAFE", bhop_prestrafe() ? "1" : "0"}};
     for (int i = 0; i < kBhopValueCount; ++i) {
         char text[24];
         std::snprintf(text, sizeof text, "%g", bhop_value(i).value);
@@ -466,6 +467,7 @@ void BuildSettings()
 	AddToggle(kForFun, "no_attachment_limit", "No Attachment Limit (Experimental)", "On: the Weapon Randomizer's weapons may have several attachments at once, each one a chance of its own. Some may break the view.", no_attachment_limit, set_no_attachment_limit);
 
 	AddToggle(kBhop, "bunnyhop", "Bunnyhopping", "On: holding Jump hops whenever you touch the floor, and strafing in the air while turning adds speed, as in Half-Life. Steep ramps can be surfed. There is no sprint, you run at the base speed. Not online.", bunnyhop, set_bunnyhop);
+	AddToggle(kBhop, "bhop_prestrafe", "Pre-strafing", "On: the floor moves as in Half-Life too, so strafing while turning gains speed before the first hop, and a landing slides instead of stopping dead. Ground Accelerate and Friction set how much.", bhop_prestrafe, set_bhop_prestrafe);
 	for (int i = 0; i < kBhopValueCount; ++i)
 	{
 		const BhopValue& v = bhop_value(i);
