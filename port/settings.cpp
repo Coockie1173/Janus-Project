@@ -104,7 +104,12 @@ void save_launch_settings() {
         {"LAUNCH_CUSTOM", custom_values()},
         {"LAUNCH_GOD", god_mode() ? "1" : "0"}, {"LAUNCH_INFINITEAMMO", infinite_ammo() ? "1" : "0"}, {"LAUNCH_INFINITESPRINT", infinite_sprint() ? "1" : "0"},
         {"LAUNCH_WEAPONRANDOMIZER", weapon_randomizer() ? "1" : "0"},
-        {"LAUNCH_NOATTACHMENTLIMIT", no_attachment_limit() ? "1" : "0"}};
+        {"LAUNCH_NOATTACHMENTLIMIT", no_attachment_limit() ? "1" : "0"}, {"LAUNCH_BUNNYHOP", bunnyhop() ? "1" : "0"}};
+    for (int i = 0; i < kBhopValueCount; ++i) {
+        char text[24];
+        std::snprintf(text, sizeof text, "%g", bhop_value(i).value);
+        values.push_back({bhop_value(i).launch, text});
+    }
     char forced_text[16];
     std::snprintf(forced_text, sizeof forced_text, "%08X", forced_weapon_id());
     values.push_back({"LAUNCH_FORCEDWEAPON", forced_text});
@@ -182,14 +187,14 @@ void save_keys() {
 
 //the pages
 //what the game does with each classic controller button, and the key file's name for it
-struct Action { const char* label; const char* name; };
+struct Action { const char* label; const char* name; bool forFun = false; }; //forFun: bound under its toggle, not on Key Bindings
 const Action kActions[] = {
     {"Fire", "ZR"}, {"Aim", "ZL"}, {"Melee Attack", "L"}, {"Throw Grenade (doubles as R button)", "R"}, {"Reload", "Y"},
     {"Crouch", "A"}, {"Action", "B"}, {"Sprint", "Extra 1"}, {"Cycle Grenades", "X"}, {"Next Weapon", "Right"},
     {"Previous Weapon", "Left"}, {"Weapon 1", "Extra 3"}, {"Weapon 2", "Extra 4"}, {"Weapon 3", "Extra 5"},
     {"Firing Mode", "Up"}, {"Smartphone", "Down"}, {"Night Vision / Scores", "Minus"},
     {"Pause", "Plus"}, {"Move Forward", "Left Stick Up"}, {"Move Back", "Left Stick Down"},
-    {"Move Left", "Left Stick Left"}, {"Move Right", "Left Stick Right"}};
+    {"Move Left", "Left Stick Left"}, {"Move Right", "Left Stick Right"}, {"Jump", "Extra 6", true}};
 
 struct Row {
     std::string label, hint;
@@ -209,11 +214,12 @@ struct Row {
 };
 struct Page { std::string title; std::vector<Row> rows; };
 
-enum { kRoot, kScreen, kControls, kBindings, kEnhancements, kCheats, kForFun, kHotkeys, kHotkeyEdit, kLevels, kMaps, kSkips, kPageCount };
+enum { kRoot, kScreen, kControls, kBindings, kEnhancements, kCheats, kForFun, kHotkeys, kHotkeyEdit, kLevels, kMaps, kSkips, kBhop, kPageCount };
 std::vector<Page> g_pages;
 int g_page = kRoot, g_row = 0, g_scroll = 0;
 int g_root_row = 0; //where the cursor was on the first page
 int g_listening = -1; //the binding row waiting for a key
+int g_listenAction = -1; //and the action it's for
 int g_dragging = -1; //the slider row the mouse has by the knob
 int g_drop = -1; //the row with its dropdown open
 int g_dropAt = 0, g_dropScroll = 0; //the cursor in its list
@@ -275,6 +281,28 @@ void restore_bindings() {
     if (defaults.lines.empty()) { rt_log("goldeneye: no default keys (config/keys.txt)"); return; }
     for (auto& a : kActions) g_keys.set(a.name, defaults.get(a.name));
     save_keys();
+}
+
+Row BindingRow(int action)
+{
+	const Action& a = kActions[action];
+	Row r;
+	r.label = a.label;
+	r.hint = "Select to add a key or a mouse button. Delete clears the action.";
+	r.binding = true;
+	r.value = [name = std::string(a.name)]
+	{
+		std::string v;
+		for (auto& k : g_keys.keys(name)) v += (v.empty() ? "" : ", ") + k;
+		return v.empty() ? std::string("-") : v;
+	};
+	r.select = [action]
+	{
+		g_listening = g_row;
+		g_listenAction = action;
+	};
+	r.clear = [name = std::string(a.name)] { g_keys.set_keys(name, {}); save_keys(); };
+	return r;
 }
 
 Setting& AddSetting(int page, Setting::Kind kind, const char* id, const char* label, const char* hint)
@@ -436,6 +464,13 @@ void BuildSettings()
 	AddChoice(kForFun, "forced_weapon", "Forced Weapon", "In the campaign you and every guard start with this weapon, without attachments. Only while the Weapon Randomizer is off. From the next spawn on.",
 		weapons, forced_weapon, [](int v) { set_forced_weapon(v); g_dirty = true; }).dropdown = true;
 	AddToggle(kForFun, "no_attachment_limit", "No Attachment Limit (Experimental)", "On: the Weapon Randomizer's weapons may have several attachments at once, each one a chance of its own. Some may break the view.", no_attachment_limit, set_no_attachment_limit);
+
+	AddToggle(kBhop, "bunnyhop", "Bunnyhopping", "On: holding Jump hops whenever you touch the floor, and strafing in the air while turning adds speed, as in Half-Life. Steep ramps can be surfed. Not online.", bunnyhop, set_bunnyhop);
+	for (int i = 0; i < kBhopValueCount; ++i)
+	{
+		const BhopValue& v = bhop_value(i);
+		AddRange(kBhop, v.launch, v.label, v.hint, [i] { return bhop_value(i).value; }, [i](float f) { bhop_value(i).value = f; g_dirty = true; }, v.lo, v.hi, v.by, v.decimals);
+	}
 }
 
 Row SettingRow(int i)
@@ -816,6 +851,16 @@ void build_pages() {
     g_pages[kEnhancements].rows.push_back({"Skip Cutscenes (Experimental)", "Choose which cutscenes are skipped: each mission's intro, the one in its middle and its ending.", {}, {}, [] { go(kSkips); }});
     BuildSettings();
     for (size_t i = 0; i < g_settings.size(); ++i) g_pages[g_settings[i].page].rows.push_back(SettingRow((int)i));
+	auto& hop = g_pages[kBhop].rows; //the jump right under its toggle
+	hop.insert(hop.begin() + std::min<size_t>(1, hop.size()), BindingRow((int)std::size(kActions) - 1));
+	hop.push_back({"Defaults", "Every value above back to its own. The switch and the jump key stay as they are.", {}, {}, []
+	{
+		bhop_defaults();
+		g_dirty = true;
+	}});
+	auto& fun = g_pages[kForFun].rows;
+	const auto limit = std::find_if(fun.begin(), fun.end(), [](const Row& r) { return r.label == "No Attachment Limit (Experimental)"; });
+	fun.insert(limit, {"Bunnyhopping", "Half-Life's bunnyhopping and air strafing: its switch, the jump key and how it feels.", [] { return std::string(bunnyhop() ? "On" : "Off"); }, {}, [] { go(kBhop); }});
 
     Page& screen = g_pages[kScreen];
     screen.title = "Screen Settings";
@@ -849,26 +894,14 @@ void build_pages() {
 
     Page& bindings = g_pages[kBindings];
     bindings.title = "Key Bindings";
-    for (size_t i = 0; i < std::size(kActions); ++i) {
-        const Action& a = kActions[i];
-        Row r;
-        r.label = a.label;
-        r.hint = "Select to add a key or a mouse button. Delete clears the action.";
-        r.binding = true;
-        r.value = [name = std::string(a.name)] {
-            std::string v;
-            for (auto& k : g_keys.keys(name)) v += (v.empty() ? "" : ", ") + k;
-            return v.empty() ? std::string("-") : v;
-        };
-        r.select = [i] { g_listening = (int)i; };
-        r.clear = [name = std::string(a.name)] { g_keys.set_keys(name, {}); save_keys(); };
-        bindings.rows.push_back(r);
-    }
+    for (size_t i = 0; i < std::size(kActions); ++i)
+        if (!kActions[i].forFun) bindings.rows.push_back(BindingRow((int)i));
     bindings.rows.push_back({"Restore Defaults", "Back to the port's own keys for every action.", {}, {}, restore_bindings});
 
     g_pages[kEnhancements].title = "Enhancements";
     g_pages[kCheats].title = "Cheats";
     g_pages[kForFun].title = "For Fun";
+    g_pages[kBhop].title = "Bunnyhopping";
     g_pages[kHotkeys].title = "Hotkeys";
     g_pages[kHotkeyEdit].title = "Hotkey";
     BuildHotkeyPages();
@@ -876,7 +909,8 @@ void build_pages() {
 
 //the key or mouse button pressed for the listening action goes on that one and off every other
 void bind(const std::string& key) {
-    const char* name = kActions[g_listening].name;
+    if (g_listenAction < 0) return;
+    const char* name = kActions[g_listenAction].name;
     for (auto& a : kActions) {
         auto keys = g_keys.keys(a.name);
         size_t before = keys.size();
@@ -935,6 +969,32 @@ void AddWeaponBindings()
 	rt_log("goldeneye: the weapon slots are on 1, 2 and 3 now (Extra 3 to 5 in %s)", video_keys_path().c_str());
 }
 
+//a key file from before the jump: Space goes from the action to it, when the action keeps a key
+void AddJumpBinding()
+{
+	static bool done = false;
+	if (done || video_keys_path().empty()) return;
+	done = true;
+	if (g_keys.lines.empty() || g_keys.find("Extra 6") >= 0) return;
+	auto is = [](const std::string& k) { return !SDL_strcasecmp(k.c_str(), "Space"); };
+	bool taken = false;
+	for (auto& a : kActions)
+	{
+		auto keys = g_keys.keys(a.name);
+		if (std::string(a.name) != "B" && std::any_of(keys.begin(), keys.end(), is)) taken = true;
+	}
+	auto action = g_keys.keys("B");
+	if (!taken && std::any_of(action.begin(), action.end(), is))
+	{
+		std::erase_if(action, is);
+		if (action.empty()) taken = true;
+		else g_keys.set_keys("B", action);
+	}
+	g_keys.set("Extra 6", taken ? "" : "Space");
+	save_keys();
+	rt_log("goldeneye: the jump is on %s (Extra 6 in %s)", taken ? "no key" : "Space", video_keys_path().c_str());
+}
+
 //opening, closing, moving
 void open(bool on) {
     if (on == g_open) return;
@@ -954,12 +1014,22 @@ void open(bool on) {
     mouse_capture(!overlay_open());
 }
 
+//the For Fun row that opens the bunnyhopping page
+int BhopRow()
+{
+	const auto& fun = g_pages[kForFun].rows;
+	for (size_t i = 0; i < fun.size(); ++i)
+		if (fun[i].label == "Bunnyhopping") return (int)i;
+	return 0;
+}
+
 void back() {
     if (g_drop >= 0) g_drop = -1;
     else if (g_listening >= 0) g_listening = -1;
     else if (g_page == kRoot) open(false);
     else if (g_page == kHotkeyEdit) go(kHotkeys, std::max(0, g_edit));
     else if (g_page == kSkips) go(kEnhancements, 0);
+    else if (g_page == kBhop) go(kForFun, BhopRow());
     else go(kRoot, g_root_row);
 }
 
@@ -1541,6 +1611,7 @@ bool cheats_active()
 	for (const Setting& s : g_settings)
 	{
 		if ((s.page == kCheats || s.page == kForFun) && s.get() > 0.5f) return true;
+		if (s.page == kBhop && std::string(s.id) == "bunnyhop" && s.get() > 0.5f) return true;
 	}
 	return false;
 }
@@ -1567,6 +1638,7 @@ void settings_init() {
 bool settings_event(const SDL_Event* e) {
     add_sprint_binding();
     AddWeaponBindings();
+    AddJumpBinding();
     if (e->type == SDL_EVENT_KEY_UP && e->key.scancode == SDL_SCANCODE_ESCAPE) g_escape = false;
     if (!g_open && e->type == SDL_EVENT_KEY_DOWN && e->key.scancode == SDL_SCANCODE_ESCAPE) {
         g_escape = true;
