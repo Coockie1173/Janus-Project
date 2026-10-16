@@ -124,6 +124,8 @@ void install_ping(); //the scoreboard of a modded network game has every player'
 bool show_ping();
 void set_show_ping(bool on);
 bool modded_lobby(); //modmenu.cpp: network games are the ones of Connect to WFC Modded
+void net_write_number(PPCContext& c, uint32_t stream, uint32_t value, uint32_t most); //a ranged number 0..most into a player's state or a command (its stream)
+uint32_t net_read_number(PPCContext& c, uint32_t stream, uint32_t most, uint32_t otherwise); //and back, otherwise when it can't be read
 void install_mods(); //mods.cpp
 float world_trace(const PPCContext& c, const float start[3], const float way[3]); //the first hit of the level's collision along way from start, 0 to 1 of it, negative for none. on the game's thread
 //a level among the mods: its file's hash, name and path, and the gamemode folders it is in, a bit each (0: only in the mods folder itself)
@@ -263,7 +265,16 @@ void install_bunnyhop(); //bunnyhop.cpp
 bool bunnyhop(); //for fun, the player hops by itself and strafing in the air adds speed
 void set_bunnyhop(bool on);
 void bunnyhop_look(uint32_t controller); //after ge_look_apply, the body's step is ours
-void bunnyhop_apply(uint32_t controller); //after the local controller's update
+void bunnyhop_apply(uint32_t controller); //after a controller's update: the local one's offline, every one's online
+void bunnyhop_command(uint32_t command); //a command of this console's was filled: the jump key goes in
+uint32_t bunnyhop_input(uint32_t controller, uint32_t command); //before ge_input_copy: the key is the controller's
+void bunnyhop_input_done(uint32_t command, uint32_t kept); //after it, with what bunnyhop_input gave
+void bunnyhop_write(PPCContext& c, uint32_t stream, bool rules); //the host's rules behind its own player's state
+void bunnyhop_read(PPCContext& c, uint32_t stream);
+bool bunnyhop_now(); //on for this game: the menu's, the host's online
+bool bhop_locked(); //a joined modded network game: the host's settings are the ones played by
+bool bhop_prestrafe_now();
+float bhop_value_now(int which);
 void bunnyhop_buttons(const ClassicState& s); //the jump key, as the pad was read
 bool bunnyhop_speed(float& speed); //the speedometer's, false with it off or nobody in play
 enum { kBhopSpeed, kBhopHeight, kBhopGravity, kBhopAirCap, kBhopAirAccel, kBhopWish, kBhopMax, kBhopFall, kBhopDrop, kBhopGroundAccel, kBhopFriction, kBhopValueCount };

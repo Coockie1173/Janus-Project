@@ -466,12 +466,20 @@ void BuildSettings()
 		weapons, forced_weapon, [](int v) { set_forced_weapon(v); g_dirty = true; }).dropdown = true;
 	AddToggle(kForFun, "no_attachment_limit", "No Attachment Limit (Experimental)", "On: the Weapon Randomizer's weapons may have several attachments at once, each one a chance of its own. Some may break the view.", no_attachment_limit, set_no_attachment_limit);
 
-	AddToggle(kBhop, "bunnyhop", "Bunnyhopping", "On: holding Jump hops whenever you touch the floor, and strafing in the air while turning adds speed, as in Half-Life. Steep ramps can be surfed. There is no sprint, you run at the base speed. Not online.", bunnyhop, set_bunnyhop);
-	AddToggle(kBhop, "bhop_prestrafe", "Pre-strafing", "On: the floor moves as in Half-Life too, so strafing while turning gains speed before the first hop, and a landing slides instead of stopping dead. Ground Accelerate and Friction set how much.", bhop_prestrafe, set_bhop_prestrafe);
+	//in a game someone else hosts through Connect to WFC Modded the page shows the host's, and nothing on it changes
+	AddToggle(kBhop, "bunnyhop", "Bunnyhopping", "On: holding Jump hops whenever you touch the floor, and strafing in the air while turning adds speed, as in Half-Life. Steep ramps can be surfed. There is no sprint, you run at the base speed. Online through Connect to WFC Modded the host's settings are everyone's.",
+		[] { return bhop_locked() ? bunnyhop_now() : bunnyhop(); }, [](bool on) { if (!bhop_locked()) set_bunnyhop(on); });
+	AddToggle(kBhop, "bhop_prestrafe", "Pre-strafing", "On: the floor moves as in Half-Life too, so strafing while turning gains speed before the first hop, and a landing slides instead of stopping dead. Ground Accelerate and Friction set how much.",
+		bhop_prestrafe_now, [](bool on) { if (!bhop_locked()) set_bhop_prestrafe(on); });
 	for (int i = 0; i < kBhopValueCount; ++i)
 	{
 		const BhopValue& v = bhop_value(i);
-		AddRange(kBhop, v.launch, v.label, v.hint, [i] { return bhop_value(i).value; }, [i](float f) { bhop_value(i).value = f; g_dirty = true; }, v.lo, v.hi, v.by, v.decimals);
+		AddRange(kBhop, v.launch, v.label, v.hint, [i] { return bhop_value_now(i); }, [i](float f)
+		{
+			if (bhop_locked()) return;
+			bhop_value(i).value = f;
+			g_dirty = true;
+		}, v.lo, v.hi, v.by, v.decimals);
 	}
 }
 
@@ -855,14 +863,21 @@ void build_pages() {
     for (size_t i = 0; i < g_settings.size(); ++i) g_pages[g_settings[i].page].rows.push_back(SettingRow((int)i));
 	auto& hop = g_pages[kBhop].rows; //the jump right under its toggle
 	hop.insert(hop.begin() + std::min<size_t>(1, hop.size()), BindingRow((int)std::size(kActions) - 1));
+	hop.push_back({"Settings", "Online through Connect to WFC Modded the host's are everyone's: a host sends its own, and in a game someone else hosts they're shown here and can't be changed. Yours are back after the game.",
+		[] { return std::string(bhop_locked() ? "The host's, locked" : "Yours"); }, {}, {}});
 	hop.push_back({"Defaults", "Every value above back to its own. The switch and the jump key stay as they are.", {}, {}, []
 	{
+		if (bhop_locked()) return;
 		bhop_defaults();
 		g_dirty = true;
 	}});
 	auto& fun = g_pages[kForFun].rows;
 	const auto limit = std::find_if(fun.begin(), fun.end(), [](const Row& r) { return r.label == "No Attachment Limit (Experimental)"; });
-	fun.insert(limit, {"Bunnyhopping", "Half-Life's bunnyhopping and air strafing: its switch, the jump key and how it feels.", [] { return std::string(bunnyhop() ? "On" : "Off"); }, {}, [] { go(kBhop); }});
+	fun.insert(limit, {"Bunnyhopping", "Half-Life's bunnyhopping and air strafing: its switch, the jump key and how it feels.", []
+	{
+		if (bhop_locked()) return std::string(bunnyhop_now() ? "On (host)" : "Off (host)");
+		return std::string(bunnyhop() ? "On" : "Off");
+	}, {}, [] { go(kBhop); }});
 
     Page& screen = g_pages[kScreen];
     screen.title = "Screen Settings";
@@ -1170,7 +1185,7 @@ void draw_frame(ImDrawList* dl, const Layout& L, const Page& page) {
     dl->AddRectFilledMultiColor(ImVec2(L.x(620), L.y(96)), ImVec2(L.x(820), L.y(118)), blue0, kBlue, kBlue, blue0);
     dl->AddRectFilled(ImVec2(L.x(820), L.y(96)), ImVec2(L.w, L.y(118)), kBlue);
     dl->AddRectFilled(ImVec2(L.x(322), L.y(123)), ImVec2(L.w, L.y(126)), kCream);
-    text(dl, ImVec2(L.x(323), L.y(78)), 40 * u, kCream, page.title);
+    text(dl, ImVec2(L.x(323), L.y(78)), 40 * u, kCream, g_page == kBhop && bhop_locked() ? page.title + " (Host's)" : page.title);
 
     //the foot, what the row under the cursor is for and the keys
     for (float y : {545.0f, 668.0f}) {

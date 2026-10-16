@@ -43,6 +43,19 @@
 //and friction takes it back. while that's no faster than the game's walk the player is the game's,
 //and a landing without the key slides on it instead of stopping dead
 //
+//online, through Connect to WFC Modded: the host's bunnyhopping is everyone's. the host steps
+//every player from their commands and a joined console steps its own ahead of it, so each
+//player has its hop of its own (Hopper) wherever it's stepped, and the jump key goes with the
+//command: the bits 31 (ours) and 30 (the key) of its +0x3C, which the game fills but never
+//sends (ge_command_fill, ge_command_read puts 0 there), taken off for ge_input_copy and put
+//back after. ge_command_write and ge_command_read add the key behind the game's own
+//the host's switch and values go with its own player's state (behind the ping, net.cpp), each
+//value as its step on the menu's slider, the same numbers the host plays by. a joined console
+//plays by them while it's in the game and its menu shows them, locked; its own are kept for
+//later. with the host's off, or before they came, nobody hops. the others a joined console sees
+//are drawn towards where the host says they are, hops and all, nothing to do there
+//over Nintendo WFC (a console's game) it stays off
+//
 //GE_BUNNYHOP=1 start with it on, else what the menu saved
 //the speed goes in the log twice a second, and what walls take (GE_BHOP_LOG=0 not)
 //GE_BHOP_PRESTRAFE=0 without pre-strafing, GE_BHOP_SPEED, GE_BHOP_HEIGHT, GE_BHOP_AIRCAP, GE_BHOP_AIRACCEL, GE_BHOP_WISH, GE_BHOP_MAX, GE_BHOP_GRAVITY,
@@ -80,74 +93,209 @@ BhopValue g_values[kBhopValueCount]{
 	{"Ground Accelerate", "Pre-strafing: how fast the run's speed is reached on the floor, Half-Life's sv_accelerate. Higher gains more speed turning.", "GE_BHOP_ACCEL", "LAUNCH_BHOP_ACCEL", 10.0f, 1.0f, 30.0f, 0.5f, 1},
 	{"Friction", "Pre-strafing: how fast the floor takes speed back, Half-Life's sv_friction. Lower keeps more.", "GE_BHOP_FRICTION", "LAUNCH_BHOP_FRICTION", 4.0f, 0.5f, 12.0f, 0.25f, 2},
 };
-float& kBaseSpeed = g_values[kBhopSpeed].value;
-float& kHopHeight = g_values[kBhopHeight].value;
-float& kGravity = g_values[kBhopGravity].value;
-float& kAirCap = g_values[kBhopAirCap].value; //half-life's 30 units a second is 0.76
-float& kAirAccel = g_values[kBhopAirAccel].value;
-float& kWishSpeed = g_values[kBhopWish].value;
-float& kMaxSpeed = g_values[kBhopMax].value; //more and a step goes through walls
-float& kFall = g_values[kBhopFall].value; //of each frame's fall that counts towards the deadly one
-float& kFreeDrop = g_values[kBhopDrop].value; //how far under the floor it left the player falls before the game's fall
-float& kGroundAccel = g_values[kBhopGroundAccel].value;
-float& kFriction = g_values[kBhopFriction].value;
+//what play goes by this frame: the menu's offline, the host's in a modded network game
+struct Rules
+{
+	bool on = false, prestrafe = true;
+	float v[kBhopValueCount]{};
+};
+Rules g_now;
+float& kBaseSpeed = g_now.v[kBhopSpeed];
+float& kHopHeight = g_now.v[kBhopHeight];
+float& kGravity = g_now.v[kBhopGravity];
+float& kAirCap = g_now.v[kBhopAirCap]; //half-life's 30 units a second is 0.76
+float& kAirAccel = g_now.v[kBhopAirAccel];
+float& kWishSpeed = g_now.v[kBhopWish];
+float& kMaxSpeed = g_now.v[kBhopMax]; //more and a step goes through walls
+float& kFall = g_now.v[kBhopFall]; //of each frame's fall that counts towards the deadly one
+float& kFreeDrop = g_now.v[kBhopDrop]; //how far under the floor it left the player falls before the game's fall
+float& kGroundAccel = g_now.v[kBhopGroundAccel];
+float& kFriction = g_now.v[kBhopFriction];
 const float kStopSpeed = 2.0f; //under this friction takes as if it were this, half-life's stopspeed of its run
 const float kGain = 0.1f; //the floor's speed is ours this much over the game's walk
 const float kDeadZone = 0.2f;
 const float kWalkable = 0.7f; //a normal this far up is a floor, half-life's
 const float kRamp = 0.05f; //and this far up a ramp, not a wall
 const uint32_t kExtraJump = 1u << 5;
+const uint32_t kCmdExtra = 0x3C, kCmdOurs = 0x80000000, kCmdJump = 0x40000000; //see the top
 
-std::atomic<bool> g_bunnyhop{false};
+enum Mode { kOffline, kOff, kHosting, kJoined };
+Mode g_mode = kOffline;
+uint32_t g_rulesFrame = ~0u;
+Rules g_host; //as the host last sent them
+bool g_hostKnown = false;
+
+std::atomic<bool> g_bunnyhop{false}; //the menu's, ours
 std::atomic<bool> g_prestrafe{true};
+std::atomic<bool> g_onNow{false}, g_locked{false}; //for the menu's and the renderer's threads
 std::atomic<bool> g_jump{false}; //as the pad was last read
 std::atomic<float> g_speed{0}; //the speedometer's, read by the renderer's thread
 std::atomic<uint32_t> g_speedFrame{~0u};
 bool g_trace = false;
 bool g_log = true; //the speed in the log, twice a second
-uint32_t g_ctrl = 0; //the local controller as of its last update
-bool g_active = false; //the speed is ours
-float g_vel[2]{}; //x and z, a second
-float g_ground[2]{}; //pre-strafing's on the floor, kept while the walk is still the game's
-bool g_groundOn = false; //it went on last frame
-uint32_t g_entity = 0;
-uint32_t g_gravityBody = 0; //the body whose gravity is ours, its own and what we made it
-float g_gravityGame = 0, g_gravityOurs = 0;
-float g_fallen = 0; //the deadly fall as we left it
-float g_floorY = 0, g_topY = 0; //where the player left the floor, and the highest since
 PPCFunc orig_fall_start = nullptr, orig_move_grab = nullptr, orig_sprint_allowed = nullptr, orig_move_speed = nullptr;
+PPCFunc orig_command_write = nullptr, orig_command_read = nullptr;
 
-//the body's gravity back to the game's
-void GameGravity()
+//a player's hop: offline the local one's, online every one stepped here
+struct Hopper
 {
-	if (guest_ptr(g_gravityBody) && ldf(g_gravityBody + kBodyGravity) == g_gravityOurs) stf(g_gravityBody + kBodyGravity, g_gravityGame);
-	g_gravityBody = 0;
+	uint32_t ctrl = 0;
+	uint32_t seen = 0; //the frame it was last asked for
+	bool commanded = false; //stepped from commands that had the key in them
+	bool jump = false; //the key, as its last input had it
+	bool active = false; //the speed is ours
+	float vel[2]{}; //x and z, a second
+	float ground[2]{}; //pre-strafing's on the floor, kept while the walk is still the game's
+	bool groundOn = false; //it went on last frame
+	uint32_t entity = 0;
+	uint32_t gravityBody = 0; //the body whose gravity is ours, its own and what we made it
+	float gravityGame = 0, gravityOurs = 0;
+	float fallen = 0; //the deadly fall as we left it
+	float floorY = 0, topY = 0; //where the player left the floor, and the highest since
+};
+const int kHoppers = 16;
+Hopper g_hoppers[kHoppers];
+
+Hopper* Of(uint32_t ctrl)
+{
+	for (Hopper& h : g_hoppers)
+	{
+		if (h.ctrl == ctrl && ctrl != 0) return &h;
+	}
+	return nullptr;
 }
 
-void LowGravity(uint32_t body)
+//the body's gravity back to the game's
+void GameGravity(Hopper& h)
 {
-	if (body != g_gravityBody) GameGravity();
+	if (guest_ptr(h.gravityBody) && ldf(h.gravityBody + kBodyGravity) == h.gravityOurs) stf(h.gravityBody + kBodyGravity, h.gravityGame);
+	h.gravityBody = 0;
+}
+
+//the controller's own, else a free one or the one longest not asked for
+Hopper& Make(uint32_t ctrl)
+{
+	if (Hopper* h = Of(ctrl))
+	{
+		h->seen = ld32(kFrameCount);
+		return *h;
+	}
+	Hopper* pFree = &g_hoppers[0];
+	for (Hopper& h : g_hoppers)
+	{
+		if (h.ctrl == 0) { pFree = &h; break; }
+		if (h.seen < pFree->seen) pFree = &h;
+	}
+	GameGravity(*pFree);
+	*pFree = Hopper{};
+	pFree->ctrl = ctrl;
+	pFree->seen = ld32(kFrameCount);
+	return *pFree;
+}
+
+//a value as its step on the slider: what the host sends and plays by
+uint32_t StepOf(int which, float value)
+{
+	const BhopValue& b = g_values[which];
+	return (uint32_t)std::clamp(std::lround((value - b.lo) / b.by), 0L, std::lround((b.hi - b.lo) / b.by));
+}
+float AtStep(int which, uint32_t step) { return g_values[which].lo + (float)step * g_values[which].by; }
+
+Rules Own(bool steps)
+{
+	Rules r;
+	r.on = g_bunnyhop;
+	r.prestrafe = g_prestrafe;
+	for (int i = 0; i < kBhopValueCount; ++i) r.v[i] = steps ? AtStep(i, StepOf(i, g_values[i].value)) : g_values[i].value;
+	return r;
+}
+
+//once a frame, before anything reads the rules
+void Refresh()
+{
+	const uint32_t frame = ld32(kFrameCount);
+	if (frame == g_rulesFrame) return;
+	g_rulesFrame = frame;
+	Mode mode = kOffline;
+	if (network_game()) mode = !modded_lobby() ? kOff : joined_game() ? kJoined : kHosting;
+	else g_hostKnown = false;
+	switch (mode)
+	{
+	case kOffline: g_now = Own(false); break;
+	case kHosting: g_now = Own(true); break;
+	case kJoined: g_now = g_hostKnown ? g_host : Rules{}; break;
+	case kOff: g_now.on = false; break;
+	}
+	static int said = -1;
+	if (mode * 2 + g_now.on != said)
+	{
+		said = mode * 2 + g_now.on;
+		static const char* names[] = { "offline", "a game over Nintendo WFC, off", "hosting, ours go to the others", "joined, the host's" };
+		if (mode != kOffline) rt_log("goldeneye: bunnyhop: %s, %s%s", names[mode], g_now.on ? "on" : "off", mode == kJoined && !g_hostKnown ? " until the host's come" : "");
+	}
+	g_mode = mode;
+	g_onNow = g_now.on;
+	g_locked = mode == kJoined;
+	if (!g_now.on || !guest_ptr(ld32(kPlayerPtr)))
+	{
+		for (Hopper& h : g_hoppers)
+		{
+			GameGravity(h);
+			h.fallen = 0;
+			h.active = false;
+		}
+	}
+	if (!guest_ptr(ld32(kPlayerPtr))) //between levels the controllers are gone
+	{
+		for (Hopper& h : g_hoppers) h = Hopper{};
+	}
+}
+
+//the controller hops here: offline the local one, online one stepped from commands
+Hopper* Hops(uint32_t ctrl)
+{
+	Refresh();
+	if (!g_now.on || !guest_ptr(ctrl)) return nullptr;
+	if (g_mode == kOffline)
+	{
+		if (ctrl != local_controller()) return nullptr;
+		if (noclip())
+		{
+			if (Hopper* h = Of(ctrl)) h->active = false;
+			return nullptr;
+		}
+		Hopper& h = Make(ctrl);
+		h.jump = g_jump;
+		return &h;
+	}
+	Hopper* h = Of(ctrl);
+	return h && h->commanded ? h : nullptr;
+}
+
+void LowGravity(Hopper& h, uint32_t body)
+{
+	if (body != h.gravityBody) GameGravity(h);
 	const float now{ ldf(body + kBodyGravity) };
 	if (!std::isfinite(now) || now <= 0) return;
-	if (body != g_gravityBody || now != g_gravityOurs) g_gravityGame = now; //the game set it again
-	g_gravityBody = body;
-	g_gravityOurs = g_gravityGame * kGravity;
-	stf(body + kBodyGravity, g_gravityOurs);
+	if (body != h.gravityBody || now != h.gravityOurs) h.gravityGame = now; //the game set it again
+	h.gravityBody = body;
+	h.gravityOurs = h.gravityGame * kGravity;
+	stf(body + kBodyGravity, h.gravityOurs);
 }
 
 //PlayerLand has added this frame's fall: only kFall of it stays
-void LongerFall(uint32_t ctrl)
+void LongerFall(Hopper& h, uint32_t ctrl)
 {
 	const float now{ ldf(ctrl + kFallen) };
 	if (!std::isfinite(now)) return;
-	if (ld32(ctrl + kPlayerState) != kStateFalling || now < g_fallen)
+	if (ld32(ctrl + kPlayerState) != kStateFalling || now < h.fallen)
 	{
-		g_fallen = ld32(ctrl + kPlayerState) == kStateFalling ? now * kFall : 0; //a new fall
-		if (g_fallen != now && g_fallen > 0) stf(ctrl + kFallen, g_fallen);
+		h.fallen = ld32(ctrl + kPlayerState) == kStateFalling ? now * kFall : 0; //a new fall
+		if (h.fallen != now && h.fallen > 0) stf(ctrl + kFallen, h.fallen);
 		return;
 	}
-	g_fallen += (now - g_fallen) * kFall;
-	stf(ctrl + kFallen, g_fallen);
+	h.fallen += (now - h.fallen) * kFall;
+	stf(ctrl + kFallen, h.fallen);
 }
 
 bool Free(uint32_t state)
@@ -155,34 +303,37 @@ bool Free(uint32_t state)
 	return state == kStateStanding || state == kStateMoving || state == kStateSprinting || state == kStateFalling;
 }
 
-void Trace(float gameX, float gameZ, bool floor)
+void Trace(const Hopper& h, float gameX, float gameZ, bool floor)
 {
+	if (!(g_trace || g_log) || h.ctrl != local_controller()) return;
 	static auto last = std::chrono::steady_clock::now();
 	auto now = std::chrono::steady_clock::now();
 	if (now - last < std::chrono::milliseconds(500)) return;
 	last = now;
-	rt_log("goldeneye: bunnyhop %s, speed %.2f (the game's %.2f), %s, yaw %.2f", g_active ? "on" : "off", std::hypot(g_vel[0], g_vel[1]),
-		   std::hypot(gameX, gameZ), floor ? "on the floor" : "in the air", ldf(ld32(g_ctrl + kEntity) + kYaw));
+	rt_log("goldeneye: bunnyhop %s, speed %.2f (the game's %.2f), %s, yaw %.2f", h.active ? "on" : "off", std::hypot(h.vel[0], h.vel[1]),
+		   std::hypot(gameX, gameZ), floor ? "on the floor" : "in the air", ldf(ld32(h.ctrl + kEntity) + kYaw));
 }
 //the walk asks whether to start the fall
 void FallStart(PPCContext& c)
 {
 	const uint32_t ctrl{ c.r[3] };
-	const uint32_t entity{ guest_ptr(ctrl) ? ld32(ctrl + kEntity) : 0 };
-	if (!g_active || ctrl != g_ctrl || !guest_ptr(entity) || ld32(ctrl + kPlayerState) == kStateFalling)
+	Hopper* h = Hops(ctrl);
+	const uint32_t entity{ h ? ld32(ctrl + kEntity) : 0 };
+	if (!h || !h->active || !guest_ptr(entity) || ld32(ctrl + kPlayerState) == kStateFalling)
 	{
 		orig_fall_start(c);
 		return;
 	}
 	const float y{ ldf(entity + kPos + 4) };
-	if (std::isfinite(y) && g_floorY - y < kFreeDrop) return;
+	if (std::isfinite(y) && h->floorY - y < kFreeDrop) return;
 	orig_fall_start(c);
-	if (std::isfinite(y) && g_topY > y) stf(ctrl + kFallen, g_topY - y); //LongerFall takes its share of it
+	if (std::isfinite(y) && h->topY > y) stf(ctrl + kFallen, h->topY - y); //LongerFall takes its share of it
 }
 
 void MoveGrab(PPCContext& c)
 {
-	if (g_active && g_jump && c.r[3] == g_ctrl)
+	Hopper* h = Hops(c.r[3]);
+	if (h && h->active && h->jump)
 	{
 		c.r[3] = 0;
 		return;
@@ -190,15 +341,9 @@ void MoveGrab(PPCContext& c)
 	orig_move_grab(c);
 }
 
-//ours: bunnyhopping, the local player's, offline
-bool Ours(uint32_t ctrl)
-{
-	return g_bunnyhop && ctrl == g_ctrl && guest_ptr(ctrl) && !network_game();
-}
-
 void SprintAllowed(PPCContext& c)
 {
-	if ((c.lr == kAskStart || c.lr == kAskGoOn) && Ours(c.r[3]))
+	if ((c.lr == kAskStart || c.lr == kAskGoOn) && Hops(c.r[3]))
 	{
 		c.r[3] = 0;
 		return;
@@ -212,20 +357,38 @@ void MoveSpeed(PPCContext& c)
 	const uint32_t ctrl{ c.r[3] }, out{ c.r[4] };
 	const bool speed{ (c.r[6] & 0xFF) != 0 };
 	orig_move_speed(c);
-	if (!Ours(ctrl) || !guest_ptr(out) || ld8(ctrl + kSprinting) || ld8(ctrl + kCrouched) || ld8(ctrl + kSlowed)) return;
+	if (!Hops(ctrl) || !guest_ptr(out) || ld8(ctrl + kSprinting) || ld8(ctrl + kCrouched) || ld8(ctrl + kSlowed)) return;
 	const float now{ ldf(out) };
 	if (!std::isfinite(now) || now == 0) return;
 	stf(out, speed ? now * kBaseSpeed / kGameRun : now * kGameRun / kBaseSpeed);
 }
+
+//(r3 the command, r4 the stream): the key behind the game's own, in a modded network game
+void CommandWrite(PPCContext& c)
+{
+	const uint32_t cmd{ c.r[3] }, stream{ c.r[4] };
+	orig_command_write(c);
+	if (modded_lobby()) net_write_number(c, stream, guest_ptr(cmd) && (ld32(cmd + kCmdExtra) & kCmdJump) ? 1 : 0, 1);
+}
+
+void CommandRead(PPCContext& c)
+{
+	const uint32_t cmd{ c.r[3] }, stream{ c.r[4] };
+	orig_command_read(c);
+	if (!modded_lobby()) return;
+	const uint32_t jump{ net_read_number(c, stream, 1, 0) };
+	if (guest_ptr(cmd)) st32(cmd + kCmdExtra, (ld32(cmd + kCmdExtra) & ~kCmdJump) | kCmdOurs | (jump ? kCmdJump : 0));
+}
+
 //on the floor without the key, half-life's ground move from the speed we had, its own of last frame
 //or the game's walk. each frame's gain off a turn is small, so it goes on under the walk until
-//it's faster: true then, g_vel is the speed
-bool PreStrafe(uint32_t ctrl, float gameX, float gameZ, float wishX, float wishZ, float stick, float dt, bool groundOn)
+//it's faster: true then, the hopper's vel is the speed
+bool PreStrafe(Hopper& h, uint32_t ctrl, float gameX, float gameZ, float wishX, float wishZ, float stick, float dt, bool groundOn)
 {
-	if (!g_prestrafe || ld8(ctrl + kSprinting) || ld8(ctrl + kCrouched) || ld8(ctrl + kSlowed)) return false;
+	if (!g_now.prestrafe || ld8(ctrl + kSprinting) || ld8(ctrl + kCrouched) || ld8(ctrl + kSlowed)) return false;
 	float v[2]{ gameX, gameZ };
-	if (g_active) v[0] = g_vel[0], v[1] = g_vel[1];
-	else if (groundOn) v[0] = g_ground[0], v[1] = g_ground[1];
+	if (h.active) v[0] = h.vel[0], v[1] = h.vel[1];
+	else if (groundOn) v[0] = h.ground[0], v[1] = h.ground[1];
 	const float speed{ std::hypot(v[0], v[1]) };
 	if (speed > 0)
 	{
@@ -244,20 +407,25 @@ bool PreStrafe(uint32_t ctrl, float gameX, float gameZ, float wishX, float wishZ
 			v[1] += accel * wishZ;
 		}
 	}
-	g_ground[0] = v[0];
-	g_ground[1] = v[1];
-	g_groundOn = true;
+	h.ground[0] = v[0];
+	h.ground[1] = v[1];
+	h.groundOn = true;
 	if (std::hypot(v[0], v[1]) <= std::hypot(gameX, gameZ) + kGain) return false;
-	g_vel[0] = v[0];
-	g_vel[1] = v[1];
+	h.vel[0] = v[0];
+	h.vel[1] = v[1];
 	return true;
 }
+
 } //namespace
 
 bool bunnyhop() { return g_bunnyhop; }
+bool bunnyhop_now() { return g_onNow; }
+bool bhop_locked() { return g_locked; }
 bool bhop_prestrafe() { return g_prestrafe; }
+bool bhop_prestrafe_now() { return g_locked ? g_now.prestrafe : (bool)g_prestrafe; }
 void set_bhop_prestrafe(bool on) { g_prestrafe = on; }
 BhopValue& bhop_value(int which) { return g_values[which]; }
+float bhop_value_now(int which) { return g_locked ? g_now.v[which] : g_values[which].value; }
 
 void bhop_defaults()
 {
@@ -266,61 +434,129 @@ void bhop_defaults()
 
 bool bunnyhop_speed(float& speed)
 {
-	if (!g_bunnyhop || !in_play() || ld32(kFrameCount) - g_speedFrame >= 4) return false;
+	if (!g_onNow || !in_play() || ld32(kFrameCount) - g_speedFrame >= 4) return false;
 	speed = g_speed;
 	return true;
 }
 void set_bunnyhop(bool on) { g_bunnyhop = on; }
 
+//after a controller's update: the local one's offline, any one's online
 void bunnyhop_apply(uint32_t ctrl)
 {
-	g_ctrl = ctrl;
-	const uint32_t entity{ ld32(ctrl + kEntity) };
+	Refresh();
+	const uint32_t entity{ guest_ptr(ctrl) ? ld32(ctrl + kEntity) : 0 };
 	const uint32_t body{ guest_ptr(entity) ? ld32(entity + kBody) : 0 };
-	if (!g_bunnyhop || !guest_ptr(body) || noclip() || network_game())
+	Hopper* h = Hops(ctrl);
+	if (!h || !guest_ptr(body))
 	{
-		GameGravity();
-		g_fallen = 0;
+		if (Hopper* had = Of(ctrl))
+		{
+			GameGravity(*had);
+			had->fallen = 0;
+		}
 		return;
 	}
-	LowGravity(body);
-	LongerFall(ctrl);
+	LowGravity(*h, body);
+	LongerFall(*h, ctrl);
 }
 void bunnyhop_buttons(const ClassicState& s) { g_jump = (s.extra & kExtraJump) != 0; }
+
+//a command of this console's is filled: the key goes in
+void bunnyhop_command(uint32_t cmd)
+{
+	if (guest_ptr(cmd)) st32(cmd + kCmdExtra, (ld32(cmd + kCmdExtra) & ~kCmdJump) | kCmdOurs | (g_jump ? kCmdJump : 0));
+}
+
+//(controller, command) before ge_input_copy: the key is the controller's, and the game copies
+//+0x3C without it. what was there, for bunnyhop_input_done
+uint32_t bunnyhop_input(uint32_t ctrl, uint32_t cmd)
+{
+	if (!network_game() || !guest_ptr(ctrl) || !guest_ptr(cmd)) return 0;
+	const uint32_t extra{ ld32(cmd + kCmdExtra) };
+	if (!(extra & kCmdOurs)) return 0;
+	st32(cmd + kCmdExtra, extra & ~(kCmdOurs | kCmdJump));
+	Hopper& h = Make(ctrl);
+	if (g_trace && !h.commanded) rt_log("goldeneye: bunnyhop: %08X is stepped from commands with the jump key in them", ctrl);
+	h.commanded = true;
+	h.jump = (extra & kCmdJump) != 0;
+	return extra;
+}
+void bunnyhop_input_done(uint32_t cmd, uint32_t kept)
+{
+	if (kept) st32(cmd + kCmdExtra, kept);
+}
+
+//a player's state goes out from the host: its own player's has the rules behind it, a bit says so
+void bunnyhop_write(PPCContext& c, uint32_t stream, bool rules)
+{
+	Refresh();
+	net_write_number(c, stream, rules ? 1 : 0, 1);
+	if (!rules) return;
+	net_write_number(c, stream, g_now.on ? 1 : 0, 1);
+	net_write_number(c, stream, g_now.prestrafe ? 1 : 0, 1);
+	for (int i = 0; i < kBhopValueCount; ++i) net_write_number(c, stream, StepOf(i, g_now.v[i]), StepOf(i, g_values[i].hi));
+}
+
+void bunnyhop_read(PPCContext& c, uint32_t stream)
+{
+	if (net_read_number(c, stream, 1, 0))
+	{
+		Rules r;
+		r.on = net_read_number(c, stream, 1, 0) != 0;
+		r.prestrafe = net_read_number(c, stream, 1, 0) != 0;
+		for (int i = 0; i < kBhopValueCount; ++i) r.v[i] = AtStep(i, net_read_number(c, stream, StepOf(i, g_values[i].hi), StepOf(i, g_values[i].initial)));
+		const bool news{ !g_hostKnown || r.on != g_host.on };
+		g_host = r;
+		g_hostKnown = true;
+		if (news) rt_log("goldeneye: bunnyhop: the host's is %s (base speed %.1f, hop %.2f, gravity %.2f, air cap %.2f, top speed %.0f)", r.on ? "on" : "off",
+						 r.v[kBhopSpeed], r.v[kBhopHeight], r.v[kBhopGravity], r.v[kBhopAirCap], r.v[kBhopMax]);
+	}
+}
 
 //after ge_look_apply, its step is in the body
 void bunnyhop_look(uint32_t ctrl)
 {
+	Hopper* hp = Hops(ctrl);
 	const uint32_t entity{ ld32(ctrl + kEntity) };
 	const uint32_t body{ guest_ptr(entity) ? ld32(entity + kBody) : 0 };
 	const float dt{ ldf(ctrl + kTimeStep) };
-	const bool groundOn{ g_groundOn };
-	g_groundOn = false;
-	if (!g_bunnyhop || ctrl != g_ctrl || !guest_ptr(body) || noclip() || network_game() || !Free(ld32(ctrl + kPlayerState)) ||
-		!(dt > 0.0005f && dt < 0.2f))
+	if (!guest_ptr(body) || !(dt > 0.0005f && dt < 0.2f))
 	{
-		g_active = false;
+		if (hp) hp->active = false;
 		return;
 	}
-	if (entity != g_entity) g_active = false;
-	g_entity = entity;
+	if (!hp) return;
+	Hopper& h = *hp;
+	const bool groundOn{ h.groundOn };
+	h.groundOn = false;
+	if (!Free(ld32(ctrl + kPlayerState)))
+	{
+		h.active = false;
+		return;
+	}
+	if (entity != h.entity) h.active = false;
+	h.entity = entity;
+	const bool local{ ctrl == local_controller() };
 
 	const float gameX{ ldf(body + kBodyStep) / dt }, gameZ{ ldf(body + kBodyStep + 8) / dt };
 	const float stickX{ ldf(ctrl + kMoveStick) }, stickY{ ldf(ctrl + kMoveStick + 4) };
 	const float yaw{ ldf(entity + kYaw) };
 	if (!std::isfinite(gameX) || !std::isfinite(gameZ) || !std::isfinite(stickX) || !std::isfinite(stickY) || !std::isfinite(yaw))
 	{
-		g_active = false;
+		h.active = false;
 		return;
 	}
 	const bool floor{ (ld16(body + kBodyFloor) & 1) != 0 };
-	g_speed = std::hypot(gameX, gameZ);
-	g_speedFrame = ld32(kFrameCount);
+	if (local)
+	{
+		g_speed = std::hypot(gameX, gameZ);
+		g_speedFrame = ld32(kFrameCount);
+	}
 	const float posY{ ldf(entity + kPos + 4) };
 	if (std::isfinite(posY))
 	{
-		if (floor || !g_active) g_floorY = g_topY = posY;
-		else g_topY = std::max(g_topY, posY);
+		if (floor || !h.active) h.floorY = h.topY = posY;
+		else h.topY = std::max(h.topY, posY);
 	}
 	const float stick{ std::min(1.0f, std::hypot(stickX, stickY)) };
 	//the stick in the world, as noclip.cpp has it
@@ -331,94 +567,94 @@ void bunnyhop_look(uint32_t ctrl)
 	//ClipVelocity: the push out of it (+0xEC) is its normal, and the speed is ours across and the
 	//body's fall speed up. a ramp too steep to stand on turns the speed across into speed up it,
 	//and gravity pulls along it: surfing
-	if (g_active && (ld16(body + kBodyFloor) & kBodyHit) != 0)
+	if (h.active && (ld16(body + kBodyFloor) & kBodyHit) != 0)
 	{
 		float n[3]{ ldf(body + kBodyPush), ldf(body + kBodyPush + 4), ldf(body + kBodyPush + 8) };
 		const float push{ std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]) };
 		if (std::isfinite(push) && push > 1e-5f && n[1] / push < kWalkable)
 		{
 			for (float& f : n) f /= push;
-			float v[3]{ g_vel[0], ldf(body + kBodyFallSpeed), g_vel[1] };
+			float v[3]{ h.vel[0], ldf(body + kBodyFallSpeed), h.vel[1] };
 			const float into{ v[0] * n[0] + v[1] * n[1] + v[2] * n[2] };
 			if (std::isfinite(v[1]) && into < 0)
 			{
-				if ((g_trace || g_log) && into < -1.0f)
+				if ((g_trace || g_log) && local && into < -1.0f)
 					rt_log("goldeneye: bunnyhop: the body's flags %X, normal %.2f %.2f %.2f took %.2f of %.2f", ld16(body + kBodyFloor), n[0], n[1], n[2], -into,
 						   std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]));
 				for (int i = 0; i < 3; ++i) v[i] -= into * n[i];
-				g_vel[0] = v[0];
-				g_vel[1] = v[2];
+				h.vel[0] = v[0];
+				h.vel[1] = v[2];
 				stf(body + kBodyFallSpeed, v[1]);
 			}
 			if (n[1] > kRamp && std::isfinite(posY)) //on a ramp, the fall starts over
 			{
-				g_floorY = g_topY = posY;
+				h.floorY = h.topY = posY;
 				if (ld32(ctrl + kPlayerState) == kStateFalling) stf(ctrl + kFallen, 0.0f);
-				g_fallen = 0;
+				h.fallen = 0;
 			}
 		}
 	}
 
 	if (floor)
 	{
-		if (!g_jump) //a landing from the game's fall with the key held hops on: the hurt is done, its stall runs out in the air
+		if (!h.jump) //a landing from the game's fall with the key held hops on: the hurt is done, its stall runs out in the air
 		{
-			g_active = PreStrafe(ctrl, gameX, gameZ, wishX, wishZ, stick, dt, groundOn);
-			if (!g_active)
+			h.active = PreStrafe(h, ctrl, gameX, gameZ, wishX, wishZ, stick, dt, groundOn);
+			if (!h.active)
 			{
-				if (g_trace || g_log) Trace(gameX, gameZ, floor);
+				Trace(h, gameX, gameZ, floor);
 				return;
 			}
 		}
 		else
 		{
 			//a hop off the floor: the speed we had, or the game's walk if that's faster
-			if (!g_active || std::hypot(g_vel[0], g_vel[1]) < std::hypot(gameX, gameZ))
+			if (!h.active || std::hypot(h.vel[0], h.vel[1]) < std::hypot(gameX, gameZ))
 			{
-				g_vel[0] = gameX;
-				g_vel[1] = gameZ;
+				h.vel[0] = gameX;
+				h.vel[1] = gameZ;
 			}
-			g_active = true;
+			h.active = true;
 			const float gravity{ ldf(body + kBodyGravity) };
 			if (std::isfinite(gravity) && gravity > 0) stf(body + kBodyFallSpeed, std::sqrt(2.0f * gravity * kHopHeight));
 		}
 	}
 	else
 	{
-		if (!g_active)
+		if (!h.active)
 		{
-			if (!g_jump)
+			if (!h.jump)
 			{
-				if (g_trace || g_log) Trace(gameX, gameZ, floor);
+				Trace(h, gameX, gameZ, floor);
 				return;
 			}
-			g_vel[0] = gameX;
-			g_vel[1] = gameZ;
-			g_active = true;
+			h.vel[0] = gameX;
+			h.vel[1] = gameZ;
+			h.active = true;
 		}
 		if (stick >= kDeadZone)
 		{
 			const float wishSpeed{ kWishSpeed * stick };
-			const float add{ std::min(wishSpeed, kAirCap) - (g_vel[0] * wishX + g_vel[1] * wishZ) };
+			const float add{ std::min(wishSpeed, kAirCap) - (h.vel[0] * wishX + h.vel[1] * wishZ) };
 			if (add > 0)
 			{
 				const float accel{ std::min(add, kAirAccel * wishSpeed * dt) };
-				g_vel[0] += accel * wishX;
-				g_vel[1] += accel * wishZ;
+				h.vel[0] += accel * wishX;
+				h.vel[1] += accel * wishZ;
 			}
 		}
 	}
 
-	const float speed{ std::hypot(g_vel[0], g_vel[1]) };
+	const float speed{ std::hypot(h.vel[0], h.vel[1]) };
 	if (speed > kMaxSpeed)
 	{
-		g_vel[0] *= kMaxSpeed / speed;
-		g_vel[1] *= kMaxSpeed / speed;
+		h.vel[0] *= kMaxSpeed / speed;
+		h.vel[1] *= kMaxSpeed / speed;
 	}
-	g_speed = std::hypot(g_vel[0], g_vel[1]);
-	stf(body + kBodyStep, g_vel[0] * dt);
-	stf(body + kBodyStep + 8, g_vel[1] * dt);
-	if (g_trace || g_log) Trace(gameX, gameZ, floor);
+	if (local) g_speed = std::hypot(h.vel[0], h.vel[1]);
+	stf(body + kBodyStep, h.vel[0] * dt);
+	stf(body + kBodyStep + 8, h.vel[1] * dt);
+	Trace(h, gameX, gameZ, floor);
 }
 
 void install_bunnyhop()
@@ -440,6 +676,10 @@ void install_bunnyhop()
 	orig_move_speed = ppc_hook("ge_move_speed", MoveSpeed);
 	if (!orig_sprint_allowed || !orig_move_speed) rt_log("goldeneye: bunnyhop: ge_sprint_allowed or ge_move_speed isn't hooked, the sprint and the run are the game's");
 	if (!orig_fall_start || !orig_move_grab) rt_log("goldeneye: bunnyhop: ge_fall_start or ge_move_grab isn't hooked, hops over 0.5 are the walk's");
+	//both or neither: a host that reads the key and a console that doesn't write it can't play together
+	orig_command_write = ppc_hook("ge_command_write", CommandWrite);
+	orig_command_read = ppc_hook("ge_command_read", CommandRead);
+	if (!orig_command_write || !orig_command_read) rt_die("goldeneye: ge_command_write and ge_command_read are not hooked in this build");
 }
 
 } //namespace ge

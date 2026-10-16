@@ -382,6 +382,7 @@ void command_fill(PPCContext& c) {
     uint32_t cmd = c.r[4], now = ld32(kFrameCount);
     orig_command_fill(c);
     net_command_look(cmd, now != frame);
+    bunnyhop_command(cmd);
     frame = now;
 }
 
@@ -390,7 +391,9 @@ void input_copy(PPCContext& c) {
     uint32_t ctrl = c.r[3];
     //a player's look is stepped from here on, not in its controller's update: the limits are this player's
     if (guest_ptr(ctrl)) set_pitch_limit(g_pitch_limit_now = pitch_limit_of(ctrl));
+    uint32_t cmd = c.r[4], kept = bunnyhop_input(ctrl, cmd);
     orig_input_copy(c);
+    bunnyhop_input_done(cmd, kept);
     if (!net_turns() || !guest_ptr(ctrl)) return;
     float yaw = ldf(ctrl + kCtrlHeading), pitch = ldf(ctrl + kCtrlLean);
     uint32_t player = ld32(ctrl + 4);
@@ -413,10 +416,11 @@ void look_apply(PPCContext& c) {
         float& turn = turn_of(ctrl);
         float add = dt > 0.0005f && dt < 0.3f ? turn / dt : 0;
         turn = 0;
-        if (add == 0) { orig_look_apply(c); return; }
+        if (add == 0) { orig_look_apply(c); bunnyhop_look(ctrl); return; }
         stf(ctrl + 0x97C, ldf(ctrl + 0x97C) + add);
         orig_look_apply(c);
         stf(ctrl + 0x97C, ldf(ctrl + 0x97C) - add);
+        bunnyhop_look(ctrl);
         return;
     }
     if (ctrl != g_look_ctrl || g_look_yaw == 0 || !(dt > 0.0005f && dt < 0.2f)) {
@@ -600,7 +604,7 @@ void controller_update(PPCContext& c) {
         bunnyhop_apply(ctrl);
         cheats_apply(ctrl);
         stamina_apply(ctrl);
-    }
+    } else if (network_game() && guest_ptr(player) && !is_tank(ctrl)) bunnyhop_apply(ctrl); //online everyone hops
     //the cheat, in a state whose update never got to ge_look_apply: turn the player's yaw directly
     if (forced && ctrl == g_look_ctrl && g_look_yaw != 0) {
         float yaw = ldf(player + 0xDC);

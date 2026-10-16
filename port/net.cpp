@@ -255,7 +255,7 @@ uint32_t HostPingOf(uint32_t ctrl)
 	return kPingNone;
 }
 
-//(r3 the controller, r4 the stream, r5 the state)
+//(r3 the controller, r4 the stream, r5 the state). bunnyhopping's after the ping (bunnyhop.cpp)
 void PlayerWrite(PPCContext& c)
 {
 	const uint32_t ctrl = c.r[3], stream = c.r[4];
@@ -263,13 +263,8 @@ void PlayerWrite(PPCContext& c)
 	if (!modded_lobby()) return;
 	const uint32_t ms = HostPingOf(ctrl);
 	if (ms != kPingNone) KeepPing(ctrl, ms); //the host's own scoreboard reads them here too
-	PPCContext call = c;
-	call.r[3] = stream;
-	call.r[4] = ms;
-	call.r[5] = 0;
-	call.r[6] = kPingNone;
-	call.r[7] = 1;
-	stream_write(call);
+	net_write_number(c, stream, ms, kPingNone);
+	bunnyhop_write(c, stream, ms == kPingHost);
 }
 
 //(r3 the controller, r4 the stream, r5 the state), true when it was read
@@ -278,18 +273,8 @@ void PlayerRead(PPCContext& c)
 	const uint32_t ctrl = c.r[3], stream = c.r[4];
 	orig_player_read(c);
 	if (!modded_lobby()) return;
-	const uint32_t stack = c.r[1], frame = stack - 0x20, out = frame + 0x10;
-	st32(frame, stack);
-	st32(out, kPingNone);
-	PPCContext call = c;
-	call.r[1] = frame;
-	call.r[3] = stream;
-	call.r[4] = out;
-	call.r[5] = 0;
-	call.r[6] = kPingNone;
-	call.r[7] = 1;
-	stream_read(call);
-	const uint32_t ms = ld32(out);
+	const uint32_t ms = net_read_number(c, stream, kPingNone, kPingNone);
+	bunnyhop_read(c, stream);
 	if (ms < kPingNone) KeepPing(ctrl, ms);
 	static const bool trace = std::getenv("GE_TRACE") != nullptr;
 	static uint32_t said = 0;
@@ -351,6 +336,34 @@ void ScoreboardDraw(PPCContext& c)
 }
 
 } //namespace
+
+void net_write_number(PPCContext& c, uint32_t stream, uint32_t value, uint32_t most)
+{
+	PPCContext call = c;
+	call.r[3] = stream;
+	call.r[4] = std::min(value, most);
+	call.r[5] = 0;
+	call.r[6] = most;
+	call.r[7] = 1;
+	stream_write(call);
+}
+
+uint32_t net_read_number(PPCContext& c, uint32_t stream, uint32_t most, uint32_t otherwise)
+{
+	const uint32_t stack = c.r[1], frame = stack - 0x20, out = frame + 0x10;
+	st32(frame, stack);
+	st32(out, otherwise);
+	PPCContext call = c;
+	call.r[1] = frame;
+	call.r[3] = stream;
+	call.r[4] = out;
+	call.r[5] = 0;
+	call.r[6] = most;
+	call.r[7] = 1;
+	stream_read(call);
+	const uint32_t value = ld32(out);
+	return value <= most ? value : otherwise;
+}
 
 bool show_ping() { return g_showPing; }
 void set_show_ping(bool on) { g_showPing = on; }

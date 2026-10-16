@@ -388,8 +388,9 @@ const uint32_t kModdedVersions = 0x40000000; //where the numbers made here are, 
 //what this build sends differently from the game in such a game goes in as well, so builds
 //that don't read each other's packets don't find each other: 1 the pitch's range (net.cpp),
 //2 a pool for every gamemode, 3 a command's yaw and lean are the mouse's turn (input.cpp),
-//4 a player's state has its ping behind it (net.cpp)
-const uint8_t kPortProtocol = 4;
+//4 a player's state has its ping behind it (net.cpp), 5 a command has the jump key behind it and a
+//player's state the host's bunnyhopping (bunnyhop.cpp)
+const uint8_t kPortProtocol = 5;
 
 uint32_t FileSum(const std::string& path)
 {
