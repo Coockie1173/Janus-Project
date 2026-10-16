@@ -130,3 +130,5 @@ ge_gun_parts           # a gun model's parts are shown or hidden: the Golden Gun
 ge_load_soundbank      # a soundbank is loaded: GE_TRACESOUND logs it (port/sound.cpp)
 ge_soundbank_slot      # a soundbank is checked for its slot: Weapon Randomizer's weapons bank has a slot of its own (port/randomizer.cpp)
 ge_soundbank_slot_memory # a soundbank slot's memory: the randomizer's slot is the port's (port/randomizer.cpp)
+ge_fall_start          # the player starts falling: not off a hop while bunnyhopping, only well below where it left the floor (port/bunnyhop.cpp)
+ge_move_grab           # a ladder or a ledge is looked for in the air: none while a hop is held
