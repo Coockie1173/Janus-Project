@@ -419,12 +419,17 @@ void look_apply(PPCContext& c) {
         stf(ctrl + 0x97C, ldf(ctrl + 0x97C) - add);
         return;
     }
-    if (ctrl != g_look_ctrl || g_look_yaw == 0 || !(dt > 0.0005f && dt < 0.2f)) { orig_look_apply(c); return; }
+    if (ctrl != g_look_ctrl || g_look_yaw == 0 || !(dt > 0.0005f && dt < 0.2f)) {
+        orig_look_apply(c);
+        if (guest_ptr(ctrl)) bunnyhop_look(ctrl);
+        return;
+    }
     float rate = ldf(ctrl + 0x97C), add = g_look_yaw / dt;
     g_look_yaw = 0;
     stf(ctrl + 0x97C, rate + add);
     orig_look_apply(c);
     stf(ctrl + 0x97C, ldf(ctrl + 0x97C) - add);
+    bunnyhop_look(ctrl);
 }
 
 const uint32_t kClA = 0x0010, kClB = 0x0040, kClZR = 0x0004, kClZL = 0x0080; //KPAD's classic bits
@@ -592,6 +597,7 @@ void controller_update(PPCContext& c) {
     if (ctrl == g_local_ctrl && frame == g_local_frame && !again && !is_tank(ctrl)) { //a tank has other things where the aim's blend is
         aim_lock_frame(ctrl);
         noclip_apply(ctrl);
+        bunnyhop_apply(ctrl);
         cheats_apply(ctrl);
         stamina_apply(ctrl);
     }
@@ -855,6 +861,7 @@ void classic_filter(int chan, ClassicState& s) {
     debug_classic(s);
     sprint_buttons(s);
     weapon_buttons(s);
+    bunnyhop_buttons(s);
     aim_lock_buttons(s);
     menu_buttons(s);
     custom_buttons(s);

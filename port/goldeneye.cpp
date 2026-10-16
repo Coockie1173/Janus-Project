@@ -124,6 +124,7 @@ void install() {
     install_stamina();
     install_cheats();
     install_randomizer();
+    install_bunnyhop();
     install_collision();
     install_autosave();
     install_weapons();

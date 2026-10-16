@@ -19,6 +19,7 @@
 //stamina.cpp the sprint that's left as a bar
 //cheats.cpp god mode, infinite ammo, infinite sprint
 //randomizer.cpp the weapon randomizer
+//bunnyhop.cpp hops by itself and half-life's air strafing
 //weapons.cpp a key for each weapon slot
 //prompts.cpp the bound key in the game's prompts, where it shows a controller button
 //collision.cpp the level's collision drawn in place of the world
@@ -258,6 +259,17 @@ bool weapon_randomizer(); //for fun, the campaign's weapons and the guards' guns
 void set_weapon_randomizer(bool on);
 bool no_attachment_limit(); //experimental, the randomizer's weapons may have more than one attachment
 void set_no_attachment_limit(bool on);
+void install_bunnyhop(); //bunnyhop.cpp
+bool bunnyhop(); //for fun, the player hops by itself and strafing in the air adds speed
+void set_bunnyhop(bool on);
+void bunnyhop_look(uint32_t controller); //after ge_look_apply, the body's step is ours
+void bunnyhop_apply(uint32_t controller); //after the local controller's update
+void bunnyhop_buttons(const ClassicState& s); //the jump key, as the pad was read
+bool bunnyhop_speed(float& speed); //the speedometer's, false with it off or nobody in play
+enum { kBhopHeight, kBhopGravity, kBhopAirCap, kBhopAirAccel, kBhopWish, kBhopMax, kBhopFall, kBhopDrop, kBhopValueCount };
+struct BhopValue { const char* label; const char* hint; const char* env; const char* launch; float value, lo, hi, by; int decimals; float initial = 0; };
+BhopValue& bhop_value(int which); //its tunables, by the enum above
+void bhop_defaults(); //every tunable back to its own
 int forced_weapon(); //for fun, everyone gets this weapon in the campaign: 0 none, else 1 + its place in the list
 void set_forced_weapon(int weapon);
 int forced_weapon_count(); //"Off" and the weapons
