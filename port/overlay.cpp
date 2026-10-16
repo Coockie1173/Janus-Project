@@ -135,6 +135,23 @@ void stamina_bar(const Stamina& s) {
     dl->AddRectFilled(ImVec2(at, y - 5 * u), ImVec2(at + wide, y + h + 5 * u), IM_COL32(255, 255, 255, 255));
 }
 
+//bunnyhopping's speedometer (bunnyhop.cpp), under the crosshair: across the floor, a second
+void speedometer(float speed) {
+    char text[16];
+    std::snprintf(text, sizeof text, "%.1f", speed);
+    ImFont* font = ImGui::GetFont();
+    ImVec2 screen = ImGui::GetIO().DisplaySize;
+    float u = std::min(screen.y / 720, screen.x / 960);
+    float size = font->FontSize * 2.2f * std::max(u, 1.0f);
+    ImVec2 box = font->CalcTextSizeA(size, FLT_MAX, 0, text);
+    ImVec2 at(std::floor((screen.x - box.x) / 2), std::floor(screen.y / 2 + 30 * u));
+    float hot = std::clamp((speed - 4.2f) / 12.0f, 0.0f, 1.0f); //white at a run, orange as it builds
+    ImU32 colour = IM_COL32(255, (int)(255 - 80 * hot), (int)(255 - 200 * hot), 255);
+    ImDrawList* dl = ImGui::GetBackgroundDrawList();
+    dl->AddText(font, size, ImVec2(at.x + 2 * u, at.y + 2 * u), IM_COL32(0, 0, 0, 180), text);
+    dl->AddText(font, size, at, colour, text);
+}
+
 std::string find_dmw() {
     if (const char* e = std::getenv("GE_DMW")) return e;
     std::error_code ec;
@@ -264,7 +281,9 @@ void draw() {
     bool cheats = cheats_active();
     Stamina sprint;
     bool meter = stamina(sprint);
-    if (!overlay_open() && !g_show_state && !skipping_cutscene() && fade <= 0 && !settings_toast() && !cheats && !meter) return;
+    float speed = 0;
+    bool hop = bunnyhop_speed(speed);
+    if (!overlay_open() && !g_show_state && !skipping_cutscene() && fade <= 0 && !settings_toast() && !cheats && !meter && !hop) return;
     //with only the state shown the cursor stays hidden over the picture
     ImGuiIO& io = ImGui::GetIO();
     if (overlay_open()) io.ConfigFlags &= ~ImGuiConfigFlags_NoMouseCursorChange;
@@ -274,6 +293,7 @@ void draw() {
     ImGui::NewFrame();
     if (fade > 0) cutscene_black(fade);
     if (meter) stamina_bar(sprint);
+    if (hop && fade <= 0) speedometer(speed);
     if (cheats) cheats_label();
     if (g_show_state) player_state();
     if (skipping_cutscene()) skipping_label();
