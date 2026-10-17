@@ -1626,11 +1626,8 @@ bool cheats_active()
 {
 	if (gecko_cheats()) return true;
 	for (const Setting& s : g_settings)
-	{
 		if ((s.page == kCheats || s.page == kForFun) && s.get() > 0.5f) return true;
-		if (s.page == kBhop && std::string(s.id) == "bunnyhop" && s.get() > 0.5f) return true;
-	}
-	return false;
+	return false; //bunnyhopping is on its own page, so it doesn't count
 }
 bool menu_event(const SDL_Event* e);
 
