@@ -58,6 +58,10 @@
 //the menu's Trigger Viewer page turns each type on and off (the ones the game asked about so
 //far in the level are listed), and whether what is behind the level's walls is drawn too
 //
+//all of it stays from one start to the next (LAUNCH_TRIGGERVIEW, _TRIGGERXRAY and _TRIGGERTYPES
+//in the settings file: "on" or "off" for the types not set on their own, then each set one,
+//"+13" on or "-36" off)
+//
 //GE_TRIGGERS=1 start with it on
 #include "ge.h"
 #include <atomic>
@@ -571,6 +575,29 @@ void set_trigger_types_shown(bool on)
 	g_types_shown = on;
 }
 
+//"on,-36,+13": every type but 0x36 on
+std::string trigger_types_saved()
+{
+	std::lock_guard<std::mutex> lock(g_types_lock);
+	std::string text = g_types_shown ? "on" : "off";
+	char b[16];
+	for (const auto& t : g_type_shown)
+		if (t.second != g_types_shown) std::snprintf(b, sizeof b, ",%c%02X", t.second ? '+' : '-', t.first), text += b;
+	return text;
+}
+
+void LoadTypes(const std::string& text)
+{
+	std::lock_guard<std::mutex> lock(g_types_lock);
+	g_type_shown.clear();
+	g_types_shown = text.compare(0, 3, "off") != 0;
+	for (size_t at = text.find(','); at != std::string::npos; at = text.find(',', at + 1))
+	{
+		char sign = at + 1 < text.size() ? text[at + 1] : 0;
+		if (sign == '+' || sign == '-') g_type_shown[(uint32_t)std::strtoul(text.c_str() + at + 2, nullptr, 16)] = sign == '+';
+	}
+}
+
 std::vector<std::string> trigger_labels()
 {
 	std::lock_guard<std::mutex> lock(g_labels_lock);
@@ -595,8 +622,9 @@ void install_triggers()
 	orig_test_point = ppc_hook("ge_trigger_test_point", TestPoint);
 	orig_test_body = ppc_hook("ge_trigger_test_body", TestBody);
 	if (!orig_test_near || !orig_test_point || !orig_test_body) rt_die("goldeneye: the trigger tests are not hooked in this build");
-	if (const char* e = std::getenv("GE_TRIGGERS")) g_view = std::atoi(e) != 0;
-	if (const char* e = std::getenv("GE_TRIGGERS_XRAY")) g_xray = std::atoi(e) != 0;
+	g_view = std::atoi(saved_setting("GE_TRIGGERS", "LAUNCH_TRIGGERVIEW").c_str()) != 0;
+	g_xray = std::atoi(saved_setting("GE_TRIGGERS_XRAY", "LAUNCH_TRIGGERXRAY").c_str()) != 0;
+	LoadTypes(saved_setting("GE_TRIGGER_TYPES", "LAUNCH_TRIGGERTYPES"));
 	g_trace = std::getenv("GE_TRACE") != nullptr;
 }
 

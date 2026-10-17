@@ -105,7 +105,8 @@ void save_launch_settings() {
         {"LAUNCH_GOD", god_mode() ? "1" : "0"}, {"LAUNCH_INFINITEAMMO", infinite_ammo() ? "1" : "0"}, {"LAUNCH_INFINITESPRINT", infinite_sprint() ? "1" : "0"},
         {"LAUNCH_WEAPONRANDOMIZER", weapon_randomizer() ? "1" : "0"},
         {"LAUNCH_NOATTACHMENTLIMIT", no_attachment_limit() ? "1" : "0"}, {"LAUNCH_BUNNYHOP", bunnyhop() ? "1" : "0"},
-        {"LAUNCH_BHOP_PRESTRAFE", bhop_prestrafe() ? "1" : "0"}};
+        {"LAUNCH_BHOP_PRESTRAFE", bhop_prestrafe() ? "1" : "0"},
+        {"LAUNCH_TRIGGERVIEW", trigger_view() ? "1" : "0"}, {"LAUNCH_TRIGGERXRAY", trigger_xray() ? "1" : "0"}, {"LAUNCH_TRIGGERTYPES", trigger_types_saved()}};
     for (int i = 0; i < kBhopValueCount; ++i) {
         char text[24];
         std::snprintf(text, sizeof text, "%g", bhop_value(i).value);
@@ -861,8 +862,8 @@ void RefreshTriggerPage()
 		r.hint = hint;
 		uint32_t type = t.type;
 		r.value = [type] { return std::string(trigger_type_shown(type) ? "On" : "Off"); };
-		r.adjust = [type](int) { set_trigger_type_shown(type, !trigger_type_shown(type)); };
-		r.select = [type] { set_trigger_type_shown(type, !trigger_type_shown(type)); };
+		r.adjust = [type](int) { set_trigger_type_shown(type, !trigger_type_shown(type)); g_dirty = true; };
+		r.select = [type] { set_trigger_type_shown(type, !trigger_type_shown(type)); g_dirty = true; };
 		rows.push_back(r);
 	}
 	if (g_page == kTriggers) g_row = std::clamp(g_row, 0, (int)rows.size() - 1);
@@ -910,8 +911,8 @@ void build_pages() {
 	cheats.insert(collision == cheats.end() ? cheats.end() : collision + 1, {"Trigger Viewer", "The triggers that go off when you walk into them, drawn over the world: its switch, whether they show through walls, and which types.",
 		[] { return std::string(trigger_view() ? "On" : "Off"); }, {}, [] { go(kTriggers); }});
 	Page& triggers = g_pages[kTriggers];
-	triggers.rows.push_back({"Show All Types", "Every type on, the ones not checked yet too.", {}, {}, [] { set_trigger_types_shown(true); }});
-	triggers.rows.push_back({"Hide All Types", "Every type off, the ones not checked yet too. Then turn on the ones you want.", {}, {}, [] { set_trigger_types_shown(false); }});
+	triggers.rows.push_back({"Show All Types", "Every type on, the ones not checked yet too.", {}, {}, [] { set_trigger_types_shown(true); g_dirty = true; }});
+	triggers.rows.push_back({"Hide All Types", "Every type off, the ones not checked yet too. Then turn on the ones you want.", {}, {}, [] { set_trigger_types_shown(false); g_dirty = true; }});
 	g_triggerRows = triggers.rows.size();
 	auto& fun = g_pages[kForFun].rows;
 	const auto limit = std::find_if(fun.begin(), fun.end(), [](const Row& r) { return r.label == "No Attachment Limit (Experimental)"; });

@@ -336,6 +336,7 @@ uint32_t trigger_types_version(); //changes with the list
 bool trigger_type_shown(uint32_t type);
 void set_trigger_type_shown(uint32_t type, bool on);
 void set_trigger_types_shown(bool on); //every type, and the ones not asked about yet
+std::string trigger_types_saved(); //the types' choices as the settings file keeps them
 void install_weapons(); //weapons.cpp
 void install_prompts(); //prompts.cpp
 void weapon_buttons(ClassicState& s); //a slot's key, in the classic's filter
