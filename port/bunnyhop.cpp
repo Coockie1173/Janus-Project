@@ -66,6 +66,12 @@
 //neither his body nor his first-person arms (cp_bondfp, whose head bone the camera sits at): the
 //view stays at 0,0,0, the streets never come in and he falls. so for that call the row says
 //nothing and the game picks Bond's (4D0001B9) itself, his files load after it
+//the mission's way is one objective's markers (type 0x3F, 22 on Tank), each woken by the one
+//before as the player reaches it, the last waking the ending's cutscene and that the exit. one
+//of them hands on through the tank's own part of the street (Tank's marker at -398 27 -151 to a
+//static object), which Bond never gets past. so on foot, once the first marker is awake, every
+//other one of its objective is woken too and each goes off where Bond reaches it (again after a
+//checkpoint, which starts them over)
 //
 //GE_BUNNYHOP=1 start with it on, else what the menu saved
 //the speed goes in the log twice a second, and what walls take (GE_BHOP_LOG=0 not)
@@ -151,6 +157,11 @@ const uint32_t kLevels = 0x805D1804, kLevelRow = 0x805D1820, kRowSkin = 0x78; //
 const uint32_t kLevelKind = 0xFFFF0000, kCampaignLevel = 0x01810000;
 bool g_onFoot = false; //this level's player isn't the tank, see the top
 uint32_t g_saidOnFoot = 0; //the level it was logged for
+bool g_wayWoken = false; //the markers of this level's way, see the top
+uint32_t g_wayFrame = ~0u;
+const uint32_t kWorld = 0x805F4CCC, kTriggerCount = 0xE0, kTriggers = 0xE4;
+const uint32_t kTriggerType = 0x58, kTriggerFlags = 0x68, kAsleep = 1, kMarkerObjective = 0x9C;
+const uint32_t kObjectiveMarker = 0x3F;
 
 //a player's hop: offline the local one's, online every one stepped here
 struct Hopper
@@ -367,14 +378,47 @@ void SprintAllowed(PPCContext& c)
 	orig_sprint_allowed(c);
 }
 
+//on foot in a tank's level: once a marker of the way is awake, the others of its objective too
+void WakeWay()
+{
+	const uint32_t frame{ ld32(kFrameCount) };
+	if (g_wayWoken || frame == g_wayFrame) return;
+	g_wayFrame = frame;
+	const uint32_t count{ std::min(ld32(kWorld + kTriggerCount), 4096u) }, triggers{ ld32(kWorld + kTriggers) };
+	if (!guest_ptr(triggers)) return;
+	uint32_t objective = 0;
+	for (uint32_t i = 0; i < count && !objective; ++i)
+	{
+		const uint32_t t{ ld32(triggers + i * 4) };
+		if (guest_ptr(t) && ld32(t + kTriggerType) == kObjectiveMarker && !(ld32(t + kTriggerFlags) & kAsleep)) objective = ld32(t + kMarkerObjective);
+	}
+	if (!objective) return;
+	int woken = 0;
+	for (uint32_t i = 0; i < count; ++i)
+	{
+		const uint32_t t{ ld32(triggers + i * 4) };
+		if (!guest_ptr(t) || ld32(t + kTriggerType) != kObjectiveMarker || ld32(t + kMarkerObjective) != objective) continue;
+		if (!(ld32(t + kTriggerFlags) & kAsleep)) continue;
+		st32(t + kTriggerFlags, ld32(t + kTriggerFlags) & ~kAsleep);
+		++woken;
+	}
+	g_wayWoken = true;
+	rt_log("goldeneye: bunnyhop: on foot, the %d other marker(s) of objective %08X are awake", woken, objective);
+}
+
 //(levels, hash) -> is the player a tank there: not while bunnyhopping in the campaign
 void TankLevel(PPCContext& c)
 {
 	const uint32_t hash{ c.r[4] };
 	orig_tank_level(c);
-	if (!guest_ptr(ld32(kPlayerPtr))) g_onFoot = g_bunnyhop && !network_game();
+	if (!guest_ptr(ld32(kPlayerPtr)))
+	{
+		g_onFoot = g_bunnyhop && !network_game();
+		g_wayWoken = false;
+	}
 	if (c.r[3] == 0 || !g_onFoot || (hash & kLevelKind) != kCampaignLevel) return;
 	c.r[3] = 0;
+	if (guest_ptr(ld32(kPlayerPtr))) WakeWay();
 	if (g_saidOnFoot != hash) rt_log("goldeneye: bunnyhop: level %08X is on foot, not in the tank", hash);
 	g_saidOnFoot = hash;
 }
