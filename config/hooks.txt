@@ -76,6 +76,7 @@ ge_cutscene_take       # a cutscene takes the player: the ones in config/cutscen
 ge_cutscene_release    # and lets go: GE_TRACECUT logs it, a won level logs what took the player since
 ge_file_update         # a file of the file manager is updated: one being unloaded waits the console's time (port/unload.cpp)
 ge_timeline_event      # a timeline's type 0xB event: one that waits stays at the event's frame (port/timeline.cpp)
+ge_timeline_item_event # a timeline's event to an item of its own file: none while the file isn't loaded (port/timeline.cpp)
 ge_texture_animate     # a texture's animator: it counts the whole frame's length at any rate (port/flipbooks.cpp)
 ge_typed_text_update   # a typed text gets its next character: one a console frame at any rate (port/typing.cpp)
 ge_sound_details       # a sound's details are looked up by its hash: GE_TRACESOUND logs it and who asked (port/sound.cpp)
