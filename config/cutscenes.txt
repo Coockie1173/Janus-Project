@@ -12,6 +12,7 @@
 0181013F 04002615 58.7  middle through # Dam, into the truck until 0.8 s before the mouse is back for good (187.2 s in, given back on the way at 138.4)
 0181013F 04002633 59.4  middle again # Dam, the mouse lost 12.5 s after it takes the player, until 1.7 s before the B prompt (passed 61.1 s in)
 0181013F 04002728 26.6  middle again # Dam, after the quick time event, the mouse lost 8.7 s in until 0.8 s before the player is let go (27.4 s in)
+01810150 0400269B 46.9  middle      # Outpost, two timelines in a row (04002758 at +27.4), until 0.8 s before the player is let go (47.7 s in)
 0181014D 04002B0F 19.1  middle      # Solar, in the middle, until 0.8 s before the player is let go (19.9 s in)
 0181013C 04002CE0 0     ending      # Airfield, after the plane's two quick time events
 0181013F 04002380 0     ending      # Dam
