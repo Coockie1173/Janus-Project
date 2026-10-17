@@ -26,7 +26,7 @@ import extract_disc
 
 ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 WINDOWS = os.name == "nt"
-GAME_EXE = os.path.join(ROOT, "GoldenEye.exe" if WINDOWS else "GoldenEye")
+GAME_EXE = os.path.join(ROOT, "Janus-Project.exe" if WINDOWS else "Janus-Project")
 PORTABLE = os.path.isfile(GAME_EXE) #a package: no build folder, no launch.sh
 PLAY = "Play.bat" if WINDOWS else "./Play.sh"
 CRASHES = "crashes" if PORTABLE else "build/crashes"

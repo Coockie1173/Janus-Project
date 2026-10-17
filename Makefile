@@ -5,8 +5,8 @@
 #   make smoke      boot headless for SMOKE_SECS seconds, log to build/run.log
 #   make names      mix the symbol sources into build/names.tsv
 #   make deps       build SDL3 into build/deps if the system has no SDL3 dev files
-#   make win        the Windows build, cross-compiled and zipped: build/GoldenEye007-win64.zip
-#   make linux      the Linux build to hand out, zipped: build/GoldenEye007-linux64.zip
+#   make win        the Windows build, cross-compiled and zipped: build/Janus-Project-win64.zip
+#   make linux      the Linux build to hand out, zipped: build/Janus-Project-linux64.zip
 #   make clean      remove generated code and objects (keeps build/deps)
 #
 # The disc's contents are expected in ./game (sys/main.dol, files/, ...).

@@ -65,17 +65,17 @@ And if you change wiikit yourself, `make wiikit-save` writes your changes back i
 The boot ROM fonts and the DSP's resampling table (`font_western.bin`, `font_japanese.bin`, `dsp_coef.bin`) are taken from Dolphin's free replacements in `Sys/GC` if you have Dolphin installed (pass `FONTS=dir` otherwise). If Dolphin's `Sys/totaldb.dsy` is around (`DSY=file`) it'll name some more SDK functions by signature.
 
 ## Windows
-`make win` cross-compiles a 64-bit Windows build from Linux (llvm-mingw and SDL3 get fetched into `build/deps`) and packs it as `build/GoldenEye007-win64.zip`. In there you'll find the executable, `Play.bat` which opens the same settings window (a Python with Tk is in the package), and a `README.txt` (see `port/win/`). The disc's files are not in it! The player takes them out of their own image using the window's "Extract disc..." button. Online works the same as on Linux (Winsock instead of BSD sockets).
+`make win` cross-compiles a 64-bit Windows build from Linux (llvm-mingw and SDL3 get fetched into `build/deps`) and packs it as `build/Janus-Project-win64.zip`. In there you'll find the executable, `Play.bat` which opens the same settings window (a Python with Tk is in the package), and a `README.txt` (see `port/win/`). The disc's files are not in it! The player takes them out of their own image using the window's "Extract disc..." button. Online works the same as on Linux (Winsock instead of BSD sockets).
 
 ## Linux package
-`make linux` builds the same portable layout for Linux and packs it as `build/GoldenEye007-linux64.zip`: the executable (C++ runtime linked in, SDL3 next to it in `lib/`), `Play.sh` which opens the settings window with the system's Python, and a `README.txt` (see `port/linux/`). It needs glibc 2.38, OpenSSL 3 and OpenGL 4.5 wherever it runs. Online and crash dumps work there too.
+`make linux` builds the same portable layout for Linux and packs it as `build/Janus-Project-linux64.zip`: the executable (C++ runtime linked in, SDL3 next to it in `lib/`), `Play.sh` which opens the settings window with the system's Python, and a `README.txt` (see `port/linux/`). It needs glibc 2.38, OpenSSL 3 and OpenGL 4.5 wherever it runs. Online and crash dumps work there too.
 
-Both packages come with an empty `mods/` folder (the gamemode folders are in it). The mods are a download of their own: `make mods-zip` packs `mods/` exactly as it is (the `.edb` files, their `.png` pictures and `.txt` files, gamemode folders included) as `build/GoldenEye007-mods.zip`, which gets unzipped into the game's folder, next to `Play`. No level in `mods/`, no zip.
+Both packages come with an empty `mods/` folder (the gamemode folders are in it). The mods are a download of their own: `make mods-zip` packs `mods/` exactly as it is (the `.edb` files, their `.png` pictures and `.txt` files, gamemode folders included) as `build/Janus-Project-mods.zip`, which gets unzipped into the game's folder, next to `Play`. No level in `mods/`, no zip.
 
 ## Releases
 Every push to `main` builds both packages and the mods' zip and puts them up as the `latest` release, and pushing a tag like `v1.0` gives that one its own release. Since the build needs the disc, GitHub's own machines can't do it: `.github/workflows/release.yml` runs on a self-hosted runner, which is just my own PC. If it's off, the release simply waits.
 
-Want the same on your fork? Add a self-hosted runner (Settings > Actions > Runners), and give it an `.env` file with `GE_GAME=/path/to/your/extracted/disc` (and `GE_MODS=/path/to/mods` if you want a `GoldenEye007-mods.zip` next to them).
+Want the same on your fork? Add a self-hosted runner (Settings > Actions > Runners), and give it an `.env` file with `GE_GAME=/path/to/your/extracted/disc` (and `GE_MODS=/path/to/mods` if you want a `Janus-Project-mods.zip` next to them).
 
 # Playing
 `./launch.sh` opens a small window first. In there you can set the frame rate (60 by default, 30 is what the console does), the field of view, the mouse sensitivity, online on or off, and the key bindings (click Set, press a key or a mouse button). Then hit Play.

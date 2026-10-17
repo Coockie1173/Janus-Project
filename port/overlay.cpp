@@ -231,6 +231,7 @@ void filtered(const WatchGroup& g, const std::string& path) { //with a filter it
 }
 
 void init(SDL_Window* win, void* gl) {
+    window_icon(win);
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGui::GetIO().IniFilename = nullptr; //no imgui.ini left in the folder

@@ -18,7 +18,7 @@ What you need
 Setting it up (once)
 --------------------
 1. Unzip this whole folder somewhere you can write to (not Program Files),
-   for instance C:\Games\GoldenEye007.
+   for instance C:\Games\Janus-Project.
 
 2. Double-click Play.bat. A small window opens.
 
@@ -88,7 +88,7 @@ Where things are
                     license_to_kill, team_license_to_kill): the levels in one are that
                     mode's maps after Multiplayer > Connect to WFC Modded, and a mode
                     with an empty folder isn't offered there
-                    It comes empty: GoldenEye007-mods.zip, a download of its own
+                    It comes empty: Janus-Project-mods.zip, a download of its own
                     next to this one, has levels for it. Unzip it into this folder.
                     Without any level in those folders Multiplayer is the game's own
                     menu, with Nintendo Wi-Fi Connection alone.
@@ -106,12 +106,12 @@ If something goes wrong
 - Extract disc... says the image is another game: only the US version (SJBE52)
   works with this build.
 - A window that closes at once, or a black one: update the graphics driver. On
-  a laptop, make GoldenEye.exe use the dedicated graphics card (Windows
+  a laptop, make Janus-Project.exe use the dedicated graphics card (Windows
   Settings -> Display -> Graphics).
 - "Illegal instruction", or it never opens a window on an old PC: the processor
   has no AVX2. This build cannot run there.
 - Windows SmartScreen says the program is unknown: More info -> Run anyway.
-- Online does not connect: allow GoldenEye.exe through the Windows firewall
+- Online does not connect: allow Janus-Project.exe through the Windows firewall
   when it asks, and leave "Online" ticked in the Play.bat window.
 - Anything else: run.log ends with what happened. Send it along with a report.
 

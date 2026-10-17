@@ -22,7 +22,7 @@ What you need
 Setting it up (once)
 --------------------
 1. Unzip this whole folder somewhere you can write to (unzip keeps Play.sh and
-   GoldenEye executable; if your file manager did not: chmod +x Play.sh GoldenEye).
+   Janus-Project executable; if your file manager did not: chmod +x Play.sh Janus-Project).
 
 2. Run ./Play.sh. A small window opens.
 
@@ -97,7 +97,7 @@ Where things are
                     license_to_kill, team_license_to_kill): the levels in one are that
                     mode's maps after Multiplayer > Connect to WFC Modded, and a mode
                     with an empty folder isn't offered there
-                    It comes empty: GoldenEye007-mods.zip, a download of its own
+                    It comes empty: Janus-Project-mods.zip, a download of its own
                     next to this one, has levels for it. Unzip it into this folder.
                     Without any level in those folders Multiplayer is the game's own
                     menu, with Nintendo Wi-Fi Connection alone.

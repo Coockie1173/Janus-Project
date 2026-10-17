@@ -19,13 +19,24 @@ target_sources(wiiboot PRIVATE
     ${GE_PORT}/cutscenes.cpp ${GE_PORT}/tweaks.cpp ${GE_PORT}/qte.cpp ${GE_PORT}/movies.cpp
     ${GE_PORT}/tank.cpp ${GE_PORT}/hotkeys.cpp ${GE_PORT}/noclip.cpp ${GE_PORT}/bunnyhop.cpp ${GE_PORT}/stamina.cpp ${GE_PORT}/files.cpp ${GE_PORT}/records.cpp ${GE_PORT}/zones.cpp
     ${GE_PORT}/autosave.cpp ${GE_PORT}/weapons.cpp ${GE_PORT}/collision.cpp ${GE_PORT}/triggers.cpp ${GE_PORT}/prompts.cpp ${GE_PORT}/body.cpp ${GE_PORT}/unload.cpp
-    ${GE_PORT}/timeline.cpp ${GE_PORT}/flipbooks.cpp ${GE_PORT}/heap.cpp ${GE_PORT}/sweep.cpp ${GE_PORT}/mods.cpp ${GE_PORT}/modmenu.cpp ${GE_PORT}/pictures.cpp ${GE_PORT}/shake.cpp ${GE_PORT}/render.cpp ${GE_PORT}/sound.cpp ${GE_PORT}/occlusion.cpp ${GE_PORT}/height.cpp ${GE_PORT}/typing.cpp ${GE_PORT}/custom.cpp ${GE_PORT}/pointer.cpp ${GE_PORT}/cheats.cpp ${GE_PORT}/randomizer.cpp)
+    ${GE_PORT}/timeline.cpp ${GE_PORT}/flipbooks.cpp ${GE_PORT}/heap.cpp ${GE_PORT}/sweep.cpp ${GE_PORT}/mods.cpp ${GE_PORT}/modmenu.cpp ${GE_PORT}/pictures.cpp ${GE_PORT}/shake.cpp ${GE_PORT}/render.cpp ${GE_PORT}/sound.cpp ${GE_PORT}/occlusion.cpp ${GE_PORT}/height.cpp ${GE_PORT}/typing.cpp ${GE_PORT}/custom.cpp ${GE_PORT}/pointer.cpp ${GE_PORT}/cheats.cpp ${GE_PORT}/randomizer.cpp ${GE_PORT}/icon.cpp)
 # files found wherever the game is started from
 target_compile_definitions(wiiboot PRIVATE
     GE_ROOT="${GE_HOME}"
     GE_HOSTS_DEFAULT="${GE_HOME}/config/hosts.txt"
     GE_GECKO_DEFAULT="${GE_GECKO_FILE}"
     GE_SETTINGS_FILE="${GE_SETTINGS_FILE}")
+# the window's icon (port/icon.bmp, from icon.tga) as an array in the executable, and on
+# Windows the executable's own icon as a resource (port/win/icon.rc)
+file(READ ${GE_PORT}/icon.bmp GE_ICON_HEX HEX)
+string(REGEX REPLACE "(..)" "0x\\1," GE_ICON_BYTES "${GE_ICON_HEX}")
+file(CONFIGURE OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/ge_gen/ge_icon.h
+     CONTENT "static const unsigned char kIcon[] = {${GE_ICON_BYTES}};\n" @ONLY)
+target_include_directories(wiiboot PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/ge_gen)
+if(WIN32)
+  enable_language(RC)
+  target_sources(wiiboot PRIVATE ${GE_PORT}/win/icon.rc)
+endif()
 # the debug overlay and the settings menu: Dear ImGui's sources (tools/get_imgui.sh), compiled in when they are there
 set(GE_IMGUI ${GE_ROOT}/build/deps/imgui)
 if(EXISTS ${GE_IMGUI}/imgui.cpp)

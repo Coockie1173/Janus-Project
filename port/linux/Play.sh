@@ -23,7 +23,7 @@
 #                                      the game's memory to each dump, 152 MB)
 # Any option skips the window; what the launcher does not know goes to the game (--window 1920x1080...).
 cd "$(dirname "$0")" || exit 1
-[ -x ./GoldenEye ] || { echo "GoldenEye is missing or not executable: unzip the whole package (unzip keeps the permissions)"; exit 1; }
+[ -x ./Janus-Project ] || { echo "Janus-Project is missing or not executable: unzip the whole package (unzip keeps the permissions)"; exit 1; }
 command -v python3 >/dev/null || { echo "python3 is needed for the launcher (with Tk for its window): install it from your distribution"; exit 1; }
 # through X11 when there is one: a present on Wayland costs the renderer 2 ms, 0.3 there
 # (SDL_VIDEODRIVER in the environment overrides)

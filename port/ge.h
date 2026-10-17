@@ -39,6 +39,7 @@
 //native.cpp the engine's hot math routines written for the host
 //net.cpp the hosts file for the game's servers
 //overlay.cpp the debug overlay (F3), memory watches from a .dmw file (dmw.cpp)
+//icon.cpp the window's icon
 //settings.cpp the settings menu (F1)
 //render.cpp anisotropic filtering and anti-aliasing, the renderer's
 //hotkeys.cpp keys that change the menu's settings in play (hotkeys.h)
@@ -342,6 +343,7 @@ void install_prompts(); //prompts.cpp
 void weapon_buttons(ClassicState& s); //a slot's key, in the classic's filter
 bool sprint_key(); //input.cpp, the sprint key is down this frame
 void install_overlay(); //overlay.cpp
+void window_icon(SDL_Window* win); //icon.cpp, port/icon.bmp on the window
 bool overlay_open(); //the watches or the settings menu are up, so the mouse is free
 bool settings_open(); //settings.cpp
 void save_settings(); //the settings file is written

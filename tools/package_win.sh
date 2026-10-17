@@ -2,16 +2,16 @@
 # The Windows package: the cross-built game (make win), what it needs beside it, the
 # instructions and an empty mods folder, zipped. Nothing of the disc goes in: game/ is left for the
 # player to fill.
-#     sh tools/package_win.sh [FONTS_DIR]      -> build/GoldenEye007-win64.zip
+#     sh tools/package_win.sh [FONTS_DIR]      -> build/Janus-Project-win64.zip
 set -e
 cd "$(dirname "$0")/.."
 FONTS=${1:-/usr/share/dolphin-emu/Sys/GC}
-NAME=GoldenEye007-win64
+NAME=Janus-Project-win64
 S=build/win/$NAME
 rm -rf "$S" build/$NAME.zip
 mkdir -p "$S/config/gecko" "$S/fonts" "$S/game" "$S/licenses"
-cp build/out-win/wiiboot.exe "$S/GoldenEye.exe"
-build/deps/llvm-mingw/bin/x86_64-w64-mingw32-strip "$S/GoldenEye.exe"
+cp build/out-win/wiiboot.exe "$S/Janus-Project.exe"
+build/deps/llvm-mingw/bin/x86_64-w64-mingw32-strip "$S/Janus-Project.exe"
 cp build/deps/sdl3-win/bin/SDL3.dll "$S/"
 cp config/keys.txt "$S/keys.txt"
 cp config/keys.txt config/hosts.txt config/openings.txt config/cutscenes.txt build/recomp/symbols.tsv "$S/config/"

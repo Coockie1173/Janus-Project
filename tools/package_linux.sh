@@ -2,18 +2,18 @@
 # The Linux package: the portable build (make linux), what it needs beside it, the
 # instructions and an empty mods folder, zipped. Nothing of the disc goes in: game/ is left for the
 # player to fill.
-#     sh tools/package_linux.sh [FONTS_DIR]      -> build/GoldenEye007-linux64.zip
+#     sh tools/package_linux.sh [FONTS_DIR]      -> build/Janus-Project-linux64.zip
 set -e
 cd "$(dirname "$0")/.."
 FONTS=${1:-/usr/share/dolphin-emu/Sys/GC}
-NAME=GoldenEye007-linux64
+NAME=Janus-Project-linux64
 S=build/linux/$NAME
 SDL=$(ls build/deps/sdl3/lib*/libSDL3.so.0 | head -1)
 rm -rf "$S" build/$NAME.zip
 mkdir -p "$S/config/gecko" "$S/fonts" "$S/game" "$S/lib" "$S/licenses"
 # the function names stay in: a crash dump's host backtrace reads them
-cp build/out-linux/wiiboot "$S/GoldenEye"
-strip --strip-debug "$S/GoldenEye"
+cp build/out-linux/wiiboot "$S/Janus-Project"
+strip --strip-debug "$S/Janus-Project"
 cp -L "$SDL" "$S/lib/libSDL3.so.0"
 strip --strip-unneeded "$S/lib/libSDL3.so.0"
 cp config/keys.txt "$S/keys.txt"
@@ -38,7 +38,7 @@ for d in conflict team_conflict golden_gun black_box goldeneye heroes license_to
     mkdir -p "$S/mods/$d"
 done
 cp port/linux/Play.sh port/linux/README.txt "$S/"
-chmod 755 "$S/Play.sh" "$S/GoldenEye"
+chmod 755 "$S/Play.sh" "$S/Janus-Project"
 printf 'The game goes here: ./Play.sh, then "Extract disc..." and pick your GoldenEye 007 (SJBE52) image.\nWhen it is done this folder holds sys/main.dol and files/. See README.txt.\n' > "$S/game/PUT YOUR DISC HERE.txt"
 (cd build/linux && zip -q -r -9 "../$NAME.zip" "$NAME")
 echo "build/$NAME.zip: $(du -h build/$NAME.zip | cut -f1)"

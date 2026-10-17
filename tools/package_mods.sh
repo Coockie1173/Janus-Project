@@ -2,10 +2,10 @@
 # The mods as a download of their own: the mods folder as it is (the .edb files, their .png
 # pictures and .txt files, in it and in its folder for each online gamemode), zipped. It is
 # unzipped into the game's folder, next to Play, where the packages have an empty mods folder.
-#     sh tools/package_mods.sh      -> build/GoldenEye007-mods.zip, none without a level in mods/
+#     sh tools/package_mods.sh      -> build/Janus-Project-mods.zip, none without a level in mods/
 set -e
 cd "$(dirname "$0")/.."
-NAME=GoldenEye007-mods
+NAME=Janus-Project-mods
 S=build/mods-package
 rm -rf "$S" build/$NAME.zip
 mkdir -p "$S/mods"

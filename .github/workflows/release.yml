@@ -40,4 +40,4 @@ jobs:
       - name: release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: sh tools/publish_release.sh build/GoldenEye007-linux64.zip build/GoldenEye007-win64.zip $(ls build/GoldenEye007-mods.zip 2>/dev/null)
+        run: sh tools/publish_release.sh build/Janus-Project-linux64.zip build/Janus-Project-win64.zip $(ls build/Janus-Project-mods.zip 2>/dev/null)
