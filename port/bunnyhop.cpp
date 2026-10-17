@@ -72,6 +72,10 @@
 //static object), which Bond never gets past. so on foot, once the first marker is awake, every
 //other one of its objective is woken too and each goes off where Bond reaches it (again after a
 //checkpoint, which starts them over)
+//and the opening plays with the tank bound to it (its slot 0, 4D0001E6), Bond is left free to walk
+//off while it does. so while it plays (the byte at 806EB6C8, which OB_Cutscene sets as one starts
+//and clears as it ends) and no cutscene has Bond himself (+0x5E4), his input is empty: the sticks
+//and the buttons ge_input_copy takes, and the hop's key
 //
 //GE_BUNNYHOP=1 start with it on, else what the menu saved
 //the speed goes in the log twice a second, and what walls take (GE_BHOP_LOG=0 not)
@@ -157,6 +161,10 @@ const uint32_t kLevels = 0x805D1804, kLevelRow = 0x805D1820, kRowSkin = 0x78; //
 const uint32_t kLevelKind = 0xFFFF0000, kCampaignLevel = 0x01810000;
 bool g_onFoot = false; //this level's player isn't the tank, see the top
 uint32_t g_saidOnFoot = 0; //the level it was logged for
+bool g_tankOnFoot = false; //a tank's level is on foot now
+bool g_held = false; //Bond waits for the cutscene, as last said
+const uint32_t kCutscenePlaying = 0x806EB6C8, kInCutscene = 0x5E4;
+const uint32_t kInputSticks = 0x8, kInputStickCount = 6, kInputBytes = 0x30, kInputButtons = 0x34, kInputHeld = 0x38;
 bool g_wayWoken = false; //the markers of this level's way, see the top
 uint32_t g_wayFrame = ~0u;
 const uint32_t kWorld = 0x805F4CCC, kTriggerCount = 0xE0, kTriggers = 0xE4;
@@ -278,6 +286,15 @@ void Refresh()
 	}
 }
 
+//on foot in a tank's level a cutscene that doesn't have Bond holds him where he is, see the top
+bool Held(uint32_t ctrl)
+{
+	const bool held{ g_tankOnFoot && guest_ptr(ctrl) && ctrl == local_controller() && ld8(kCutscenePlaying) && !ld8(ctrl + kInCutscene) };
+	if (held != g_held) rt_log("goldeneye: bunnyhop: Bond %s", held ? "waits for the cutscene" : "is let go");
+	g_held = held;
+	return held;
+}
+
 //the controller hops here: offline the local one, online one stepped from commands
 Hopper* Hops(uint32_t ctrl)
 {
@@ -292,7 +309,7 @@ Hopper* Hops(uint32_t ctrl)
 			return nullptr;
 		}
 		Hopper& h = Make(ctrl);
-		h.jump = g_jump;
+		h.jump = g_jump && !Held(ctrl);
 		return &h;
 	}
 	Hopper* h = Of(ctrl);
@@ -415,9 +432,11 @@ void TankLevel(PPCContext& c)
 	{
 		g_onFoot = g_bunnyhop && !network_game();
 		g_wayWoken = false;
+		g_tankOnFoot = false;
 	}
 	if (c.r[3] == 0 || !g_onFoot || (hash & kLevelKind) != kCampaignLevel) return;
 	c.r[3] = 0;
+	g_tankOnFoot = true;
 	if (guest_ptr(ld32(kPlayerPtr))) WakeWay();
 	if (g_saidOnFoot != hash) rt_log("goldeneye: bunnyhop: level %08X is on foot, not in the tank", hash);
 	g_saidOnFoot = hash;
@@ -566,6 +585,13 @@ void bunnyhop_command(uint32_t cmd)
 //+0x3C without it. what was there, for bunnyhop_input_done
 uint32_t bunnyhop_input(uint32_t ctrl, uint32_t cmd)
 {
+	if (guest_ptr(cmd) && Held(ctrl))
+	{
+		for (uint32_t i = 0; i < kInputStickCount; ++i) stf(cmd + kInputSticks + 4 * i, 0.0f);
+		for (uint32_t i = 0; i < 3; ++i) st8(cmd + kInputBytes + i, 0);
+		st32(cmd + kInputButtons, 0);
+		st32(cmd + kInputHeld, 0);
+	}
 	if (!network_game() || !guest_ptr(ctrl) || !guest_ptr(cmd)) return 0;
 	const uint32_t extra{ ld32(cmd + kCmdExtra) };
 	if (!(extra & kCmdOurs)) return 0;
