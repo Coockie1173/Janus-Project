@@ -117,6 +117,22 @@ void cheats_label() {
     dl->AddText(font, size, at, IM_COL32(255, 196, 64, 255), text);
 }
 
+//the trigger viewer (triggers.cpp): the triggers the player is in, top left
+void trigger_list(const std::vector<std::string>& lines) {
+    ImFont* font = ImGui::GetFont();
+    ImVec2 screen = ImGui::GetIO().DisplaySize;
+    float u = std::min(screen.y / 720, screen.x / 960);
+    float size = font->FontSize * std::max(u, 1.0f), pad = 5 * u;
+    ImVec2 at(14 * u + pad, 14 * u + pad);
+    ImDrawList* dl = ImGui::GetBackgroundDrawList();
+    for (const std::string& line : lines) {
+        ImVec2 box = font->CalcTextSizeA(size, FLT_MAX, 0, line.c_str());
+        dl->AddRectFilled(ImVec2(at.x - pad, at.y - pad), ImVec2(at.x + box.x + pad, at.y + box.y + pad), IM_COL32(0, 0, 0, 150), 3);
+        dl->AddText(font, size, at, IM_COL32(255, 220, 60, 255), line.c_str());
+        at.y += box.y + 3 * pad;
+    }
+}
+
 //the stamina meter (stamina.cpp): the sprint that's left, and the line a sprint is cancelled
 //right under. green under the line, dimmer while it refills, red while there's too little
 //left to sprint again
@@ -295,6 +311,7 @@ void draw() {
     if (meter) stamina_bar(sprint);
     if (hop && fade <= 0) speedometer(speed);
     if (cheats) cheats_label();
+    if (trigger_view() && fade <= 0) trigger_list(trigger_labels());
     if (g_show_state) player_state();
     if (skipping_cutscene()) skipping_label();
     if (g_open) watches();

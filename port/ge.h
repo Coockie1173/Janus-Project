@@ -23,6 +23,7 @@
 //weapons.cpp a key for each weapon slot
 //prompts.cpp the bound key in the game's prompts, where it shows a controller button
 //collision.cpp the level's collision drawn in place of the world
+//triggers.cpp the triggers that go off by being walked into, drawn over the world
 //body.cpp a blocked player moves in the console's steps, so vents can be got through at any frame rate
 //unload.cpp a file that's let go stays loaded as long as on the console, so cutscenes end at any frame rate
 //timeline.cpp a timeline that waits at an event stays at its frame, so doors are shut after a skipped cutscene
@@ -321,6 +322,11 @@ void set_sound_height(bool on);
 bool collision_view(); //cheat, the level's collision is drawn in place of the world
 void set_collision_view(bool on);
 void collision_tick(); //every tick of the game's loop
+void install_triggers(); //triggers.cpp
+bool trigger_view(); //cheat, the triggers that go off by being walked into are drawn over the world
+void set_trigger_view(bool on);
+void triggers_update(PPCContext& c); //collision.cpp, the player's view is about to be drawn
+std::vector<std::string> trigger_labels(); //the triggers the player is in, a line each
 void install_weapons(); //weapons.cpp
 void install_prompts(); //prompts.cpp
 void weapon_buttons(ClassicState& s); //a slot's key, in the classic's filter

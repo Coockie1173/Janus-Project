@@ -71,6 +71,9 @@
 //all of the world's items are gone over for those (the first list of its +0xA4). one the view
 //is inside of is left out, that's the player's own
 //
+//the trigger viewer (triggers.cpp) is drawn from the same view: it is gathered here too, and
+//the runtime is told which of the two are on
+//
 //GE_COLLISION=1 start with it on
 //GE_TRACE=1 log what got gathered
 #include "ge.h"
@@ -119,7 +122,7 @@ struct Vertex
 
 std::atomic<bool> g_view{false};
 bool g_trace = false;
-bool g_shown = false; //the runtime has the view on
+uint8_t g_shown = 0; //the views the runtime has on, 1 the collision, 2 the triggers
 uint32_t g_signature = 0;
 int g_settle = 0;
 std::vector<Vertex> g_mesh; //what's being gathered
@@ -588,10 +591,15 @@ void Send()
 	gx_debug_mesh(g_sent.data(), (uint32_t)g_sent.size());
 	++g_count.sends;
 }
+//the views that are on, as the runtime takes them
+uint8_t Views() { return (g_view ? 1 : 0) | (trigger_view() ? 2 : 0); }
+
 void Update(PPCContext& c)
 {
+	if (trigger_view()) triggers_update(c);
+	if (!g_view) return;
 	uint32_t signature = Signature();
-	if (!g_shown || signature != g_signature)
+	if (!(g_shown & 1) || signature != g_signature)
 	{
 		g_signature = signature;
 		g_settle = g_shown ? kSettle : 1;
@@ -615,7 +623,7 @@ void Update(PPCContext& c)
 PPCFunc orig_camera_apply = nullptr;
 void CameraApply(PPCContext& c)
 {
-	bool player = c.lr == kPlayerViewCall && g_view && guest_ptr(ld32(kPlayerPtr));
+	bool player = c.lr == kPlayerViewCall && Views() && guest_ptr(ld32(kPlayerPtr));
 	orig_camera_apply(c);
 	if (!player) return;
 	g_view_applied = true;
@@ -630,11 +638,11 @@ void WorldDraw(PPCContext& c)
 	if (player)
 	{
 		for (int i = 0; i < 16; ++i) g_clip[i] = ldf(kClipMatrix + i * 4);
-		gx_debug_view(true, g_clip);
-		g_shown = true;
+		g_shown = Views();
+		gx_debug_view(g_shown, g_clip);
 	}
 	orig_world_draw(c);
-	if (g_trace && g_view)
+	if (g_trace && Views())
 	{
 		static int views = 0, others = 0;
 		++(player ? views : others);
@@ -650,9 +658,9 @@ void set_collision_view(bool on) { g_view = on; }
 void collision_tick()
 {
 	static const float none[16]{};
-	if (g_view && guest_ptr(ld32(kPlayerPtr))) return;
-	if (g_shown) gx_debug_view(false, none);
-	g_shown = false;
+	if (Views() && guest_ptr(ld32(kPlayerPtr))) return;
+	if (g_shown) gx_debug_view(0, none);
+	g_shown = 0;
 }
 
 void install_collision()

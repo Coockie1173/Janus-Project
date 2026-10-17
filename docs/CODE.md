@@ -804,6 +804,22 @@ them with the game's own clip matrix in place of what the game draws in 3D.
 | `WorldDraw` | hook: takes the clip matrix as the player's world draw begins |
 | `collision_tick()` | the viewer goes off with the option or the level |
 
+### triggers.cpp
+
+The trigger viewer (a cheat). The triggers that go off when someone walks into them are drawn
+over the world, see-through, in the shape the game tests (`gx_debug_overlay`; collision.cpp's
+camera hooks gather it and tell the runtime which views are on).
+
+| Function | What |
+|---|---|
+| `TestNear`, `TestPoint`, `TestBody` | hooks: the game's three "is someone in it" tests; a trigger they are asked about is remembered with what they answered (the near test only for shaped ones, the point test not from the AI points' wake checks) |
+| `ShapeOf(trigger)` | the trigger's collision shape in its map's data |
+| `TriggerMatrix`, `WorldShape(c, ...)` | the trigger's angles as the game turns them, then `fn_802D3120` and `fn_802A5360` make the shape's place in the world |
+| `Box`, `Capsule`, `Sphere`, `Quad` | the shapes as triangles, the diagonals left out of the outline |
+| `Gather(c)` | every remembered trigger still in the world's list: yellow while someone is in it, a colour a type while asked about, grey after; the lines of the ones the player is in |
+| `triggers_update(c)` | gathers and sends when it changed |
+| `trigger_labels()` | the lines for the overlay (overlay.cpp `trigger_list`) |
+
 ### body.cpp
 
 Vents at high frame rates. How far the collision pushes a body out depends on how deep the
@@ -990,7 +1006,7 @@ Options (the launcher sets these from its settings):
 | `GE_SKIP_LIST=ids`, `GE_SKIP_MOVIES=1`, `GE_AUTO_QTE=1`, `GE_AUTO_START=1`, `GE_NO_TUTORIALS=1`, `GE_NO_COLOUR_FILTER=1`, `GE_UNLOCK_ALL=1`, `GE_ONLINE_UNLOCKS=0`, `GE_EXTRAS_MENU=1` | enhancements |
 | `GE_LEVEL_TIMER=0`, `GE_AUTOSAVE=0` | on by default |
 | `GE_CUSTOM=H,D,R,P[,K]`, `GE_CUSTOM_ON=1` | 007 Custom's sliders (enemy health, damage, reaction speed, hit protection; K 0: no headshots that kill), and every mission played with them |
-| `GE_MOUSE_EVERYWHERE=1`, `GE_NOCLIP=1`, `GE_STAMINA=1`, `GE_COLLISION=1` | cheats |
+| `GE_MOUSE_EVERYWHERE=1`, `GE_NOCLIP=1`, `GE_STAMINA=1`, `GE_COLLISION=1`, `GE_TRIGGERS=1` | cheats |
 | `GE_HOSTS=F`, `GE_NETLOG=1` | the hosts file, the network log |
 | `GE_GECKO=F`, `GE_GECKO_EXTRA=F[:F...]` | gecko code files |
 | `GE_SETTINGS=N` | start with the settings menu open on page N |
@@ -1014,7 +1030,7 @@ Traces:
 
 | Variable | What |
 |---|---|
-| `GE_TRACE=1` | `main`, the frame rate, player states, angles, checkpoints, qte, movies, tutorials, the body, noclip, the tank, weapon slots, the collision viewer, the skip |
+| `GE_TRACE=1` | `main`, the frame rate, player states, angles, checkpoints, qte, movies, tutorials, the body, noclip, the tank, weapon slots, the collision viewer, the trigger viewer, the skip |
 | `GE_TRACETEXT=1` | texts looked up, tags written out, prompts |
 | `GE_TRACEPOS=1` | the local body's position after every update |
 | `GE_TRACELOOK=1` | the look input vectors |

@@ -35,6 +35,7 @@
 //GE_STAMINA=1 cheat, the sprint that's left as a bar
 //GE_GOD=1 GE_INFINITE_AMMO=1 GE_INFINITE_SPRINT=1 cheats, the campaign's player isn't hurt, the ammo and the sprint never run out
 //GE_COLLISION=1 cheat, the level's collision is drawn in place of the world
+//GE_TRIGGERS=1 cheat, the triggers that go off by being walked into are drawn over the world
 //GE_SETTINGS=N start with the settings menu (F1) open on page N
 //GE_FPS=N frame rate the engine may reach (30 by default, auto is 60)
 //GE_VSYNC=1 frames wait for the screen's refresh
@@ -126,6 +127,7 @@ void install() {
     install_randomizer();
     install_bunnyhop();
     install_collision();
+    install_triggers();
     install_autosave();
     install_weapons();
     install_prompts();
