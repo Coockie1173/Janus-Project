@@ -592,7 +592,7 @@ void Send()
 	++g_count.sends;
 }
 //the views that are on, as the runtime takes them
-uint8_t Views() { return (g_view ? 1 : 0) | (trigger_view() ? 2 : 0); }
+uint8_t Views() { return (g_view ? 1 : 0) | (trigger_view() ? (trigger_xray() ? 6 : 2) : 0); }
 
 void Update(PPCContext& c)
 {

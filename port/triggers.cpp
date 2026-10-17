@@ -38,12 +38,16 @@
 //the picture goes to the runtime as its debug overlay (gx_debug_overlay), with the matrix the
 //collision viewer keeps for the player's view (collision.cpp calls in here)
 //
+//the menu's Trigger Viewer page turns each type on and off (the ones the game asked about so
+//far in the level are listed), and whether what is behind the level's walls is drawn too
+//
 //GE_TRIGGERS=1 start with it on
 #include "ge.h"
 #include <atomic>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <map>
 #include <mutex>
 #include <unordered_map>
 #include <vector>
@@ -88,6 +92,20 @@ PPCFunc g_shape_world = nullptr, g_quat_matrix = nullptr;
 uint32_t g_scratch = 0;
 std::mutex g_labels_lock;
 std::vector<std::string> g_labels; //what the player is in, for the overlay
+std::atomic<bool> g_xray{false};
+
+//the menu's choices (its thread) and the types seen (the game's), under one lock
+std::mutex g_types_lock;
+std::map<uint32_t, bool> g_type_shown; //a type set on its own
+bool g_types_shown = true; //every other type
+std::vector<TriggerType> g_types;
+uint32_t g_types_version = 0;
+
+bool Shown(uint32_t type) //with the lock held
+{
+	auto it = g_type_shown.find(type);
+	return it == g_type_shown.end() ? g_types_shown : it->second;
+}
 
 PPCFunc orig_test_near = nullptr, orig_test_point = nullptr, orig_test_body = nullptr;
 
@@ -310,6 +328,14 @@ void Gather(PPCContext& c)
 	c.r[1] -= 0x400;
 	g_scratch = (c.r[1] + 0x40) & ~0xFu;
 	uint32_t drawn = 0, shapes = 0;
+	std::map<uint32_t, TriggerType> types;
+	std::map<uint32_t, bool> shown;
+	bool otherwise;
+	{
+		std::lock_guard<std::mutex> lock(g_types_lock);
+		shown = g_type_shown;
+		otherwise = g_types_shown;
+	}
 	for (uint32_t i = 0; i < count; ++i)
 	{
 		uint32_t trigger = ld32(list + i * 4);
@@ -319,6 +345,12 @@ void Gather(PPCContext& c)
 		const Seen& s = seen->second;
 		bool inside = now - s.insideFrame <= 1, recent = now - s.frame <= kRecent;
 		uint32_t type = ld32(trigger + kType);
+		TriggerType& listed = types[type];
+		listed.type = type;
+		++listed.count;
+		if (ld32(trigger + kDataFlags) & kHasShape) ++listed.shaped;
+		auto own = shown.find(type);
+		if (!(own == shown.end() ? otherwise : own->second)) continue;
 		uint8_t color[4];
 		//the one the player is in fills the screen from inside: its edges are enough
 		if (inside) color[0] = 255, color[1] = 220, color[2] = 60, color[3] = now - s.playerFrame <= 1 ? 20 : 60;
@@ -371,13 +403,29 @@ void Gather(PPCContext& c)
 	c = saved;
 	g_seen.swap(kept);
 	{
+		std::vector<TriggerType> list;
+		for (const auto& t : types) list.push_back(t.second);
+		std::lock_guard<std::mutex> lock(g_types_lock);
+		bool same = list.size() == g_types.size();
+		for (size_t i = 0; same && i < list.size(); ++i) same = list[i].type == g_types[i].type && list[i].count == g_types[i].count && list[i].shaped == g_types[i].shaped;
+		if (!same)
+		{
+			g_types.swap(list);
+			++g_types_version;
+		}
+	}
+	{
 		std::lock_guard<std::mutex> lock(g_labels_lock);
 		g_labels.swap(labels);
 	}
 	if (g_trace)
 	{
 		static uint32_t updates = 0;
-		if (++updates % 300 == 0) rt_log("goldeneye: trigger view: %u triggers in the world, %zu asked about, %u drawn (%u with a shape), %zu triangles", count, g_seen.size(), drawn, shapes, g_mesh.size() / 3);
+		if (++updates % 300 == 0) {
+			std::string listed;
+			for (const auto& t : types) listed += " " + std::to_string(t.first);
+			rt_log("goldeneye: trigger view: %u triggers in the world, %zu asked about, %u drawn (%u with a shape), %zu triangles, types%s", count, g_seen.size(), drawn, shapes, g_mesh.size() / 3, listed.c_str());
+		}
 	}
 }
 } //namespace
@@ -391,6 +439,40 @@ void set_trigger_view(bool on)
 		std::lock_guard<std::mutex> lock(g_labels_lock);
 		g_labels.clear();
 	}
+}
+
+bool trigger_xray() { return g_xray; }
+void set_trigger_xray(bool on) { g_xray = on; }
+
+std::vector<TriggerType> trigger_types()
+{
+	std::lock_guard<std::mutex> lock(g_types_lock);
+	return g_types;
+}
+
+uint32_t trigger_types_version()
+{
+	std::lock_guard<std::mutex> lock(g_types_lock);
+	return g_types_version;
+}
+
+bool trigger_type_shown(uint32_t type)
+{
+	std::lock_guard<std::mutex> lock(g_types_lock);
+	return Shown(type);
+}
+
+void set_trigger_type_shown(uint32_t type, bool on)
+{
+	std::lock_guard<std::mutex> lock(g_types_lock);
+	g_type_shown[type] = on;
+}
+
+void set_trigger_types_shown(bool on)
+{
+	std::lock_guard<std::mutex> lock(g_types_lock);
+	g_type_shown.clear();
+	g_types_shown = on;
 }
 
 std::vector<std::string> trigger_labels()
@@ -418,6 +500,7 @@ void install_triggers()
 	orig_test_body = ppc_hook("ge_trigger_test_body", TestBody);
 	if (!orig_test_near || !orig_test_point || !orig_test_body) rt_die("goldeneye: the trigger tests are not hooked in this build");
 	if (const char* e = std::getenv("GE_TRIGGERS")) g_view = std::atoi(e) != 0;
+	if (const char* e = std::getenv("GE_TRIGGERS_XRAY")) g_xray = std::atoi(e) != 0;
 	g_trace = std::getenv("GE_TRACE") != nullptr;
 }
 

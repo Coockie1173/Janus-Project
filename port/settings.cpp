@@ -215,7 +215,7 @@ struct Row {
 };
 struct Page { std::string title; std::vector<Row> rows; };
 
-enum { kRoot, kScreen, kControls, kBindings, kEnhancements, kCheats, kForFun, kHotkeys, kHotkeyEdit, kLevels, kMaps, kSkips, kBhop, kPageCount };
+enum { kRoot, kScreen, kControls, kBindings, kEnhancements, kCheats, kForFun, kHotkeys, kHotkeyEdit, kLevels, kMaps, kSkips, kBhop, kTriggers, kPageCount };
 std::vector<Page> g_pages;
 int g_page = kRoot, g_row = 0, g_scroll = 0;
 int g_root_row = 0; //where the cursor was on the first page
@@ -229,6 +229,8 @@ bool g_dirty = false; //the launcher's file needs writing
 std::vector<Setting> g_settings;
 int g_edit = -1; //the hotkey on the edit page
 bool g_hotkeysChanged = false; //the two hotkey pages need building again
+size_t g_triggerRows = 0; //the trigger page's rows before its list of types
+uint32_t g_triggerTypes = ~0u; //the version of the list the page was built for
 std::string g_toast; //what a hotkey just did
 Clock::time_point g_toastUntil{};
 
@@ -458,7 +460,8 @@ void BuildSettings()
 	AddToggle(kCheats, "noclip", "Noclip", "On: you fly where you look, through walls, and don't fall. The sprint key flies faster.", noclip, set_noclip);
 	AddToggle(kCheats, "stamina_meter", "Stamina Meter", "On: a bar shows the sprint that's left. Cancel a sprint right under the line and it's back at a second the frame after.", stamina_meter, set_stamina_meter);
 	AddToggle(kCheats, "collision_view", "Collision Viewer", "On: the level's collision is drawn in place of the world. Floors are green, walls grey, ceilings red, props orange.", collision_view, set_collision_view);
-	AddToggle(kCheats, "trigger_view", "Trigger Viewer", "On: the triggers that go off when you walk into them are drawn over the world in the shape the game tests, a colour for each type. Yellow while someone is in one, grey once the game stopped checking it. The ones you are in are listed on screen.", trigger_view, set_trigger_view);
+	AddToggle(kTriggers, "trigger_view", "Trigger Viewer", "On: the triggers that go off when you walk into them are drawn over the world in the shape the game tests, a colour for each type. Yellow while someone is in one, grey once the game stopped checking it. The ones you are in are listed on screen.", trigger_view, set_trigger_view);
+	AddToggle(kTriggers, "trigger_xray", "Through Walls", "On: the parts of a trigger behind the level's walls and floors are drawn too, fainter, so every trigger in the level shows. Off: only what is in sight.", trigger_xray, set_trigger_xray);
 
 	AddToggle(kForFun, "weapon_randomizer", "Weapon Randomizer", "On: in the campaign every guard and you start with a random weapon, with one random attachment or none. From the next spawn on.", weapon_randomizer, set_weapon_randomizer);
 	std::vector<const char*> weapons;
@@ -835,6 +838,34 @@ void RefreshHotkeyPages()
 	if (g_dragging >= 0 && !g_pages[g_page].rows[std::min(g_dragging, (int)g_pages[g_page].rows.size() - 1)].slide) g_dragging = -1;
 }
 
+//the trigger page's types are what the game asked about in the level so far, built again when
+//that changes
+void RefreshTriggerPage()
+{
+	uint32_t version = trigger_types_version();
+	if (version == g_triggerTypes) return;
+	g_triggerTypes = version;
+	auto& rows = g_pages[kTriggers].rows;
+	rows.resize(g_triggerRows);
+	std::vector<TriggerType> types = trigger_types();
+	if (types.empty()) rows.push_back({"No Types Yet", "The types show up here once the game has checked a trigger of theirs in the level being played.", {}, {}, {}});
+	for (const TriggerType& t : types)
+	{
+		char label[32], hint[160];
+		std::snprintf(label, sizeof label, "Type 0x%02X", t.type);
+		std::snprintf(hint, sizeof hint, "%u checked in this level so far, %u of them with a collision shape. On: drawn. Off: left out.", t.count, t.shaped);
+		Row r;
+		r.label = label;
+		r.hint = hint;
+		uint32_t type = t.type;
+		r.value = [type] { return std::string(trigger_type_shown(type) ? "On" : "Off"); };
+		r.adjust = [type](int) { set_trigger_type_shown(type, !trigger_type_shown(type)); };
+		r.select = [type] { set_trigger_type_shown(type, !trigger_type_shown(type)); };
+		rows.push_back(r);
+	}
+	if (g_page == kTriggers) g_row = std::clamp(g_row, 0, (int)rows.size() - 1);
+}
+
 void build_pages() {
     g_pages.resize(kPageCount);
     Page& root = g_pages[kRoot];
@@ -872,6 +903,14 @@ void build_pages() {
 		bhop_defaults();
 		g_dirty = true;
 	}});
+	auto& cheats = g_pages[kCheats].rows;
+	const auto collision = std::find_if(cheats.begin(), cheats.end(), [](const Row& r) { return r.label == "Collision Viewer"; });
+	cheats.insert(collision == cheats.end() ? cheats.end() : collision + 1, {"Trigger Viewer", "The triggers that go off when you walk into them, drawn over the world: its switch, whether they show through walls, and which types.",
+		[] { return std::string(trigger_view() ? "On" : "Off"); }, {}, [] { go(kTriggers); }});
+	Page& triggers = g_pages[kTriggers];
+	triggers.rows.push_back({"Show All Types", "Every type on, the ones not checked yet too.", {}, {}, [] { set_trigger_types_shown(true); }});
+	triggers.rows.push_back({"Hide All Types", "Every type off, the ones not checked yet too. Then turn on the ones you want.", {}, {}, [] { set_trigger_types_shown(false); }});
+	g_triggerRows = triggers.rows.size();
 	auto& fun = g_pages[kForFun].rows;
 	const auto limit = std::find_if(fun.begin(), fun.end(), [](const Row& r) { return r.label == "No Attachment Limit (Experimental)"; });
 	fun.insert(limit, {"Bunnyhopping", "Half-Life's bunnyhopping and air strafing: its switch, the jump key and how it feels.", []
@@ -920,6 +959,7 @@ void build_pages() {
     g_pages[kCheats].title = "Cheats";
     g_pages[kForFun].title = "For Fun";
     g_pages[kBhop].title = "Bunnyhopping";
+    g_pages[kTriggers].title = "Trigger Viewer";
     g_pages[kHotkeys].title = "Hotkeys";
     g_pages[kHotkeyEdit].title = "Hotkey";
     BuildHotkeyPages();
@@ -1041,6 +1081,15 @@ int BhopRow()
 	return 0;
 }
 
+//the Cheats row that opens the trigger page
+int TriggerRow()
+{
+	const auto& cheats = g_pages[kCheats].rows;
+	for (size_t i = 0; i < cheats.size(); ++i)
+		if (cheats[i].label == "Trigger Viewer") return (int)i;
+	return 0;
+}
+
 void back() {
     if (g_drop >= 0) g_drop = -1;
     else if (g_listening >= 0) g_listening = -1;
@@ -1048,6 +1097,7 @@ void back() {
     else if (g_page == kHotkeyEdit) go(kHotkeys, std::max(0, g_edit));
     else if (g_page == kSkips) go(kEnhancements, 0);
     else if (g_page == kBhop) go(kForFun, BhopRow());
+    else if (g_page == kTriggers) go(kCheats, TriggerRow());
     else go(kRoot, g_root_row);
 }
 
@@ -1627,7 +1677,7 @@ bool cheats_active()
 {
 	if (gecko_cheats()) return true;
 	for (const Setting& s : g_settings)
-		if ((s.page == kCheats || s.page == kForFun) && s.get() > 0.5f) return true;
+		if ((s.page == kCheats || s.page == kForFun || (s.page == kTriggers && s.id == "trigger_view")) && s.get() > 0.5f) return true;
 	return false; //bunnyhopping is on its own page, so it doesn't count
 }
 bool menu_event(const SDL_Event* e);
@@ -1671,6 +1721,7 @@ bool settings_event(const SDL_Event* e) {
     if (!g_open) return e->type == SDL_EVENT_KEY_DOWN && HotkeyDown(e->key);
     bool taken = menu_event(e);
     RefreshHotkeyPages();
+    RefreshTriggerPage();
     return taken;
 }
 
@@ -1759,6 +1810,7 @@ void settings_draw() {
     if (g_open) {
         if (g_keys.lines.empty()) load_keys(); //opened before the window had read the key file
         RefreshHotkeyPages();
+        RefreshTriggerPage();
         if (OnGrid()) { //the foot says which level the cursor is on
             const Grid& grid = CurrentGrid();
             bool cell = g_gridAt < (int)grid.about.size() && grid.hash[g_gridAt];
