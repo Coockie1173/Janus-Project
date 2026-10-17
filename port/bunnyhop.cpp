@@ -56,6 +56,17 @@
 //are drawn towards where the host says they are, hops and all, nothing to do there
 //over Nintendo WFC (a console's game) it stays off
 //
+//the tank's mission is on foot: the game makes its player XItemHandler_PlayerTank where
+//ge_tank_level (800BFFB0) says the level is one, Bond himself (XItemHandler_PlayerNew) elsewhere.
+//so in the campaign (0181xxxx) the answer is no while bunnyhopping, for every one of its callers
+//(the hud, the commands...) alike. it's made while there's no player, as a level loads, and kept
+//until the player is gone again: switching it in play changes the next level, not this one
+//a tank's level names its player's skin in its row (+0x78): the tank's (4D0001A8, io_tank) for
+//Tank. ge_player_skin (8000F8E0) takes it over ge_tank_level's answer, and Bond made with it has
+//neither his body nor his first-person arms (cp_bondfp, whose head bone the camera sits at): the
+//view stays at 0,0,0, the streets never come in and he falls. so for that call the row says
+//nothing and the game picks Bond's (4D0001B9) itself, his files load after it
+//
 //GE_BUNNYHOP=1 start with it on, else what the menu saved
 //the speed goes in the log twice a second, and what walls take (GE_BHOP_LOG=0 not)
 //GE_BHOP_PRESTRAFE=0 without pre-strafing, GE_BHOP_SPEED, GE_BHOP_HEIGHT, GE_BHOP_AIRCAP, GE_BHOP_AIRACCEL, GE_BHOP_WISH, GE_BHOP_MAX, GE_BHOP_GRAVITY,
@@ -135,6 +146,11 @@ bool g_trace = false;
 bool g_log = true; //the speed in the log, twice a second
 PPCFunc orig_fall_start = nullptr, orig_move_grab = nullptr, orig_sprint_allowed = nullptr, orig_move_speed = nullptr;
 PPCFunc orig_command_write = nullptr, orig_command_read = nullptr;
+PPCFunc orig_tank_level = nullptr, orig_player_skin = nullptr;
+const uint32_t kLevels = 0x805D1804, kLevelRow = 0x805D1820, kRowSkin = 0x78; //the level manager, its row of the level
+const uint32_t kLevelKind = 0xFFFF0000, kCampaignLevel = 0x01810000;
+bool g_onFoot = false; //this level's player isn't the tank, see the top
+uint32_t g_saidOnFoot = 0; //the level it was logged for
 
 //a player's hop: offline the local one's, online every one stepped here
 struct Hopper
@@ -349,6 +365,41 @@ void SprintAllowed(PPCContext& c)
 		return;
 	}
 	orig_sprint_allowed(c);
+}
+
+//(levels, hash) -> is the player a tank there: not while bunnyhopping in the campaign
+void TankLevel(PPCContext& c)
+{
+	const uint32_t hash{ c.r[4] };
+	orig_tank_level(c);
+	if (!guest_ptr(ld32(kPlayerPtr))) g_onFoot = g_bunnyhop && !network_game();
+	if (c.r[3] == 0 || !g_onFoot || (hash & kLevelKind) != kCampaignLevel) return;
+	c.r[3] = 0;
+	if (g_saidOnFoot != hash) rt_log("goldeneye: bunnyhop: level %08X is on foot, not in the tank", hash);
+	g_saidOnFoot = hash;
+}
+
+//(manager, level) the player's skin as a level loads: on foot in a tank's level not the row's
+void PlayerSkin(PPCContext& c)
+{
+	const uint32_t row{ ld32(kLevelRow) };
+	bool tank{ false };
+	if (g_bunnyhop && !network_game() && (c.r[4] & kLevelKind) == kCampaignLevel && guest_ptr(row))
+	{
+		PPCContext ask{ c };
+		ask.r[3] = kLevels;
+		orig_tank_level(ask);
+		tank = ask.r[3] != 0;
+	}
+	if (!tank)
+	{
+		orig_player_skin(c);
+		return;
+	}
+	const uint32_t skin{ ld32(row + kRowSkin) };
+	st32(row + kRowSkin, 0);
+	orig_player_skin(c);
+	st32(row + kRowSkin, skin);
 }
 
 //the speed (or one over it, the last argument 0) standing up and not sprinting is the base speed's
@@ -676,6 +727,9 @@ void install_bunnyhop()
 	orig_move_speed = ppc_hook("ge_move_speed", MoveSpeed);
 	if (!orig_sprint_allowed || !orig_move_speed) rt_log("goldeneye: bunnyhop: ge_sprint_allowed or ge_move_speed isn't hooked, the sprint and the run are the game's");
 	if (!orig_fall_start || !orig_move_grab) rt_log("goldeneye: bunnyhop: ge_fall_start or ge_move_grab isn't hooked, hops over 0.5 are the walk's");
+	orig_player_skin = ppc_hook("ge_player_skin", PlayerSkin);
+	if (orig_player_skin) orig_tank_level = ppc_hook("ge_tank_level", TankLevel); //without it Bond would get the tank's skin
+	if (!orig_tank_level) rt_log("goldeneye: bunnyhop: ge_tank_level or ge_player_skin isn't hooked, the tank's mission is in the tank");
 	//both or neither: a host that reads the key and a console that doesn't write it can't play together
 	orig_command_write = ppc_hook("ge_command_write", CommandWrite);
 	orig_command_read = ppc_hook("ge_command_read", CommandRead);

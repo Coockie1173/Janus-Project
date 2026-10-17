@@ -140,3 +140,5 @@ ge_fall_start          # the player starts falling: not off a hop while bunnyhop
 ge_move_grab           # a ladder or a ledge is looked for in the air: none while a hop is held
 ge_sprint_allowed      # bunnyhopping, no sprint starts and one going ends
 ge_move_speed          # bunnyhopping, the run is the menu's base speed
+ge_tank_level          # bunnyhopping, the tank's mission is on foot
+ge_player_skin         # and Bond's skin, not the one the level's row names
