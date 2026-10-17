@@ -69,9 +69,10 @@
 //the mission's way is one objective's markers (type 0x3F, 22 on Tank), each woken by the one
 //before as the player reaches it, the last waking the ending's cutscene and that the exit. one
 //of them hands on through the tank's own part of the street (Tank's marker at -398 27 -151 to a
-//static object), which Bond never gets past. so on foot, once the first marker is awake, every
-//other one of its objective is woken too and each goes off where Bond reaches it (again after a
-//checkpoint, which starts them over)
+//static object), which Bond never gets past. so on foot the way is followed: a marker that was
+//awake and sleeps again went off, and when one has and a second later none of its objective is
+//awake, the nearest one that hasn't gone off yet is woken (an awake marker draws its icon, so
+//only ever the one ahead). a checkpoint starts them over, and the way with them
 //and the opening plays with the tank bound to it (its slot 0, 4D0001E6), Bond is left free to walk
 //off while it does. so while it plays (the byte at 806EB6C8, which OB_Cutscene sets as one starts
 //and clears as it ends) and no cutscene has Bond himself (+0x5E4), his input is empty: the sticks
@@ -165,8 +166,18 @@ bool g_tankOnFoot = false; //a tank's level is on foot now
 bool g_held = false; //Bond waits for the cutscene, as last said
 const uint32_t kCutscenePlaying = 0x806EB6C8, kInCutscene = 0x5E4;
 const uint32_t kInputSticks = 0x8, kInputStickCount = 6, kInputBytes = 0x30, kInputButtons = 0x34, kInputHeld = 0x38;
-bool g_wayWoken = false; //the markers of this level's way, see the top
+//the markers of this level's way, see the top
+struct Way
+{
+	std::vector<uint32_t> reached; //markers that went off
+	uint32_t awake = 0, objective = 0, last = 0, before = 0; //a marker seen awake, the ones reached last and before it
+	std::chrono::steady_clock::time_point stalled{}; //none awake since
+	bool waiting = false;
+};
+Way g_way;
 uint32_t g_wayFrame = ~0u;
+const auto kWayGap = std::chrono::seconds(1); //the game's own link comes the frame after
+const uint32_t kTriggerAt = 0x30;
 const uint32_t kWorld = 0x805F4CCC, kTriggerCount = 0xE0, kTriggers = 0xE4;
 const uint32_t kTriggerType = 0x58, kTriggerFlags = 0x68, kAsleep = 1, kMarkerObjective = 0x9C;
 const uint32_t kObjectiveMarker = 0x3F;
@@ -395,32 +406,64 @@ void SprintAllowed(PPCContext& c)
 	orig_sprint_allowed(c);
 }
 
-//on foot in a tank's level: once a marker of the way is awake, the others of its objective too
+//on foot in a tank's level: the way's next marker where the game's own link doesn't wake it
 void WakeWay()
 {
 	const uint32_t frame{ ld32(kFrameCount) };
-	if (g_wayWoken || frame == g_wayFrame) return;
+	if (frame == g_wayFrame) return;
 	g_wayFrame = frame;
 	const uint32_t count{ std::min(ld32(kWorld + kTriggerCount), 4096u) }, triggers{ ld32(kWorld + kTriggers) };
 	if (!guest_ptr(triggers)) return;
-	uint32_t objective = 0;
-	for (uint32_t i = 0; i < count && !objective; ++i)
+	auto marker = [&](uint32_t t) { return guest_ptr(t) && ld32(t + kTriggerType) == kObjectiveMarker && (!g_way.objective || ld32(t + kMarkerObjective) == g_way.objective); };
+	auto reached = [&](uint32_t t) { return std::find(g_way.reached.begin(), g_way.reached.end(), t) != g_way.reached.end(); };
+	if (g_way.awake && (ld32(g_way.awake + kTriggerFlags) & kAsleep)) //went off, maybe waking the next this frame
+	{
+		if (!reached(g_way.awake)) g_way.reached.push_back(g_way.awake);
+		g_way.before = g_way.last;
+		g_way.last = g_way.awake;
+		g_way.awake = 0;
+	}
+	for (uint32_t i = 0; i < count && !g_way.awake; ++i)
 	{
 		const uint32_t t{ ld32(triggers + i * 4) };
-		if (guest_ptr(t) && ld32(t + kTriggerType) == kObjectiveMarker && !(ld32(t + kTriggerFlags) & kAsleep)) objective = ld32(t + kMarkerObjective);
+		if (marker(t) && !(ld32(t + kTriggerFlags) & kAsleep)) g_way.awake = t;
 	}
-	if (!objective) return;
-	int woken = 0;
+	if (g_way.awake)
+	{
+		g_way.objective = ld32(g_way.awake + kMarkerObjective);
+		g_way.waiting = false;
+		return;
+	}
+	if (!g_way.last) return;
+	const auto now{ std::chrono::steady_clock::now() };
+	if (!g_way.waiting)
+	{
+		g_way.waiting = true;
+		g_way.stalled = now;
+		return;
+	}
+	if (now - g_way.stalled < kWayGap) return;
+	g_way.waiting = false;
+	const float x{ ldf(g_way.last + kTriggerAt) }, y{ ldf(g_way.last + kTriggerAt + 4) }, z{ ldf(g_way.last + kTriggerAt + 8) };
+	//the way goes on ahead: away from the one reached before, when there is one
+	float ax = 0.0f, az = 0.0f;
+	if (g_way.before) ax = x - ldf(g_way.before + kTriggerAt), az = z - ldf(g_way.before + kTriggerAt + 8);
+	uint32_t next = 0;
+	float best = 0.0f;
+	bool ahead = false;
 	for (uint32_t i = 0; i < count; ++i)
 	{
 		const uint32_t t{ ld32(triggers + i * 4) };
-		if (!guest_ptr(t) || ld32(t + kTriggerType) != kObjectiveMarker || ld32(t + kMarkerObjective) != objective) continue;
-		if (!(ld32(t + kTriggerFlags) & kAsleep)) continue;
-		st32(t + kTriggerFlags, ld32(t + kTriggerFlags) & ~kAsleep);
-		++woken;
+		if (!marker(t) || reached(t)) continue;
+		const float dx{ ldf(t + kTriggerAt) - x }, dy{ ldf(t + kTriggerAt + 4) - y }, dz{ ldf(t + kTriggerAt + 8) - z };
+		const float d{ dx * dx + dy * dy + dz * dz };
+		const bool front{ dx * ax + dz * az >= 0.0f };
+		if (!next || (front && !ahead) || (front == ahead && d < best)) next = t, best = d, ahead = front;
 	}
-	g_wayWoken = true;
-	rt_log("goldeneye: bunnyhop: on foot, the %d other marker(s) of objective %08X are awake", woken, objective);
+	g_way.last = g_way.before = 0;
+	if (!next) return;
+	st32(next + kTriggerFlags, ld32(next + kTriggerFlags) & ~kAsleep);
+	rt_log("goldeneye: bunnyhop: on foot, the way of objective %08X goes on at marker %08X (%.0f %.0f %.0f)", g_way.objective, next, ldf(next + kTriggerAt), ldf(next + kTriggerAt + 4), ldf(next + kTriggerAt + 8));
 }
 
 //(levels, hash) -> is the player a tank there: not while bunnyhopping in the campaign
@@ -431,7 +474,7 @@ void TankLevel(PPCContext& c)
 	if (!guest_ptr(ld32(kPlayerPtr)))
 	{
 		g_onFoot = g_bunnyhop && !network_game();
-		g_wayWoken = false;
+		g_way = {};
 		g_tankOnFoot = false;
 	}
 	if (c.r[3] == 0 || !g_onFoot || (hash & kLevelKind) != kCampaignLevel) return;
