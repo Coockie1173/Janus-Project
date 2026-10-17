@@ -327,6 +327,7 @@ bool trigger_view(); //cheat, the triggers that go off by being walked into are 
 void set_trigger_view(bool on);
 void triggers_update(PPCContext& c); //collision.cpp, the player's view is about to be drawn
 std::vector<std::string> trigger_labels(); //the triggers the player is in, a line each
+const char* trigger_type_name(uint32_t type); //what the type does, nullptr when not known
 bool trigger_xray(); //what is behind the level's walls is drawn too, fainter
 void set_trigger_xray(bool on);
 struct TriggerType { uint32_t type, count, shaped; }; //a type the game asked about in the level: how many, how many with a shape

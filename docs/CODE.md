@@ -819,6 +819,8 @@ camera hooks gather it and tell the runtime which views are on).
 | `Gather(c)` | every remembered trigger still in the world's list: yellow while someone is in it, a colour a type while asked about, grey after; the lines of the ones the player is in |
 | `triggers_update(c)` | gathers and sends when it changed |
 | `trigger_labels()` | the lines for the overlay (overlay.cpp `trigger_list`) |
+| `trigger_type_name(type)` | what a type does, from its class's update; nullptr when not known |
+| `DeathColumn`, `Column` | a death barrier without a shape: in it as fn_800429C0 tests, drawn as a column |
 | `trigger_types()`, `trigger_type_shown`, `set_trigger_types_shown`, `trigger_xray` | the menu's Trigger Viewer page (settings.cpp `RefreshTriggerPage`): the types asked about, which are drawn, and the faint pass behind walls |
 
 ### body.cpp

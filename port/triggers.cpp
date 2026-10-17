@@ -38,6 +38,23 @@
 //the picture goes to the runtime as its debug overlay (gx_debug_overlay), with the matrix the
 //collision viewer keeps for the player's view (collision.cpp calls in here)
 //
+//the death barrier (type 0x13, fn_800429C0) without a shape doesn't ask a test: anyone within
+//its range across and below its height (+0x34) dies, a column down from it. those are drawn
+//from their class (+8, 8056D8C0) and in it is worked out here the same way
+//
+//the types' names: the game has none left (its hashes' names are stripped), these are what each
+//class does, from its update (a type's class is at +8 of its triggers, its functions from +8):
+//0x00 static object (eurochef's OB_Static), made when the player is near; 0x03 the generic
+//trigger: its script and a script variable (+0xA8 to 1) when someone is in; 0x08 made when near,
+//a character by its data (?); 0x0C level change (fn_80042440, its data the level's hash); 0x10
+//damage zone (fn_800425E0: every +0xA4 seconds a body inside is hurt by +0xA0, pushed away from
+//it); 0x13 death barrier; 0x1D loads a file's sections when near (fn_80032A30); 0x1E loads the
+//parts of objects of subtype 0x1F00007B when near (fn_80032C40); 0x25 made when near, a camera
+//by its data (angles, a range) (?); 0x36 sets a script variable (+0x9C) to the side of its plane
+//the player leaves it on (fn_80045710); 0x3F an objective's marker (fn_80046450, the objective
+//0x5320xxxx at +0x9C); 0x54 loads and unloads up to seven files when the player crosses its
+//plane (fn_80034AB0)
+//
 //the menu's Trigger Viewer page turns each type on and off (the ones the game asked about so
 //far in the level are listed), and whether what is behind the level's walls is drawn too
 //
@@ -64,10 +81,12 @@ const uint32_t kHasShape = 0x8000000;
 const uint32_t kMapFile = 0x1C, kMapHash = 0x20, kFileHeader = 0x24, kGeom = 0x47454F4D, kMapDataList = 0x70;
 const uint32_t kTriggerHeader = 0x58, kShapes = 0x10, kShapeSize = 0x30;
 const uint32_t kShapeWorldFn = 0x802D3120, kQuatMatrixFn = 0x802A5360, kShapeOrigin = 0x805C96E8;
+const uint32_t kDeathBarrierClass = 0x8056D8C0, kDeathBarrierWho = 0xA0;
+const float kColumnDepth = 60.0f; //how far down a death barrier's column is drawn, it has no bottom
 const uint32_t kAiWake[][2] = {{0x8002AA60, 0x8002AB20 + 336}, {0x8002DDD0, 0x8002DE90 + 212}}; //the AI points' updates
 const uint32_t kRecent = 30; //game frames a trigger stays lit after it was last asked about
 const float kMaxRadius = 500.0f; //a range further than that is "anywhere", nothing to draw
-enum Kind { kBox = 0, kSphere = 1, kCapsule = 3, kLozenge = 4, kRangeOnly = 0xFF };
+enum Kind { kBox = 0, kSphere = 1, kCapsule = 3, kLozenge = 4, kColumn = 0xFE, kRangeOnly = 0xFF };
 
 struct Vertex
 {
@@ -290,6 +309,31 @@ void Capsule(const float* foot, const float* axis, float length, const float* up
 	}
 }
 
+//an upright cylinder down from its top's centre, the top closed
+void Column(const float* top, float radius, float depth, const uint8_t* color)
+{
+	const int kAround = 24;
+	float ring[kAround][2][3];
+	for (int i = 0; i < kAround; ++i)
+	{
+		float around = i * 6.2831853f / kAround;
+		for (int end = 0; end < 2; ++end)
+		{
+			ring[i][end][0] = top[0] + radius * std::cos(around);
+			ring[i][end][1] = top[1] - (end ? depth : 0.0f);
+			ring[i][end][2] = top[2] + radius * std::sin(around);
+		}
+	}
+	for (int i = 0; i < kAround; ++i)
+	{
+		int next = (i + 1) % kAround;
+		Quad(ring[i][0], ring[next][0], ring[next][1], ring[i][1], color);
+		Push(top, color, 1); //the lid, outlined at its rim only
+		Push(ring[i][0], color, 1);
+		Push(ring[next][0], color, 1);
+	}
+}
+
 void Sphere(const float* centre, float radius, const uint8_t* color)
 {
 	static const float up[3] = {0, 1, 0}, none[3] = {0, 0, 0};
@@ -312,9 +356,25 @@ const char* KindName(int kind)
 	case kSphere: return "sphere";
 	case kCapsule: return "capsule";
 	case kLozenge: return "lozenge";
+	case kColumn: return "column";
 	case kRangeOnly: return "range";
 	default: return "?";
 	}
+}
+
+//a death barrier without a shape, as fn_800429C0 tests it: across within range, below its height
+void DeathColumn(uint32_t trigger, uint32_t now)
+{
+	Seen& s = g_seen[trigger];
+	s.frame = now;
+	uint32_t who = ld32(trigger + kDeathBarrierWho);
+	auto in = [trigger](uint32_t item)
+	{
+		float dx = ldf(item + 0xF8) - ldf(trigger + kAt), dz = ldf(item + 0x100) - ldf(trigger + kAt + 8);
+		return dx * dx + dz * dz < ldf(trigger + kRange) && ldf(item + 0xFC) < ldf(trigger + kAt + 4);
+	};
+	uint32_t player = ld32(kPlayerPtr);
+	if ((who & 1) && guest_ptr(player) && in(player)) s.insideFrame = s.playerFrame = now;
 }
 
 void Gather(PPCContext& c)
@@ -339,8 +399,11 @@ void Gather(PPCContext& c)
 	for (uint32_t i = 0; i < count; ++i)
 	{
 		uint32_t trigger = ld32(list + i * 4);
+		if (!Readable(trigger, 0x100)) continue;
+		bool column = ld32(trigger + 8) == kDeathBarrierClass && !(ld32(trigger + kDataFlags) & kHasShape) && !(ld32(trigger + kGameFlags) & 1);
+		if (column) DeathColumn(trigger, now);
 		auto seen = g_seen.find(trigger);
-		if (seen == g_seen.end() || !Readable(trigger, 0x100)) continue;
+		if (seen == g_seen.end()) continue;
 		kept.insert(*seen);
 		const Seen& s = seen->second;
 		bool inside = now - s.insideFrame <= 1, recent = now - s.frame <= kRecent;
@@ -383,6 +446,14 @@ void Gather(PPCContext& c)
 			else continue;
 		}
 		else if (datum) continue;
+		else if (column)
+		{
+			float range = std::sqrt(ldf(trigger + kRange)), at[3];
+			if (!(range > 0.01f) || range > kMaxRadius) continue;
+			for (int k = 0; k < 3; ++k) at[k] = shape.centre[k] = ldf(trigger + kAt + k * 4);
+			Column(at, range, kColumnDepth, color);
+			shape.kind = kColumn;
+		}
 		else
 		{
 			float range = std::sqrt(ldf(trigger + kRange)), at[3];
@@ -396,7 +467,8 @@ void Gather(PPCContext& c)
 		if (now - s.playerFrame <= 1)
 		{
 			char line[160];
-			std::snprintf(line, sizeof line, "type 0x%X  %s  at %.1f %.1f %.1f  flags %08X", type, KindName(shape.kind), shape.centre[0], shape.centre[1], shape.centre[2], ld32(trigger + kGameFlags));
+			const char* name = trigger_type_name(type);
+			std::snprintf(line, sizeof line, "%s (0x%02X)  %s  at %.1f %.1f %.1f  flags %08X", name ? name : "Type", type, KindName(shape.kind), shape.centre[0], shape.centre[1], shape.centre[2], ld32(trigger + kGameFlags));
 			labels.push_back(line);
 		}
 	}
@@ -438,6 +510,30 @@ void set_trigger_view(bool on)
 	{
 		std::lock_guard<std::mutex> lock(g_labels_lock);
 		g_labels.clear();
+	}
+}
+
+const char* trigger_type_name(uint32_t type)
+{
+	switch (type)
+	{
+	case 0x00: return "Static Object";
+	case 0x03: return "Trigger";
+	case 0x08: return "Character?";
+	case 0x0C: return "Level Change";
+	case 0x10: return "Damage Zone";
+	case 0x13: return "Death Barrier";
+	case 0x1C: return "Spawn Point";
+	case 0x1D: return "File Loader";
+	case 0x1E: return "Object Loader";
+	case 0x25: return "Camera?";
+	case 0x35: return "Multiplayer Spawn";
+	case 0x36: return "Crossing Switch";
+	case 0x3E: return "Map Loader";
+	case 0x3F: return "Objective Marker";
+	case 0x41: case 0x45: return "AI Point";
+	case 0x54: return "Streaming Gate";
+	default: return nullptr;
 	}
 }
 

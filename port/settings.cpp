@@ -851,8 +851,10 @@ void RefreshTriggerPage()
 	if (types.empty()) rows.push_back({"No Types Yet", "The types show up here once the game has checked a trigger of theirs in the level being played.", {}, {}, {}});
 	for (const TriggerType& t : types)
 	{
-		char label[32], hint[160];
-		std::snprintf(label, sizeof label, "Type 0x%02X", t.type);
+		char label[48], hint[160];
+		const char* name = trigger_type_name(t.type);
+		if (name) std::snprintf(label, sizeof label, "%s (0x%02X)", name, t.type);
+		else std::snprintf(label, sizeof label, "Type 0x%02X", t.type);
 		std::snprintf(hint, sizeof hint, "%u checked in this level so far, %u of them with a collision shape. On: drawn. Off: left out.", t.count, t.shaped);
 		Row r;
 		r.label = label;
