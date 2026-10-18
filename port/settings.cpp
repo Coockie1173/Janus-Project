@@ -332,6 +332,16 @@ void AddToggle(int page, const char* id, const char* label, const char* hint, bo
 	s.show = [](float v) { return std::string(v > 0.5f ? "On" : "Off"); };
 }
 
+//only does something: Enter on its row, or a hotkey
+void AddAction(int page, const char* id, const char* label, const char* hint, std::function<void()> does)
+{
+	Setting& s = AddSetting(page, Setting::kAction, id, label, hint);
+	s.get = [] { return 0.0f; };
+	s.set = [does](float) { does(); };
+	s.step = [](float v, int) { return v; };
+	s.show = [](float) { return std::string(); };
+}
+
 Setting& AddChoice(int page, const char* id, const char* label, const char* hint, std::vector<const char*> names,
 	std::function<int()> get, std::function<void(int)> set)
 {
@@ -467,6 +477,12 @@ void BuildSettings()
 	AddToggle(kTriggers, "trigger_xray", "Through Walls", "On: the parts of a trigger behind the level's walls and floors are drawn too, fainter, so every trigger in the level shows. Off: only what is in sight.", trigger_xray, set_trigger_xray);
 
 	AddToggle(kSpeedrun, "speedrun_timer", "Show Timer", "On: the splits are on screen. Drag them anywhere with the mouse while the cursor is free: in the menus, a pause or this menu.", speedrun_timer, set_speedrun_timer);
+	AddAction(kSpeedrun, "speedrun_reset", "Reset Run", "Drops the run so far. Your personal best and best segments stay. Can be a hotkey (Hotkeys > Add Hotkey).", []
+	{
+		speedrun_reset();
+		g_resetUntil = Clock::now() + std::chrono::seconds(2);
+	});
+	g_settings.back().show = [](float) { return std::string(Clock::now() < g_resetUntil ? "Done" : ""); };
 
 	AddToggle(kForFun, "weapon_randomizer", "Weapon Randomizer", "On: in the campaign every guard and you start with a random weapon, with one random attachment or none. From the next spawn on.", weapon_randomizer, set_weapon_randomizer);
 	std::vector<const char*> weapons;
@@ -498,6 +514,13 @@ Row SettingRow(int i)
 	Row r;
 	r.label = s.label;
 	r.hint = s.hint;
+	if (s.kind == Setting::kAction)
+	{
+		r.value = [i] { return g_settings[i].show(0); };
+		r.select = [i] { g_settings[i].set(1); };
+		r.wide = true;
+		return r;
+	}
 	r.value = [i] { return g_settings[i].show(g_settings[i].get()); };
 	r.adjust = [i](int d) { g_settings[i].set(g_settings[i].step(g_settings[i].get(), d)); };
 	if (s.frac)
@@ -973,11 +996,6 @@ void build_pages() {
     speedrun.title = "Speedrun Timer";
     speedrun.rows.push_back({"How It Works", "The run starts as Dam is picked in the menu and ends as Cradle is won. Only time in the levels counts: every attempt, not the menus, loads or pauses.",
         [] { return std::string("Dam to Cradle"); }, {}, {}});
-    speedrun.rows.push_back({"Reset Run", "Drops the run so far. Your personal best and best segments stay.",
-        [] { return std::string(Clock::now() < g_resetUntil ? "Done" : ""); }, {}, [] {
-            speedrun_reset();
-            g_resetUntil = Clock::now() + std::chrono::seconds(2);
-        }});
     speedrun.rows.push_back({"Clear Best Times", "Forgets the personal best, every best segment and the attempt count. Select twice to be sure.",
         [] { return std::string(Clock::now() < g_clearUntil ? "Select again" : ""); }, {}, [] {
             if (Clock::now() < g_clearUntil) {

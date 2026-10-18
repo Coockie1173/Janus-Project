@@ -56,6 +56,11 @@ bool Same(float a, float b) { return std::fabs(a - b) < 0.001f; }
 std::string Press(Hotkey& h)
 {
 	const Setting& s = Settings()[h.setting];
+	if (s.kind == Setting::kAction)
+	{
+		s.set(1);
+		return s.label;
+	}
 	float now = s.get();
 	switch (h.action)
 	{
@@ -140,6 +145,7 @@ std::vector<std::string> ActionNames(int setting)
 	{
 	case Setting::kToggle: return {"Toggle", "Turn On", "Turn Off"};
 	case Setting::kChoice: return {"Next", "Previous", "Set To", "Switch To"};
+	case Setting::kAction: return {"Do It"};
 	default: return {"Increase", "Decrease", "Set To", "Switch To"};
 	}
 }
@@ -147,6 +153,7 @@ std::vector<std::string> ActionNames(int setting)
 //a toggle's three are next, set to on and set to off
 int ActionIndex(const Hotkey& h)
 {
+	if (Settings()[h.setting].kind == Setting::kAction) return 0;
 	if (Settings()[h.setting].kind != Setting::kToggle) return h.action;
 	return h.action == Hotkey::kNext ? 0 : h.value > 0.5f ? 1 : 2;
 }
@@ -154,6 +161,11 @@ int ActionIndex(const Hotkey& h)
 void SetAction(Hotkey& h, int index)
 {
 	h.back = NAN;
+	if (Settings()[h.setting].kind == Setting::kAction)
+	{
+		h.action = Hotkey::kNext;
+		return;
+	}
 	if (Settings()[h.setting].kind != Setting::kToggle)
 	{
 		h.action = (Hotkey::Action)std::clamp(index, 0, Hotkey::kActionCount - 1);
@@ -168,6 +180,7 @@ std::string ActionName(const Hotkey& h) { return ActionNames(h.setting)[ActionIn
 std::string Describe(const Hotkey& h)
 {
 	const Setting& s = Settings()[h.setting];
+	if (s.kind == Setting::kAction) return s.label;
 	std::string text = s.label + ": " + ActionName(h);
 	if (HasValue(h) && s.kind != Setting::kToggle) text += " " + s.show(h.value);
 	return text;

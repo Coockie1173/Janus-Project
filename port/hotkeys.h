@@ -9,10 +9,10 @@ namespace ge
 {
 
 //something the settings menu changes, as a number: 0 or 1 for a toggle, the index for a
-//choice, the value itself for a range
+//choice, the value itself for a range. an action (Reset Run) only does something, set does it
 struct Setting
 {
-	enum Kind { kToggle, kChoice, kRange };
+	enum Kind { kToggle, kChoice, kRange, kAction };
 	std::string id; //its name in the hotkeys file
 	std::string label, hint;
 	int page{};
