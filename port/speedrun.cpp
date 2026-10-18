@@ -19,8 +19,8 @@
 //(Reset Run can be a hotkey too). the splits go out and come in as LiveSplit's .lss, in game time
 //
 //the window is dragged with the mouse wherever the cursor is free (menus, a pause, F1). let go
-//outside the game's window it gets a window of its own (SDL's software renderer and a second
-//ImGui context, the game's GL context isn't touched), closing that one puts it back
+//outside the game's window it gets a window of its own (a second ImGui context, drawn by a thread
+//with a GL context of its own), closing that one puts it back
 //the splits, the window's place and whether it's shown are in speedrun.txt, next to the settings
 //GE_SPEEDRUN=F that file instead
 //GE_SPEEDRUN_SHOT=F.bmp the own window's picture, once, for looking at it in a hidden run
@@ -30,9 +30,12 @@
 #include <cctype>
 #include <chrono>
 #include <climits>
+#include <condition_variable>
+#include <cstddef>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <mutex>
@@ -42,7 +45,7 @@
 
 #ifdef GE_IMGUI
 #include "imgui.h"
-#include "imgui_impl_sdlrenderer3.h"
+#include "gl.h"
 #include <SDL3/SDL.h>
 #endif
 
@@ -496,7 +499,6 @@ ImVec2 g_grab; //the cursor's place in the box as it was taken
 
 //its own window
 SDL_Window* g_win = nullptr;
-SDL_Renderer* g_ren = nullptr;
 ImGuiContext* g_ctx = nullptr;
 ImFont* g_popFont = nullptr;
 Clock::time_point g_popDrawn{};
@@ -610,24 +612,223 @@ void DrawBox(ImDrawList* dl, float x, float y, float u)
 	menu_text(dl, ImVec2(x + 16 * u, fy + 62 * u), 18 * u, Fade(kCream, 0.7f), state, true);
 }
 
-//the game's GL context stays the current one around anything done to the own window: the
-//software renderer's window surface can be a GL renderer's of its own (Wayland's always is),
-//and the game's draws went to that one's context and crashed in the driver
-struct KeepGl
+//the own window has a thread of its own with a GL context of its own: the game's thread only
+//builds the picture's vertices (the second ImGui context) and hands them over. drawn with the
+//game's context made current on it instead, the switch of drawable cost the game 143 frames a
+//second down to 117 on X11; a software renderer before that (its surface a GL renderer's) 150
+//to 105, and visible its presents waited for the screen's refresh, so the game ran at 60
+struct Picture
 {
-	SDL_Window* m_pWindow{ SDL_GL_GetCurrentWindow() };
-	SDL_GLContext m_Context{ SDL_GL_GetCurrentContext() };
-	~KeepGl()
+	int w{}, h{};
+	std::vector<ImDrawVert> vtx;
+	std::vector<ImDrawIdx> idx;
+	struct Cmd
 	{
-		if (m_pWindow && m_Context && SDL_GL_GetCurrentContext() != m_Context) SDL_GL_MakeCurrent(m_pWindow, m_Context);
-	}
+		ImVec4 clip;
+		unsigned count, idxAt, vtxAt;
+	};
+	std::vector<Cmd> cmds;
 };
+
+#define POP_GL_FUNCS(X) \
+	X(PFNGLCREATESHADERPROC, CreateShader) X(PFNGLSHADERSOURCEPROC, ShaderSource) X(PFNGLCOMPILESHADERPROC, CompileShader) \
+	X(PFNGLCREATEPROGRAMPROC, CreateProgram) X(PFNGLATTACHSHADERPROC, AttachShader) X(PFNGLLINKPROGRAMPROC, LinkProgram) \
+	X(PFNGLDELETESHADERPROC, DeleteShader) X(PFNGLDELETEPROGRAMPROC, DeleteProgram) X(PFNGLUSEPROGRAMPROC, UseProgram) \
+	X(PFNGLGETUNIFORMLOCATIONPROC, GetUniformLocation) X(PFNGLUNIFORMMATRIX4FVPROC, UniformMatrix4fv) X(PFNGLUNIFORM1IPROC, Uniform1i) \
+	X(PFNGLGENVERTEXARRAYSPROC, GenVertexArrays) X(PFNGLBINDVERTEXARRAYPROC, BindVertexArray) X(PFNGLDELETEVERTEXARRAYSPROC, DeleteVertexArrays) \
+	X(PFNGLGENBUFFERSPROC, GenBuffers) X(PFNGLBINDBUFFERPROC, BindBuffer) X(PFNGLBUFFERDATAPROC, BufferData) X(PFNGLDELETEBUFFERSPROC, DeleteBuffers) \
+	X(PFNGLENABLEVERTEXATTRIBARRAYPROC, EnableVertexAttribArray) X(PFNGLVERTEXATTRIBPOINTERPROC, VertexAttribPointer) \
+	X(PFNGLGENTEXTURESPROC, GenTextures) X(PFNGLBINDTEXTUREPROC, BindTexture) X(PFNGLTEXPARAMETERIPROC, TexParameteri) \
+	X(PFNGLTEXIMAGE2DPROC, TexImage2D) X(PFNGLDELETETEXTURESPROC, DeleteTextures) X(PFNGLACTIVETEXTUREPROC, ActiveTexture) \
+	X(PFNGLVIEWPORTPROC, Viewport) X(PFNGLCLEARCOLORPROC, ClearColor) X(PFNGLCLEARPROC, Clear) X(PFNGLENABLEPROC, Enable) \
+	X(PFNGLDISABLEPROC, Disable) X(PFNGLBLENDEQUATIONPROC, BlendEquation) X(PFNGLBLENDFUNCSEPARATEPROC, BlendFuncSeparate) \
+	X(PFNGLSCISSORPROC, Scissor) X(PFNGLDRAWELEMENTSBASEVERTEXPROC, DrawElementsBaseVertex) X(PFNGLREADPIXELSPROC, ReadPixels) \
+	X(PFNGLPIXELSTOREIPROC, PixelStorei)
+
+class PopRenderer
+{
+public:
+	//on the game's thread: the context is made for the window and the game's made current again
+	bool Start(SDL_Window* pWindow, const unsigned char* font, int fontW, int fontH)
+	{
+		m_pWindow = pWindow;
+		m_Font.assign(font, font + (size_t)fontW * fontH * 4);
+		m_FontW = fontW;
+		m_FontH = fontH;
+		SDL_Window* game = SDL_GL_GetCurrentWindow();
+		SDL_GLContext gameContext = SDL_GL_GetCurrentContext();
+		m_Context = SDL_GL_CreateContext(pWindow);
+		if (game && gameContext) SDL_GL_MakeCurrent(game, gameContext);
+		if (!m_Context) return false;
+		m_Thread = SDL_CreateThread([](void* me) { static_cast<PopRenderer*>(me)->Run(); return 0; }, "speedrun timer", this);
+		return m_Thread != nullptr;
+	}
+
+	void Stop()
+	{
+		{
+			std::lock_guard<std::mutex> hold(m_Lock);
+			m_Quit = true;
+		}
+		m_Wake.notify_one();
+		if (m_Thread) SDL_WaitThread(m_Thread, nullptr);
+		if (m_Context) SDL_GL_DestroyContext(m_Context);
+		m_Thread = nullptr;
+		m_Context = nullptr;
+	}
+
+	void Show(Picture&& picture)
+	{
+		{
+			std::lock_guard<std::mutex> hold(m_Lock);
+			m_Next = std::move(picture);
+			m_Have = true;
+		}
+		m_Wake.notify_one();
+	}
+
+private:
+	struct Gl
+	{
+#define POP_GL_DECLARE(T, n) T n{};
+		POP_GL_FUNCS(POP_GL_DECLARE)
+#undef POP_GL_DECLARE
+	} gl;
+
+	void Run()
+	{
+		if (!SDL_GL_MakeCurrent(m_pWindow, m_Context)) return;
+		SDL_GL_SetSwapInterval(0); //its presents never wait for the screen
+#define POP_GL_LOAD(T, n) gl.n = (T)SDL_GL_GetProcAddress("gl" #n);
+		POP_GL_FUNCS(POP_GL_LOAD)
+#undef POP_GL_LOAD
+		Setup();
+		for (;;)
+		{
+			Picture now;
+			{
+				std::unique_lock<std::mutex> hold(m_Lock);
+				m_Wake.wait(hold, [this] { return m_Quit || m_Have; });
+				if (m_Quit) break;
+				now = std::move(m_Next);
+				m_Have = false;
+			}
+			Draw(now);
+		}
+		gl.DeleteTextures(1, &m_Texture);
+		gl.DeleteBuffers(1, &m_Vbo);
+		gl.DeleteBuffers(1, &m_Ibo);
+		gl.DeleteVertexArrays(1, &m_Vao);
+		gl.DeleteProgram(m_Program);
+		SDL_GL_MakeCurrent(m_pWindow, nullptr);
+	}
+
+	void Setup()
+	{
+		const char* vs = "#version 330 core\n"
+			"layout(location = 0) in vec2 Position; layout(location = 1) in vec2 UV; layout(location = 2) in vec4 Color;\n"
+			"uniform mat4 Proj; out vec2 FragUV; out vec4 FragColor;\n"
+			"void main() { FragUV = UV; FragColor = Color; gl_Position = Proj * vec4(Position, 0, 1); }\n";
+		const char* fs = "#version 330 core\n"
+			"in vec2 FragUV; in vec4 FragColor; uniform sampler2D Texture; out vec4 OutColor;\n"
+			"void main() { OutColor = FragColor * texture(Texture, FragUV); }\n";
+		GLuint v = gl.CreateShader(GL_VERTEX_SHADER), f = gl.CreateShader(GL_FRAGMENT_SHADER);
+		gl.ShaderSource(v, 1, &vs, nullptr);
+		gl.ShaderSource(f, 1, &fs, nullptr);
+		gl.CompileShader(v);
+		gl.CompileShader(f);
+		m_Program = gl.CreateProgram();
+		gl.AttachShader(m_Program, v);
+		gl.AttachShader(m_Program, f);
+		gl.LinkProgram(m_Program);
+		gl.DeleteShader(v);
+		gl.DeleteShader(f);
+		m_Proj = gl.GetUniformLocation(m_Program, "Proj");
+		m_Sampler = gl.GetUniformLocation(m_Program, "Texture");
+		gl.GenVertexArrays(1, &m_Vao);
+		gl.BindVertexArray(m_Vao);
+		gl.GenBuffers(1, &m_Vbo);
+		gl.GenBuffers(1, &m_Ibo);
+		gl.BindBuffer(GL_ARRAY_BUFFER, m_Vbo);
+		gl.BindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_Ibo);
+		gl.EnableVertexAttribArray(0);
+		gl.EnableVertexAttribArray(1);
+		gl.EnableVertexAttribArray(2);
+		gl.VertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(ImDrawVert), (void*)offsetof(ImDrawVert, pos));
+		gl.VertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(ImDrawVert), (void*)offsetof(ImDrawVert, uv));
+		gl.VertexAttribPointer(2, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(ImDrawVert), (void*)offsetof(ImDrawVert, col));
+		gl.GenTextures(1, &m_Texture);
+		gl.BindTexture(GL_TEXTURE_2D, m_Texture);
+		gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		gl.PixelStorei(GL_UNPACK_ALIGNMENT, 1);
+		gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, m_FontW, m_FontH, 0, GL_RGBA, GL_UNSIGNED_BYTE, m_Font.data());
+	}
+
+	void Draw(const Picture& p)
+	{
+		gl.Viewport(0, 0, p.w, p.h);
+		gl.ClearColor(6 / 255.0f, 14 / 255.0f, 18 / 255.0f, 1);
+		gl.Disable(GL_SCISSOR_TEST);
+		gl.Clear(GL_COLOR_BUFFER_BIT);
+		gl.Enable(GL_BLEND);
+		gl.BlendEquation(GL_FUNC_ADD);
+		gl.BlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+		gl.Disable(GL_CULL_FACE);
+		gl.Disable(GL_DEPTH_TEST);
+		gl.Enable(GL_SCISSOR_TEST);
+		float l = 0, r = (float)p.w, t = 0, b = (float)p.h;
+		const float proj[16] = { 2 / (r - l), 0, 0, 0, 0, 2 / (t - b), 0, 0, 0, 0, -1, 0, (r + l) / (l - r), (t + b) / (b - t), 0, 1 };
+		gl.UseProgram(m_Program);
+		gl.UniformMatrix4fv(m_Proj, 1, GL_FALSE, proj);
+		gl.Uniform1i(m_Sampler, 0);
+		gl.ActiveTexture(GL_TEXTURE0);
+		gl.BindTexture(GL_TEXTURE_2D, m_Texture);
+		gl.BindVertexArray(m_Vao);
+		gl.BindBuffer(GL_ARRAY_BUFFER, m_Vbo);
+		gl.BufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(p.vtx.size() * sizeof(ImDrawVert)), p.vtx.data(), GL_STREAM_DRAW);
+		gl.BufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)(p.idx.size() * sizeof(ImDrawIdx)), p.idx.data(), GL_STREAM_DRAW);
+		for (const Picture::Cmd& c : p.cmds)
+		{
+			if (c.clip.z <= c.clip.x || c.clip.w <= c.clip.y) continue;
+			gl.Scissor((GLint)c.clip.x, (GLint)((float)p.h - c.clip.w), (GLsizei)(c.clip.z - c.clip.x), (GLsizei)(c.clip.w - c.clip.y));
+			gl.DrawElementsBaseVertex(GL_TRIANGLES, (GLsizei)c.count, sizeof(ImDrawIdx) == 2 ? GL_UNSIGNED_SHORT : GL_UNSIGNED_INT,
+				(void*)(size_t)(c.idxAt * sizeof(ImDrawIdx)), (GLint)c.vtxAt);
+		}
+		static bool shot = false;
+		if (const char* path = std::getenv("GE_SPEEDRUN_SHOT"); path && !shot)
+		{
+			std::vector<uint8_t> rgba((size_t)p.w * p.h * 4), flipped(rgba.size());
+			gl.PixelStorei(GL_PACK_ALIGNMENT, 1);
+			gl.ReadPixels(0, 0, p.w, p.h, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
+			for (int y = 0; y < p.h; ++y) std::memcpy(&flipped[(size_t)y * p.w * 4], &rgba[(size_t)(p.h - 1 - y) * p.w * 4], (size_t)p.w * 4);
+			if (SDL_Surface* s = SDL_CreateSurfaceFrom(p.w, p.h, SDL_PIXELFORMAT_ABGR8888, flipped.data(), p.w * 4))
+			{
+				shot = SDL_SaveBMP(s, path);
+				SDL_DestroySurface(s);
+			}
+		}
+		SDL_GL_SwapWindow(m_pWindow);
+	}
+
+	SDL_Window* m_pWindow{ nullptr };
+	SDL_GLContext m_Context{ nullptr };
+	SDL_Thread* m_Thread{ nullptr };
+	std::mutex m_Lock;
+	std::condition_variable m_Wake;
+	Picture m_Next;
+	bool m_Have{ false }, m_Quit{ false };
+	std::vector<unsigned char> m_Font;
+	int m_FontW{}, m_FontH{};
+	GLuint m_Program{}, m_Vao{}, m_Vbo{}, m_Ibo{}, m_Texture{};
+	GLint m_Proj{}, m_Sampler{};
+};
+PopRenderer g_pop;
 
 void OpenPop()
 {
-	KeepGl keep;
 	int w = m_WinW > 0 ? m_WinW : (int)kWidth, h = m_WinH > 0 ? m_WinH : (int)BoxHeight(1);
-	SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE | (std::getenv("WIIKIT_HIDDEN") ? SDL_WINDOW_HIDDEN : 0);
+	SDL_WindowFlags flags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | (std::getenv("WIIKIT_HIDDEN") ? SDL_WINDOW_HIDDEN : 0);
 	g_win = SDL_CreateWindow("Speedrun Timer", w, h, flags);
 	if (!g_win)
 	{
@@ -637,37 +838,38 @@ void OpenPop()
 	}
 	if (m_WinX != INT_MIN && m_WinY != INT_MIN) SDL_SetWindowPosition(g_win, m_WinX, m_WinY);
 	window_icon(g_win);
-	g_ren = SDL_CreateRenderer(g_win, "software");
-	if (!g_ren)
-	{
-		rt_log("goldeneye: speedrun: its window has no renderer: %s", SDL_GetError());
-		SDL_DestroyWindow(g_win);
-		g_win = nullptr;
-		m_Popped = false;
-		return;
-	}
 	ImGuiContext* game = ImGui::GetCurrentContext();
 	g_ctx = ImGui::CreateContext();
 	ImGui::SetCurrentContext(g_ctx);
-	ImGui::GetIO().IniFilename = nullptr;
-	ImGui::GetIO().Fonts->AddFontDefault();
-	g_popFont = menu_font_add(ImGui::GetIO().Fonts);
-	ImGui_ImplSDLRenderer3_Init(g_ren);
+	ImGuiIO& io = ImGui::GetIO();
+	io.IniFilename = nullptr;
+	io.BackendFlags |= ImGuiBackendFlags_RendererHasVtxOffset;
+	io.Fonts->AddFontDefault();
+	g_popFont = menu_font_add(io.Fonts);
+	unsigned char* pixels = nullptr;
+	int fw = 0, fh = 0;
+	io.Fonts->GetTexDataAsRGBA32(&pixels, &fw, &fh);
+	io.Fonts->SetTexID((ImTextureID)1); //the thread's only texture
+	bool started = g_pop.Start(g_win, pixels, fw, fh);
 	ImGui::SetCurrentContext(game);
+	if (!started)
+	{
+		rt_log("goldeneye: speedrun: its window can't be drawn: %s", SDL_GetError());
+		g_pop.Stop();
+		ImGui::DestroyContext(g_ctx);
+		SDL_DestroyWindow(g_win);
+		g_ctx = nullptr;
+		g_win = nullptr;
+		m_Popped = false;
+	}
 }
 
 void ClosePop()
 {
-	KeepGl keep;
-	ImGuiContext* game = ImGui::GetCurrentContext();
-	ImGui::SetCurrentContext(g_ctx);
-	ImGui_ImplSDLRenderer3_Shutdown();
+	g_pop.Stop();
 	ImGui::DestroyContext(g_ctx);
-	ImGui::SetCurrentContext(game);
-	SDL_DestroyRenderer(g_ren);
 	SDL_DestroyWindow(g_win);
 	g_ctx = nullptr;
-	g_ren = nullptr;
 	g_win = nullptr;
 	g_popFont = nullptr;
 }
@@ -677,35 +879,35 @@ void DrawPop()
 	auto now = Clock::now();
 	if (now - g_popDrawn < std::chrono::milliseconds(16)) return; //60 a second is plenty for a clock
 	g_popDrawn = now;
-	KeepGl keep;
 	ImGuiContext* game = ImGui::GetCurrentContext();
 	ImGui::SetCurrentContext(g_ctx);
-	int pw = 0, ph = 0;
-	SDL_GetCurrentRenderOutputSize(g_ren, &pw, &ph);
+	Picture p;
+	SDL_GetWindowSizeInPixels(g_win, &p.w, &p.h);
+	p.w = std::max(p.w, 1);
+	p.h = std::max(p.h, 1);
 	ImGuiIO& io = ImGui::GetIO();
-	io.DisplaySize = ImVec2((float)std::max(pw, 1), (float)std::max(ph, 1));
+	io.DisplaySize = ImVec2((float)p.w, (float)p.h);
 	io.DeltaTime = 1.0f / 60;
-	ImGui_ImplSDLRenderer3_NewFrame();
 	ImGui::NewFrame();
 	float u = std::min(io.DisplaySize.x / kWidth, io.DisplaySize.y / BoxHeight(1));
 	menu_font_select(g_popFont);
 	DrawBox(ImGui::GetForegroundDrawList(), std::floor((io.DisplaySize.x - kWidth * u) / 2), std::floor((io.DisplaySize.y - BoxHeight(u)) / 2), u);
 	menu_font_select(nullptr);
 	ImGui::Render();
-	SDL_SetRenderDrawColor(g_ren, 6, 14, 18, 255);
-	SDL_RenderClear(g_ren);
-	ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), g_ren);
-	static bool shot = false;
-	if (const char* path = std::getenv("GE_SPEEDRUN_SHOT"); path && !shot)
+	const ImDrawData* d = ImGui::GetDrawData();
+	for (int n = 0; n < d->CmdListsCount; ++n)
 	{
-		if (SDL_Surface* s = SDL_RenderReadPixels(g_ren, nullptr))
+		const ImDrawList* list = d->CmdLists[n];
+		unsigned vtxBase = (unsigned)p.vtx.size(), idxBase = (unsigned)p.idx.size();
+		p.vtx.insert(p.vtx.end(), list->VtxBuffer.begin(), list->VtxBuffer.end());
+		p.idx.insert(p.idx.end(), list->IdxBuffer.begin(), list->IdxBuffer.end());
+		for (const ImDrawCmd& c : list->CmdBuffer)
 		{
-			shot = SDL_SaveBMP(s, path);
-			SDL_DestroySurface(s);
+			if (!c.UserCallback) p.cmds.push_back({ c.ClipRect, c.ElemCount, idxBase + c.IdxOffset, vtxBase + c.VtxOffset });
 		}
 	}
-	SDL_RenderPresent(g_ren);
 	ImGui::SetCurrentContext(game);
+	g_pop.Show(std::move(p));
 }
 
 //the window an event is for, 0 for one that isn't any window's
