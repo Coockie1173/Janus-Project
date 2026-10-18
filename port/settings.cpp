@@ -483,6 +483,7 @@ void BuildSettings()
 		g_resetUntil = Clock::now() + std::chrono::seconds(2);
 	});
 	g_settings.back().show = [](float) { return std::string(Clock::now() < g_resetUntil ? "Done" : ""); };
+	AddToggle(kSpeedrun, "speedrun_quit_reset", "Reset On Save And Quit", "On: choosing Save and Quit in the pause menu resets the run.", speedrun_quit_reset, set_speedrun_quit_reset);
 
 	AddToggle(kForFun, "weapon_randomizer", "Weapon Randomizer", "On: in the campaign every guard and you start with a random weapon, with one random attachment or none. From the next spawn on.", weapon_randomizer, set_weapon_randomizer);
 	std::vector<const char*> weapons;

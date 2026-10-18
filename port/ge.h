@@ -360,6 +360,9 @@ void speedrun_frame(); //speedrun.cpp, once a frame on the game's thread
 void speedrun_level_change(uint32_t from, uint32_t to, uint32_t entrance, bool next); //next: the app's update loads what comes after a won mission
 bool speedrun_timer(); //the splits window is shown
 void set_speedrun_timer(bool on);
+bool speedrun_quit_reset(); //Save and Quit resets the run
+void set_speedrun_quit_reset(bool on);
+void speedrun_menu_save(); //autosave.cpp: the game's menu saved the game, not a checkpoint
 void speedrun_reset(); //the run so far is dropped, the best times stay
 void speedrun_clear_best(); //the personal best, the best segments and the attempts are gone
 bool speedrun_dragging(); //the window is held by the mouse

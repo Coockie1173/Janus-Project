@@ -61,6 +61,7 @@ void RecordRestart(PPCContext& c)
 void SaveWrite(PPCContext& c)
 {
 	if (g_stepping) c.r[6] |= kWriteQuiet;
+	else speedrun_menu_save();
 	orig_save_write(c);
 }
 
