@@ -103,13 +103,13 @@ const float kGameRun = 4.2f; //806E947C
 const uint32_t kStateStanding = 0, kStateMoving = 2, kStateSprinting = 3, kStateFalling = 4;
 //the tunables, F1 > For Fun > Bunnyhopping, saved as LAUNCH_BHOP_*
 BhopValue g_values[kBhopValueCount]{
-	{"Base Speed", "How fast you run, in metres a second: there's no sprint while bunnyhopping. 4.2 is the game's run, 6.6 its sprint.", "GE_BHOP_SPEED", "LAUNCH_BHOP_SPEED", 6.6f, 1.0f, 15.0f, 0.1f, 1},
-	{"Hop Height", "How high a hop goes, in metres.", "GE_BHOP_HEIGHT", "LAUNCH_BHOP_HEIGHT", 1.5f, 0.1f, 5.0f, 0.05f, 2},
+	{"Base Speed", "How fast you run, in metres a second: there's no sprint while bunnyhopping. 4.2 is the game's run, 6.6 its sprint.", "GE_BHOP_SPEED", "LAUNCH_BHOP_SPEED", 7.0f, 1.0f, 15.0f, 0.1f, 1},
+	{"Hop Height", "How high a hop goes, in metres.", "GE_BHOP_HEIGHT", "LAUNCH_BHOP_HEIGHT", 0.9f, 0.1f, 5.0f, 0.05f, 2},
 	{"Gravity", "Of the game's gravity while bunnyhopping. 1.0 is the game's own.", "GE_BHOP_GRAVITY", "LAUNCH_BHOP_GRAVITY", 0.5f, 0.1f, 1.5f, 0.05f, 2},
-	{"Air Cap", "How much speed the stick adds along itself in the air. Half-Life's is 0.76: higher gains speed faster and turns sharper.", "GE_BHOP_AIRCAP", "LAUNCH_BHOP_AIRCAP", 2.5f, 0.1f, 10.0f, 0.05f, 2},
-	{"Air Accelerate", "How fast the air cap is reached, Half-Life's sv_airaccelerate.", "GE_BHOP_AIRACCEL", "LAUNCH_BHOP_AIRACCEL", 10.0f, 1.0f, 100.0f, 1.0f, 0},
+	{"Air Cap", "How much speed the stick adds along itself in the air. Half-Life's is 0.76: higher gains speed faster and turns sharper.", "GE_BHOP_AIRCAP", "LAUNCH_BHOP_AIRCAP", 1.1f, 0.1f, 10.0f, 0.05f, 2},
+	{"Air Accelerate", "How fast the air cap is reached, Half-Life's sv_airaccelerate.", "GE_BHOP_AIRACCEL", "LAUNCH_BHOP_AIRACCEL", 8.0f, 1.0f, 100.0f, 1.0f, 0},
 	{"Stick Speed", "The speed a full stick asks for, in metres a second. 4.2 is the game's run.", "GE_BHOP_WISH", "LAUNCH_BHOP_WISH", 4.2f, 1.0f, 15.0f, 0.1f, 1},
-	{"Top Speed", "The fastest you can go, in metres a second. Very high speeds can go through thin walls.", "GE_BHOP_MAX", "LAUNCH_BHOP_MAX", 25.0f, 5.0f, 60.0f, 1.0f, 0},
+	{"Top Speed", "The fastest you can go, in metres a second. Very high speeds can go through thin walls.", "GE_BHOP_MAX", "LAUNCH_BHOP_MAX", 60.0f, 5.0f, 120.0f, 1.0f, 0},
 	{"Fall Damage", "Of each fall that counts towards hurting and killing you. 0.5 takes twice the drop.", "GE_BHOP_FALL", "LAUNCH_BHOP_FALL", 0.5f, 0.05f, 1.0f, 0.05f, 2},
 	{"Free Drop", "How far under where you jumped you fall before the game's own fall (and its landing) takes over, in metres.", "GE_BHOP_DROP", "LAUNCH_BHOP_DROP", 4.0f, 1.0f, 50.0f, 0.5f, 1},
 	{"Ground Accelerate", "Pre-strafing: how fast the run's speed is reached on the floor, Half-Life's sv_accelerate. Higher gains more speed turning.", "GE_BHOP_ACCEL", "LAUNCH_BHOP_ACCEL", 10.0f, 1.0f, 30.0f, 0.5f, 1},
