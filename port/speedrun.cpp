@@ -16,7 +16,7 @@
 //the difference to the personal best as a split ends (green ahead, red behind, gold for a best
 //segment), the sum of best. a finished run faster than the personal best becomes it
 //picking Dam in the menu again starts a new attempt, the F1 menu's Speedrun Timer page resets
-//(Reset Run can be a hotkey too)
+//(Reset Run can be a hotkey too). the splits go out and come in as LiveSplit's .lss, in game time
 //
 //the window is dragged with the mouse wherever the cursor is free (menus, a pause, F1)
 //the splits, the window's place and whether it's shown are in speedrun.txt, next to the settings
@@ -25,6 +25,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -56,6 +57,7 @@ bool menu_font_ready();
 namespace
 {
 
+using Clock = std::chrono::steady_clock;
 const uint32_t kCurrentLevel = 0x805D1804;
 const uint32_t kLevelTimer = 0x805C963C; //a float, seconds played in the level
 const uint32_t kLevelKind = 0xFFFF0000, kCampaignLevel = 0x01810000;
@@ -105,6 +107,8 @@ int m_Index{ 0 }; //the split being run
 uint32_t m_LastLevel{ 0 };
 float m_LastTime{ 0 };
 bool m_Loaded{ false };
+std::string m_Said; //what an import or export came to
+Clock::time_point m_SaidUntil{};
 
 std::string FilePath()
 {
@@ -207,6 +211,13 @@ void EnsureLoaded()
 	if (!m_Loaded) Load();
 }
 
+void Say(const std::string& text)
+{
+	m_Said = text;
+	m_SaidUntil = Clock::now() + std::chrono::seconds(4);
+	rt_log("goldeneye: speedrun: %s", text.c_str());
+}
+
 void StartRun()
 {
 	ResetRun();
@@ -240,6 +251,110 @@ void Split()
 		}
 	}
 	Save();
+}
+
+//LiveSplit's times: [d.]hh:mm:ss.fffffff
+std::string LssTime(float seconds)
+{
+	double t = seconds;
+	int h = (int)(t / 3600), m = (int)(t / 60) % 60;
+	char text[32];
+	std::snprintf(text, sizeof text, "%02d:%02d:%010.7f", h, m, t - h * 3600.0 - m * 60.0);
+	return text;
+}
+
+float ReadLssTime(const std::string& text)
+{
+	int days = 0, h = 0, m = 0;
+	double sec = 0;
+	std::string t = text;
+	size_t colon = t.find(':');
+	if (colon == std::string::npos) return -1;
+	if (size_t dot = t.find('.'); dot < colon)
+	{
+		days = std::atoi(t.substr(0, dot).c_str());
+		t = t.substr(dot + 1);
+	}
+	if (std::sscanf(t.c_str(), "%d:%d:%lf", &h, &m, &sec) != 3) return -1;
+	return (float)(days * 86400.0 + h * 3600.0 + m * 60.0 + sec);
+}
+
+//what's between <tag> and </tag>, empty for none
+std::string Tag(const std::string& s, const char* tag)
+{
+	std::string open = std::string("<") + tag + ">", close = std::string("</") + tag + ">";
+	size_t a = s.find(open);
+	if (a == std::string::npos) return "";
+	a += open.size();
+	size_t b = s.find(close, a);
+	return b == std::string::npos ? "" : s.substr(a, b - a);
+}
+
+//an element that starts at the text "start" (<BestSegmentTime, or the Personal Best's SplitTime):
+//its game time, its real time without one, -1 for neither or when it's empty
+float TimeOf(const std::string& s, const std::string& start, const char* close)
+{
+	size_t a = s.find(start);
+	if (a == std::string::npos) return -1;
+	size_t gt = s.find('>', a);
+	if (gt == std::string::npos || s[gt - 1] == '/') return -1;
+	size_t b = s.find(close, gt);
+	std::string inside = s.substr(gt + 1, b == std::string::npos ? std::string::npos : b - gt - 1);
+	std::string game = Tag(inside, "GameTime");
+	return ReadLssTime(game.empty() ? Tag(inside, "RealTime") : game);
+}
+
+int ReadLss(const std::string& s)
+{
+	struct Seg
+	{
+		std::string name;
+		float pb, best;
+	};
+	std::vector<Seg> segs;
+	for (size_t at = s.find("<Segment>"); at != std::string::npos; at = s.find("<Segment>", at + 1))
+	{
+		size_t end = s.find("</Segment>", at);
+		if (end == std::string::npos) break;
+		std::string seg = s.substr(at, end - at);
+		segs.push_back({ Tag(seg, "Name"), TimeOf(seg, "name=\"Personal Best\"", "</SplitTime>"), TimeOf(seg, "<BestSegmentTime", "</BestSegmentTime>") });
+	}
+	bool byName = false;
+	for (const Seg& g : segs) byName |= SplitNamed(g.name) >= 0;
+	if (!byName && (int)segs.size() != kSplits) return 0;
+	Clear();
+	int read = 0;
+	for (size_t n = 0; n < segs.size(); ++n)
+	{
+		int i = byName ? SplitNamed(segs[n].name) : (int)n;
+		if (i < 0) continue;
+		m_Pb[i] = segs[n].pb;
+		m_Best[i] = segs[n].best;
+		++read;
+	}
+	if (std::string count = Tag(s, "AttemptCount"); !count.empty()) m_Attempts = std::atoi(count.c_str());
+	return read;
+}
+
+std::string WriteLss()
+{
+	std::ostringstream f;
+	f << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Run version=\"1.7.0\">\n  <GameIcon />\n"
+	  << "  <GameName>GoldenEye 007 (Wii)</GameName>\n  <CategoryName>Any% IGT</CategoryName>\n"
+	  << "  <Metadata>\n    <Run id=\"\" />\n    <Platform usesEmulator=\"False\">Wii</Platform>\n    <Region>\n    </Region>\n    <Variables />\n  </Metadata>\n"
+	  << "  <Offset>00:00:00</Offset>\n  <AttemptCount>" << m_Attempts << "</AttemptCount>\n  <AttemptHistory />\n  <Segments>\n";
+	for (int i = 0; i < kSplits; ++i)
+	{
+		f << "    <Segment>\n      <Name>" << kMissions[i].name << "</Name>\n      <Icon />\n      <SplitTimes>\n";
+		if (m_Pb[i] >= 0) f << "        <SplitTime name=\"Personal Best\">\n          <GameTime>" << LssTime(m_Pb[i]) << "</GameTime>\n        </SplitTime>\n";
+		else f << "        <SplitTime name=\"Personal Best\" />\n";
+		f << "      </SplitTimes>\n";
+		if (m_Best[i] >= 0) f << "      <BestSegmentTime>\n        <GameTime>" << LssTime(m_Best[i]) << "</GameTime>\n      </BestSegmentTime>\n";
+		else f << "      <BestSegmentTime />\n";
+		f << "      <SegmentHistory />\n    </Segment>\n";
+	}
+	f << "  </Segments>\n  <AutoSplitterSettings />\n</Run>\n";
+	return f.str();
 }
 
 } //namespace
@@ -329,6 +444,12 @@ void speedrun_clear_best()
 	Save();
 }
 
+std::string speedrun_said()
+{
+	std::lock_guard<std::mutex> hold(g_lock);
+	return Clock::now() < m_SaidUntil ? m_Said : std::string();
+}
+
 #ifdef GE_IMGUI
 namespace
 {
@@ -339,6 +460,7 @@ const ImU32 kCream = IM_COL32(243, 232, 208, 255), kBlue = IM_COL32(88, 124, 170
 	kDark = IM_COL32(26, 32, 40, 255), kAhead = IM_COL32(92, 214, 112, 255), kBehind = IM_COL32(232, 76, 62, 255),
 	kGoldColour = IM_COL32(255, 204, 64, 255);
 const float kWidth = 330, kHead = 46, kPitch = 25, kRow = 23, kFoot = 92;
+const SDL_DialogFileFilter kFilters[] = { { "LiveSplit splits", "lss" }, { "The timer's own file", "txt" } };
 
 ImVec2 g_box0, g_box1; //where it was drawn in the game's window
 std::atomic<bool> g_dragging{ false }; //pointer.cpp asks from the game thread
@@ -453,7 +575,61 @@ void DrawBox(ImDrawList* dl, float x, float y, float u)
 	menu_text(dl, ImVec2(x + 16 * u, fy + 62 * u), 18 * u, Fade(kCream, 0.7f), state, true);
 }
 
+void Exported(void*, const char* const* files, int)
+{
+	std::lock_guard<std::mutex> hold(g_lock);
+	if (!files) return Say(std::string("Export failed: ") + SDL_GetError());
+	if (!files[0]) return;
+	std::filesystem::path path = files[0];
+	if (!path.has_extension()) path += ".lss";
+	std::ofstream f(path);
+	f << WriteLss();
+	Say(f.good() ? "Exported to " + path.filename().string() : "Couldn't write " + path.string());
+}
+
+void Imported(void*, const char* const* files, int)
+{
+	std::lock_guard<std::mutex> hold(g_lock);
+	if (!files) return Say(std::string("Import failed: ") + SDL_GetError());
+	if (!files[0]) return;
+	std::ifstream f(files[0]);
+	std::stringstream text;
+	text << f.rdbuf();
+	std::string s = text.str();
+	std::filesystem::path path = files[0];
+	int read = 0;
+	if (s.find("<Run") != std::string::npos) read = ReadLss(s);
+	else
+	{
+		float pb[kSplits], best[kSplits];
+		std::copy(m_Pb, m_Pb + kSplits, pb);
+		std::copy(m_Best, m_Best + kSplits, best);
+		Clear();
+		std::istringstream in(s);
+		read = ReadOwn(in, true);
+		if (!read) //not one of ours: what was there stays
+		{
+			std::copy(pb, pb + kSplits, m_Pb);
+			std::copy(best, best + kSplits, m_Best);
+		}
+	}
+	if (!read) return Say("No splits in " + path.filename().string());
+	ResetRun();
+	Save();
+	Say("Imported " + std::to_string(read) + " splits");
+}
+
 } //namespace
+
+void speedrun_export()
+{
+	SDL_ShowSaveFileDialog(Exported, nullptr, SDL_GL_GetCurrentWindow(), kFilters, 1, nullptr);
+}
+
+void speedrun_import()
+{
+	SDL_ShowOpenFileDialog(Imported, nullptr, SDL_GL_GetCurrentWindow(), kFilters, 2, nullptr, false);
+}
 
 bool speedrun_event(const SDL_Event* e)
 {

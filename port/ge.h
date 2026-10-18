@@ -364,6 +364,9 @@ bool speedrun_quit_reset(); //Save and Quit resets the run
 void set_speedrun_quit_reset(bool on);
 void speedrun_menu_save(); //autosave.cpp: the game's menu saved the game, not a checkpoint
 void speedrun_reset(); //the run so far is dropped, the best times stay
+void speedrun_export(); //a file dialog, the splits as LiveSplit's .lss
+void speedrun_import(); //a .lss, or the timer's own file
+std::string speedrun_said(); //what the last import or export came to, for a few seconds
 void speedrun_clear_best(); //the personal best, the best segments and the attempts are gone
 bool speedrun_dragging(); //the window is held by the mouse
 

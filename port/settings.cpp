@@ -235,7 +235,7 @@ uint32_t g_triggerTypes = ~0u; //the version of the list the page was built for
 std::string g_toast; //what a hotkey just did
 Clock::time_point g_toastUntil{};
 Clock::time_point g_clearUntil{}; //Clear Best Times was selected once, again before this clears them
-Clock::time_point g_resetUntil{}; //Reset Run says it's done until then
+Clock::time_point g_resetUntil{}, g_clearedUntil{}; //Reset Run and Clear Best Times say they're done until then
 
 template <size_t N> int index_of(const char* const (&names)[N], const std::string& v, int otherwise) {
     for (size_t i = 0; i < N; ++i)
@@ -995,16 +995,20 @@ void build_pages() {
     g_pages[kTriggers].title = "Trigger Viewer";
     Page& speedrun = g_pages[kSpeedrun];
     speedrun.title = "Speedrun Timer";
-    speedrun.rows.push_back({"How It Works", "The run starts as Dam is picked in the menu and ends as Cradle is won. Only time in the levels counts: every attempt, not the menus, loads or pauses.",
-        [] { return std::string("Dam to Cradle"); }, {}, {}});
+    speedrun.rows.push_back({"Export Splits", "Saves your personal best and best segments as a LiveSplit file (.lss), in game time.",
+        [] { return speedrun_said(); }, {}, speedrun_export});
+    speedrun.rows.push_back({"Import Splits", "Loads a LiveSplit file (.lss) or one the timer saved. Its game time is taken, its real time where it has none.",
+        [] { return speedrun_said(); }, {}, speedrun_import});
+    for (size_t i = speedrun.rows.size() - 2; i < speedrun.rows.size(); ++i) speedrun.rows[i].wide = true;
     speedrun.rows.push_back({"Clear Best Times", "Forgets the personal best, every best segment and the attempt count. Select twice to be sure.",
-        [] { return std::string(Clock::now() < g_clearUntil ? "Select again" : ""); }, {}, [] {
+        [] { return std::string(Clock::now() < g_clearUntil ? "Select again" : Clock::now() < g_clearedUntil ? "Cleared" : ""); }, {}, [] {
             if (Clock::now() < g_clearUntil) {
                 speedrun_clear_best();
                 g_clearUntil = {};
-                g_resetUntil = Clock::now() + std::chrono::seconds(2);
+                g_clearedUntil = Clock::now() + std::chrono::seconds(2);
             } else g_clearUntil = Clock::now() + std::chrono::seconds(3);
         }});
+    speedrun.rows.back().wide = true;
     g_pages[kHotkeys].title = "Hotkeys";
     g_pages[kHotkeyEdit].title = "Hotkey";
     BuildHotkeyPages();
