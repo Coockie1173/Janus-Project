@@ -47,6 +47,7 @@
 //custom.cpp 007 Custom: a mission as 007 Classic with the guards set by sliders
 //crashdump.cpp crash, die and stall dumps into build/crashes
 //diagnostics.cpp the sampling profiler
+//speedrun.cpp the speedrun timer, a LiveSplit-like window timed by the level timer, Dam to Cradle
 //debug.cpp aids for finding things in the running game
 #pragma once
 #include "rt.h"
@@ -355,5 +356,12 @@ void set_anisotropy(int level);
 int anti_aliasing(); //samples a pixel, 1 is off
 void set_anti_aliasing(int samples);
 uint32_t settings_buttons(); //classic buttons the menu presses itself (+ to pause as it opens)
+void speedrun_frame(); //speedrun.cpp, once a frame on the game's thread
+void speedrun_level_change(uint32_t from, uint32_t to, uint32_t entrance, bool next); //next: the app's update loads what comes after a won mission
+bool speedrun_timer(); //the splits window is shown
+void set_speedrun_timer(bool on);
+void speedrun_reset(); //the run so far is dropped, the best times stay
+void speedrun_clear_best(); //the personal best, the best segments and the attempts are gone
+bool speedrun_dragging(); //the window is held by the mouse
 
 } //namespace ge

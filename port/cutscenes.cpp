@@ -483,6 +483,7 @@ void LevelChange(PPCContext& c)
 	//an ending that runs into another map of the same mission (Cradle's), not the next mission
 	else if (g_state == Skip::Running || g_state == Skip::FadingOut) Stop("a level change", g_part == kSkipEnding && c.lr == kNextMissionCall);
 	g_takes.clear();
+	speedrun_level_change(ld32(kCurrentLevel), level, guest_ptr(app) ? ld32(app + kAppEntrance) : 0, !g_restarting && c.lr == kNextMissionCall);
 	orig_level_change(c);
 }
 

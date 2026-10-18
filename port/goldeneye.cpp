@@ -72,6 +72,7 @@ void each_frame(uint32_t frame) {
     tweaks_apply();
     fov_apply();
     cutscenes_frame();
+    speedrun_frame();
     mouse_frame(frame);
     custom_frame(frame);
     pointer_frame(frame);

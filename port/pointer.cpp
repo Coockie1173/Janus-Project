@@ -42,7 +42,7 @@ bool Cursor(float& x, float& y, bool& left)
 	const double now = std::chrono::duration<double>(std::chrono::steady_clock::now() - g_began).count();
 	for (const Fake& fake : g_fakes)
 		if (now >= fake.from && now < fake.to) { x = fake.x; y = fake.y; left = fake.left; return true; }
-	return g_fakes.empty() && !overlay_open() && video_mouse(x, y, left);
+	return g_fakes.empty() && !overlay_open() && !speedrun_dragging() && video_mouse(x, y, left);
 }
 
 void PointerUpdate(PPCContext& c)

@@ -1679,6 +1679,10 @@ bool cheats_active() { return gecko_cheats() || god_mode() || infinite_ammo() ||
 
 #ifdef GE_IMGUI
 const std::vector<Setting>& Settings() { return g_settings; }
+//the menu's look for the speedrun timer (speedrun.cpp)
+void menu_text(ImDrawList* dl, ImVec2 at, float size, ImU32 colour, const std::string& s, bool shadow) { text(dl, at, size, colour, s, shadow); }
+float menu_text_width(const std::string& s, float size) { return text_width(s, size); }
+bool menu_font_ready() { return g_font != nullptr; }
 //anything on the Cheats page is on, or a code of the launcher's Cheats tab runs
 bool cheats_active()
 {
