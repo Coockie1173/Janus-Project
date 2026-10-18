@@ -1673,6 +1673,10 @@ uint32_t settings_buttons() {
     return g_escape || Clock::now().time_since_epoch().count() < g_pause_until ? kClPlus : 0;
 }
 
+#ifndef GE_IMGUI
+bool cheats_active() { return gecko_cheats() || god_mode() || infinite_ammo() || infinite_sprint() || noclip(); }
+#endif
+
 #ifdef GE_IMGUI
 const std::vector<Setting>& Settings() { return g_settings; }
 //anything on the Cheats page is on, or a code of the launcher's Cheats tab runs

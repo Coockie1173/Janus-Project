@@ -47,6 +47,9 @@
 //the hud is drawn all the same while a tutorial box is up (the game stands still until its
 //button) and while a quick time event waits for a button
 //
+//while a cheat is on (cheats_active) the level timer and the ammunition count flash red: their
+//texts' colour (+0x24) is red for the draw, every other half second, and the game's after it
+//
 //GE_HUD=0 no hud
 //GE_LEVEL_TIMER=0 no level timer
 //GE_ONLINE_UNLOCKS=0 the loadouts' items and the game modes open at their levels
@@ -58,6 +61,7 @@
 #include "ge.h"
 #include <atomic>
 #include <cstdlib>
+#include <chrono>
 #include <string>
 
 namespace ge
@@ -85,6 +89,10 @@ std::atomic<bool> g_level_timer{true};
 std::atomic<bool> g_hud{true};
 const uint32_t kLevelFlagsPtr = 0x805D5474, kLevelFlags = 0x198, kFlagNoHud = 4;
 const uint32_t kHudTutorialUp = 0x2523; //a byte of the hud, a tutorial box is shown
+const uint32_t kTextSize = 0x58, kTextColour = 0x24; //a hud text, its colour (RGBA)
+const uint32_t kTimerText = 0x1810; //the hud's text of the level timer
+const uint32_t kAmmoText = 0x13E8, kAmmoTexts = 4; //the ammunition count's texts (fn_8018F250 fills them)
+const uint32_t kCheatRed = 0x80101000; //the hud's colours go to 0x80
 bool g_hud_hidden = false; //inside the hud's draw with the option off
 bool g_hud_was_hidden = false; //the hud's last draw was one
 PPCFunc orig_element_draw = nullptr, orig_text_draw = nullptr, orig_waypoints_draw = nullptr, orig_names_draw = nullptr;
@@ -177,9 +185,28 @@ void HudElementDraw(PPCContext& c)
 	if (!g_hud_hidden) orig_element_draw(c);
 }
 
+//the level timer or a part of the ammunition count
+bool CheatText(uint32_t text, uint32_t hud)
+{
+	uint32_t at = text - hud;
+	return at == kTimerText || (at >= kAmmoText && at < kAmmoText + kAmmoTexts * kTextSize && (at - kAmmoText) % kTextSize == 0);
+}
+
 void HudTextDraw(PPCContext& c)
 {
-	if (!g_hud_hidden) orig_text_draw(c);
+	if (g_hud_hidden) return;
+	uint32_t text = c.r[3];
+	if (!cheats_active() || !CheatText(text, c.r[4]))
+	{
+		orig_text_draw(c);
+		return;
+	}
+	//red for half of each second, the game's own colour for the other half
+	auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+	uint32_t colour = ld32(text + kTextColour);
+	if (ms % 1000 < 500) st32(text + kTextColour, kCheatRed | (colour & 0xFF));
+	orig_text_draw(c);
+	st32(text + kTextColour, colour);
 }
 
 void WaypointsDraw(PPCContext& c)

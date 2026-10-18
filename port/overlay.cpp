@@ -41,7 +41,6 @@ void settings_draw();
 bool settings_toast(); //a hotkey's line is up
 void settings_say(const std::string& text); //a line at the top for a moment
 void settings_replay(); //a recording's hotkeys, every frame
-bool cheats_active(); //something on the menu's Cheats page is on
 #endif
 
 namespace {

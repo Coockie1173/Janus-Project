@@ -170,6 +170,7 @@ void pictures_file(uint32_t hash, uint32_t file); //a file (the game's object fo
 void install_gecko(); //gecko.cpp
 void gecko_apply();
 bool gecko_cheats(); //codes of the launcher's Cheats tab are running
+bool cheats_active(); //settings.cpp, something on the menu's Cheats page is on or a Cheats tab code runs
 void install_fov(); //fov.cpp
 void fov_apply();
 const float kGameFov = 49.0f, kFovMin = 20.0f, kFovMax = 120.0f;
