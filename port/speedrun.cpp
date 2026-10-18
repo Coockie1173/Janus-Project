@@ -13,7 +13,7 @@
 //like LiveSplit: the personal best's time at the end of each split, the best segment of each,
 //the difference to the personal best as a split ends (green ahead, red behind, gold for a best
 //segment), the sum of best. a finished run faster than the personal best becomes it
-//picking Dam in the menu again starts a new attempt
+//picking Dam in the menu again starts a new attempt, the F1 menu's Speedrun Timer page resets
 //
 //the window is dragged with the mouse wherever the cursor is free (menus, a pause, F1)
 //the splits, the window's place and whether it's shown are in speedrun.txt, next to the settings

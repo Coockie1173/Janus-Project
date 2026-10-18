@@ -216,7 +216,7 @@ struct Row {
 };
 struct Page { std::string title; std::vector<Row> rows; };
 
-enum { kRoot, kScreen, kControls, kBindings, kEnhancements, kCheats, kForFun, kHotkeys, kHotkeyEdit, kLevels, kMaps, kSkips, kBhop, kTriggers, kPageCount };
+enum { kRoot, kScreen, kControls, kBindings, kEnhancements, kCheats, kForFun, kHotkeys, kHotkeyEdit, kLevels, kMaps, kSkips, kBhop, kTriggers, kSpeedrun, kPageCount };
 std::vector<Page> g_pages;
 int g_page = kRoot, g_row = 0, g_scroll = 0;
 int g_root_row = 0; //where the cursor was on the first page
@@ -234,6 +234,8 @@ size_t g_triggerRows = 0; //the trigger page's rows before its list of types
 uint32_t g_triggerTypes = ~0u; //the version of the list the page was built for
 std::string g_toast; //what a hotkey just did
 Clock::time_point g_toastUntil{};
+Clock::time_point g_clearUntil{}; //Clear Best Times was selected once, again before this clears them
+Clock::time_point g_resetUntil{}; //Reset Run says it's done until then
 
 template <size_t N> int index_of(const char* const (&names)[N], const std::string& v, int otherwise) {
     for (size_t i = 0; i < N; ++i)
@@ -463,6 +465,8 @@ void BuildSettings()
 	AddToggle(kCheats, "collision_view", "Collision Viewer", "On: the level's collision is drawn in place of the world. Floors are green, walls grey, ceilings red, props orange.", collision_view, set_collision_view);
 	AddToggle(kTriggers, "trigger_view", "Trigger Viewer", "On: the triggers that go off when you walk into them are drawn over the world in the shape the game tests, a colour for each type. Yellow while someone is in one, grey once the game stopped checking it. The ones you are in are listed on screen.", trigger_view, set_trigger_view);
 	AddToggle(kTriggers, "trigger_xray", "Through Walls", "On: the parts of a trigger behind the level's walls and floors are drawn too, fainter, so every trigger in the level shows. Off: only what is in sight.", trigger_xray, set_trigger_xray);
+
+	AddToggle(kSpeedrun, "speedrun_timer", "Show Timer", "On: the splits are on screen. Drag them anywhere with the mouse while the cursor is free: in the menus, a pause or this menu.", speedrun_timer, set_speedrun_timer);
 
 	AddToggle(kForFun, "weapon_randomizer", "Weapon Randomizer", "On: in the campaign every guard and you start with a random weapon, with one random attachment or none. From the next spawn on.", weapon_randomizer, set_weapon_randomizer);
 	std::vector<const char*> weapons;
@@ -880,6 +884,8 @@ void build_pages() {
     root.rows.push_back({"Enhancements", "Things the port adds to the game.", {}, {}, [] { go(kEnhancements); }});
     root.rows.push_back({"Cheats", "Things the game itself would not let you do.", {}, {}, [] { go(kCheats); }});
     root.rows.push_back({"For Fun", "Things that change how the game plays, just for fun.", {}, {}, [] { go(kForFun); }});
+    root.rows.push_back({"Speedrun Timer", "A splits timer like LiveSplit's, of the in-game time from Dam to Cradle, against your best.",
+        [] { return std::string(speedrun_timer() ? "On" : "Off"); }, {}, [] { go(kSpeedrun); }});
     root.rows.push_back({"Level Select", "Load any level of the disc, the unused ones too.", {}, {}, [] { go(kLevels); }});
     root.rows.push_back({"Multiplayer Maps", "Load any multiplayer map of the disc to walk around in, the unused ones too.", {}, {}, [] { go(kMaps); }});
     //a grid's one row is what the foot reads: the cell under the cursor (settings_draw)
@@ -963,6 +969,23 @@ void build_pages() {
     g_pages[kForFun].title = "For Fun";
     g_pages[kBhop].title = "Bunnyhopping";
     g_pages[kTriggers].title = "Trigger Viewer";
+    Page& speedrun = g_pages[kSpeedrun];
+    speedrun.title = "Speedrun Timer";
+    speedrun.rows.push_back({"How It Works", "The run starts as Dam is picked in the menu and ends as Cradle is won. Only time in the levels counts: every attempt, not the menus, loads or pauses.",
+        [] { return std::string("Dam to Cradle"); }, {}, {}});
+    speedrun.rows.push_back({"Reset Run", "Drops the run so far. Your personal best and best segments stay.",
+        [] { return std::string(Clock::now() < g_resetUntil ? "Done" : ""); }, {}, [] {
+            speedrun_reset();
+            g_resetUntil = Clock::now() + std::chrono::seconds(2);
+        }});
+    speedrun.rows.push_back({"Clear Best Times", "Forgets the personal best, every best segment and the attempt count. Select twice to be sure.",
+        [] { return std::string(Clock::now() < g_clearUntil ? "Select again" : ""); }, {}, [] {
+            if (Clock::now() < g_clearUntil) {
+                speedrun_clear_best();
+                g_clearUntil = {};
+                g_resetUntil = Clock::now() + std::chrono::seconds(2);
+            } else g_clearUntil = Clock::now() + std::chrono::seconds(3);
+        }});
     g_pages[kHotkeys].title = "Hotkeys";
     g_pages[kHotkeyEdit].title = "Hotkey";
     BuildHotkeyPages();
