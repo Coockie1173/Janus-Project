@@ -42,7 +42,7 @@ set(GE_IMGUI ${GE_ROOT}/build/deps/imgui)
 if(EXISTS ${GE_IMGUI}/imgui.cpp)
   target_sources(wiiboot PRIVATE
       ${GE_IMGUI}/imgui.cpp ${GE_IMGUI}/imgui_draw.cpp ${GE_IMGUI}/imgui_tables.cpp ${GE_IMGUI}/imgui_widgets.cpp
-      ${GE_IMGUI}/backends/imgui_impl_sdl3.cpp ${GE_IMGUI}/backends/imgui_impl_opengl3.cpp)
+      ${GE_IMGUI}/backends/imgui_impl_sdl3.cpp ${GE_IMGUI}/backends/imgui_impl_opengl3.cpp ${GE_IMGUI}/backends/imgui_impl_sdlrenderer3.cpp)
   target_include_directories(wiiboot PRIVATE ${GE_IMGUI} ${GE_IMGUI}/backends ${CMAKE_CURRENT_BINARY_DIR}/ge_gen)
   # the menu's typeface (Roboto, among Dear ImGui's fonts) as an array in the executable
   file(READ ${GE_IMGUI}/misc/fonts/Roboto-Medium.ttf GE_FONT_HEX HEX)

@@ -476,7 +476,8 @@ void BuildSettings()
 	AddToggle(kTriggers, "trigger_view", "Trigger Viewer", "On: the triggers that go off when you walk into them are drawn over the world in the shape the game tests, a colour for each type. Yellow while someone is in one, grey once the game stopped checking it. The ones you are in are listed on screen.", trigger_view, set_trigger_view);
 	AddToggle(kTriggers, "trigger_xray", "Through Walls", "On: the parts of a trigger behind the level's walls and floors are drawn too, fainter, so every trigger in the level shows. Off: only what is in sight.", trigger_xray, set_trigger_xray);
 
-	AddToggle(kSpeedrun, "speedrun_timer", "Show Timer", "On: the splits are on screen. Drag them anywhere with the mouse while the cursor is free: in the menus, a pause or this menu.", speedrun_timer, set_speedrun_timer);
+	AddToggle(kSpeedrun, "speedrun_timer", "Show Timer", "On: the splits are on screen. Drag them with the mouse while the cursor is free (menus, a pause, this menu); let go outside the game's window and they get their own.", speedrun_timer, set_speedrun_timer);
+	AddToggle(kSpeedrun, "speedrun_window", "Own Window", "On: the timer is in a window of its own, to put next to the game or capture on its own. Closing that window puts it back in the game's.", speedrun_window, set_speedrun_window);
 	AddAction(kSpeedrun, "speedrun_reset", "Reset Run", "Drops the run so far. Your personal best and best segments stay. Can be a hotkey (Hotkeys > Add Hotkey).", []
 	{
 		speedrun_reset();
@@ -1194,6 +1195,7 @@ void select() {
 
 //the picture
 ImFont* g_font = nullptr;
+ImFont* g_textFont = nullptr; //another context's copy of it, while the speedrun timer's own window draws
 const float kFontSize = 48, kNarrow = 0.80f; //the game's font is narrow, so the glyphs get drawn squeezed
 const ImU32 kCream = IM_COL32(243, 232, 208, 255), kBlue = IM_COL32(88, 124, 170, 255),
             kBar = IM_COL32(70, 100, 146, 150), kSelected = IM_COL32(255, 255, 255, 245),
@@ -1201,17 +1203,19 @@ const ImU32 kCream = IM_COL32(243, 232, 208, 255), kBlue = IM_COL32(88, 124, 170
             kDim = IM_COL32(6, 14, 18, 215), kGrid = IM_COL32(90, 150, 150, 22), kDark = IM_COL32(26, 32, 40, 255);
 
 float text_width(const std::string& s, float size) {
+    ImFont* font = g_textFont ? g_textFont : g_font;
     float w = 0;
-    for (unsigned char c : s) w += g_font->GetCharAdvance(c);
-    return w * size / g_font->FontSize * kNarrow;
+    for (unsigned char c : s) w += font->GetCharAdvance(c);
+    return w * size / font->FontSize * kNarrow;
 }
 
 void text(ImDrawList* dl, ImVec2 at, float size, ImU32 colour, const std::string& s, bool shadow = true) {
-    float k = size / g_font->FontSize;
+    ImFont* font = g_textFont ? g_textFont : g_font;
+    float k = size / font->FontSize;
     for (int pass = shadow ? 0 : 1; pass < 2; ++pass) {
         float x = at.x + (pass ? 0 : size * 0.05f), y = at.y + (pass ? 0 : size * 0.05f);
         for (unsigned char c : s) {
-            const ImFontGlyph* g = g_font->FindGlyph(c);
+            const ImFontGlyph* g = font->FindGlyph(c);
             if (!g) continue;
             if (g->Visible) {
                 dl->PrimReserve(6, 4);
@@ -1729,6 +1733,13 @@ const std::vector<Setting>& Settings() { return g_settings; }
 void menu_text(ImDrawList* dl, ImVec2 at, float size, ImU32 colour, const std::string& s, bool shadow) { text(dl, at, size, colour, s, shadow); }
 float menu_text_width(const std::string& s, float size) { return text_width(s, size); }
 bool menu_font_ready() { return g_font != nullptr; }
+ImFont* menu_font_add(ImFontAtlas* atlas)
+{
+	ImFontConfig cfg;
+	cfg.FontDataOwnedByAtlas = false;
+	return atlas->AddFontFromMemoryTTF((void*)kMenuFont, (int)sizeof kMenuFont, kFontSize, &cfg);
+}
+void menu_font_select(ImFont* font) { g_textFont = font; }
 //anything on the Cheats page is on, or a code of the launcher's Cheats tab runs
 bool cheats_active()
 {

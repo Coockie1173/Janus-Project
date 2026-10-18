@@ -43,6 +43,7 @@ void settings_say(const std::string& text); //a line at the top for a moment
 void settings_replay(); //a recording's hotkeys, every frame
 bool speedrun_event(const SDL_Event* e); //speedrun.cpp
 void speedrun_draw();
+void speedrun_own_window();
 #endif
 
 namespace {
@@ -294,6 +295,7 @@ void watches() {
 }
 
 void draw() {
+    speedrun_own_window();
     settings_replay();
     if (std::string said = pictures_draw(); !said.empty()) settings_say(said);
     float fade = cutscene_fade();
@@ -302,7 +304,7 @@ void draw() {
     bool meter = stamina(sprint);
     float speed = 0;
     bool hop = bunnyhop_speed(speed);
-    if (!overlay_open() && !g_show_state && !skipping_cutscene() && fade <= 0 && !settings_toast() && !cheats && !meter && !hop && !speedrun_timer()) return;
+    if (!overlay_open() && !g_show_state && !skipping_cutscene() && fade <= 0 && !settings_toast() && !cheats && !meter && !hop && !speedrun_in_game()) return;
     //with only the state shown the cursor stays hidden over the picture
     ImGuiIO& io = ImGui::GetIO();
     if (overlay_open()) io.ConfigFlags &= ~ImGuiConfigFlags_NoMouseCursorChange;

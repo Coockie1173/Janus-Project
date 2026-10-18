@@ -18,14 +18,18 @@
 //picking Dam in the menu again starts a new attempt, the F1 menu's Speedrun Timer page resets
 //(Reset Run can be a hotkey too). the splits go out and come in as LiveSplit's .lss, in game time
 //
-//the window is dragged with the mouse wherever the cursor is free (menus, a pause, F1)
+//the window is dragged with the mouse wherever the cursor is free (menus, a pause, F1). let go
+//outside the game's window it gets a window of its own (SDL's software renderer and a second
+//ImGui context, the game's GL context isn't touched), closing that one puts it back
 //the splits, the window's place and whether it's shown are in speedrun.txt, next to the settings
 //GE_SPEEDRUN=F that file instead
+//GE_SPEEDRUN_SHOT=F.bmp the own window's picture, once, for looking at it in a hidden run
 #include "ge.h"
 #include <algorithm>
 #include <atomic>
 #include <cctype>
 #include <chrono>
+#include <climits>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -38,6 +42,7 @@
 
 #ifdef GE_IMGUI
 #include "imgui.h"
+#include "imgui_impl_sdlrenderer3.h"
 #include <SDL3/SDL.h>
 #endif
 
@@ -52,6 +57,8 @@ namespace ge
 void menu_text(ImDrawList* dl, ImVec2 at, float size, ImU32 colour, const std::string& s, bool shadow); //settings.cpp, the game's font
 float menu_text_width(const std::string& s, float size);
 bool menu_font_ready();
+ImFont* menu_font_add(ImFontAtlas* atlas); //the game's font in another context's atlas
+void menu_font_select(ImFont* font); //what menu_text draws with, nullptr the menu's own
 #endif
 
 namespace
@@ -94,6 +101,8 @@ int MissionOf(uint32_t level)
 std::mutex g_lock;
 bool m_Shown{ false };
 float m_X{ -1 }, m_Y{ 0.06f }; //the box's top left corner in the game's window, a part of it. -1: against the right edge
+bool m_Popped{ false }; //in a window of its own
+int m_WinX{ INT_MIN }, m_WinY{ INT_MIN }, m_WinW{ 0 }, m_WinH{ 0 }; //that window, on the desktop
 bool m_QuitReset{ false };
 bool m_MenuSaved{ false }; //the menu saved the game in this level
 int m_Attempts{ 0 };
@@ -171,6 +180,7 @@ int ReadOwn(std::istream& f, bool splitsOnly)
 		else if (splitsOnly) continue;
 		else if (key == "shown") in >> m_Shown;
 		else if (key == "at") in >> m_X >> m_Y;
+		else if (key == "window") in >> m_Popped >> m_WinX >> m_WinY >> m_WinW >> m_WinH;
 		else if (key == "quit_reset") in >> m_QuitReset;
 	}
 	return read;
@@ -196,6 +206,7 @@ void Save()
 	f << "# the speedrun timer (F1 > Speedrun Timer): a split's personal best (the time at its end) and its best segment, seconds, -1 for none\n";
 	f << "shown " << (m_Shown ? 1 : 0) << "\n";
 	f << "at " << m_X << " " << m_Y << "\n";
+	f << "window " << (m_Popped ? 1 : 0) << " " << m_WinX << " " << m_WinY << " " << m_WinW << " " << m_WinH << "\n";
 	f << "quit_reset " << (m_QuitReset ? 1 : 0) << "\n";
 	f << "attempts " << m_Attempts << "\n";
 	char text[96];
@@ -411,6 +422,23 @@ void set_speedrun_timer(bool on)
 	Save();
 }
 
+bool speedrun_window()
+{
+	std::lock_guard<std::mutex> hold(g_lock);
+	EnsureLoaded();
+	return m_Popped;
+}
+
+void set_speedrun_window(bool on)
+{
+	std::lock_guard<std::mutex> hold(g_lock);
+	EnsureLoaded();
+	if (m_Popped == on) return;
+	m_Popped = on;
+	if (on) m_Shown = true;
+	Save();
+}
+
 bool speedrun_quit_reset()
 {
 	std::lock_guard<std::mutex> hold(g_lock);
@@ -465,6 +493,13 @@ const SDL_DialogFileFilter kFilters[] = { { "LiveSplit splits", "lss" }, { "The 
 ImVec2 g_box0, g_box1; //where it was drawn in the game's window
 std::atomic<bool> g_dragging{ false }; //pointer.cpp asks from the game thread
 ImVec2 g_grab; //the cursor's place in the box as it was taken
+
+//its own window
+SDL_Window* g_win = nullptr;
+SDL_Renderer* g_ren = nullptr;
+ImGuiContext* g_ctx = nullptr;
+ImFont* g_popFont = nullptr;
+Clock::time_point g_popDrawn{};
 
 ImU32 Fade(ImU32 c, float a) { return (c & ~IM_COL32_A_MASK) | ((ImU32)((float)(c >> IM_COL32_A_SHIFT) * a) << IM_COL32_A_SHIFT); }
 
@@ -575,6 +610,144 @@ void DrawBox(ImDrawList* dl, float x, float y, float u)
 	menu_text(dl, ImVec2(x + 16 * u, fy + 62 * u), 18 * u, Fade(kCream, 0.7f), state, true);
 }
 
+//the game's GL context stays the current one around anything done to the own window: the
+//software renderer's window surface can be a GL renderer's of its own (Wayland's always is),
+//and the game's draws went to that one's context and crashed in the driver
+struct KeepGl
+{
+	SDL_Window* m_pWindow{ SDL_GL_GetCurrentWindow() };
+	SDL_GLContext m_Context{ SDL_GL_GetCurrentContext() };
+	~KeepGl()
+	{
+		if (m_pWindow && m_Context && SDL_GL_GetCurrentContext() != m_Context) SDL_GL_MakeCurrent(m_pWindow, m_Context);
+	}
+};
+
+void OpenPop()
+{
+	KeepGl keep;
+	int w = m_WinW > 0 ? m_WinW : (int)kWidth, h = m_WinH > 0 ? m_WinH : (int)BoxHeight(1);
+	SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE | (std::getenv("WIIKIT_HIDDEN") ? SDL_WINDOW_HIDDEN : 0);
+	g_win = SDL_CreateWindow("Speedrun Timer", w, h, flags);
+	if (!g_win)
+	{
+		rt_log("goldeneye: speedrun: no window of its own: %s", SDL_GetError());
+		m_Popped = false;
+		return;
+	}
+	if (m_WinX != INT_MIN && m_WinY != INT_MIN) SDL_SetWindowPosition(g_win, m_WinX, m_WinY);
+	window_icon(g_win);
+	g_ren = SDL_CreateRenderer(g_win, "software");
+	if (!g_ren)
+	{
+		rt_log("goldeneye: speedrun: its window has no renderer: %s", SDL_GetError());
+		SDL_DestroyWindow(g_win);
+		g_win = nullptr;
+		m_Popped = false;
+		return;
+	}
+	ImGuiContext* game = ImGui::GetCurrentContext();
+	g_ctx = ImGui::CreateContext();
+	ImGui::SetCurrentContext(g_ctx);
+	ImGui::GetIO().IniFilename = nullptr;
+	ImGui::GetIO().Fonts->AddFontDefault();
+	g_popFont = menu_font_add(ImGui::GetIO().Fonts);
+	ImGui_ImplSDLRenderer3_Init(g_ren);
+	ImGui::SetCurrentContext(game);
+}
+
+void ClosePop()
+{
+	KeepGl keep;
+	ImGuiContext* game = ImGui::GetCurrentContext();
+	ImGui::SetCurrentContext(g_ctx);
+	ImGui_ImplSDLRenderer3_Shutdown();
+	ImGui::DestroyContext(g_ctx);
+	ImGui::SetCurrentContext(game);
+	SDL_DestroyRenderer(g_ren);
+	SDL_DestroyWindow(g_win);
+	g_ctx = nullptr;
+	g_ren = nullptr;
+	g_win = nullptr;
+	g_popFont = nullptr;
+}
+
+void DrawPop()
+{
+	auto now = Clock::now();
+	if (now - g_popDrawn < std::chrono::milliseconds(16)) return; //60 a second is plenty for a clock
+	g_popDrawn = now;
+	KeepGl keep;
+	ImGuiContext* game = ImGui::GetCurrentContext();
+	ImGui::SetCurrentContext(g_ctx);
+	int pw = 0, ph = 0;
+	SDL_GetCurrentRenderOutputSize(g_ren, &pw, &ph);
+	ImGuiIO& io = ImGui::GetIO();
+	io.DisplaySize = ImVec2((float)std::max(pw, 1), (float)std::max(ph, 1));
+	io.DeltaTime = 1.0f / 60;
+	ImGui_ImplSDLRenderer3_NewFrame();
+	ImGui::NewFrame();
+	float u = std::min(io.DisplaySize.x / kWidth, io.DisplaySize.y / BoxHeight(1));
+	menu_font_select(g_popFont);
+	DrawBox(ImGui::GetForegroundDrawList(), std::floor((io.DisplaySize.x - kWidth * u) / 2), std::floor((io.DisplaySize.y - BoxHeight(u)) / 2), u);
+	menu_font_select(nullptr);
+	ImGui::Render();
+	SDL_SetRenderDrawColor(g_ren, 6, 14, 18, 255);
+	SDL_RenderClear(g_ren);
+	ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), g_ren);
+	static bool shot = false;
+	if (const char* path = std::getenv("GE_SPEEDRUN_SHOT"); path && !shot)
+	{
+		if (SDL_Surface* s = SDL_RenderReadPixels(g_ren, nullptr))
+		{
+			shot = SDL_SaveBMP(s, path);
+			SDL_DestroySurface(s);
+		}
+	}
+	SDL_RenderPresent(g_ren);
+	ImGui::SetCurrentContext(game);
+}
+
+//the window an event is for, 0 for one that isn't any window's
+SDL_WindowID EventWindow(const SDL_Event* e)
+{
+	if (e->type >= SDL_EVENT_WINDOW_FIRST && e->type <= SDL_EVENT_WINDOW_LAST) return e->window.windowID;
+	switch (e->type)
+	{
+	case SDL_EVENT_KEY_DOWN: case SDL_EVENT_KEY_UP: return e->key.windowID;
+	case SDL_EVENT_TEXT_INPUT: return e->text.windowID;
+	case SDL_EVENT_MOUSE_MOTION: return e->motion.windowID;
+	case SDL_EVENT_MOUSE_BUTTON_DOWN: case SDL_EVENT_MOUSE_BUTTON_UP: return e->button.windowID;
+	case SDL_EVENT_MOUSE_WHEEL: return e->wheel.windowID;
+	default: return 0;
+	}
+}
+
+//its own window's: closed it goes back in the game's, moved or resized it's kept
+bool PopEvent(const SDL_Event* e)
+{
+	std::lock_guard<std::mutex> hold(g_lock);
+	switch (e->type)
+	{
+	case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
+		m_Popped = false;
+		Save();
+		break;
+	case SDL_EVENT_WINDOW_MOVED:
+		m_WinX = e->window.data1;
+		m_WinY = e->window.data2;
+		Save();
+		break;
+	case SDL_EVENT_WINDOW_RESIZED:
+		m_WinW = e->window.data1;
+		m_WinH = e->window.data2;
+		Save();
+		break;
+	default: break;
+	}
+	return e->type != SDL_EVENT_KEY_DOWN && e->type != SDL_EVENT_KEY_UP; //F1 and the hotkeys work from it too
+}
+
 void Exported(void*, const char* const* files, int)
 {
 	std::lock_guard<std::mutex> hold(g_lock);
@@ -633,7 +806,8 @@ void speedrun_import()
 
 bool speedrun_event(const SDL_Event* e)
 {
-	if (!speedrun_timer()) return false;
+	if (g_win && EventWindow(e) == SDL_GetWindowID(g_win)) return PopEvent(e);
+	if (!speedrun_timer() || speedrun_window()) return false;
 	bool free = !in_play() || overlay_open();
 	switch (e->type)
 	{
@@ -662,6 +836,21 @@ bool speedrun_event(const SDL_Event* e)
 		if (!g_dragging || e->button.button != SDL_BUTTON_LEFT) return false;
 		g_dragging = false;
 		std::lock_guard<std::mutex> hold(g_lock);
+		//let go outside the game's window: a window of its own where it was dropped
+		SDL_Window* game = SDL_GetWindowFromID(e->button.windowID);
+		int ww = 0, wh = 0, wx = 0, wy = 0;
+		if (game) SDL_GetWindowSize(game, &ww, &wh);
+		if (game && (e->button.x < 0 || e->button.y < 0 || e->button.x >= (float)ww || e->button.y >= (float)wh))
+		{
+			SDL_GetWindowPosition(game, &wx, &wy);
+			m_WinX = wx + (int)(e->button.x - g_grab.x);
+			m_WinY = wy + (int)(e->button.y - g_grab.y);
+			m_WinW = (int)(g_box1.x - g_box0.x);
+			m_WinH = (int)(g_box1.y - g_box0.y);
+			m_Popped = true;
+			m_X = -1; //back in the game's window it's against the right edge again
+			m_Y = 0.06f;
+		}
 		Save();
 		return true;
 	}
@@ -672,18 +861,44 @@ bool speedrun_event(const SDL_Event* e)
 
 bool speedrun_dragging() { return g_dragging; }
 
+//before the game's window's overlay: its own window opened, closed and drawn
+void speedrun_own_window()
+{
+	bool want;
+	{
+		std::lock_guard<std::mutex> hold(g_lock);
+		EnsureLoaded();
+		want = m_Shown && m_Popped;
+		if (want && !g_win && menu_font_ready()) OpenPop();
+	}
+	if (!want && g_win) ClosePop();
+	if (!g_win) return;
+	std::lock_guard<std::mutex> hold(g_lock);
+	DrawPop();
+}
+
+bool speedrun_in_game() //drawn over the game's picture
+{
+	std::lock_guard<std::mutex> hold(g_lock);
+	EnsureLoaded();
+	return m_Shown && !m_Popped;
+}
+
 void speedrun_draw()
 {
 	if (!menu_font_ready() || pictures_hiding()) return;
 	std::lock_guard<std::mutex> hold(g_lock);
 	EnsureLoaded();
-	if (!m_Shown) return;
+	if (!m_Shown || m_Popped) return;
 	float u = Scale();
 	ImVec2 screen = ImGui::GetIO().DisplaySize;
 	float w = kWidth * u, h = BoxHeight(u);
 	float x = m_X < 0 ? screen.x - w - 16 * u : m_X * screen.x, y = m_Y * screen.y;
-	x = std::clamp(x, 0.0f, std::max(0.0f, screen.x - w));
-	y = std::clamp(y, 0.0f, std::max(0.0f, screen.y - h));
+	if (!g_dragging) //held, it goes past the edges and out
+	{
+		x = std::clamp(x, 0.0f, std::max(0.0f, screen.x - w));
+		y = std::clamp(y, 0.0f, std::max(0.0f, screen.y - h));
+	}
 	g_box0 = ImVec2(x, y);
 	g_box1 = ImVec2(x + w, y + h);
 	DrawBox(ImGui::GetForegroundDrawList(), x, y, u);
