@@ -130,6 +130,7 @@ float g_hold_from = -1; //the level time the next map was first seen at
 std::map<uint32_t, float> g_openings; //level hash -> the level time its opening ends at, 0 not known
 std::map<uint32_t, bool> g_any_openings; //level hash -> its opening doesn't take the player, see the top
 bool g_any = false, g_armed_any = false; //the cutscene is one that plays without the player
+bool g_qte = false, g_armed_qte = false; //its quick time events pass under the skip
 
 int MissionOf(uint32_t level)
 {
@@ -162,11 +163,13 @@ void LoadOpenings(const std::string& path)
 //an ending's with 0 seconds to the level change
 //"again": the mouse is still lost to the cutscene before when it takes the player, the skip waits
 //for it to come back and be lost again
+//"qte": only with Auto Quick Time Events on, and its quick time events don't end the skip, they
+//pass by themselves under it
 struct Inside
 {
 	float seconds;
 	int mission, part;
-	bool through, again;
+	bool through, again, qte;
 };
 std::map<std::pair<uint32_t, uint32_t>, Inside> g_cutscenes;
 void LoadCutscenes(const std::string& path)
@@ -180,17 +183,18 @@ void LoadCutscenes(const std::string& path)
 		l = l.substr(0, l.find('#'));
 		int n = std::sscanf(l.c_str(), "%x %x %f %31s %31s %31s", &level, &cutscene, &seconds, part, more[0], more[1]);
 		if (n < 4) continue;
-		bool through = false, again = false;
+		bool through = false, again = false, qte = false;
 		for (int i = 0; i < n - 4; ++i)
 		{
 			if (std::string(more[i]) == "through") through = seconds > 0 || std::string(part) == "ending";
 			else if (std::string(more[i]) == "again") again = true;
+			else if (std::string(more[i]) == "qte") qte = true;
 			else mission = (unsigned)std::strtoul(more[i], nullptr, 16);
 		}
 		int m = MissionOf(mission ? mission : level);
 		int p = std::find(kPartNames, kPartNames + kSkipParts, std::string(part)) - kPartNames;
 		if (m < 0 || p == kSkipIntro || p == kSkipParts) continue;
-		g_cutscenes[{level, cutscene}] = {seconds, m, p, through, again};
+		g_cutscenes[{level, cutscene}] = {seconds, m, p, through, again, qte};
 		g_missions[m].has[p] = true;
 	}
 }
@@ -299,7 +303,7 @@ void Arm(uint32_t level)
 	g_part = kSkipIntro;
 	g_frames = g_counting = 0;
 	g_wait_until = 0;
-	g_armed_through = g_back_first = false;
+	g_armed_through = g_back_first = g_armed_qte = false;
 	auto known = g_openings.find(level);
 	g_armed_ends = known != g_openings.end() ? known->second : 0.0f;
 	g_armed_any = g_any_openings[level];
@@ -312,6 +316,7 @@ void ArmCutscene(uint32_t cutscene)
 	if (g_state != Skip::Idle) return;
 	auto known = g_cutscenes.find({ld32(kCurrentLevel), cutscene});
 	if (known == g_cutscenes.end() || !g_on[known->second.mission][known->second.part]) return;
+	if (known->second.qte && !auto_qte()) return;
 	g_state = Skip::Waiting;
 	g_option = &g_on[known->second.mission][known->second.part];
 	g_part = known->second.part;
@@ -319,6 +324,7 @@ void ArmCutscene(uint32_t cutscene)
 	g_armed_ends = known->second.seconds > 0 ? ldf(kLevelTimer) + known->second.seconds : 0.0f;
 	g_armed_through = known->second.through;
 	g_armed_any = false;
+	g_armed_qte = known->second.qte;
 	g_back_first = known->second.again;
 	//one that keeps the mouse a while longer is waited for until shortly before its end
 	g_wait_until = std::max(ldf(kLevelTimer) + kWaitSeconds, g_armed_ends - kFadeSeconds * 3);
@@ -331,6 +337,7 @@ void StartFade()
 	g_ends = g_armed_ends;
 	g_through = g_armed_through;
 	g_any = g_armed_any;
+	g_qte = g_armed_qte;
 	if (g_ends > 0 && g_ends - ldf(kLevelTimer) < kFadeSeconds * 3)
 	{
 		g_state = Skip::Idle; //too short to fade out of and back into
@@ -352,7 +359,7 @@ bool Over()
 {
 	uint32_t state;
 	if (!*g_option) Stop("turned off");
-	else if (cutscene_input_waiting()) Stop("a button is wanted");
+	else if (cutscene_input_waiting() && !(g_qte && auto_qte())) Stop("a button is wanted");
 	else if (!local_player_state(state)) Stop("the player is gone");
 	else if (!Held(g_any) && !g_through) Stop("done");
 	return g_state == Skip::Idle;
