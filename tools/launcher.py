@@ -120,7 +120,8 @@ def skip_missions():
         for line in open(os.path.join(ROOT, "config", "cutscenes.txt"), encoding="utf-8"):
             f = line.split("#")[0].split()
             if len(f) >= 4 and f[3] in SKIP_PARTS[1:]:
-                parts = levels.get((f[4] if len(f) >= 5 else f[0]).upper())
+                other = [w for w in f[4:] if w not in ("through", "again")] #the options aren't the mission's level
+                parts = levels.get((other[0] if other else f[0]).upper())
                 if parts is not None:
                     parts[f[3]] = True
     except OSError:
