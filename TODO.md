@@ -218,13 +218,13 @@ Texts that still talk about the controller.
 
 ## Cheats
 
-- [ ] Turbo mode
-- [ ] Jumping
+- [x] Turbo mode: F1 > Cheats, a slider up to 5x the game's speed, campaign only (3x walked 13.94 m where 1x walked 4.65)
+- [x] Jumping
 - [x]-ish Spawn any weapon
 - [ ] All weapons (unless it breaks the way multiplayer maps do in single player, and whether that can be fixed)
 - ~~[ ] Force Sgt Garcia's best spawn point~~
 - [x] Infinite ammo: F1 > Cheats, campaign only; every kind of ammo stays full (41 shots from a 16 round P99 on Dam)
-- [ ] Grenades in single player
+- [x] Grenades in single player: F1 > Cheats, four frag grenades each level, campaign only (thrown and exploding in Nightclub)
 - [x] Infinite sprint: F1 > Cheats, campaign only (a sprint on Dam ends with all 3.1 s left)
 - [x] God mode: F1 > Cheats, campaign only; the player's damage is left out (not seen in a fight yet, no scripted run got hurt)
 - [x] Enemy rockets

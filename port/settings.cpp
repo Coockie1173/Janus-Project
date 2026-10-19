@@ -89,6 +89,8 @@ void save_launch_settings() {
     std::snprintf(ads_sens_text, sizeof ads_sens_text, "%.2f", ads_sens());
     char shake_text[16], tank_text[32];
     std::snprintf(shake_text, sizeof shake_text, "%g", shake_scale());
+    char turbo_text[16];
+    std::snprintf(turbo_text, sizeof turbo_text, "%g", turbo());
     std::snprintf(tank_text, sizeof tank_text, "%d,%d,%d", tank_source(0), tank_source(1), tank_source(2));
     static const char* modes[] = {"auto", "direct", "stick"};
     std::vector<std::pair<std::string, std::string>> values = {
@@ -103,6 +105,7 @@ void save_launch_settings() {
         {"LAUNCH_ANISO", std::to_string(anisotropy())}, {"LAUNCH_MSAA", std::to_string(anti_aliasing())},
         {"LAUNCH_CUSTOM", custom_values()},
         {"LAUNCH_GOD", god_mode() ? "1" : "0"}, {"LAUNCH_INFINITEAMMO", infinite_ammo() ? "1" : "0"}, {"LAUNCH_INFINITESPRINT", infinite_sprint() ? "1" : "0"},
+        {"LAUNCH_TURBO", turbo_text}, {"LAUNCH_GRENADES", grenades() ? "1" : "0"},
         {"LAUNCH_WEAPONRANDOMIZER", weapon_randomizer() ? "1" : "0"},
         {"LAUNCH_NOATTACHMENTLIMIT", no_attachment_limit() ? "1" : "0"}, {"LAUNCH_BUNNYHOP", bunnyhop() ? "1" : "0"},
         {"LAUNCH_BHOP_PRESTRAFE", bhop_prestrafe() ? "1" : "0"},
@@ -470,6 +473,10 @@ void BuildSettings()
 	AddToggle(kCheats, "god_mode", "God Mode", "On: nothing hurts you in the campaign. A fall out of the level or a failed mission still ends it.", god_mode, set_god_mode);
 	AddToggle(kCheats, "infinite_ammo", "Infinite Ammo", "On: your ammo never runs out in the campaign.", infinite_ammo, set_infinite_ammo);
 	AddToggle(kCheats, "infinite_sprint", "Infinite Sprint", "On: the sprint never runs out in the campaign.", infinite_sprint, set_infinite_sprint);
+	Setting& turboRow = AddRange(kCheats, "turbo", "Turbo Mode", "How fast you move in the campaign, times the game's own: walking, sprinting and crouched alike.",
+		turbo, [](float v) { set_turbo(v); g_dirty = true; }, 1, kTurboMax, 0.1f, 1);
+	turboRow.show = [show = turboRow.show](float v) { return v > 1 ? show(v) + "x" : std::string("Off"); };
+	AddToggle(kCheats, "grenades", "Grenades", "On: you carry four frag grenades in the campaign, thrown with Throw Grenade. Every level starts you with four.", grenades, set_grenades);
 	AddToggle(kCheats, "noclip", "Noclip", "On: you fly where you look, through walls, and don't fall. The sprint key flies faster.", noclip, set_noclip);
 	AddToggle(kCheats, "stamina_meter", "Stamina Meter", "On: a bar shows the sprint that's left. Cancel a sprint right under the line and it's back at a second the frame after.", stamina_meter, set_stamina_meter);
 	AddToggle(kCheats, "collision_view", "Collision Viewer", "On: the level's collision is drawn in place of the world. Floors are green, walls grey, ceilings red, props orange.", collision_view, set_collision_view);
@@ -1724,7 +1731,7 @@ uint32_t settings_buttons() {
 }
 
 #ifndef GE_IMGUI
-bool cheats_active() { return gecko_cheats() || god_mode() || infinite_ammo() || infinite_sprint() || noclip(); }
+bool cheats_active() { return gecko_cheats() || god_mode() || infinite_ammo() || infinite_sprint() || turbo() > 1 || grenades() || noclip(); }
 #endif
 
 #ifdef GE_IMGUI

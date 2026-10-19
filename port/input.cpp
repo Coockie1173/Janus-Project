@@ -602,7 +602,7 @@ void controller_update(PPCContext& c) {
         aim_lock_frame(ctrl);
         noclip_apply(ctrl);
         bunnyhop_apply(ctrl);
-        cheats_apply(ctrl);
+        cheats_apply(c, ctrl);
         stamina_apply(ctrl);
     } else if (network_game() && guest_ptr(player) && !is_tank(ctrl)) bunnyhop_apply(ctrl); //online everyone hops
     //the cheat, in a state whose update never got to ge_look_apply: turn the player's yaw directly

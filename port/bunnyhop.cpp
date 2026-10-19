@@ -514,6 +514,7 @@ void MoveSpeed(PPCContext& c)
 	const uint32_t ctrl{ c.r[3] }, out{ c.r[4] };
 	const bool speed{ (c.r[6] & 0xFF) != 0 };
 	orig_move_speed(c);
+	turbo_speed(ctrl, out, speed);
 	if (!Hops(ctrl) || !guest_ptr(out) || ld8(ctrl + kSprinting) || ld8(ctrl + kCrouched) || ld8(ctrl + kSlowed)) return;
 	const float now{ ldf(out) };
 	if (!std::isfinite(now) || now == 0) return;

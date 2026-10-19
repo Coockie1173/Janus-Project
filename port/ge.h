@@ -298,7 +298,13 @@ bool infinite_ammo(); //cheat, every kind of ammo stays at the most it holds
 void set_infinite_ammo(bool on);
 bool infinite_sprint(); //cheat, the sprint never runs out
 void set_infinite_sprint(bool on);
-void cheats_apply(uint32_t controller); //after the local controller's update
+const float kTurboMax = 5.0f;
+float turbo(); //cheat, the campaign's player moves this many times as fast, 1 is the game's
+void set_turbo(float scale);
+bool grenades(); //cheat, the campaign's player has frag grenades
+void set_grenades(bool on);
+void turbo_speed(uint32_t controller, uint32_t out, bool asSpeed); //ge_move_speed's answer, times the turbo
+void cheats_apply(PPCContext& c, uint32_t controller); //after the local controller's update
 void install_stamina(); //stamina.cpp
 bool stamina_meter(); //cheat, the sprint that's left as a bar
 void set_stamina_meter(bool on);
