@@ -508,19 +508,22 @@ ImU32 Fade(ImU32 c, float a) { return (c & ~IM_COL32_A_MASK) | ((ImU32)((float)(
 //1:23.45, 1:02:03.45 past an hour, 12.34 under a minute
 std::string Hms(float s, int decimals = 2)
 {
-	s = std::max(s, 0.0f);
-	int whole = (int)s, h = whole / 3600, m = whole / 60 % 60;
-	float sec = s - (float)(h * 3600 + m * 60);
+	//rounded first, so 59.996 shows as 1:00.00 and not 60.00
+	double scale = std::pow(10.0, decimals);
+	double t = std::round(std::max((double)s, 0.0) * scale) / scale;
+	int whole = (int)t, h = whole / 3600, m = whole / 60 % 60;
+	double sec = t - (double)(h * 3600 + m * 60);
+	int width = decimals ? decimals + 3 : 2; //"05.4", or "05" with no decimals
 	char text[32];
-	if (h) std::snprintf(text, sizeof text, "%d:%02d:%0*.*f", h, m, decimals + 3, decimals, sec);
-	else if (m) std::snprintf(text, sizeof text, "%d:%0*.*f", m, decimals + 3, decimals, sec);
+	if (h) std::snprintf(text, sizeof text, "%d:%02d:%0*.*f", h, m, width, decimals, sec);
+	else if (m) std::snprintf(text, sizeof text, "%d:%0*.*f", m, width, decimals, sec);
 	else std::snprintf(text, sizeof text, "%.*f", decimals, sec);
 	return text;
 }
 
 std::string Delta(float d)
 {
-	return (d < 0 ? "-" : "+") + Hms(std::fabs(d), std::fabs(d) < 60 ? 1 : 0);
+	return (d < 0 ? "-" : "+") + Hms(std::fabs(d), 1);
 }
 
 void RightText(ImDrawList* dl, float right, float y, float size, ImU32 colour, const std::string& s, bool shadow = true)
