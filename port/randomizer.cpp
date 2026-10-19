@@ -135,7 +135,7 @@ uint32_t RowOf(uint32_t id)
 	return 0;
 }
 
-bool IsWeapon(uint32_t id) { return std::find(std::begin(kGiveAll), std::end(kGiveAll), id) != std::end(kGiveAll); }
+bool IsWeapon(uint32_t id) { return std::find(std::begin(kGiveAll), std::end(kGiveAll), id) != std::end(kGiveAll) || custom_weapon(id); }
 
 //the model flags of the attachments the loadout menu allows on the weapon
 uint32_t Allowed(const PPCContext& c, uint32_t id)
@@ -397,6 +397,8 @@ void Give(PPCContext& c)
 {
 	const uint32_t ctrl{ c.r[3] }, id{ c.r[4] };
 	const bool pickup{ (c.r[9] & 0xFF) != 0 };
+	static const bool trace = std::getenv("GE_TRACEWEAPONS") != nullptr;
+	if (trace) rt_log("goldeneye: weapons: %08X given %08X %s", ctrl, id, call_chain(c).c_str());
 	if (Active())
 	{
 		LoadSections(c);

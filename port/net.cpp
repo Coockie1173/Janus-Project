@@ -115,8 +115,11 @@ void net_trace_controller(uint32_t ctrl, uint32_t player, bool own)
 {
 	static const bool trace = std::getenv("GE_NETTRACE") != nullptr;
 	if (!trace || !network_game()) return;
-	rt_log("nettrace: frame %u: %s %08X at %.3f %.3f %.3f, yaw %.5f, pitch %.5f", ld32(kFrameCount), own ? "own" : "other", ctrl, ldf(player + kEntityPlace),
-		ldf(player + kEntityPlace + 4), ldf(player + kEntityPlace + 8), ldf(player + kEntityYaw), ldf(ctrl + kCtrlPitch));
+	//the weapon in the hand: the inventory's item (+0xC4C, 0x10 each) the byte +0xC96 numbers
+	const uint32_t items = ld32(ctrl + 0xC4C), held = ld8(ctrl + 0xC96);
+	const uint32_t weapon = guest_ptr(items) && held < ld32(ctrl + 0xC48) ? ld32(items + held * 0x10) : 0;
+	rt_log("nettrace: frame %u: %s %08X at %.3f %.3f %.3f, yaw %.5f, pitch %.5f holds %08X", ld32(kFrameCount), own ? "own" : "other", ctrl, ldf(player + kEntityPlace),
+		ldf(player + kEntityPlace + 4), ldf(player + kEntityPlace + 8), ldf(player + kEntityYaw), ldf(ctrl + kCtrlPitch), weapon);
 }
 
 //the ping, in a game between players who came through Connect to WFC Modded: a joined console's

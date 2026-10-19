@@ -142,3 +142,8 @@ ge_sprint_allowed      # bunnyhopping, no sprint starts and one going ends
 ge_move_speed          # bunnyhopping, the run is the menu's base speed
 ge_tank_level          # bunnyhopping, the tank's mission is on foot
 ge_player_skin         # and Bond's skin, not the one the level's row names
+ge_weapons_load        # the weapons table from o_guns.edb: the custom weapons' rows go in after it (port/customweapons.cpp)
+ge_weapon_def_add      # a weapon definition into the map by id: the custom ones after the game's last
+ge_hash_find           # (hash, a file's list, its rows' size) -> the row's index or -1: traced for the custom weapons' hashes
+ge_weapon_poses        # every weapon's pose by its idle anim mode, once: the custom weapons' too
+ge_loadout_give        # a network game's player gets its loadout's weapons: traced for the custom weapons

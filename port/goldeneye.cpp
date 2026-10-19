@@ -92,6 +92,7 @@ void install() {
     install_blend_time();
     install_ping();
     install_mods();
+    install_custom_weapons();
     install_mods_menu();
     install_custom();
     install_pointer();

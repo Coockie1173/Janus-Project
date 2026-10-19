@@ -441,6 +441,9 @@ uint32_t PoolVersion()
 		Mix32(sum, pFile->hash);
 		Mix32(sum, FileSum(pFile->path));
 	}
+	//the custom weapons: a loadout has them by a key their order gives them
+	const std::vector<uint8_t>& weapons = custom_weapons_sum();
+	if (!weapons.empty()) Mix(sum, weapons.data(), weapons.size());
 	return kModdedVersions | (sum & (kModdedVersions - 1));
 }
 

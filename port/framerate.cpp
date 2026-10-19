@@ -99,6 +99,7 @@ void frame_tick(PPCContext& c) {
         each_frame(f);
         autosave_frame(c);
         mods_menu_frame(c);
+        custom_weapons_frame(c);
         pictures_frame();
     }
     collision_tick();

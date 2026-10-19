@@ -347,6 +347,11 @@ void set_trigger_type_shown(uint32_t type, bool on);
 void set_trigger_types_shown(bool on); //every type, and the ones not asked about yet
 std::string trigger_types_saved(); //the types' choices as the settings file keeps them
 void install_weapons(); //weapons.cpp
+void install_custom_weapons(); //customweapons.cpp, after install_mods and before install_mods_menu (its version has them): the weapons of mods/weapons
+void custom_weapons_frame(PPCContext& c); //once a frame, on the game's thread
+uint32_t custom_weapon_text(uint32_t hash); //the characters of a custom weapon's name or about, 0 for any other
+bool custom_weapon(uint32_t id); //the inventory id is one of the custom weapons'
+const std::vector<uint8_t>& custom_weapons_sum(); //what their files say, for the network game's version
 void install_prompts(); //prompts.cpp
 void weapon_buttons(ClassicState& s); //a slot's key, in the classic's filter
 bool sprint_key(); //input.cpp, the sprint key is down this frame
