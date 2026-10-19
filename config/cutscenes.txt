@@ -4,7 +4,7 @@
 # (0: not known, it fades back in when the mouse is back, a button is wanted or the level changes),
 # the part of the mission (middle or ending), and the mission's level when it's another map of it
 # (config/openings.txt names them). After them "through": it runs to its seconds even where the mouse is
-# given back on the way, "again": the mouse is still lost to the one before when it takes the player, it
+# given back on the way (an ending with 0 seconds: to the level change), "again": the mouse is still lost to the one before when it takes the player, it
 # waits for the mouse to come back and go again. The log has the level time of every take, the mouse lost and
 # back, each quick time event and level change ("cut: t ...").
 01810144 04002580 113.0 middle      # Nightclub, the meeting with Zukovsky (three timelines in a row)
@@ -17,7 +17,8 @@
 0181013C 04002CE0 0     ending      # Airfield, after the plane's two quick time events
 0181013F 04002380 0     ending      # Dam
 01810144 0400274B 0     ending      # Nightclub
-0181014F 04002F6F 0     ending      # Bunker
+0181014F 04002F6D 0     ending through # Bunker, three timelines in a row (04002F6E at +10.0, 04002F6F at +36.6) to the change to Archives
+01810146 0400277C 0     ending through # Archives, let go 14.0 s in and the change to Tank 0.05 s after it, the black stays up over it
 0181014D 040026C2 0     ending      # Solar
 0181014A 040030C6 62.8  ending      # Facility, until about a second before the quick time event (passed 64.2 s in), the rest plays
 0181014E 0400257F 100.2 ending      # Memorial, until a second before the quick time event (101.2 s in), the mouse comes back with it

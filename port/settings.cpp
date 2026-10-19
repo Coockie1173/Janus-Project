@@ -1752,7 +1752,10 @@ bool cheats_active()
 {
 	if (gecko_cheats()) return true;
 	for (const Setting& s : g_settings)
-		if ((s.page == kCheats || s.page == kForFun || (s.page == kTriggers && s.id == "trigger_view")) && s.get() > 0.5f) return true;
+	{
+		const float off = s.id == "turbo" ? 1.0f : 0.0f; //turbo's off is the game's speed, 1x
+		if ((s.page == kCheats || s.page == kForFun || (s.page == kTriggers && s.id == "trigger_view")) && s.get() > off + 0.05f) return true;
+	}
 	return false; //bunnyhopping is on its own page, so it doesn't count
 }
 bool menu_event(const SDL_Event* e);

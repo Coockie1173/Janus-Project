@@ -158,7 +158,8 @@ void LoadOpenings(const std::string& path)
 //a cutscene after the opening that is skipped as well: lines of "level hash (hex), the hash of
 //the timeline that takes the player (hex), the seconds until the picture is back, the part of
 //the mission it is (middle, ending), and the mission's level when it's another map of it"
-//"through" after them: the skip runs to its seconds even where the mouse is given back on the way
+//"through" after them: the skip runs to its seconds even where the mouse is given back on the way,
+//an ending's with 0 seconds to the level change
 //"again": the mouse is still lost to the cutscene before when it takes the player, the skip waits
 //for it to come back and be lost again
 struct Inside
@@ -182,7 +183,7 @@ void LoadCutscenes(const std::string& path)
 		bool through = false, again = false;
 		for (int i = 0; i < n - 4; ++i)
 		{
-			if (std::string(more[i]) == "through") through = seconds > 0;
+			if (std::string(more[i]) == "through") through = seconds > 0 || std::string(part) == "ending";
 			else if (std::string(more[i]) == "again") again = true;
 			else mission = (unsigned)std::strtoul(more[i], nullptr, 16);
 		}
