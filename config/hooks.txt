@@ -149,3 +149,4 @@ ge_weapon_poses        # every weapon's pose by its idle anim mode, once: the cu
 ge_loadout_give        # a network game's player gets its loadout's weapons: traced for the custom weapons
 ge_script_set          # an animscript object is given its script (file, hash): a custom weapon's scripts come from its own file
 ge_file_object         # a file with the section of one of its objects loaded: a custom gun's script is in its own file
+ge_loadout_pick        # the loadout menu takes the lit weapon: a custom pistol stays a loadout's secondary

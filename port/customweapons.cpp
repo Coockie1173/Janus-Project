@@ -74,6 +74,7 @@ const uint32_t kAlloc = 0x803428C0; //(bytes, flags) -> a block of the game's he
 const uint32_t kRowInsert = 0x800CD950; //(table, row)
 const uint32_t kFirstKey = 0x4B000100, kFirstId = 0x0200F000, kFirstText = 0x4300F300; //the game's stop at 4B00005A, 02001EBC, 430017xx
 const uint32_t kMostWeapons = 64, kMostPages = 4096;
+const uint32_t kProfiles = 0x805DE788, kProfileSize = 0x590; //a pad's profile, its loadouts in it
 
 struct Patch { uint32_t at, size; uint32_t value; }; //size 1, 4, or 0 for a float
 struct Weapon
@@ -671,6 +672,26 @@ void NetItems(const PPCContext& c)
 	if (g_trace) rt_log("goldeneye: weapons: network items %u to %u", kNetGameItems + 1, place);
 }
 
+//the loadout menu takes a weapon (fn_80256A80): a secondary that isn't one of the game's five
+//pistols becomes the Torka, so a custom pistol taken there is put back
+const uint32_t kMenuLit = 0x2C8, kMenuLitIndex = 0x220, kMenuPad = 0x1A4, kMenuPage = 0x214, kItemLoadout = 8;
+const uint32_t kSecondaryPages[] = {0x7D0000C1, 0x7D0000E8}, kSecondarySlot = 0x15C, kTorka = 0x4B00002D;
+PPCFunc orig_loadout_pick = nullptr;
+
+void LoadoutPick(PPCContext& c)
+{
+	const uint32_t item = c.r[3], menu = c.r[4];
+	const uint32_t row = guest_ptr(menu) ? ld32(menu + kMenuLit + ld32(menu + kMenuLitIndex) * 4) : 0;
+	const uint32_t key = guest_ptr(row) ? ld32(row + 4) : 0, page = guest_ptr(menu) ? ld32(menu + kMenuPage) : 0;
+	orig_loadout_pick(c);
+	const bool custom = std::any_of(g_weapons.begin(), g_weapons.end(), [&](const Weapon& w) { return w.key == key; });
+	if (!custom || std::find(std::begin(kSecondaryPages), std::end(kSecondaryPages), page) == std::end(kSecondaryPages)) return;
+	const uint32_t slot = kProfiles + ld8(menu + kMenuPad) * kProfileSize + ld32(item + kItemLoadout) * 4 + kSecondarySlot;
+	if (ld32(slot) != kTorka) return;
+	st32(slot, key);
+	if (g_trace) rt_log("goldeneye: weapons: %08X kept as the secondary", key);
+}
+
 } //namespace
 
 uint32_t custom_weapon_text(uint32_t hash)
@@ -718,11 +739,12 @@ void install_custom_weapons()
 	if (g_traceGives) orig_find = ppc_hook("ge_hash_find", Find);
 	orig_script_set = ppc_hook("ge_script_set", ScriptSet);
 	orig_file_object = ppc_hook("ge_file_object", FileObject);
+	orig_loadout_pick = ppc_hook("ge_loadout_pick", LoadoutPick);
 	get_file = ppc_lookup(kGetFile);
 	fix_up = ppc_lookup(kFixUp);
 	for (Weapon& w : g_weapons)
 		if (!w.model.empty()) ReadModel(w);
-	if (!game_alloc || !row_insert || !orig_load || !orig_def_add || !orig_poses || !weapon_pose || !orig_loadout_give || !orig_script_set || !orig_file_object || !get_file || !fix_up) rt_die("goldeneye: custom weapons are not hooked in this build");
+	if (!game_alloc || !row_insert || !orig_load || !orig_def_add || !orig_poses || !weapon_pose || !orig_loadout_give || !orig_script_set || !orig_file_object || !orig_loadout_pick || !get_file || !fix_up) rt_die("goldeneye: custom weapons are not hooked in this build");
 }
 
 } //namespace ge
