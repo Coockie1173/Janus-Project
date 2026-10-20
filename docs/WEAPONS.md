@@ -164,9 +164,26 @@ A weapon's `model = NAME.edb` (in `mods/weapons`, next to its .txt) is a file ma
 
 ```
 eurochef-cli ge weapon --base AK-47 --from o_guns.edb --parts                 # the base gun's parts
-eurochef-cli ge weapon --base AK-47 --from o_guns.edb --export ak47.gltf      # them as a glTF scene
+eurochef-cli ge weapon --base AK-47 --from o_guns.edb --export ak47.gltf      # the base, rigged
 eurochef-cli ge weapon mygun.gltf --base AK-47 --from o_guns.edb -o mods/weapons/mygun.edb
 ```
+
+The eurochef GUI does the same: File > New GoldenEye 007 weapon (base gun, o_guns.edb, scene,
+gun file, brightness, file hash; Export base rig, Build, and the weapon's .txt with name, base
+and model if asked).
+
+- **The rig** (`ge/weapon_rig.rs`): the base gun as one skinned mesh, an armature with a bone
+  `Part_N_role` (role: the locator's, from `locator_name`) for each part, put where the first
+  script that names it (the model script for most) puts it on frame 0, from that command's
+  controller (+0x34 list, the command's byte 10; channels 0x4 position, 0x8 rotation x y z w,
+  0x10 scale, keyframes of a frame number and the value). Every part's triangles weighted all to
+  its bone, so the gun is seen assembled and a part is a vertex group. The scripts with more than
+  one frame go along as animations named by their hash (fire, reload...), not read back. A part
+  without a controller in its first script rests at the origin (the AK's parts 9 and 10).
+- **The build** takes a skinned mesh's triangles to the part of their heaviest joint (`Part_N...`)
+  and each vertex into that joint's space by the inverse bind matrix, so the copied scripts put it
+  back; `Part_N` nodes as before still work. Checked: AK-47 rig exported, part 0's materials
+  tinted, built: all 16 parts' vertices the same as the old `Part_N` path's to 3e-8.
 
 - **The file**: the scene's nodes `Part_N` (or `Body` for part 0) are the gun's parts, 0x601 mesh
   entities with flags 2 as the game's are; a part the scene leaves out is empty. Then copies of
@@ -174,8 +191,7 @@ eurochef-cli ge weapon mygun.gltf --base AK-47 --from o_guns.edb -o mods/weapons
   `BASE_GUNS` in eurochef's `ge/weapon.rs`), byte for byte, with the parts they name renumbered
   as the file's. A script is one block from its header to its keyframes with only relative
   pointers inside. Parts are numbered as the scripts first name them; two on the same locator
-  are one. The export puts each part where its own file has it, around its locator, so they
-  overlap: keep a part's place to keep it where the base's moves it.
+  are one.
 - **In the game** (`port/customweapons.cpp`):
   - the file is a mod (mods.cpp reads `weapons/`); its hash is what the mods give it.
   - the first time a script of it is asked for in a level the file is got as `fn_801461C0` gets
@@ -194,6 +210,28 @@ eurochef-cli ge weapon mygun.gltf --base AK-47 --from o_guns.edb -o mods/weapons
 - **Checked**: the AK-47's 16 parts exported, the body tinted gold, built again: on Dam the
   whole AK is drawn with the gold body, fires (45 to 15, the recoil the fire script moves),
   guards take it (none fails AttachGun). With only `Body` in the scene, the body alone.
+
+## How a reload is put together
+
+Two scripts play side by side, both at 30 fps, started by the same action:
+
+- **The arms**: the weapon's anim mode (cp_bondfp, 09) starts an anim set (0A), which plays an
+  animscript (04): cmd 2 plays the arms' skeletal animation (03, `83nnnnnn`) on the `sk_arms`
+  skin, cmd 5 plays sounds, cmd 0xB raises events (16000185, which the weapon code waits for).
+  The AK's: 04003140, 74 frames, sounds on frames 0, 12, 20, 35, the event on 47.
+- **The gun's parts**: the o_guns script of the firing mode (the AK's reload 04001DF1, 73
+  frames): cmd 3 puts each part on its locator with a controller of keyframes (the magazine
+  82000037: 27 keys of position and rotation, 820000A9: 13 of position), cmd 5 the magazine's sounds (frames 8 to 53),
+  cmd 0x11 timing jumps.
+
+A reload of its own would need:
+
+- **gun parts**: an animscript writer from glTF animations of the rig's bones (keyframes per
+  controller, the command list of the base kept); the rig export already writes the base's
+  keyframes out, the way back is not done.
+- **arms**: decoding cp_bondfp's type-03 motion data (not done), then writing it; until then
+  the base's arm clip plays, and the parts' keyframes have to stay in step with it (73 vs 74
+  frames on the AK).
 
 ## What custom animations still need
 
