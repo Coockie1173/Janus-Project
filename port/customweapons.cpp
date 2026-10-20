@@ -69,7 +69,8 @@ const uint32_t kList = 0x80585C80, kListSize = 0x10, kListCount = 0x41, kListKin
 const uint32_t kListWeapons = 32; //the weapons' places, the attachments and gadgets after them
 const uint32_t kPages = 0x805E0590, kPagesCount = 0x8, kPagesData = 0xC;
 const uint32_t kPageSize = 0x10, kPageHash = 0, kPageRows = 0x4, kPageRowCount = 0x8;
-const uint32_t kMenuRow = 20, kMenuRowHash = 4, kMenuRowKind = 0xC, kKindWeapon = 0x0010;
+const uint32_t kMenuRow = 20, kMenuRowHash = 4, kMenuRowKind = 0xC, kKindWeapon = 0x0010, kKindSlot = 0x00A3;
+const uint32_t kLayoutScript = 8, kFiveSlots = 0x04002B3C, kSixSlots = 0x04002B3B, kFiveSlotCount = 5; //a page's first row: its layout's script
 const uint32_t kAlloc = 0x803428C0; //(bytes, flags) -> a block of the game's heap
 const uint32_t kRowInsert = 0x800CD950; //(table, row)
 const uint32_t kFirstKey = 0x4B000100, kFirstId = 0x0200F000, kFirstText = 0x4300F300; //the game's stop at 4B00005A, 02001EBC, 430017xx
@@ -516,14 +517,31 @@ void WeaponPage(const PPCContext& c, uint32_t page)
 		if ((pistol && pistols) || (!pistol && others)) adds.push_back(&w);
 	}
 	if (adds.empty()) return;
-	const uint32_t fresh = Alloc(c, (count + (uint32_t)adds.size()) * kMenuRow);
+	//the secondary's page is laid out for its five pistols (script 04002B3C, five slots) and doesn't
+	//scroll: past five it gets the other pages' layout (04002B3B, six slots, scrolls)
+	uint32_t slots = 0, lastSlot = 0, items = (uint32_t)adds.size();
+	for (uint32_t i = 0; i < count; ++i)
+	{
+		const uint32_t kind = ld32(rows + i * kMenuRow + kMenuRowKind) >> 16;
+		if (kind == kKindSlot) { ++slots; lastSlot = i; }
+		if (kind == kKindWeapon) ++items;
+	}
+	const bool relayout = ld32(rows + kLayoutScript) == kFiveSlots && slots == kFiveSlotCount && items > slots;
+	const uint32_t fresh = Alloc(c, (count + (uint32_t)adds.size() + relayout) * kMenuRow);
 	if (!fresh) return;
 	const uint32_t item = rows + (uint32_t)last * kMenuRow;
 	uint32_t out = fresh;
 	for (uint32_t i = 0; i < count; ++i)
 	{
 		for (uint32_t at = 0; at < kMenuRow; at += 4) st32(out + at, ld32(rows + i * kMenuRow + at));
+		if (relayout && i == 0) st32(out + kLayoutScript, kSixSlots);
 		out += kMenuRow;
+		if (relayout && i == lastSlot)
+		{
+			for (uint32_t at = 0; at < kMenuRow; at += 4) st32(out + at, ld32(rows + i * kMenuRow + at));
+			st32(out + kMenuRowHash, ld32(rows + i * kMenuRow + kMenuRowHash) + 1); //the next slot's widget
+			out += kMenuRow;
+		}
 		if (i != (uint32_t)last) continue;
 		for (const Weapon* pW : adds)
 		{
@@ -533,7 +551,7 @@ void WeaponPage(const PPCContext& c, uint32_t page)
 			out += kMenuRow;
 		}
 	}
-	const uint32_t total = count + (uint32_t)adds.size();
+	const uint32_t total = count + (uint32_t)adds.size() + relayout;
 	g_pages[hash] = { rows, count, fresh, total };
 	st32(page + kPageRows, fresh);
 	st32(page + kPageRowCount, total);
