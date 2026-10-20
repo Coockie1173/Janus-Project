@@ -40,15 +40,19 @@
 //  clips = 6                  clips it is given
 //  damage = 1.5               the base's damage times this, the player's and a guard's
 //  byte+D = 40, float+10 = 12, word+178 = 04001DB3   any other place of the row
+//  model = golden_ak.edb      a gun of its own, a file next to it made by eurochef's `ge weapon`
+//                             (the gun's parts from a glTF scene, the base gun's scripts)
 //
 //GE_TRACE=1 logs the weapons made and the pages they go into
 #include "ge.h"
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -82,6 +86,9 @@ struct Weapon
 	uint32_t baseId{}, baseKey{};
 	int kind{ -1 }; //which six of the loadout list
 	uint32_t chars{}, aboutChars{}; //the texts in the game's memory
+	std::string model; //its gun's file in the weapons folder, empty: the base's
+	uint32_t modelFile{}; //that file's hash, as the mods have it
+	std::set<uint32_t> modelScripts; //the base's scripts the file has copies of
 };
 
 std::vector<Weapon> g_weapons;
@@ -90,7 +97,7 @@ bool g_trace = false;
 bool g_listed = false, g_failed = false;
 struct OwnPage { uint32_t gameRows, gameCount, rows, count; };
 std::map<uint32_t, OwnPage> g_pages; //a weapon page's hash, its rows with these in them
-PPCFunc orig_loadout_give = nullptr;
+PPCFunc orig_loadout_give = nullptr, orig_script_set = nullptr;
 const uint32_t kLoadoutPrimary = 8, kLoadoutSecondary = 0xC; //a loadout row's keys
 bool g_traceGives = false;
 PPCFunc orig_find = nullptr, orig_poses = nullptr, weapon_pose = nullptr;
@@ -133,6 +140,7 @@ bool ReadWeapon(const std::filesystem::path& path, Weapon& w)
 		else if (key == "damage") w.damage = std::strtof(value.c_str(), nullptr);
 		else if (key == "clip") w.clip = std::atoi(value.c_str());
 		else if (key == "clips") w.clips = std::atoi(value.c_str());
+		else if (key == "model") w.model = value;
 		else if (key.rfind("byte+", 0) == 0 || key.rfind("word+", 0) == 0 || key.rfind("float+", 0) == 0)
 		{
 			Patch p{};
@@ -242,6 +250,87 @@ bool FindBase(const PPCContext& c, Weapon& w)
 	return w.baseKey != 0;
 }
 
+//a gun of its own (eurochef's `ge weapon`): a file of the weapons folder with the gun's parts and
+//copies of the base gun's scripts out of o_guns, under the base's hashes. as the file is loaded
+//its scripts get hashes of the weapon's own (04F0 + its number in the top half, so their order
+//stays), the row's model and the definition's +0x1C list name those, and ge_script_set is given
+//the file for them in place of o_guns. a script the file doesn't have stays the base's
+const uint32_t kOwnScripts = 0x04F0, kGameScripts = 0x0400;
+const uint32_t kFilesManager = 0x805D36A4, kGetFile = 0x800E3740; //(manager, file, 0): the file, loaded there and then when it isn't
+const uint32_t kFixUp = 0x802E9610; //(file's data, which lists: -1 all): each list's things get their place in memory, set up as what they are
+const uint32_t kRowLoaded = 0xC, kRowFixed = 0x8000; //a list row's thing in memory, and its section's bit once it is set up
+const uint32_t kFileData = 0x24, kScriptList = 0x68, kScriptRow = 0x10;
+const uint32_t kRowModel = 0x178, kDefScripts = 0x1C, kDefParent = 8, kScriptRowWords = 5;
+PPCFunc get_file = nullptr, fix_up = nullptr, orig_file_object = nullptr;
+
+uint32_t OwnScript(size_t n, uint32_t script) { return (kOwnScripts + (uint32_t)n) << 16 | (script & 0xFFFF); }
+
+uint32_t Remap(size_t n, uint32_t script)
+{
+	const Weapon& w = g_weapons[n];
+	return w.modelFile && w.modelScripts.count(script) ? OwnScript(n, script) : script;
+}
+
+//the scripts a gun file has, read from the file itself
+void ReadModel(Weapon& w)
+{
+	const std::filesystem::path path = std::filesystem::path(mods_folder()) / "weapons" / w.model;
+	std::ifstream in(path, std::ios::binary);
+	std::vector<uint8_t> d((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+	auto be32 = [&](size_t at) { return at + 4 <= d.size() ? (uint32_t)d[at] << 24 | d[at + 1] << 16 | d[at + 2] << 8 | d[at + 3] : 0u; };
+	if (d.size() < 0xD8 || be32(0) != 0x47454F4D)
+	{
+		rt_log("goldeneye: weapons: %s: %s isn't a gun's .edb, the base's gun is drawn", w.file.c_str(), w.model.c_str());
+		return;
+	}
+	const uint32_t count = be32(kScriptList) >> 16, list = kScriptList + 4 + be32(kScriptList + 4);
+	for (uint32_t i = 0; i < count && i < 256; ++i) w.modelScripts.insert(be32(list + i * kScriptRow));
+	std::error_code error;
+	for (const ModLevel& file : mod_files())
+		if (std::filesystem::equivalent(file.path, path, error)) w.modelFile = file.hash;
+	if (!w.modelFile) rt_log("goldeneye: weapons: %s: %s isn't among the mods, the base's gun is drawn", w.file.c_str(), w.model.c_str());
+	else if (g_trace) rt_log("goldeneye: weapons: %s is drawn with %s (%08X, %zu script(s))", w.name.c_str(), w.model.c_str(), w.modelFile, w.modelScripts.size());
+}
+
+//the gun's file with its scripts under the weapon's hashes, loaded there and then the first time
+//it is asked for in a level (as fn_801461C0 gets o_guns). 0 when it can't be
+uint32_t ModelFile(const PPCContext& c, size_t n)
+{
+	PPCContext call = c;
+	const uint32_t stack = c.r[1], frame = stack - 0x40;
+	st32(frame, stack);
+	call.r[1] = frame;
+	call.r[3] = kFilesManager;
+	call.r[4] = g_weapons[n].modelFile;
+	call.r[5] = 0;
+	get_file(call);
+	const uint32_t file = call.r[3], data = guest_ptr(file) ? ld32(file + kFileData) : 0;
+	if (!guest_ptr(data))
+	{
+		static uint32_t told = 0;
+		if (told++ < 5) rt_log("goldeneye: weapons: %s's gun (%s) doesn't load", g_weapons[n].name.c_str(), g_weapons[n].model.c_str());
+		return 0;
+	}
+	const uint32_t count = ld16(data + kScriptList), rows = data + kScriptList + 4 + ld32(data + kScriptList + 4);
+	for (uint32_t i = 0; i < count && i < 256; ++i)
+	{
+		const uint32_t row = rows + i * kScriptRow, hash = ld32(row);
+		if (hash >> 16 == kGameScripts) st32(row, OwnScript(n, hash));
+	}
+	//its things get their pointers as the game sets them up when a file has come in
+	//(fn_802E9610, from fn_802EC4C0): the file loaded this way hasn't been through that
+	if (count && !(ld16(rows + 4) & kRowFixed))
+	{
+		PPCContext fix = call;
+		fix.r[3] = data;
+		fix.r[4] = 0xFFFFFFFF;
+		fix_up(fix);
+		if (g_trace) rt_log("goldeneye: weapons: %s's gun is set up (%s)", g_weapons[n].name.c_str(), guest_ptr(ld32(rows + kRowLoaded)) ? "its scripts are there" : "its scripts aren't there");
+	}
+	if (!guest_ptr(ld32(rows + kRowLoaded))) return 0;
+	return file;
+}
+
 //the weapons table is filled: each weapon's row goes in, the base's with what the file changes
 void Load(PPCContext& c)
 {
@@ -263,6 +352,8 @@ void Load(PPCContext& c)
 		st32(row + kRowId, w.id);
 		st32(row + kRowName, w.text);
 		st8(row + kRowSilenced, 0);
+		const size_t n = size_t(&w - g_weapons.data());
+		st32(row + kRowModel, Remap(n, ld32(row + kRowModel)));
 		if (w.clip >= 0) st8(row + kRowClip, (uint8_t)std::min(w.clip, 255));
 		if (w.clips >= 0) st8(row + kRowClips, (uint8_t)std::min(w.clips, 255));
 		for (uint32_t at : kRowDamage) st32(row + at, as_u32(as_f32(ld32(row + at)) * w.damage));
@@ -279,6 +370,30 @@ void Load(PPCContext& c)
 		row_insert(call);
 		if (g_trace) rt_log("goldeneye: weapons: %s is %08X, id %08X, made from %08X (%s)", w.name.c_str(), w.key, w.id, w.baseKey, w.base.c_str());
 	}
+}
+
+//a gun of its own: what the base and its parents' +0x1C lists give for each generic script (the
+//nearest one's row), with the file's copies in place of the base's
+uint32_t ScriptList(const PPCContext& c, size_t n)
+{
+	std::vector<std::array<uint32_t, kScriptRowWords>> rows;
+	for (uint32_t def = DefOf(g_weapons[n].baseId), steps = 0; def && steps < 8; def = DefOf(ld32(def + kDefParent)), ++steps)
+	{
+		const uint32_t list = ld32(def + kDefScripts);
+		for (uint32_t row = list; guest_ptr(list) && ld32(row); row += kScriptRowWords * 4)
+		{
+			if (std::any_of(rows.begin(), rows.end(), [&](const auto& r) { return r[0] == ld32(row); })) continue;
+			std::array<uint32_t, kScriptRowWords> r{};
+			r[0] = ld32(row);
+			for (uint32_t k = 1; k < kScriptRowWords; ++k) r[k] = ld32(row + k * 4) ? Remap(n, ld32(row + k * 4)) : 0;
+			rows.push_back(r);
+		}
+	}
+	const uint32_t list = Alloc(c, uint32_t(rows.size() + 1) * kScriptRowWords * 4);
+	if (!list) return 0;
+	for (size_t i = 0; i <= rows.size(); ++i)
+		for (uint32_t k = 0; k < kScriptRowWords; ++k) st32(list + uint32_t(i * kScriptRowWords + k) * 4, i < rows.size() ? rows[i][k] : 0);
+	return list;
 }
 
 //the definitions' map: after the game's last one, one for each weapon, the base's with its id
@@ -298,6 +413,7 @@ void DefAdd(PPCContext& c)
 		if (!base) continue;
 		for (uint32_t at = 0; at < kDefSize; at += 4) st32(def + at, ld32(base + at));
 		st32(def, w.id);
+		if (w.modelFile) st32(def + kDefScripts, ScriptList(c, i));
 		PPCContext call = c;
 		st32(frame, stack);
 		call.r[1] = frame;
@@ -474,6 +590,41 @@ void LoadoutGive(PPCContext& c)
 	orig_loadout_give(c);
 }
 
+//a file asked for by one of its objects (a guard's gun): a custom gun's script is in its own file
+void FileObject(PPCContext& c)
+{
+	const uint32_t hash = c.r[5], n = (hash >> 16) - kOwnScripts;
+	if (n < g_weapons.size() && g_weapons[n].modelFile)
+	{
+		c.r[3] = ModelFile(c, n);
+		return;
+	}
+	orig_file_object(c);
+}
+
+//a script object is given its script: one of a custom gun's comes from its file
+void ScriptSet(PPCContext& c)
+{
+	const uint32_t hash = c.r[5], n = (hash >> 16) - kOwnScripts;
+	if (n < g_weapons.size() && g_weapons[n].modelFile)
+		if (const uint32_t file = ModelFile(c, n)) c.r[4] = file;
+	if (g_traceGives)
+	{
+		static std::set<uint64_t> seen;
+		const uint32_t file = c.r[4], data = guest_ptr(file) ? ld32(file + kFileData) : 0, fileHash = guest_ptr(data) ? ld32(data + 4) : 0;
+		if (seen.insert((uint64_t)fileHash << 32 | hash).second)
+		{
+			//the object keeps the script it took at +0x20
+			const uint32_t object = c.r[3];
+			const std::string chain = call_chain(c);
+			orig_script_set(c);
+			rt_log("goldeneye: weapons: script %08X of %08X %s %s", hash, fileHash, ld32(object + 0x20) == hash ? "taken" : "not taken", chain.c_str());
+			return;
+		}
+	}
+	orig_script_set(c);
+}
+
 void Find(PPCContext& c)
 {
 	const uint32_t hash = c.r[3];
@@ -565,7 +716,13 @@ void install_custom_weapons()
 	orig_loadout_give = ppc_hook("ge_loadout_give", LoadoutGive);
 	g_traceGives = std::getenv("GE_TRACEWEAPONS") != nullptr;
 	if (g_traceGives) orig_find = ppc_hook("ge_hash_find", Find);
-	if (!game_alloc || !row_insert || !orig_load || !orig_def_add || !orig_poses || !weapon_pose || !orig_loadout_give) rt_die("goldeneye: custom weapons are not hooked in this build");
+	orig_script_set = ppc_hook("ge_script_set", ScriptSet);
+	orig_file_object = ppc_hook("ge_file_object", FileObject);
+	get_file = ppc_lookup(kGetFile);
+	fix_up = ppc_lookup(kFixUp);
+	for (Weapon& w : g_weapons)
+		if (!w.model.empty()) ReadModel(w);
+	if (!game_alloc || !row_insert || !orig_load || !orig_def_add || !orig_poses || !weapon_pose || !orig_loadout_give || !orig_script_set || !orig_file_object || !get_file || !fix_up) rt_die("goldeneye: custom weapons are not hooked in this build");
 }
 
 } //namespace ge

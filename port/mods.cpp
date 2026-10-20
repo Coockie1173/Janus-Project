@@ -15,6 +15,7 @@
 //folder with that gamemode's triggers, one of which loads the geometry
 //a .png with a level's name is its picture in the menus (port/pictures.cpp)
 //a .txt with a level's name says who the players of a network game are in it (LevelSet)
+//weapons/ has the custom weapons: their .txt files (port/customweapons.cpp) and the guns they are drawn with, mods too
 //
 //GE_MODS=DIR the folder, every .edb in it and in its gamemode folders (mods in the game's folder by default)
 //GE_TRACEFILES=1 log every file the game gives memory to, with its size
@@ -505,6 +506,7 @@ float world_trace(const PPCContext& c, const float start[3], const float way[3])
 }
 
 //in the order of the game's Choose Game Mode. Classic Conflict has Conflict's maps, as in the game
+const char* const kWeaponsFolder = "weapons";
 const char* const kModeFolders[kModeCount] = { "conflict", "team_conflict", "golden_gun", "black_box", "goldeneye", "heroes", "license_to_kill", "team_license_to_kill" };
 
 const std::vector<ModLevel>& mod_levels() { return g_levels; }
@@ -570,6 +572,7 @@ void install_mods()
 		const std::string name = FolderName(folder.filename().string());
 		const auto mode = std::find(std::begin(kModeFolders), std::end(kModeFolders), name);
 		if (mode != std::end(kModeFolders)) ReadFolder(folder, 1u << (mode - std::begin(kModeFolders)), mods);
+		else if (name == kWeaponsFolder) ReadFolder(folder, 0, mods); //the custom weapons' guns (customweapons.cpp)
 		else rt_log("goldeneye: mods: the folder %s isn't a gamemode's, left out", folder.filename().string().c_str());
 	}
 	if (mods.empty()) return;

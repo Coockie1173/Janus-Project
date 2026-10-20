@@ -147,3 +147,5 @@ ge_weapon_def_add      # a weapon definition into the map by id: the custom ones
 ge_hash_find           # (hash, a file's list, its rows' size) -> the row's index or -1: traced for the custom weapons' hashes
 ge_weapon_poses        # every weapon's pose by its idle anim mode, once: the custom weapons' too
 ge_loadout_give        # a network game's player gets its loadout's weapons: traced for the custom weapons
+ge_script_set          # an animscript object is given its script (file, hash): a custom weapon's scripts come from its own file
+ge_file_object         # a file with the section of one of its objects loaded: a custom gun's script is in its own file

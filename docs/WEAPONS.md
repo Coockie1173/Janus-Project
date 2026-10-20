@@ -158,13 +158,48 @@ list had it). Through Connect to Nintendo WFC the same loadout spawns an AK-47.
 faced each other in the runs), damage done to another player, a silencer on one (the row has
 no silenced pair), more than two players, the stat bars of the menu (they show the base's).
 
-## What custom models and animations still need
+## A gun of its own (stage 2)
 
-- **A model**: an .edb of its own (eurochef already writes entities and textures from glTF for
-  levels) with the parts as entities and a model script like 04001DAC, plus the lookups of row
-  +0x178 and definition +0x1C pointed at that file instead of o_guns.
+A weapon's `model = NAME.edb` (in `mods/weapons`, next to its .txt) is a file made by eurochef:
+
+```
+eurochef-cli ge weapon --base AK-47 --from o_guns.edb --parts                 # the base gun's parts
+eurochef-cli ge weapon --base AK-47 --from o_guns.edb --export ak47.gltf      # them as a glTF scene
+eurochef-cli ge weapon mygun.gltf --base AK-47 --from o_guns.edb -o mods/weapons/mygun.edb
+```
+
+- **The file**: the scene's nodes `Part_N` (or `Body` for part 0) are the gun's parts, 0x601 mesh
+  entities with flags 2 as the game's are; a part the scene leaves out is empty. Then copies of
+  every script the base gun is drawn and moved with (its model, fire, reload..., by firing mode:
+  `BASE_GUNS` in eurochef's `ge/weapon.rs`), byte for byte, with the parts they name renumbered
+  as the file's. A script is one block from its header to its keyframes with only relative
+  pointers inside. Parts are numbered as the scripts first name them; two on the same locator
+  are one. The export puts each part where its own file has it, around its locator, so they
+  overlap: keep a part's place to keep it where the base's moves it.
+- **In the game** (`port/customweapons.cpp`):
+  - the file is a mod (mods.cpp reads `weapons/`); its hash is what the mods give it.
+  - the first time a script of it is asked for in a level the file is got as `fn_801461C0` gets
+    o_guns (`fn_800E3740`: files manager 805D36A4, the hash, 0), which loads it there and then.
+    Loaded that way its lists' things have no place yet (a row's +0xC is set and its section
+    short gets bit 0x8000 when `fn_802E9610`, the set-up `fn_802EC4C0` does once a file is in,
+    runs): the port runs `fn_802E9610(data, -1)` itself.
+  - its scripts get the weapon's own hashes (top half 04F0 + the weapon's number, the base's low
+    half, so the sorted list stays sorted); the row's +0x178 and a new +0x1C list in the
+    definition (the base and its parents' rows, the nearest one's for each generic script, with
+    the file's copies in) name them.
+  - `ge_script_set` (8031A8E0, the script object's vtable +0x20: object, file, hash; it reads the
+    script through the list row's +0xC) gets the gun's file for those hashes, and
+    `ge_file_object` (800E3D20: a file with the section of one of its objects loaded, what a
+    guard's AttachGun asks for o_guns and the row's +0x178) answers with it.
+- **Checked**: the AK-47's 16 parts exported, the body tinted gold, built again: on Dam the
+  whole AK is drawn with the gold body, fires (45 to 15, the recoil the fire script moves),
+  guards take it (none fails AttachGun). With only `Body` in the scene, the body alone.
+
+## What custom animations still need
+
 - **The gun parts' motion** (slide, magazine on reload, fire): animscripts with keyframed
-  controllers (position, rotation, scale); eurochef reads this format already, a writer is needed.
+  controllers (position, rotation, scale). The copies are the base's; a writer of new keyframes
+  (from glTF animations of the parts) would give a gun its own.
 - **The arms**: skeletal animations of cp_bondfp (type 03). eurochef has no decoder for their
   motion data yet, so the format has to be read from the game's decoder first. Until then a
   custom weapon uses its base's arm animations, which are shared by kind anyway (the pistols the
