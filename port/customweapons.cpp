@@ -46,6 +46,10 @@
 //  model offset = 0.02 -0.01 0   the gun moved forward, up and right, in metres (aiming down the
 //                             sight brings the base's rear sight to the eye: line the gun's up with it)
 //  model scale = 0.9          the gun's size, times this
+//  fire sound = mygun.wav     a shot sounds like this file (next to it) in place of the base's,
+//                             at the gun's place: the player's, another player's, a guard's
+//                             (customsound.cpp)
+//  fire volume = 0.8          that sound times this
 //
 //GE_TRACE=1 logs the weapons made and the pages they go into
 #include "ge.h"
@@ -98,6 +102,9 @@ struct Weapon
 	uint32_t modelFile{}; //that file's hash, as the mods have it
 	std::set<uint32_t> modelScripts; //the base's scripts the file has copies of
 	float offset[3]{}, scale{ 1.0f }; //the gun moved (the game's x, y, z) and sized as it loads
+	std::string fireSound;
+	float fireVolume{ 1.0f };
+	int fireClip{ -1 }; //customsound.cpp's
 };
 
 std::vector<Weapon> g_weapons;
@@ -160,6 +167,8 @@ bool ReadWeapon(const std::filesystem::path& path, Weapon& w)
 			w.offset[2] = forward;
 		}
 		else if (key == "model scale") w.scale = std::strtof(value.c_str(), nullptr);
+		else if (key == "fire sound") w.fireSound = value;
+		else if (key == "fire volume") w.fireVolume = std::strtof(value.c_str(), nullptr);
 		else if (key.rfind("byte+", 0) == 0 || key.rfind("word+", 0) == 0 || key.rfind("float+", 0) == 0)
 		{
 			Patch p{};
@@ -818,6 +827,61 @@ void LoadoutPick(PPCContext& c)
 	if (g_trace) rt_log("goldeneye: weapons: %08X kept as the secondary", key);
 }
 
+//a shot's sounds (fn_8012E3A0: controller, the shot's place): the weapon's own .wav in place of the
+//base's. the game's still runs for the rest (the noise the guards hear), with its sounds left out
+//by its own switch, the byte 806EBA7C. the controller's weapon is its row by the byte +0xC98
+const uint32_t kNoShotSounds = 0x806EBA7C, kHeldRow = 0xC98;
+PPCFunc orig_fire_sound = nullptr;
+
+void FireSound(PPCContext& c)
+{
+	const uint32_t ctrl = c.r[3], place = c.r[4];
+	const int8_t held = guest_ptr(ctrl) ? (int8_t)ld8(ctrl + kHeldRow) : -1;
+	const uint32_t rows = ld32(kWeapons + 0xC), key = held >= 0 && guest_ptr(rows) ? ld32(rows + (uint32_t)held * kRowSize + kRowKey) : 0;
+	const auto w = std::find_if(g_weapons.begin(), g_weapons.end(), [&](const Weapon& w) { return w.key == key && w.fireClip >= 0; });
+	if (g_trace) rt_log("goldeneye: weapons: a shot of %08X by %08X%s", key, ctrl, ctrl == local_controller() ? " (local)" : "");
+	if (w == g_weapons.end() || !guest_ptr(place))
+	{
+		orig_fire_sound(c);
+		return;
+	}
+	const uint8_t was = ld8(kNoShotSounds);
+	st8(kNoShotSounds, 1);
+	orig_fire_sound(c);
+	st8(kNoShotSounds, was);
+	if (was) return;
+	const float at[3]{ ldf(place), ldf(place + 4), ldf(place + 8) };
+	custom_sound_play(w->fireClip, at, w->fireVolume);
+}
+
+//a guard's shot doesn't come through there: fn_80057060 plays its row's (the guard's +0x754) three
+//sounds +0x214..+0x21C one by one through fn_80283F60 (guard, sound, 0), the sound at the guard's
+//entity (+4) +0xF8. the loop doesn't look at what it answers. a custom weapon's are left out and
+//its .wav plays once, for the first of them
+const uint32_t kGuardShotLoop = 0x800577A0, kGuardRow = 0x754, kGuardSounds = 0x214, kGuardSoundCount = 3;
+const uint32_t kEntity = 4, kEntityPlace = 0xF8;
+PPCFunc orig_character_sound = nullptr;
+
+void CharacterSound(PPCContext& c)
+{
+	const uint32_t guard = c.r[3], sound = c.r[4];
+	const uint32_t row = c.lr == kGuardShotLoop && guest_ptr(guard) ? ld32(guard + kGuardRow) : 0;
+	const uint32_t key = guest_ptr(row) ? ld32(row + kRowKey) : 0;
+	const auto w = std::find_if(g_weapons.begin(), g_weapons.end(), [&](const Weapon& w) { return w.key == key && w.fireClip >= 0; });
+	if (w == g_weapons.end())
+	{
+		orig_character_sound(c);
+		return;
+	}
+	c.r[3] = 0;
+	uint32_t first = 0xFFFFFFFF;
+	for (uint32_t k = 0; k < kGuardSoundCount && first == 0xFFFFFFFF; ++k) first = ld32(row + kGuardSounds + k * 4);
+	const uint32_t entity = ld32(guard + kEntity);
+	if (sound != first || !guest_ptr(entity)) return;
+	const float at[3]{ ldf(entity + kEntityPlace), ldf(entity + kEntityPlace + 4), ldf(entity + kEntityPlace + 8) };
+	custom_sound_play(w->fireClip, at, w->fireVolume);
+}
+
 } //namespace
 
 uint32_t custom_weapon_text(uint32_t hash)
@@ -872,7 +936,16 @@ void install_custom_weapons()
 	get_file = ppc_lookup(kGetFile);
 	fix_up = ppc_lookup(kFixUp);
 	for (Weapon& w : g_weapons)
+	{
 		if (!w.model.empty()) ReadModel(w);
+		if (!w.fireSound.empty()) w.fireClip = custom_sound_load((std::filesystem::path(mods_folder()) / "weapons" / w.fireSound).string());
+	}
+	if (std::any_of(g_weapons.begin(), g_weapons.end(), [](const Weapon& w) { return w.fireClip >= 0; }))
+	{
+		orig_fire_sound = ppc_hook("ge_weapon_fire_sound", FireSound);
+		orig_character_sound = ppc_hook("ge_character_sound", CharacterSound);
+		if (!orig_fire_sound || !orig_character_sound) rt_log("goldeneye: ge_weapon_fire_sound or ge_character_sound is not hooked in this build, custom weapons fire with their base's sound");
+	}
 	if (!game_alloc || !row_insert || !orig_load || !orig_def_add || !orig_poses || !weapon_pose || !orig_loadout_give || !orig_script_set || !orig_file_object || !orig_loadout_pick || !get_file || !fix_up) rt_die("goldeneye: custom weapons are not hooked in this build");
 }
 

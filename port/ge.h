@@ -355,6 +355,8 @@ int custom_weapon_count(); //the custom weapons, by their number
 uint32_t custom_weapon_id(int n);
 const char* custom_weapon_name(int n);
 const std::vector<uint8_t>& custom_weapons_sum(); //what their files say, for the network game's version
+int custom_sound_load(const std::string& path); //customsound.cpp: a .wav, -1 when it can't be read
+void custom_sound_play(int sound, const float* pPlace, float volume); //at a place in the world, or nullptr for no place
 void install_prompts(); //prompts.cpp
 void weapon_buttons(ClassicState& s); //a slot's key, in the classic's filter
 bool sprint_key(); //input.cpp, the sprint key is down this frame

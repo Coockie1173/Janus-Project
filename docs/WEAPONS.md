@@ -247,6 +247,25 @@ and model if asked).
 - **The randomizer** (F1 > For Fun) has the custom weapons in its pool and in Forced Weapon's list,
   after the game's 27.
 
+## A shot of its own (sound)
+
+`fire sound = NAME.wav` (next to the .txt; `fire volume` scales it) plays that file for every
+shot of the weapon in place of its base's sounds (`port/customsound.cpp`, `port/customweapons.cpp`):
+
+- **the player's and another player's**: `ge_weapon_fire_sound` (8012E3A0: controller, the shot's
+  place) plays the held row's (the controller's byte +0xC98 in the weapons table) +0x1E4..+0x1F0,
+  or three of +0x1F4..+0x22C. A local shot (fn_8012E1A0) also sends network message 0x21
+  (fn_801DE7E0); the console that gets it calls the same function from 801DEF00 / 801DEFC0 for
+  that player. The port runs it with its byte 806EBA7C set (no sounds, the noise the guards
+  hear stays) and plays the file at the place.
+- **a guard's**: fn_80057060 plays the guard's row (+0x754) +0x214..+0x21C through
+  `ge_character_sound` (80283F60: character, sound, 0; at the entity's +0xF8), the call returning
+  to 800577A0. From there a custom weapon's are left out and the file plays once.
+- **the mix**: the file is mixed on the host after the game's mix (wiikit `audio_set_mixer`), at
+  0.08 of full scale (the game's own shots peak at about 2400 of 32768), full within 2.5 m of the
+  listener, fading out by 100 m, panned by the listener's +0x34 axis. The game's volume options
+  don't reach it, nor do the occlusion and the height filter.
+
 ## How a reload is put together
 
 Two scripts play side by side, both at 30 fps, started by the same action:
