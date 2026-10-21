@@ -38,7 +38,8 @@
 //  base = AK-47               the game's weapon it is made from, by name or by id (0200xxxx)
 //  clip = 40                  rounds in a clip
 //  clips = 6                  clips it is given
-//  damage = 1.5               the base's damage times this, the player's and a guard's
+//  damage = 1.5               the base's damage times this. a guard's shots with it do the
+//                             player's, unless the file sets them (float+14C..+158)
 //  byte+D = 40, float+10 = 12, word+178 = 04001DB3   any other place of the row
 //  model = golden_ak.edb      a gun of its own, a file next to it made by eurochef's `ge weapon`
 //                             (the gun's parts from a glTF scene, the base gun's scripts)
@@ -68,6 +69,7 @@ namespace
 const uint32_t kWeapons = 0x805D1A4C, kRowSize = 0x254;
 const uint32_t kRowKey = 0, kRowSilenced = 8, kRowClip = 0xD, kRowClips = 0xE, kRowId = 0x174, kRowName = 0x190;
 const uint32_t kRowDamage[] = {0x44, 0x50, 0xC4, 0xD0, 0x14C, 0x158};
+const uint32_t kRowPlayerShot = 0x44, kRowGuardShot = 0x14C, kShotSize = 0x10; //near damage, near and far range, far damage
 const uint32_t kDefs = 0x80578AB0, kDefSize = 0x2C, kDefLast = 0x02000001;
 const uint32_t kList = 0x80585C80, kListSize = 0x10, kListCount = 0x41, kListKind = 6, kListFree = 0xFFFFFFFF;
 const uint32_t kListWeapons = 32; //the weapons' places, the attachments and gadgets after them
@@ -273,11 +275,11 @@ bool FindBase(const PPCContext& c, Weapon& w)
 //stays), the row's model and the definition's +0x1C list name those, and ge_script_set is given
 //the file for them in place of o_guns. a script the file doesn't have stays the base's
 const uint32_t kOwnScripts = 0x04F0, kGameScripts = 0x0400;
+const uint32_t kRowModel = 0x178, kDefScripts = 0x1C, kDefParent = 8, kScriptRowWords = 5;
 const uint32_t kFilesManager = 0x805D36A4, kGetFile = 0x800E3740; //(manager, file, 0): the file, loaded there and then when it isn't
 const uint32_t kFixUp = 0x802E9610; //(file's data, which lists: -1 all): each list's things get their place in memory, set up as what they are
 const uint32_t kRowLoaded = 0xC, kRowFixed = 0x8000; //a list row's thing in memory, and its section's bit once it is set up
 const uint32_t kFileData = 0x24, kScriptList = 0x68, kScriptRow = 0x10;
-const uint32_t kRowModel = 0x178, kDefScripts = 0x1C, kDefParent = 8, kScriptRowWords = 5;
 PPCFunc get_file = nullptr, fix_up = nullptr, orig_file_object = nullptr;
 
 uint32_t OwnScript(size_t n, uint32_t script) { return (kOwnScripts + (uint32_t)n) << 16 | (script & 0xFFFF); }
@@ -286,6 +288,40 @@ uint32_t Remap(size_t n, uint32_t script)
 {
 	const Weapon& w = g_weapons[n];
 	return w.modelFile && w.modelScripts.count(script) ? OwnScript(n, script) : script;
+}
+
+//the gun a guard holds, the row's +0x178: the base's, or the file's copy of it. a base without one
+//(the Golden Gun) or a file without the copy gets the gun the hands hold, what the definitions
+//give for the P99's (04001DAC), from the file: a guard draws its body's far level of detail,
+//which eurochef makes the whole gun. without a file the Golden Gun's gets the one Golden Gun mode
+//lays in the level (0400293D), as the randomizer gives the game's
+const uint32_t kHandModel = 0x04001DAC, kGoldenGun = 0x02000827, kGoldenGunModel = 0x0400293D;
+
+uint32_t HandModel(uint32_t id)
+{
+	for (uint32_t def = DefOf(id), steps = 0; def && steps < 8; def = DefOf(ld32(def + kDefParent)), ++steps)
+		for (uint32_t row = ld32(def + kDefScripts); guest_ptr(row) && ld32(row); row += kScriptRowWords * 4)
+		{
+			if (ld32(row) != kHandModel) continue;
+			for (uint32_t k = 1; k < kScriptRowWords; ++k)
+				if (ld32(row + k * 4)) return ld32(row + k * 4);
+		}
+	return kHandModel;
+}
+
+uint32_t WorldModel(size_t n, uint32_t model)
+{
+	const Weapon& w = g_weapons[n];
+	const bool none = model == 0 || model == 0xFFFFFFFF;
+	if (w.modelFile && !none && w.modelScripts.count(model)) return OwnScript(n, model);
+	if (w.modelFile && w.modelScripts.count(HandModel(w.baseId)))
+	{
+		const uint32_t made = OwnScript(n, HandModel(w.baseId));
+		if (g_trace) rt_log("goldeneye: weapons: %s's guards hold its own gun %08X (the base's %08X isn't in %s)", w.name.c_str(), made, model, w.model.c_str());
+		return made;
+	}
+	if (none && w.baseId == kGoldenGun) return kGoldenGunModel;
+	return model;
 }
 
 //the scripts a gun file has, read from the file itself
@@ -315,6 +351,25 @@ void ReadModel(Weapon& w)
 const uint32_t kEntityList = 0x50, kEntityRow = 0x14, kRowAddress = 8;
 const uint32_t kMeshPositions = 0x5C, kMeshCount = 0xA8, kPositionSize = 0x10;
 const uint32_t kMeshPoints[] = {0x10, 0x20, 0x30, 0x7C, 0x8C, 0x98}, kMeshRadii[] = {0x3C, 0x88};
+//and the mesh's points (what a guard holds the gun by and fires from, the base part's as eurochef
+//copies them): block 5 of the blocks the mesh's +0x40 word lists (its low byte which there are,
+//above it where their table is), a table row where its block is; the block's count at +5, from
+//+6 where the 0x30 byte points are, a point's position at +0x14
+const uint32_t kMeshBlocks = 0x40, kPointsBlock = 5, kPointSize = 0x30, kPointPosition = 0x14;
+
+uint32_t MeshPoints(uint32_t mesh, uint32_t& count)
+{
+	const uint32_t word = ld32(mesh + kMeshBlocks), bits = word & 0xFF;
+	count = 0;
+	if (!(bits & 1 << kPointsBlock)) return 0;
+	const uint32_t table = mesh + kMeshBlocks + (uint32_t)((int32_t)word >> 8);
+	const uint32_t row = table + 4 * (uint32_t)__builtin_popcount(bits & ((1 << kPointsBlock) - 1));
+	if (!guest_ptr(row)) return 0;
+	const uint32_t block = row + (uint32_t)((int32_t)ld32(row) >> 8);
+	if (!guest_ptr(block)) return 0;
+	count = ld8(block + 5);
+	return block + 6 + (uint32_t)(int32_t)(int16_t)ld16(block + 6);
+}
 
 void MoveModel(uint32_t data, const Weapon& w)
 {
@@ -324,6 +379,7 @@ void MoveModel(uint32_t data, const Weapon& w)
 		for (int k = 0; k < 3; ++k) st32(at + k * 4, as_u32(as_f32(ld32(at + k * 4)) * w.scale + w.offset[k]));
 	};
 	const uint32_t count = ld16(data + kEntityList), rows = data + kEntityList + 4 + ld32(data + kEntityList + 4);
+	uint32_t moved = 0;
 	for (uint32_t i = 0; i < count && i < 256; ++i)
 	{
 		//the entities are set up as the file comes in (their first word their class by then): a
@@ -334,8 +390,11 @@ void MoveModel(uint32_t data, const Weapon& w)
 		for (uint32_t v = 0; v < vertices && v < 0x10000; ++v) move(positions + v * kPositionSize);
 		for (uint32_t at : kMeshPoints) move(mesh + at);
 		for (uint32_t at : kMeshRadii) st32(mesh + at, as_u32(as_f32(ld32(mesh + at)) * w.scale));
+		uint32_t points = 0;
+		const uint32_t at = MeshPoints(mesh, points);
+		for (uint32_t p = 0; guest_ptr(at) && p < points && p < 64; ++p, ++moved) move(at + p * kPointSize + kPointPosition);
 	}
-	if (g_trace) rt_log("goldeneye: weapons: %s's gun times %.3f, moved %.3f %.3f %.3f", w.name.c_str(), w.scale, w.offset[2], w.offset[1], w.offset[0]);
+	if (g_trace) rt_log("goldeneye: weapons: %s's gun times %.3f, moved %.3f %.3f %.3f, %u point(s) with it", w.name.c_str(), w.scale, w.offset[2], w.offset[1], w.offset[0], moved);
 }
 
 //the gun's file with its scripts under the weapon's hashes, loaded there and then the first time
@@ -400,7 +459,7 @@ void Load(PPCContext& c)
 		st32(row + kRowName, w.text);
 		st8(row + kRowSilenced, 0);
 		const size_t n = size_t(&w - g_weapons.data());
-		st32(row + kRowModel, Remap(n, ld32(row + kRowModel)));
+		st32(row + kRowModel, WorldModel(n, ld32(row + kRowModel)));
 		if (w.clip >= 0) st8(row + kRowClip, (uint8_t)std::min(w.clip, 255));
 		if (w.clips >= 0) st8(row + kRowClips, (uint8_t)std::min(w.clips, 255));
 		for (uint32_t at : kRowDamage) st32(row + at, as_u32(as_f32(ld32(row + at)) * w.damage));
@@ -409,6 +468,10 @@ void Load(PPCContext& c)
 			if (p.size == 1) st8(row + p.at, (uint8_t)p.value);
 			else st32(row + p.at, p.value);
 		}
+		//a guard's shots do the player's, unless the file says what they do
+		const bool guardSet = std::any_of(w.patches.begin(), w.patches.end(), [](const Patch& p) { return p.at >= kRowGuardShot && p.at < kRowGuardShot + kShotSize; });
+		if (!guardSet)
+			for (uint32_t at = 0; at < kShotSize; at += 4) st32(row + kRowGuardShot + at, ld32(row + kRowPlayerShot + at));
 		PPCContext call = c;
 		st32(frame, stack);
 		call.r[1] = frame;
@@ -769,6 +832,9 @@ uint32_t custom_weapon_text(uint32_t hash)
 
 const std::vector<uint8_t>& custom_weapons_sum() { return g_sum; }
 bool custom_weapon(uint32_t id) { return std::any_of(g_weapons.begin(), g_weapons.end(), [&](const Weapon& w) { return w.id == id; }); }
+int custom_weapon_count() { return (int)g_weapons.size(); }
+uint32_t custom_weapon_id(int n) { return n >= 0 && n < (int)g_weapons.size() ? g_weapons[n].id : 0; }
+const char* custom_weapon_name(int n) { return n >= 0 && n < (int)g_weapons.size() ? g_weapons[n].name.c_str() : ""; }
 
 //once a frame on the game's thread: the list's places and the loadout pages
 void custom_weapons_frame(PPCContext& c)

@@ -211,6 +211,42 @@ and model if asked).
   whole AK is drawn with the gold body, fires (45 to 15, the recoil the fire script moves),
   guards take it (none fails AttachGun). With only `Body` in the scene, the body alone.
 
+- **A guard's gun, a gun on the floor**: `ge_gun_parts` (800CCF70), with its last argument set as
+  a guard's AttachGun passes it, shows only the parts on the locators of 805730D0 (the body first)
+  and sets their node's +0x136 and +0x137 to 1 (other code does the same for a gun on the floor).
+  A node with +0x137 set is drawn (`fn_80312F20`) from its copy numbered +0x136 at +0x114, out of
+  its entity row's **levels of detail** (`fn_8033AAC0`): the row's +0x10 word (low byte 0x20, above
+  it where the list is), rows of 0x18 bytes ended by a 0 word: where the entity is from the row,
+  a distance and three 0 words, a short FFFF and flags (2000 on the first). The P99's body: itself,
+  then entity 0 (0200016E), the whole gun in one mesh in the body's space, which is what a guard
+  holds. A row without the list has no copy 1: nothing is drawn (Bond in third person draws copy
+  0 and shows it). eurochef's `ge weapon` gives the body that list with the whole gun (the parts
+  the model script puts on it, attachments left out, each put where it rests on frame 0 and taken
+  into the body's space), even for a base whose body has none (the Golden Gun), and an attachment
+  that has one in the base (the silencer) a copy of itself.
+- **Points**: block 5 of the blocks a mesh's +0x40 word lists (low byte which blocks there are,
+  above it where their table is; a table row is where its block is and the block's number, 0x405
+  for block 5 right behind it). The block's +5 is the count, from +6 where the 0x30-byte points
+  are: a hash (10xxxxxx), three floats of 0.5, a position at +0x14, a rotation at +0x20
+  (`fn_80313EA0` finds one by its hash, in the level of detail drawn). The P99's whole gun has
+  1000008B (the grip) and 100000B8 (the muzzle), its frame 100000B8 and 10000147. eurochef copies
+  each base part's points, and the base's far ones to the far meshes; the port moves them with the
+  gun (`model offset`, `model scale`).
+- **A sliver out of the gun** (the user's deagle, a spike up from the rear sight, in the hands
+  and on a guard): a skinned triangle goes to the part most of its corners are weighted to, but
+  each corner was taken into its own joint's space, so a corner weighted to the slide in a
+  triangle of the frame stayed 4 cm off. Now all three corners go into the chosen part's joint's
+  space (eurochef's importer, `chosen`).
+- A gun file built before any of these has to be built again.
+- **No gun for guards in the row** (the Golden Gun's +0x178 is FFFFFFFF), or a file without the
+  copy of the base's: the row gets the file's copy of the gun the hands hold (what the
+  definitions give for 04001DAC), whose body draws the whole gun on a guard; without a file
+  the Golden Gun's gets 0400293D, the one Golden Gun mode lays in the level.
+- **A guard's damage** with a custom weapon is the player's (+0x44..+0x50 copied to
+  +0x14C..+0x158) unless the file sets one of those itself.
+- **The randomizer** (F1 > For Fun) has the custom weapons in its pool and in Forced Weapon's list,
+  after the game's 27.
+
 ## How a reload is put together
 
 Two scripts play side by side, both at 30 fps, started by the same action:

@@ -17,7 +17,8 @@
 //  attachment hash) -> 1 when the weapon's entry has the hash's bit. a weapon without an entry
 //  carries none (the Golden Gun, the MJR-409). fn_80169310, the guard's AttachGun's mask, leaves
 //  everything on for those: a sight on one breaks the view. one attachment at most
-//the weapons: the ones the game's own give-all (fn_800C02A0) hands out, by their row of the
+//the weapons: the ones the game's own give-all (fn_800C02A0) hands out and the custom ones of
+//mods/weapons (customweapons.cpp, a guard holds the gun it makes for them), by their row of the
 //  weapons table (805D1A4C: the count at +8, the rows at +0xC, 0x254 each; the id at +0x174,
 //  +0xD the clip, +0xE the clips, +0x178 the model a guard holds, none for the Golden Gun)
 //
@@ -137,6 +138,14 @@ uint32_t RowOf(uint32_t id)
 
 bool IsWeapon(uint32_t id) { return std::find(std::begin(kGiveAll), std::end(kGiveAll), id) != std::end(kGiveAll) || custom_weapon(id); }
 
+//the give-all's weapons, then the custom ones of mods/weapons
+std::vector<uint32_t> Weapons()
+{
+	std::vector<uint32_t> ids(std::begin(kGiveAll), std::end(kGiveAll));
+	for (int i = 0; i < custom_weapon_count(); ++i) ids.push_back(custom_weapon_id(i));
+	return ids;
+}
+
 //the model flags of the attachments the loadout menu allows on the weapon
 uint32_t Allowed(const PPCContext& c, uint32_t id)
 {
@@ -199,7 +208,7 @@ Pick RandomWeapon(const PPCContext& c, bool guard, const std::vector<uint32_t>& 
 		return {forced, row, g_forcedFlags};
 	}
 	std::vector<Pick> pool;
-	for (uint32_t id : kGiveAll)
+	for (uint32_t id : Weapons())
 	{
 		const uint32_t row{ RowOf(id) };
 		if (!row || std::find(taken.begin(), taken.end(), id) != taken.end()) continue;
@@ -362,7 +371,7 @@ void TraceAllowed(const PPCContext& c)
 	static bool said = false;
 	if (!g_trace || said) return;
 	said = true;
-	for (uint32_t id : kGiveAll) rt_log("goldeneye: randomizer: %08X may carry %s", id, Describe(Allowed(c, id)).c_str());
+	for (uint32_t id : Weapons()) rt_log("goldeneye: randomizer: %08X may carry %s", id, Describe(Allowed(c, id)).c_str());
 }
 
 bool Holds(uint32_t ctrl, uint32_t id)
@@ -454,10 +463,11 @@ void GunParts(PPCContext& c)
 {
 	const uint32_t row{ c.r[3] }, entity{ c.r[4] };
 	orig_gun_parts(c);
-	if (!guest_ptr(row) || ld32(row + kRowId) != kGoldenGun || ld32(row + kRowModel) != kGoldenGunModel) return;
+	const uint32_t gun{ guest_ptr(row) ? ld32(row + kRowModel) : 0 };
+	if (gun != kGoldenGunModel) return;
 	PPCContext call = c;
 	call.r[3] = entity;
-	call.r[4] = kGoldenGunModel;
+	call.r[4] = gun;
 	attached_model(call);
 	const uint32_t model{ call.r[3] };
 	if (!guest_ptr(model)) return;
@@ -468,7 +478,7 @@ void GunParts(PPCContext& c)
 		st16(node + kNodeFlags, ld16(node + kNodeFlags) | kNodeShown);
 		st8(node + kNodeFade, 0);
 	}
-	if (g_trace) rt_log("goldeneye: randomizer: the Golden Gun's %u parts shown on %08X", ld8(model + kModelPartCount), entity);
+	if (g_trace) rt_log("goldeneye: randomizer: %08X's %u parts shown on %08X", gun, ld8(model + kModelPartCount), entity);
 }
 
 //(guard, weapon row, flags, hide the gun model's unnamed parts)
@@ -499,14 +509,24 @@ bool weapon_randomizer() { return g_on; }
 void set_weapon_randomizer(bool on) { g_on = on; }
 bool no_attachment_limit() { return g_unlimited; }
 void set_no_attachment_limit(bool on) { g_unlimited = on; }
+//the give-all's, then the custom ones
 int forced_weapon()
 {
-	const uint32_t* found{ std::find(std::begin(kGiveAll), std::end(kGiveAll), g_forced.load()) };
-	return found == std::end(kGiveAll) ? 0 : (int)(found - std::begin(kGiveAll)) + 1;
+	const std::vector<uint32_t> ids{ Weapons() };
+	const auto found{ std::find(ids.begin(), ids.end(), g_forced.load()) };
+	return found == ids.end() ? 0 : (int)(found - ids.begin()) + 1;
 }
-void set_forced_weapon(int weapon) { g_forced = weapon > 0 && weapon <= kWeaponCount ? kGiveAll[weapon - 1] : 0; }
-int forced_weapon_count() { return kWeaponCount + 1; }
-const char* forced_weapon_name(int weapon) { return weapon > 0 && weapon <= kWeaponCount ? kNames[weapon - 1] : "Off"; }
+void set_forced_weapon(int weapon)
+{
+	const std::vector<uint32_t> ids{ Weapons() };
+	g_forced = weapon > 0 && weapon <= (int)ids.size() ? ids[weapon - 1] : 0;
+}
+int forced_weapon_count() { return kWeaponCount + custom_weapon_count() + 1; }
+const char* forced_weapon_name(int weapon)
+{
+	if (weapon > kWeaponCount) return custom_weapon_name(weapon - kWeaponCount - 1);
+	return weapon > 0 ? kNames[weapon - 1] : "Off";
+}
 uint32_t forced_weapon_id() { return g_forced; }
 
 void install_randomizer()

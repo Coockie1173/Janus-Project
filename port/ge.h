@@ -351,6 +351,9 @@ void install_custom_weapons(); //customweapons.cpp, after install_mods and befor
 void custom_weapons_frame(PPCContext& c); //once a frame, on the game's thread
 uint32_t custom_weapon_text(uint32_t hash); //the characters of a custom weapon's name or about, 0 for any other
 bool custom_weapon(uint32_t id); //the inventory id is one of the custom weapons'
+int custom_weapon_count(); //the custom weapons, by their number
+uint32_t custom_weapon_id(int n);
+const char* custom_weapon_name(int n);
 const std::vector<uint8_t>& custom_weapons_sum(); //what their files say, for the network game's version
 void install_prompts(); //prompts.cpp
 void weapon_buttons(ClassicState& s); //a slot's key, in the classic's filter
