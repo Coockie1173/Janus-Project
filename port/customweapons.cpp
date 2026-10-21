@@ -808,7 +808,9 @@ void NetItems(const PPCContext& c)
 }
 
 //the loadout menu takes a weapon (fn_80256A80): a secondary that isn't one of the game's five
-//pistols becomes the Torka, so a custom pistol taken there is put back
+//pistols becomes the Torka, on every pick (a gadget, an attachment, the primary), so a custom pistol
+//is put back: the one taken there, or the one the loadout had. a custom gun that isn't a pistol
+//still goes when the Multi Task does
 const uint32_t kMenuLit = 0x2C8, kMenuLitIndex = 0x220, kMenuPad = 0x1A4, kMenuPage = 0x214, kItemLoadout = 8;
 const uint32_t kSecondaryPages[] = {0x7D0000C1, 0x7D0000E8}, kSecondarySlot = 0x15C, kTorka = 0x4B00002D;
 PPCFunc orig_loadout_pick = nullptr;
@@ -816,15 +818,21 @@ PPCFunc orig_loadout_pick = nullptr;
 void LoadoutPick(PPCContext& c)
 {
 	const uint32_t item = c.r[3], menu = c.r[4];
-	const uint32_t row = guest_ptr(menu) ? ld32(menu + kMenuLit + ld32(menu + kMenuLitIndex) * 4) : 0;
-	const uint32_t key = guest_ptr(row) ? ld32(row + 4) : 0, page = guest_ptr(menu) ? ld32(menu + kMenuPage) : 0;
-	orig_loadout_pick(c);
-	const bool custom = std::any_of(g_weapons.begin(), g_weapons.end(), [&](const Weapon& w) { return w.key == key; });
-	if (!custom || std::find(std::begin(kSecondaryPages), std::end(kSecondaryPages), page) == std::end(kSecondaryPages)) return;
+	if (!guest_ptr(menu) || !guest_ptr(item))
+	{
+		orig_loadout_pick(c);
+		return;
+	}
+	const uint32_t row = ld32(menu + kMenuLit + ld32(menu + kMenuLitIndex) * 4);
+	const uint32_t key = guest_ptr(row) ? ld32(row + 4) : 0, page = ld32(menu + kMenuPage);
 	const uint32_t slot = kProfiles + ld8(menu + kMenuPad) * kProfileSize + ld32(item + kItemLoadout) * 4 + kSecondarySlot;
-	if (ld32(slot) != kTorka) return;
-	st32(slot, key);
-	if (g_trace) rt_log("goldeneye: weapons: %08X kept as the secondary", key);
+	const bool secondaryPage = std::find(std::begin(kSecondaryPages), std::end(kSecondaryPages), page) != std::end(kSecondaryPages);
+	const uint32_t wanted = secondaryPage ? key : ld32(slot);
+	orig_loadout_pick(c);
+	const bool custom = std::any_of(g_weapons.begin(), g_weapons.end(), [&](const Weapon& w) { return w.key == wanted; });
+	if (!custom || ld32(slot) != kTorka || (!secondaryPage && !Pistol(wanted))) return;
+	st32(slot, wanted);
+	if (g_trace) rt_log("goldeneye: weapons: %08X kept as the secondary", wanted);
 }
 
 //a shot's sounds (fn_8012E3A0: controller, the shot's place): the weapon's own .wav in place of the
