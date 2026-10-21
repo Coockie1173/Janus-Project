@@ -42,12 +42,16 @@
 //  byte+D = 40, float+10 = 12, word+178 = 04001DB3   any other place of the row
 //  model = golden_ak.edb      a gun of its own, a file next to it made by eurochef's `ge weapon`
 //                             (the gun's parts from a glTF scene, the base gun's scripts)
+//  model offset = 0.02 -0.01 0   the gun moved forward, up and right, in metres (aiming down the
+//                             sight brings the base's rear sight to the eye: line the gun's up with it)
+//  model scale = 0.9          the gun's size, times this
 //
 //GE_TRACE=1 logs the weapons made and the pages they go into
 #include "ge.h"
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -91,6 +95,7 @@ struct Weapon
 	std::string model; //its gun's file in the weapons folder, empty: the base's
 	uint32_t modelFile{}; //that file's hash, as the mods have it
 	std::set<uint32_t> modelScripts; //the base's scripts the file has copies of
+	float offset[3]{}, scale{ 1.0f }; //the gun moved (the game's x, y, z) and sized as it loads
 };
 
 std::vector<Weapon> g_weapons;
@@ -143,6 +148,16 @@ bool ReadWeapon(const std::filesystem::path& path, Weapon& w)
 		else if (key == "clip") w.clip = std::atoi(value.c_str());
 		else if (key == "clips") w.clips = std::atoi(value.c_str());
 		else if (key == "model") w.model = value;
+		else if (key == "model offset")
+		{
+			//forward, up, right in metres: the game's z, y and x
+			float forward = 0, up = 0, right = 0;
+			std::sscanf(value.c_str(), "%f %f %f", &forward, &up, &right);
+			w.offset[0] = right;
+			w.offset[1] = up;
+			w.offset[2] = forward;
+		}
+		else if (key == "model scale") w.scale = std::strtof(value.c_str(), nullptr);
 		else if (key.rfind("byte+", 0) == 0 || key.rfind("word+", 0) == 0 || key.rfind("float+", 0) == 0)
 		{
 			Patch p{};
@@ -294,6 +309,35 @@ void ReadModel(Weapon& w)
 	else if (g_trace) rt_log("goldeneye: weapons: %s is drawn with %s (%08X, %zu script(s))", w.name.c_str(), w.model.c_str(), w.modelFile, w.modelScripts.size());
 }
 
+//a gun file's parts (0x601 meshes as eurochef writes them) sized and moved: every position (0x10
+//bytes each from the pointer at +0x5C, as many as +0xA8 says) and the copies of the bounds
+//(+0x10 and +0x20 the box, +0x30 and +0x7C a sphere, +0x8C and +0x98 the box again)
+const uint32_t kEntityList = 0x50, kEntityRow = 0x14, kRowAddress = 8;
+const uint32_t kMeshPositions = 0x5C, kMeshCount = 0xA8, kPositionSize = 0x10;
+const uint32_t kMeshPoints[] = {0x10, 0x20, 0x30, 0x7C, 0x8C, 0x98}, kMeshRadii[] = {0x3C, 0x88};
+
+void MoveModel(uint32_t data, const Weapon& w)
+{
+	if (w.scale == 1.0f && !w.offset[0] && !w.offset[1] && !w.offset[2]) return;
+	auto move = [&](uint32_t at)
+	{
+		for (int k = 0; k < 3; ++k) st32(at + k * 4, as_u32(as_f32(ld32(at + k * 4)) * w.scale + w.offset[k]));
+	};
+	const uint32_t count = ld16(data + kEntityList), rows = data + kEntityList + 4 + ld32(data + kEntityList + 4);
+	for (uint32_t i = 0; i < count && i < 256; ++i)
+	{
+		//the entities are set up as the file comes in (their first word their class by then): a
+		//gun file has nothing but meshes
+		const uint32_t row = rows + i * kEntityRow, mesh = guest_ptr(ld32(row + kRowLoaded)) ? ld32(row + kRowLoaded) : data + ld32(row + kRowAddress);
+		if (!guest_ptr(mesh) || ld32(mesh + kMeshCount) > 0xFFFF) continue;
+		const uint32_t positions = mesh + kMeshPositions + ld32(mesh + kMeshPositions), vertices = ld32(mesh + kMeshCount);
+		for (uint32_t v = 0; v < vertices && v < 0x10000; ++v) move(positions + v * kPositionSize);
+		for (uint32_t at : kMeshPoints) move(mesh + at);
+		for (uint32_t at : kMeshRadii) st32(mesh + at, as_u32(as_f32(ld32(mesh + at)) * w.scale));
+	}
+	if (g_trace) rt_log("goldeneye: weapons: %s's gun times %.3f, moved %.3f %.3f %.3f", w.name.c_str(), w.scale, w.offset[2], w.offset[1], w.offset[0]);
+}
+
 //the gun's file with its scripts under the weapon's hashes, loaded there and then the first time
 //it is asked for in a level (as fn_801461C0 gets o_guns). 0 when it can't be
 uint32_t ModelFile(const PPCContext& c, size_t n)
@@ -326,6 +370,7 @@ uint32_t ModelFile(const PPCContext& c, size_t n)
 		PPCContext fix = call;
 		fix.r[3] = data;
 		fix.r[4] = 0xFFFFFFFF;
+		MoveModel(data, g_weapons[n]);
 		fix_up(fix);
 		if (g_trace) rt_log("goldeneye: weapons: %s's gun is set up (%s)", g_weapons[n].name.c_str(), guest_ptr(ld32(rows + kRowLoaded)) ? "its scripts are there" : "its scripts aren't there");
 	}
