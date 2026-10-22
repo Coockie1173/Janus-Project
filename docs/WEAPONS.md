@@ -180,6 +180,14 @@ want and parts `_from_` another gun can be deleted: they are then drawn as nothi
 animations (`Fire`, `Reload`...) show how each part moves, so a magazine has to be where the
 base's is to come out of the gun right.
 
+Where a part is drawn is where its mesh is on the assembled gun. The base's scripts still put the
+part's own space where they always did, so the mesh is drawn offset from it by as much as you
+moved it, and moves with it in the animations. A part's points (a launcher's grenade point,
+a scope's sight point, a silencer's muzzle) stay with the bone: move the bone as well to take them
+along (a launcher further forward: move the mesh and the bone), the bone alone to move only the
+points. Only where the bone is counts, not how it is turned (Blender turns bones on import).
+A part you delete still has its points, so an attachment without a mesh is still there, unseen.
+
 - **The rig** (`ge/weapon_rig.rs`): an armature with a bone for each part, put where the first
   script that names it (the model script for most) puts it on frame 0, from that command's
   controller (+0x34 list, the command's byte 10; channels 0x4 position, 0x8 rotation x y z w,
@@ -189,12 +197,18 @@ base's is to come out of the gun right.
   with more than one frame go along as animations named by the action they are played for, not
   read back. Bone and mesh have the part's name (`ge/weapon_parts.rs`, see "The parts" below),
   and each node's extras (custom properties in Blender) say which animations show it.
-- **The build** takes a skinned mesh's triangles to the part of their heaviest joint (`Part_N...`)
-  and each vertex into that joint's space by the inverse bind matrix, so the copied scripts put it
-  back; `Part_N` nodes as before still work. A mesh that isn't weighted (no skin, or vertices
-  weighted to nothing) under a node named for a part goes the same way: from where it is in the
-  scene into that part's bone space, when the scene has the rig (without one, as before: the part's
-  own space). So a model of your own is put where the base's part is on the assembled gun, named
+- **The build** takes a skinned mesh's triangles to the part of their heaviest joint (`Part_N...`),
+  a mesh that isn't weighted (no skin, or vertices weighted to nothing) to the part its node is
+  named for, and every vertex from where it is on the assembled gun into the part's space as the
+  base's first script places it (`rest_places`, the inverse the rig export writes): the scene's
+  own bone matrices aren't used, so bones Blender turned (its importer re-aims them) change
+  nothing. A part's bone that the scene has elsewhere than that rest place moves the part's points
+  (and its far copy's) as far, in the part's space (`move_points`, the bone's turn left out); the
+  build lists those. Checked: every bone of the AK-47 and P99 rigs turned at random with the
+  inverse bind matrices made again: the same bytes; the AK's launcher mesh and bone 2 cm up:
+  10000159 at y 0.029 (0.009) and the mesh 2 cm up; the mesh alone: the mesh up, the point not; the
+  ACOG's bone alone 3 cm back: 10000170 at z -0.013 (0.017), nothing else. Before, the build took
+  the scene's inverse bind matrices, and `Part_N` nodes without a rig are still taken as they are. So a model of your own is put where the base's part is on the assembled gun, named
   `Part_02...`, and the base's mesh deleted; nothing to weight. Checked: the AK-47, WA2000, P99,
   SEGS 550 and Golden Gun rigs (one mesh a part) built to the same bytes as the old one-mesh
   exports, and the P99's magazine and slide and the AK's launcher and reload magazine unweighted,
