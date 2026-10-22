@@ -172,17 +172,33 @@ The eurochef GUI does the same: File > New GoldenEye 007 weapon (base gun, o_gun
 gun file, brightness, file hash; Export base rig, Build, and the weapon's .txt with name, base
 and model if asked).
 
-- **The rig** (`ge/weapon_rig.rs`): the base gun as one skinned mesh, an armature with a bone
-  `Part_N_role` (role: the locator's, from `locator_name`) for each part, put where the first
+Making one from the rig: each part is an object of its own named for what it is
+(`Part_02_Magazine`, `Part_03_Slide`, `Part_13_Magazine_from_AK47`). Edit a part's mesh, or put
+your own model where the part is on the gun, name it the same (`Part_02` is enough; Blender's
+`.001` is fine) and delete the base's: it needn't be weighted to the bone. Attachments you don't
+want and parts `_from_` another gun can be deleted: they are then drawn as nothing. The
+animations (`Fire`, `Reload`...) show how each part moves, so a magazine has to be where the
+base's is to come out of the gun right.
+
+- **The rig** (`ge/weapon_rig.rs`): an armature with a bone for each part, put where the first
   script that names it (the model script for most) puts it on frame 0, from that command's
   controller (+0x34 list, the command's byte 10; channels 0x4 position, 0x8 rotation x y z w,
-  0x10 scale, keyframes of a frame number and the value). Every part's triangles weighted all to
-  its bone, so the gun is seen assembled and a part is a vertex group. The scripts with more than
-  one frame go along as animations named by their hash (fire, reload...), not read back. A part
-  without a controller in its first script rests at the origin (the AK's parts 9 and 10).
+  0x10 scale, keyframes of a frame number and the value), and each part a mesh of its own, all
+  its triangles weighted to its bone, so the gun is seen assembled. A part without a controller
+  in its first script rests at the origin (its mesh is already in the gun's space). The scripts
+  with more than one frame go along as animations named by the action they are played for, not
+  read back. Bone and mesh have the part's name (`ge/weapon_parts.rs`, see "The parts" below),
+  and each node's extras (custom properties in Blender) say which animations show it.
 - **The build** takes a skinned mesh's triangles to the part of their heaviest joint (`Part_N...`)
   and each vertex into that joint's space by the inverse bind matrix, so the copied scripts put it
-  back; `Part_N` nodes as before still work. Checked: AK-47 rig exported, part 0's materials
+  back; `Part_N` nodes as before still work. A mesh that isn't weighted (no skin, or vertices
+  weighted to nothing) under a node named for a part goes the same way: from where it is in the
+  scene into that part's bone space, when the scene has the rig (without one, as before: the part's
+  own space). So a model of your own is put where the base's part is on the assembled gun, named
+  `Part_02...`, and the base's mesh deleted; nothing to weight. Checked: the AK-47, WA2000, P99,
+  SEGS 550 and Golden Gun rigs (one mesh a part) built to the same bytes as the old one-mesh
+  exports, and the P99's magazine and slide and the AK's launcher and reload magazine unweighted,
+  under a moved parent, to the same bytes again. Checked: AK-47 rig exported, part 0's materials
   tinted, built: all 16 parts' vertices the same as the old `Part_N` path's to 3e-8.
 
 - **The file**: the scene's nodes `Part_N` (or `Body` for part 0) are the gun's parts, 0x601 mesh
@@ -246,6 +262,48 @@ and model if asked).
   +0x14C..+0x158) unless the file sets one of those itself.
 - **The randomizer** (F1 > For Fun) has the custom weapons in its pool and in Forced Weapon's list,
   after the game's 27.
+
+### The parts
+
+`ge weapon --parts` and the rig name each part by what it is: `Part_NN_What`, the number the build
+goes by, then the name, which the build doesn't read. The names were given by looking at every
+part of the 27 guns (its mesh alone and on the gun) and at what moves it, keyed by the part's
+entity (the same entity is the same mesh in every gun that has it), else by its locator:
+
+| locator | part |
+|---|---|
+| 15000168 | Body |
+| 150000CD, 150000D7, 1500014F, 15000150, 15000157, 150000DA | Silencer, Reflex Sight, ACOG Scope, Laser Pointer, Thermal Scope, Grenade Launcher (the model's flags 1 to 0x20) |
+| 150000DE | Sniper Scope (flag 0x40: the snipers' own scope) |
+| 150001CA | Always Shown (the MJR-409's tube) |
+| 15000181, 15000187 | what the hand brings in a reload: the AK's magazine, a launcher's grenade, the Gambit's bolt handle |
+| 15000182, 15000183 | the front sight, low and full (the AK's two) |
+| 15000199 | Rear Sight |
+| 150000D9, 150000DC, 15000158, 150001CF | Foregrip, Launcher Barrel, Launcher Lever, Launcher Mount |
+| 150000DD | under the barrel: the AK's cleaning rod, the Anova's launcher latch |
+| FFFFFFFF | by the entity: Magazine, Slide, Trigger, Hammer, Charging Handle, Bolt, Pump, Cylinder, Round 1..6, Stock, Selector, Safety, Shell... |
+
+- **Firing modes**: the definitions' rows (`DEFINITIONS` in `weapon_parts.rs`, read out of the DOL)
+  have a script for each of four modes. The first is the gun's. The second only the guns that
+  carry a grenade launcher have, and it differs only in the second reload (generic 04002736),
+  where the launcher's grenade moves (Anova's 8200003D, 62 keys): the launcher's reload. The third
+  the pistols fill with the first's. The fourth (Sigmus, SEGS 550, AK-47, Kallos-TT9, WA2000) has
+  copies of the moving parts with textures of their own (the AK's 82000183/86/88, a worn
+  texture 860000A5): those are `_Alt`, and the animations `Fire_Alt`, `Reload_Alt`.
+- **Actions**: 04001DAC is the gun at rest (`Idle`), 0400207D `Fire`, 04001DAD `Reload`, 04002736
+  `Reload_2` (the reload for most guns, the launcher's in the second mode); the rest keep the
+  generic's number (`Action_1DED`: the P99's silencer is screwed on in it, 35 keys).
+- **Parts of another gun**: a gun lists only the rows that differ from its parent's, so most rifles
+  play the AK-47's script for `Reload_2` and the pistols the P99's for 1DEC, 1DED, 286E, 2872
+  and 2736, and with them that gun's own parts (the AK's trigger, magazine, cleaning rod and
+  sights in a WA2000's list, 13 of its 25 parts). Those are `..._from_AK47` (the gun whose
+  definition the scripts are in, `script_role`). The build copies those scripts too, so a part
+  left out is drawn as nothing there, not as the AK's.
+- **The Kallos-TT9** names 04002FBC in its fourth mode, which o_guns doesn't have; `read_base`
+  leaves it out with a warning (it failed the whole gun before).
+- Not sure of: what 15000182 is for next to 15000183 (both are front sights; the model script
+  places the low one), the Vargen's 820000F2 (small bits spread along the whole gun), which of the
+  Anova's two moving top pieces is the handle.
 
 ## A shot of its own (sound)
 

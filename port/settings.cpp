@@ -1753,10 +1753,11 @@ bool cheats_active()
 	if (gecko_cheats()) return true;
 	for (const Setting& s : g_settings)
 	{
+		if (s.id == "weapon_randomizer" || s.id == "no_attachment_limit") continue; //random guns are a challenge, not an aid
 		const float off = s.id == "turbo" ? 1.0f : 0.0f; //turbo's off is the game's speed, 1x
 		if ((s.page == kCheats || s.page == kForFun || (s.page == kTriggers && s.id == "trigger_view")) && s.get() > off + 0.05f) return true;
 	}
-	return false; //bunnyhopping is on its own page, so it doesn't count
+	return false; //bunnyhopping is on its own page, so it doesn't count, nor does the randomizer
 }
 bool menu_event(const SDL_Event* e);
 
