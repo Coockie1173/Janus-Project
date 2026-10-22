@@ -188,7 +188,8 @@ Making one from the export:
   part's object (select yours, then the part's, Ctrl+J) or delete the part's mesh and name yours
   `Part_02...` (`Part_02` is enough, `.001` is fine). Nothing to weight, nothing to parent.
 - Attachments you don't want and parts `_from_` another gun can be deleted: they are drawn as
-  nothing then. A deleted part keeps its points (from the base), so an attachment without a mesh
+  nothing then. `--no-borrowed` (the GUI's "Leave out other guns' parts", on by default) leaves
+  the `_from_` ones out of the export to begin with. A deleted part keeps its points (from the base), so an attachment without a mesh
   is still there, unseen.
 - The parts move in the animations as the base's do, about their pivots: a magazine has to be
   where the base's is to come out of the gun right. `--animations` (a file to look at) has them;
@@ -197,8 +198,14 @@ Making one from the export:
 - **The export** (`ge/weapon_rig.rs`): each part a plain node placed where the first script that
   names it (the model script for most) puts it on frame 0, from that command's controller (+0x34
   list, the command's byte 10; channels 0x4 position, 0x8 rotation x y z w, 0x10 scale, keyframes
-  of a frame number and the value), its mesh in the part's own space; a part without a controller
-  in its first script rests at the origin (its mesh is already in the gun's space). Its points
+  of a frame number and the value), its mesh in the part's own space. The first script that has
+  keys for it: a script can name a part with a controller it doesn't have (the P99's model script
+  names the silencer with controller 5 of its 4), and the game draws it where the scripts that
+  have one put it, the P99's silencer at the muzzle (0, 0.046, 0.093, its reload's controller 5),
+  not at the origin. That was the user's silencer drawn off the gun: the export had it at the
+  origin, half in the frame, moved to the muzzle in Blender it was the muzzle's offset further
+  on. The AK's laser, front sight and charging handles were at the origin the same way. A part
+  no script has keys for rests at the origin (its mesh is already in the gun's space). Its points
   (the mesh's block 5, `point_list`) as child nodes. Names from `ge/weapon_parts.rs` ("The parts"
   below), each node's extras (custom properties in Blender) say which animations show it.
 - **The build**: with a `Gun_xN` node anywhere the whole scene is N times smaller. Every triangle
