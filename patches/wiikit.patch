@@ -4079,7 +4079,7 @@ index 8a4e097..8b1b1a8 100644
  void ppc_mmio_write(uint32_t addr, uint32_t, int) { rt_die("mmio write %08X", addr); }
  uint64_t ppc_timebase() { return 0; }
 diff --git a/runtime/video.cpp b/runtime/video.cpp
-index 5726093..3631dc0 100644
+index 5726093..bfe7f51 100644
 --- a/runtime/video.cpp
 +++ b/runtime/video.cpp
 @@ -67,7 +67,8 @@ ClassicState classic[4];
@@ -5458,6 +5458,11 @@ index 5726093..3631dc0 100644
 +        glBlitNamedFramebuffer(t.fbo, 0, 0, 0, t.w, t.h, dx, dy + dh, dx + dw, dy,   // top row first
                                 GL_COLOR_BUFFER_BIT, GL_LINEAR);
      }
+-    if (opt.dump_dir && cnt.presents % (uint64_t)opt.dump_every == 0 && ww > 0 && wh > 0) {
+-        std::vector<uint8_t> px((size_t)ww * wh * 4), flip(px.size());   // the window, as shown
+-        glReadPixels(0, 0, ww, wh, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+-        for (int y = 0; y < wh; ++y)
+-            std::memcpy(&flip[(size_t)y * ww * 4], &px[(size_t)(wh - 1 - y) * ww * 4], (size_t)ww * 4);
 +    // WIIKIT_THUMBS=file: every picture shown, small (WIIKIT_THUMBS_SIZE=WxH, 160x90 unless given), as raw
 +    // RGBA one after the other, top row first. "|command" pipes them to a program instead, as in
 +    //     WIIKIT_THUMBS_SIZE=640x360 WIIKIT_THUMBS="|ffmpeg -f rawvideo -pix_fmt rgba -s 640x360 -i - -q:v 3 dir/%06d.jpg"
@@ -5558,11 +5563,7 @@ index 5726093..3631dc0 100644
 +        }
 +    }
 +    if (overlay_cb.draw) overlay_cb.draw();
-     if (opt.dump_dir && cnt.presents % (uint64_t)opt.dump_every == 0 && ww > 0 && wh > 0) {
--        std::vector<uint8_t> px((size_t)ww * wh * 4), flip(px.size());   // the window, as shown
--        glReadPixels(0, 0, ww, wh, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
--        for (int y = 0; y < wh; ++y)
--            std::memcpy(&flip[(size_t)y * ww * 4], &px[(size_t)(wh - 1 - y) * ww * 4], (size_t)ww * 4);
++    if (opt.dump_dir && cnt.presents >= (uint64_t)opt.dump_from && cnt.presents % (uint64_t)opt.dump_every == 0 && ww > 0 && wh > 0) {
 +        std::vector<uint8_t> flip;                                        // the window, as shown
 +        video_read_window(flip, ww, wh);
          char name[64];
@@ -5842,7 +5843,7 @@ index 5726093..3631dc0 100644
              present();
              if (g_vperf_on) g_vperf.present += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - tp).count();
 diff --git a/runtime/video.h b/runtime/video.h
-index ecfb499..ae5761e 100644
+index ecfb499..2cef6bc 100644
 --- a/runtime/video.h
 +++ b/runtime/video.h
 @@ -3,7 +3,7 @@
@@ -5937,7 +5938,15 @@ index ecfb499..ae5761e 100644
  // Takes the record and leaves it empty; waits while the renderer has
  // frames_ahead frames queued, at most wait_ms (-1: as long as it takes).
  // False if the time ran out: the record is left as it was.
-@@ -87,7 +126,10 @@ PadState video_pad();
+@@ -61,6 +100,7 @@ struct VideoOptions {
+     int frames_ahead = 2;                    // frames the game may record before the renderer draws them
+     const char* dump_dir = nullptr;          // PNGs of presented frames
+     int dump_every = 60;                     // one PNG every N retraces
++    long dump_from = 0;                      // none before that many frames
+     double quit_after = 0;                   // seconds; 0 = run until the window closes
+     bool widescreen = false;                 // the console's screen is 16:9 (SYSCONF), else 4:3
+     bool fullscreen = false;                 // start fullscreen (borderless, at the desktop's mode)
+@@ -87,7 +127,10 @@ PadState video_pad();
  // the mouse buttons (the key file's [Classic Controller]), merged with its
  // pad: buttons OR'd, each stick from whichever source is deflected more.
  // Buttons are KPAD's Classic bits; sticks -1..1, y up; triggers 0..1.
@@ -5949,7 +5958,7 @@ index ecfb499..ae5761e 100644
  ClassicState video_classic(int chan);
  // The Remote's motor on a channel: its pad rumbles (the Remote's own on
  // channel 1 when a pad is there).
-@@ -97,6 +139,61 @@ void video_set_rumble(int chan, bool on);
+@@ -97,6 +140,61 @@ void video_set_rumble(int chan, bool on);
  // the pause box), and the motion is summed until taken.
  void video_set_relative_mouse(bool on);
  void video_take_mouse_motion(float& dx, float& dy);
@@ -6011,3 +6020,24 @@ index ecfb499..ae5761e 100644
  
  // WIIKIT_PERF=1: where a frame's time goes, reported every second by the
  // renderer. Nanoseconds, summed since the last report.
+diff --git a/runtime/wiiboot.cpp b/runtime/wiiboot.cpp
+index 250d419..49720ce 100644
+--- a/runtime/wiiboot.cpp
++++ b/runtime/wiiboot.cpp
+@@ -41,7 +41,7 @@ int main(int argc, char** argv) {
+         std::fprintf(stderr, "usage: wiiboot EXTRACT_DIR [--nand DIR] [--fonts DIR] [--symbols symbols.tsv] "
+                              "[--mmio-log] [--watch SECONDS]\n"
+                              "                            [--no-video] [--no-audio] [--scale N] [--frames-ahead N] "
+-                             "[--dump DIR] [--dump-every N] [--quit-after SECONDS]\n"
++                             "[--dump DIR] [--dump-every N] [--dump-from N] [--quit-after SECONDS]\n"
+                              "                            [--aspect 16:9|4:3] [--language en|fr|es|de|it|nl|ja] "
+                              "[--fullscreen] [--window WxH] [--keys FILE]\n"
+                              "                            [--input auto|pad|keyboard]\n");
+@@ -64,6 +64,7 @@ int main(int argc, char** argv) {
+         else if (!std::strcmp(argv[i], "--frames-ahead") && i + 1 < argc) vo.frames_ahead = std::max(1, std::atoi(argv[++i]));
+         else if (!std::strcmp(argv[i], "--dump") && i + 1 < argc) vo.dump_dir = argv[++i];
+         else if (!std::strcmp(argv[i], "--dump-every") && i + 1 < argc) vo.dump_every = std::max(1, std::atoi(argv[++i]));
++        else if (!std::strcmp(argv[i], "--dump-from") && i + 1 < argc) vo.dump_from = std::atol(argv[++i]);
+         else if (!std::strcmp(argv[i], "--quit-after") && i + 1 < argc) vo.quit_after = std::atof(argv[++i]);
+         else if (!std::strcmp(argv[i], "--aspect") && i + 1 < argc) {
+             std::string a = argv[++i];

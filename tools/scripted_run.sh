@@ -46,7 +46,8 @@ WIIKIT_PAD="$SCRIPT" timeout $((SECS + 40)) ${GE_BIN:-build/out/wiiboot} game --
     --symbols build/recomp/symbols.tsv $( [ -d $FONTS ] && echo --fonts $FONTS ) $( [ -n "$AUDIO" ] || echo --no-audio ) --input keyboard \
     --watch 10 --dump build/frames --dump-every "$EVERY" --quit-after "$SECS" "$@" > build/run-script.log 2>&1
 echo "exit $?" >> build/run-script.log
-if command -v montage >/dev/null; then
+#a sheet of more frames than that has taken the whole memory (the dump counts frames at the replay's rate)
+if command -v montage >/dev/null && [ "$(ls build/frames | wc -l)" -le 150 ]; then
     montage build/frames/frame_*.png -alpha off -tile 6x -geometry 426x240+2+2 -label '%f' build/sheet.png 2>/dev/null
 fi
 tail -25 build/run-script.log

@@ -184,6 +184,10 @@ Making one from the export:
 - A part's points are empties under it, `Point_10000171_Part_10` (the laser's), `Point_10000159_Part_3`
   (the launcher's), the ACOG's `Point_10000170_Part_6`...: what the game takes a muzzle, a beam,
   a sight from. Drag one to put the point somewhere else.
+- The muzzle: `Point_100000B8_Part_2` on the body (the Sigmus has it only on its whole gun; its
+  export has it all the same). Put it at your barrel's tip or the flash comes out where the base's
+  muzzle was. Aimed, the base's animation brings its rear sight to the eye: your gun's sights go
+  where the base's are, and nothing of it higher just in front of them.
 - A model of your own: import it, put it where the part is on the gun and either join it into the
   part's object (select yours, then the part's, Ctrl+J) or delete the part's mesh and name yours
   `Part_02...` (`Part_02` is enough, `.001` is fine). Nothing to weight, nothing to parent.
