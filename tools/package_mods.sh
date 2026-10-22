@@ -1,6 +1,7 @@
 #!/bin/sh
 # The mods as a download of their own: the mods folder as it is (the .edb files, their .png
-# pictures and .txt files, in it and in its folder for each online gamemode), zipped. It is
+# pictures and .txt files, in it and in its folder for each online gamemode, and the custom
+# weapons with their sounds), zipped. It is
 # unzipped into the game's folder, next to Play, where the packages have an empty mods folder.
 #     sh tools/package_mods.sh      -> build/Janus-Project-mods.zip, none without a level in mods/
 set -e
@@ -14,6 +15,8 @@ for d in conflict team_conflict golden_gun black_box goldeneye heroes license_to
     mkdir -p "$S/mods/$d"
     for f in mods/$d/*.edb mods/$d/*.png mods/$d/*.txt; do [ -f "$f" ] && cp "$f" "$S/mods/$d/"; done
 done
+mkdir -p "$S/mods/weapons"
+for f in mods/weapons/*.edb mods/weapons/*.txt mods/weapons/*.wav; do [ -f "$f" ] && cp "$f" "$S/mods/weapons/"; done
 if [ -z "$(find "$S/mods" -name '*.edb' | head -1)" ]; then
     echo "mods: no .edb in mods/, no $NAME.zip"
     exit 0
