@@ -164,7 +164,8 @@ A weapon's `model = NAME.edb` (in `mods/weapons`, next to its .txt) is a file ma
 
 ```
 eurochef-cli ge weapon --base AK-47 --from o_guns.edb --parts                 # the base gun's parts
-eurochef-cli ge weapon --base AK-47 --from o_guns.edb --export ak47.gltf      # the base, rigged
+eurochef-cli ge weapon --base AK-47 --from o_guns.edb --export ak47.gltf      # the base to start from
+eurochef-cli ge weapon --base AK-47 --from o_guns.edb --export look.gltf --animations  # to watch it move
 eurochef-cli ge weapon mygun.gltf --base AK-47 --from o_guns.edb -o mods/weapons/mygun.edb
 ```
 
@@ -172,48 +173,49 @@ The eurochef GUI does the same: File > New GoldenEye 007 weapon (base gun, o_gun
 gun file, brightness, file hash; Export base rig, Build, and the weapon's .txt with name, base
 and model if asked).
 
-Making one from the rig: each part is an object of its own named for what it is
-(`Part_02_Magazine`, `Part_03_Slide`, `Part_13_Magazine_from_AK47`). Edit a part's mesh, or put
-your own model where the part is on the gun, name it the same (`Part_02` is enough; Blender's
-`.001` is fine) and delete the base's: it needn't be weighted to the bone. Attachments you don't
-want and parts `_from_` another gun can be deleted: they are then drawn as nothing. The
-animations (`Fire`, `Reload`...) show how each part moves, so a magazine has to be where the
-base's is to come out of the gun right.
+Making one from the export:
 
-Where a part is drawn is where its mesh is on the assembled gun. The base's scripts still put the
-part's own space where they always did, so the mesh is drawn offset from it by as much as you
-moved it, and moves with it in the animations. A part's points (a launcher's grenade point,
-a scope's sight point, a silencer's muzzle) stay with the bone: move the bone as well to take them
-along (a launcher further forward: move the mesh and the bone), the bone alone to move only the
-points. Only where the bone is counts, not how it is turned (Blender turns bones on import).
-A part you delete still has its points, so an attachment without a mesh is still there, unseen.
+- Everything is under an empty `Gun_x10`, ten times the game's size (a pistol is 0.2 m, an AK
+  0.77 m), so it is comfortable in Blender. Keep that empty: while the scene has it, the build
+  takes everything in the scene ten times smaller, a model you import beside it too.
+- Each part is an object named for what it is (`Part_02_Magazine`, `Part_03_Slide`, `Part_13_Magazine_from_AK47`),
+  its origin the pivot the game moves it about. **Move, turn or scale the object** and the part
+  is there in the game, its points with it. **Edit its mesh** and only the mesh changes.
+- A part's points are empties under it, `Point_10000171_Part_10` (the laser's), `Point_10000159_Part_3`
+  (the launcher's), the ACOG's `Point_10000170_Part_6`...: what the game takes a muzzle, a beam,
+  a sight from. Drag one to put the point somewhere else.
+- A model of your own: import it, put it where the part is on the gun and either join it into the
+  part's object (select yours, then the part's, Ctrl+J) or delete the part's mesh and name yours
+  `Part_02...` (`Part_02` is enough, `.001` is fine). Nothing to weight, nothing to parent.
+- Attachments you don't want and parts `_from_` another gun can be deleted: they are drawn as
+  nothing then. A deleted part keeps its points (from the base), so an attachment without a mesh
+  is still there, unseen.
+- The parts move in the animations as the base's do, about their pivots: a magazine has to be
+  where the base's is to come out of the gun right. `--animations` (a file to look at) has them;
+  in Blender keyframes hold an object to its keys, so a part moved there snaps back.
 
-- **The rig** (`ge/weapon_rig.rs`): an armature with a bone for each part, put where the first
-  script that names it (the model script for most) puts it on frame 0, from that command's
-  controller (+0x34 list, the command's byte 10; channels 0x4 position, 0x8 rotation x y z w,
-  0x10 scale, keyframes of a frame number and the value), and each part a mesh of its own, all
-  its triangles weighted to its bone, so the gun is seen assembled. A part without a controller
-  in its first script rests at the origin (its mesh is already in the gun's space). The scripts
-  with more than one frame go along as animations named by the action they are played for, not
-  read back. Bone and mesh have the part's name (`ge/weapon_parts.rs`, see "The parts" below),
-  and each node's extras (custom properties in Blender) say which animations show it.
-- **The build** takes a skinned mesh's triangles to the part of their heaviest joint (`Part_N...`),
-  a mesh that isn't weighted (no skin, or vertices weighted to nothing) to the part its node is
-  named for, and every vertex from where it is on the assembled gun into the part's space as the
-  base's first script places it (`rest_places`, the inverse the rig export writes): the scene's
-  own bone matrices aren't used, so bones Blender turned (its importer re-aims them) change
-  nothing. A part's bone that the scene has elsewhere than that rest place moves the part's points
-  (and its far copy's) as far, in the part's space (`move_points`, the bone's turn left out); the
-  build lists those. Checked: every bone of the AK-47 and P99 rigs turned at random with the
-  inverse bind matrices made again: the same bytes; the AK's launcher mesh and bone 2 cm up:
-  10000159 at y 0.029 (0.009) and the mesh 2 cm up; the mesh alone: the mesh up, the point not; the
-  ACOG's bone alone 3 cm back: 10000170 at z -0.013 (0.017), nothing else. Before, the build took
-  the scene's inverse bind matrices, and `Part_N` nodes without a rig are still taken as they are. So a model of your own is put where the base's part is on the assembled gun, named
-  `Part_02...`, and the base's mesh deleted; nothing to weight. Checked: the AK-47, WA2000, P99,
-  SEGS 550 and Golden Gun rigs (one mesh a part) built to the same bytes as the old one-mesh
-  exports, and the P99's magazine and slide and the AK's launcher and reload magazine unweighted,
-  under a moved parent, to the same bytes again. Checked: AK-47 rig exported, part 0's materials
-  tinted, built: all 16 parts' vertices the same as the old `Part_N` path's to 3e-8.
+- **The export** (`ge/weapon_rig.rs`): each part a plain node placed where the first script that
+  names it (the model script for most) puts it on frame 0, from that command's controller (+0x34
+  list, the command's byte 10; channels 0x4 position, 0x8 rotation x y z w, 0x10 scale, keyframes
+  of a frame number and the value), its mesh in the part's own space; a part without a controller
+  in its first script rests at the origin (its mesh is already in the gun's space). Its points
+  (the mesh's block 5, `point_list`) as child nodes. Names from `ge/weapon_parts.rs` ("The parts"
+  below), each node's extras (custom properties in Blender) say which animations show it.
+- **The build**: with a `Gun_xN` node anywhere the whole scene is N times smaller. Every triangle
+  goes from where it is on the assembled gun into its part's space as the base's first script
+  places it (`rest_places`; `ImportOptions::part_spaces`): an unskinned mesh by its node, a
+  skinned one by its heaviest joint's part (`Part_N...`), as bound. The scene's own bone matrices
+  aren't used, so bones Blender turns on import change nothing. Each `Point_HASH_Part_N[_k]` empty
+  sets that point's position in the part's space, and the far copy's point of the same hash moves
+  as far (`place_points`; the point's turn stays the base's); the build lists the points moved.
+  `Part_N` scenes without a rig are taken as they are, as before.
+- **Checked** (eurochef only): AK-47, WA2000, P99, SEGS 550, Golden Gun exported and built: all
+  vertices and points within 4e-8 m of the earlier builds. The AK's launcher object 2 cm up: mesh
+  and 10000159 (y 0.009 to 0.029) up; its mesh alone: the point stays; the ACOG's point empty alone
+  3 cm back: 10000170 z 0.017 to -0.013, nothing else; the magazine's mesh deleted and a copy at the
+  scene root, ten times the size, named `Part_02 my magazine.001`: the same gun. This morning's
+  armature exports, bones turned at random included: the same bytes as before. Not checked in
+  Blender itself (none on this machine) nor in the game.
 
 - **The file**: the scene's nodes `Part_N` (or `Body` for part 0) are the gun's parts, 0x601 mesh
   entities with flags 2 as the game's are; a part the scene leaves out is empty. Then copies of
