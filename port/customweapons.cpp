@@ -116,7 +116,7 @@ std::map<uint32_t, OwnPage> g_pages; //a weapon page's hash, its rows with these
 PPCFunc orig_loadout_give = nullptr, orig_script_set = nullptr;
 const uint32_t kLoadoutPrimary = 8, kLoadoutSecondary = 0xC; //a loadout row's keys
 bool g_traceGives = false;
-PPCFunc orig_find = nullptr, orig_poses = nullptr, weapon_pose = nullptr;
+PPCFunc orig_find = nullptr, orig_node_point = nullptr, orig_poses = nullptr, weapon_pose = nullptr;
 const uint32_t kPosesDue = 0x806E9460, kWeaponPose = 0x800FE680; //(r3, character, id, aimed, firing mode)
 const uint32_t kFiringModes = 3;
 PPCFunc orig_load = nullptr, orig_def_add = nullptr, row_insert = nullptr, game_alloc = nullptr;
@@ -770,6 +770,19 @@ void Find(PPCContext& c)
 	if (ours) rt_log("goldeneye: weapons: %08X looked for -> %d %s", hash, (int)c.r[3], chain.c_str());
 }
 
+//which points are asked for (a muzzle, a sight...), each hash once with what asked
+void NodePoint(PPCContext& c)
+{
+	static std::set<uint64_t> seen;
+	const uint32_t node = c.r[3], hash = c.r[4], out = c.r[5], flags = c.r[6];
+	const bool first = seen.insert((uint64_t)node << 32 | hash).second;
+	const std::string chain = first ? call_chain(c) : std::string();
+	orig_node_point(c);
+	if (!first) return;
+	rt_log("goldeneye: weapons: point %08X of node %08X (mesh entity %08X, flags %X) -> %u: %.3f %.3f %.3f %s", hash, node,
+		ld32(ld32(node + 0x1C)), flags, c.r[3], ldf(out), ldf(out + 4), ldf(out + 8), chain.c_str());
+}
+
 //a network game sends an inventory's items by their place in the list at 80574E0C (6 bits:
 //fn_80129780 and fn_80129830, and the same search inside fn_801266A0, fn_80127A20,
 //fn_80128C00, fn_80128D90 and fn_8012AD60), so another console's copy of a player holds what
@@ -938,6 +951,7 @@ void install_custom_weapons()
 	orig_loadout_give = ppc_hook("ge_loadout_give", LoadoutGive);
 	g_traceGives = std::getenv("GE_TRACEWEAPONS") != nullptr;
 	if (g_traceGives) orig_find = ppc_hook("ge_hash_find", Find);
+	if (g_traceGives) orig_node_point = ppc_hook("ge_node_point", NodePoint);
 	orig_script_set = ppc_hook("ge_script_set", ScriptSet);
 	orig_file_object = ppc_hook("ge_file_object", FileObject);
 	orig_loadout_pick = ppc_hook("ge_loadout_pick", LoadoutPick);

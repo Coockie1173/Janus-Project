@@ -152,3 +152,4 @@ ge_file_object         # a file with the section of one of its objects loaded: a
 ge_weapon_fire_sound   # a shot's sounds: a custom weapon's own .wav in place of its base's (port/customweapons.cpp)
 ge_character_sound     # a sound at a character: a guard's shot with a custom weapon plays its .wav (port/customweapons.cpp)
 ge_loadout_pick        # the loadout menu takes the lit weapon: a custom pistol stays a loadout's secondary
+ge_node_point          # a point of a node by its hash: traced with GE_TRACEWEAPONS (port/customweapons.cpp)
