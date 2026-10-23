@@ -29,6 +29,11 @@ const uint32_t kPatchGameVersion = 0x0, kPatchVersion = 0x4, kPatchPokes = 0x8, 
 const uint32_t kPatchSize = 0x4000; //what the game copies of it
 const uint32_t kPatchCopy = 0x805C98C8, kExpectedGameVersion = 0x806EB6C0;
 const uint32_t kMaxPokesLogged = 16;
+#ifdef GE_ROOT
+const char* const kPatchSaved = GE_ROOT "/build/live-patch.bin";
+#else
+const char* const kPatchSaved = "live-patch.bin";
+#endif
 
 struct Range { uint32_t from, to; };
 const Range kDolCode[]{ { 0x80004000, 0x80006740 }, { 0x80006800, 0x8053AC80 } };
@@ -67,6 +72,13 @@ void ApplyPatch(PPCContext& c)
 		return;
 	}
 	for (uint32_t i = 0; i < kPatchSize; i += 4) st32(kPatchCopy + i, ld32(patch + i));
+	if (FILE* f = std::fopen(kPatchSaved, "wb")) //the server's, as it came, to look at
+	{
+		uint8_t bytes[kPatchSize];
+		for (uint32_t i = 0; i < kPatchSize; ++i) bytes[i] = ld8(kPatchCopy + i);
+		std::fwrite(bytes, 1, kPatchSize, f);
+		std::fclose(f);
+	}
 	if (const char* path = std::getenv("GE_PATCH_FILE")) //for tests: this one in place of the server's
 		if (FILE* f = std::fopen(path, "rb"))
 		{
