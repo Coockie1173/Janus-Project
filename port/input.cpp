@@ -379,10 +379,11 @@ void net_command_look(uint32_t cmd, bool first) {
 PPCFunc orig_command_fill = nullptr;
 void command_fill(PPCContext& c) {
     static uint32_t frame = ~0u;
-    uint32_t cmd = c.r[4], now = ld32(kFrameCount);
+    uint32_t input = c.r[3], cmd = c.r[4], now = ld32(kFrameCount);
     orig_command_fill(c);
     net_command_look(cmd, now != frame);
     bunnyhop_command(cmd);
+    owned_command_fill(input, cmd);
     frame = now;
 }
 
@@ -391,7 +392,9 @@ void input_copy(PPCContext& c) {
     uint32_t ctrl = c.r[3];
     //a player's look is stepped from here on, not in its controller's update: the limits are this player's
     if (guest_ptr(ctrl)) set_pitch_limit(g_pitch_limit_now = pitch_limit_of(ctrl));
-    uint32_t cmd = c.r[4], kept = bunnyhop_input(ctrl, cmd);
+    uint32_t cmd = c.r[4];
+    owned_input(ctrl, cmd);
+    uint32_t kept = bunnyhop_input(ctrl, cmd);
     orig_input_copy(c);
     bunnyhop_input_done(cmd, kept);
     if (!net_turns() || !guest_ptr(ctrl)) return;

@@ -127,6 +127,7 @@ void install() {
     install_noclip();
     install_stamina();
     install_cheats();
+    install_owned();
     install_randomizer();
     install_bunnyhop();
     install_collision();

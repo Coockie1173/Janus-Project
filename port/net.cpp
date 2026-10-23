@@ -1,4 +1,4 @@
-//online: the hosts file for the game's servers, the live patch that isn't applied, how far
+//online: the hosts file for the game's servers, the server's live patch, how far
 //up and down a player's pitch goes to the others, the time a player's step is sent with
 #include "ge.h"
 #include <algorithm>
@@ -11,36 +11,104 @@
 namespace ge {
 
 //after connecting the game gets Patch<name>.bin from the publisher's files and gives it to
-//_APPLYING_PATCH_ (800104F0, from ApplyPatch_Wrapper 8021E790): a game version, a patch version,
-//a count and that many (address, word) pairs it writes straight into memory and flushes from
-//the instruction cache ("APPLYING PATCH (GameVersion=%08x , PatchVersion=%08x , NumPokes=%08x)",
-//"Poking Address %08x with data %08x"). The pokes are new instructions for the console's code:
-//here that code is recompiled and never read again, so a patch would only half arrive (its data
-//changed, its code not) or write over what the port keeps there, and the game crashes
-//so the patch is logged and left out; nothing else reads the copy at 805C98C8
+//_APPLYING_PATCH_ (800104F0, from ApplyPatch_Wrapper 8021E790): it copies 0x4000 bytes of it to
+//805C98C8 and, when the patch's game version is the word at 806EB6C0 (0 on a retail disc), writes
+//each (address, word) pair into memory and flushes it from the instruction cache
+//here the game's code is recompiled and never read again, so a write into code would do nothing
+//(or half a patch would arrive), and the heap isn't laid out the way a console's is. so:
+//- writes into the dol's data and bss are made, the same as on a console
+//- writes into code are made only for a patch we know, done our own way instead
+//  (client-owned players, owned.cpp, by its write of li r3, 0x58 at 801C50F8)
+//- the rest (unknown code, the heap, anywhere else) is left out and logged
+//GE_PATCH_GAME_VERSION=hex takes patches of that game version (the local server's TEST ones),
+//GE_PATCH_FILE=a .bin is applied in place of what the server sent
 namespace
 {
 
 const uint32_t kPatchGameVersion = 0x0, kPatchVersion = 0x4, kPatchPokes = 0x8, kPatchPokeData = 0xC;
 const uint32_t kPatchSize = 0x4000; //what the game copies of it
+const uint32_t kPatchCopy = 0x805C98C8, kExpectedGameVersion = 0x806EB6C0;
 const uint32_t kMaxPokesLogged = 16;
+
+struct Range { uint32_t from, to; };
+const Range kDolCode[]{ { 0x80004000, 0x80006740 }, { 0x80006800, 0x8053AC80 } };
+const Range kDolData[]{ { 0x80006740, 0x80006800 }, { 0x8053AC80, 0x806F3878 } }; //data, then bss with the small data in it
+
+//client-owned players: the code it writes, done by owned.cpp here
+const uint32_t kOwnedMark = 0x801C50F8, kOwnedMarkWord = 0x38600058;
+const Range kOwnedCave{ 0x801BD470, 0x801BD92C };
+const uint32_t kOwnedHooks[]{ 0x801C50F8, 0x801C5150, 0x801BCBA8, 0x801D17B4, 0x801D1C34, 0x801D1FD8, 0x80129AC4, 0x8012AE20, 0x8012AEA8, 0x8012AEB8, 0x8012B9F8 };
+
+bool In(uint32_t at, const Range& r) { return at >= r.from && at < r.to; }
+
+template <size_t N>
+bool InAny(uint32_t at, const Range (&rs)[N])
+{
+	for (const Range& r : rs)
+		if (In(at, r)) return true;
+	return false;
+}
+
+bool OwnedCode(uint32_t at)
+{
+	if (In(at, kOwnedCave)) return true;
+	for (uint32_t hook : kOwnedHooks)
+		if (at == hook) return true;
+	return false;
+}
 
 //(the patch file's data)
 void ApplyPatch(PPCContext& c)
 {
-	uint32_t patch = c.r[3];
+	const uint32_t patch = c.r[3];
 	if (!guest_ptr(patch))
 	{
 		rt_log("goldeneye: a live patch at %08X is not applied", patch);
 		return;
 	}
-	uint32_t pokes = ld32(patch + kPatchPokes), fit = (kPatchSize - kPatchPokeData) / 8;
-	rt_log("goldeneye: the server's live patch is not applied (game version %08X, patch version %08X, %u pokes)",
-		ld32(patch + kPatchGameVersion), ld32(patch + kPatchVersion), pokes);
-	if (pokes > fit) pokes = fit;
-	if (!std::getenv("GE_NETLOG")) return;
-	for (uint32_t i = 0; i < pokes && i < kMaxPokesLogged; ++i)
-		rt_log("goldeneye:   poke %08X with %08X", ld32(patch + kPatchPokeData + i * 8), ld32(patch + kPatchPokeData + i * 8 + 4));
+	for (uint32_t i = 0; i < kPatchSize; i += 4) st32(kPatchCopy + i, ld32(patch + i));
+	if (const char* path = std::getenv("GE_PATCH_FILE")) //for tests: this one in place of the server's
+		if (FILE* f = std::fopen(path, "rb"))
+		{
+			uint8_t bytes[kPatchSize]{};
+			const size_t got = std::fread(bytes, 1, kPatchSize, f);
+			std::fclose(f);
+			for (uint32_t i = 0; i < kPatchSize; ++i) st8(kPatchCopy + i, i < got ? bytes[i] : 0);
+			rt_log("goldeneye: the live patch is %s, not the server's", path);
+		}
+	const uint32_t game = ld32(kPatchCopy + kPatchGameVersion), version = ld32(kPatchCopy + kPatchVersion);
+	uint32_t expected = ld32(kExpectedGameVersion);
+	if (const char* e = std::getenv("GE_PATCH_GAME_VERSION")) expected = (uint32_t)std::strtoul(e, nullptr, 16);
+	if (game != expected)
+	{
+		rt_log("goldeneye: the server's live patch is for game version %08X, not %08X: left out (as a console does)", game, expected);
+		owned_from_patch(false);
+		return;
+	}
+	const uint32_t pokes = std::min(ld32(kPatchCopy + kPatchPokes), (kPatchSize - kPatchPokeData) / 8);
+	bool owned = false;
+	for (uint32_t i = 0; i < pokes; ++i)
+		owned |= ld32(kPatchCopy + kPatchPokeData + i * 8) == kOwnedMark && ld32(kPatchCopy + kPatchPokeData + i * 8 + 4) == kOwnedMarkWord;
+	static const bool log = std::getenv("GE_NETLOG") != nullptr;
+	uint32_t made = 0, ours = 0, code = 0, elsewhere = 0, logged = 0;
+	for (uint32_t i = 0; i < pokes; ++i)
+	{
+		const uint32_t at = ld32(kPatchCopy + kPatchPokeData + i * 8), word = ld32(kPatchCopy + kPatchPokeData + i * 8 + 4);
+		const char* what;
+		if (at & 3) { ++elsewhere; what = "left out (not aligned)"; }
+		else if (InAny(at, kDolData)) { st32(at, word); ++made; what = "made"; }
+		else if (owned && OwnedCode(at)) { ++ours; what = "client-owned players, done here"; }
+		else if (InAny(at, kDolCode)) { ++code; what = "left out (code)"; }
+		else { ++elsewhere; what = "left out (not the dol's)"; }
+		if (log || (what[0] == 'l' && logged < kMaxPokesLogged))
+		{
+			rt_log("goldeneye:   poke %08X with %08X: %s", at, word, what);
+			if (what[0] == 'l') ++logged;
+		}
+	}
+	owned_from_patch(owned);
+	rt_log("goldeneye: the server's live patch %08X (game version %08X, %u pokes): %u data writes made, %u done by the port%s, %u into code and %u elsewhere left out",
+		version, game, pokes, made, ours, ours ? " (client-owned players)" : "", code, elsewhere);
 }
 
 } //namespace
@@ -515,7 +583,7 @@ void install_blend_time()
 void install_live_patch()
 {
 	if (!ppc_hook("_APPLYING_PATCH_", ApplyPatch))
-		rt_log("goldeneye: _APPLYING_PATCH_ is not hooked in this build, a live patch from the server gets poked into memory");
+		rt_log("goldeneye: _APPLYING_PATCH_ is not hooked in this build, a live patch from the server gets poked into memory as it is");
 }
 
 //the real servers (Nintendo WFC, DemonWare) are gone, a community server answers instead

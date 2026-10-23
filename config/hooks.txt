@@ -100,7 +100,7 @@ ge_halt                # the game's halt, a loop on itself: the game ends with a
 ge_camera_sway         # the camera's sway is two sines of the frame count: above 30 of the time in console frames (port/shake.cpp)
 WIFI_FUN_80234a60      # the menu's update: a level picked in the settings menu's grid is made its pending level (port/cutscenes.cpp)
 ge_camera_shake        # the camera's shakes move the look-at point: scaled by Screen Shake (port/shake.cpp)
-_APPLYING_PATCH_       # the server's live patch is poked into memory: left out, recompiled code can't take it (port/net.cpp)
+_APPLYING_PATCH_       # the server's live patch: its data writes made, known code patches done natively, the rest left out (port/net.cpp)
 bd_command_set_time    # a player's command gets the frame's time in whole milliseconds: what's cut off goes into the next (port/net.cpp)
 bd_interp_set_time     # a replica's blend time is set: a little more than the host's updates are apart (port/net.cpp)
 ge_input_copy          # a command is copied into its controller: in a modded network game two of its floats are the mouse's turn (port/input.cpp)
@@ -153,3 +153,4 @@ ge_weapon_fire_sound   # a shot's sounds: a custom weapon's own .wav in place of
 ge_character_sound     # a sound at a character: a guard's shot with a custom weapon plays its .wav (port/customweapons.cpp)
 ge_loadout_pick        # the loadout menu takes the lit weapon: a custom pistol stays a loadout's secondary
 ge_node_point          # a point of a node by its hash: traced with GE_TRACEWEAPONS (port/customweapons.cpp)
+ge_player_blend        # a client draws a player towards the host's copy: our own one keeps its place with client-owned players (port/owned.cpp)

@@ -526,6 +526,7 @@ void CommandWrite(PPCContext& c)
 {
 	const uint32_t cmd{ c.r[3] }, stream{ c.r[4] };
 	orig_command_write(c);
+	owned_command_write(c, cmd, stream);
 	if (modded_lobby()) net_write_number(c, stream, guest_ptr(cmd) && (ld32(cmd + kCmdExtra) & kCmdJump) ? 1 : 0, 1);
 }
 
@@ -533,6 +534,7 @@ void CommandRead(PPCContext& c)
 {
 	const uint32_t cmd{ c.r[3] }, stream{ c.r[4] };
 	orig_command_read(c);
+	owned_command_read(c, cmd, stream);
 	if (!modded_lobby()) return;
 	const uint32_t jump{ net_read_number(c, stream, 1, 0) };
 	if (guest_ptr(cmd)) st32(cmd + kCmdExtra, (ld32(cmd + kCmdExtra) & ~kCmdJump) | kCmdOurs | (jump ? kCmdJump : 0));
