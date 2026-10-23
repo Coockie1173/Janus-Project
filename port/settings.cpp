@@ -221,6 +221,10 @@ struct Page { std::string title; std::vector<Row> rows; };
 
 enum { kRoot, kScreen, kControls, kBindings, kEnhancements, kCheats, kForFun, kHotkeys, kHotkeyEdit, kLevels, kMaps, kSkips, kBhop, kTriggers, kSpeedrun, kPageCount };
 std::vector<Page> g_pages;
+//pages other files add (settings_page, settings_toggle), behind the ones here
+struct AddedPage { std::string title, about; };
+std::vector<AddedPage> g_addedPages;
+std::vector<std::function<void()>> g_addedToggles;
 int g_page = kRoot, g_row = 0, g_scroll = 0;
 int g_root_row = 0; //where the cursor was on the first page
 int g_listening = -1; //the binding row waiting for a key
@@ -515,6 +519,7 @@ void BuildSettings()
 			g_dirty = true;
 		}, v.lo, v.hi, v.by, v.decimals);
 	}
+	for (const auto& add : g_addedToggles) add();
 }
 
 Row SettingRow(int i)
@@ -906,7 +911,7 @@ void RefreshTriggerPage()
 }
 
 void build_pages() {
-    g_pages.resize(kPageCount);
+    g_pages.resize(kPageCount + g_addedPages.size());
     Page& root = g_pages[kRoot];
     root.title = "Settings";
     root.rows.push_back({"Screen Settings", "Adjust the field of view, the frame rate and the picture.", {}, {}, [] { go(kScreen); }});
@@ -918,6 +923,11 @@ void build_pages() {
     root.rows.push_back({"For Fun", "Things that change how the game plays, just for fun.", {}, {}, [] { go(kForFun); }});
     root.rows.push_back({"Speedrun Timer", "A splits timer like LiveSplit's, of the in-game time from Dam to Cradle, against your best.",
         [] { return std::string(speedrun_timer() ? "On" : "Off"); }, {}, [] { go(kSpeedrun); }});
+    for (size_t i = 0; i < g_addedPages.size(); ++i) {
+        const int page = kPageCount + (int)i;
+        g_pages[page].title = g_addedPages[i].title;
+        root.rows.push_back({g_addedPages[i].title, g_addedPages[i].about, {}, {}, [page] { go(page); }});
+    }
     root.rows.push_back({"Level Select", "Load any level of the disc, the unused ones too.", {}, {}, [] { go(kLevels); }});
     root.rows.push_back({"Multiplayer Maps", "Load any multiplayer map of the disc to walk around in, the unused ones too.", {}, {}, [] { go(kMaps); }});
     //a grid's one row is what the foot reads: the cell under the cursor (settings_draw)
@@ -1692,6 +1702,25 @@ void pad_down(int button) {
 #endif
 
 } //namespace
+
+//a page of the menu's first list for another file's switches, before the menu is first shown
+int settings_page(const char* title, const char* about) {
+#ifdef GE_IMGUI
+    g_addedPages.push_back({title, about});
+    return kPageCount + (int)g_addedPages.size() - 1;
+#else
+    (void)title, (void)about;
+    return -1;
+#endif
+}
+
+void settings_toggle(int page, const char* id, const char* label, const char* hint, bool (*get)(), void (*set)(bool)) {
+#ifdef GE_IMGUI
+    g_addedToggles.push_back([=] { AddToggle(page, id, label, hint, get, set); });
+#else
+    (void)page, (void)id, (void)label, (void)hint, (void)get, (void)set;
+#endif
+}
 
 void save_settings()
 {
