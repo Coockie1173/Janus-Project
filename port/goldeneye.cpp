@@ -81,6 +81,10 @@ void each_frame(uint32_t frame) {
     heap_frame();
 }
 
+#ifdef GE_DEV
+void install_dev(); //port/dev.cpp, local only
+#endif
+
 namespace {
 
 PPCFunc orig_main = nullptr;
@@ -145,6 +149,9 @@ void install() {
     wpad_set_classic(true);
     install_mouse();
     install_overlay();
+#ifdef GE_DEV
+    install_dev();
+#endif
 }
 
 RtGameLayer layer("GoldenEye 007", install);

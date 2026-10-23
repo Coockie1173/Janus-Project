@@ -20,6 +20,11 @@ target_sources(wiiboot PRIVATE
     ${GE_PORT}/tank.cpp ${GE_PORT}/hotkeys.cpp ${GE_PORT}/noclip.cpp ${GE_PORT}/bunnyhop.cpp ${GE_PORT}/stamina.cpp ${GE_PORT}/files.cpp ${GE_PORT}/records.cpp ${GE_PORT}/zones.cpp
     ${GE_PORT}/autosave.cpp ${GE_PORT}/weapons.cpp ${GE_PORT}/collision.cpp ${GE_PORT}/triggers.cpp ${GE_PORT}/prompts.cpp ${GE_PORT}/body.cpp ${GE_PORT}/unload.cpp
     ${GE_PORT}/timeline.cpp ${GE_PORT}/flipbooks.cpp ${GE_PORT}/heap.cpp ${GE_PORT}/sweep.cpp ${GE_PORT}/mods.cpp ${GE_PORT}/modmenu.cpp ${GE_PORT}/pictures.cpp ${GE_PORT}/shake.cpp ${GE_PORT}/render.cpp ${GE_PORT}/sound.cpp ${GE_PORT}/occlusion.cpp ${GE_PORT}/height.cpp ${GE_PORT}/typing.cpp ${GE_PORT}/custom.cpp ${GE_PORT}/pointer.cpp ${GE_PORT}/cheats.cpp ${GE_PORT}/randomizer.cpp ${GE_PORT}/customweapons.cpp ${GE_PORT}/customsound.cpp ${GE_PORT}/icon.cpp ${GE_PORT}/speedrun.cpp ${GE_PORT}/owned.cpp)
+# dev only, never committed: port/dev.cpp when it is there (F1 > Dev)
+if(EXISTS ${GE_PORT}/dev.cpp)
+  target_sources(wiiboot PRIVATE ${GE_PORT}/dev.cpp)
+  target_compile_definitions(wiiboot PRIVATE GE_DEV=1)
+endif()
 # files found wherever the game is started from
 target_compile_definitions(wiiboot PRIVATE
     GE_ROOT="${GE_HOME}"
