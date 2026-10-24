@@ -42,7 +42,7 @@ const Range kDolData[]{ { 0x80006740, 0x80006800 }, { 0x8053AC80, 0x806F3878 } }
 
 //client-owned players: the code it writes, done by owned.cpp here
 const uint32_t kOwnedMark = 0x801C50F8, kOwnedMarkWord = 0x38600058, kOwnedMarkWord2 = 0x38600068;
-const Range kOwnedCave{ 0x801BD470, 0x801BE554 };
+const Range kOwnedCaves[]{ { 0x801BD470, 0x801BE554 }, { 0x80492340, 0x80494AA8 } }; //the network-debug renderer, then (from v2.2) an unused log family
 const uint32_t kOwnedHooks[]{ 0x801C50F8, 0x801C5150, 0x801BCBA8, 0x801D17B4, 0x801D1C34, 0x801D1FD8, 0x80129AC4, 0x8012AE20, 0x8012AEA8, 0x8012AEB8, 0x8012B9F8, 0x801215D8, 0x8012B004, 0x8012B720 };
 
 bool In(uint32_t at, const Range& r) { return at >= r.from && at < r.to; }
@@ -57,7 +57,7 @@ bool InAny(uint32_t at, const Range (&rs)[N])
 
 bool OwnedCode(uint32_t at)
 {
-	if (In(at, kOwnedCave)) return true;
+	if (InAny(at, kOwnedCaves)) return true;
 	for (uint32_t hook : kOwnedHooks)
 		if (at == hook) return true;
 	return false;
