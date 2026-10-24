@@ -22,6 +22,7 @@
 #include "ge.h"
 #include "hotkeys.h"
 #include <algorithm>
+#include <cctype>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -79,6 +80,9 @@ bool write_lines(const std::string& path, const std::vector<std::string>& lines)
 }
 
 bool g_fps_changed = false; //the frame rate was changed in the menu
+//keys other files listen for (settings_key): pressed with the menu closed they call theirs, kept in the launcher's file
+struct AddedKey { int page; std::string launch, label, hint, key; void (*pressed)(); };
+std::vector<AddedKey> g_addedKeys;
 
 //the launcher's file, LAUNCH_NAME="value" lines. other lines are kept
 void save_launch_settings() {
@@ -115,6 +119,7 @@ void save_launch_settings() {
         std::snprintf(text, sizeof text, "%g", bhop_value(i).value);
         values.push_back({bhop_value(i).launch, text});
     }
+    for (const AddedKey& k : g_addedKeys) values.push_back({k.launch, k.key});
     char forced_text[16];
     std::snprintf(forced_text, sizeof forced_text, "%08X", forced_weapon_id());
     values.push_back({"LAUNCH_FORCEDWEAPON", forced_text});
@@ -225,6 +230,7 @@ std::vector<Page> g_pages;
 struct AddedPage { std::string title, about; };
 std::vector<AddedPage> g_addedPages;
 std::vector<std::function<void()>> g_addedToggles;
+int g_listenKey = -1; //the added key a row waits for
 int g_page = kRoot, g_row = 0, g_scroll = 0;
 int g_root_row = 0; //where the cursor was on the first page
 int g_listening = -1; //the binding row waiting for a key
@@ -313,6 +319,7 @@ Row BindingRow(int action)
 	{
 		g_listening = g_row;
 		g_listenAction = action;
+		g_listenKey = -1;
 	};
 	r.clear = [name = std::string(a.name)] { g_keys.set_keys(name, {}); save_keys(); };
 	return r;
@@ -944,6 +951,22 @@ void build_pages() {
     g_pages[kEnhancements].rows.push_back({"Skip Cutscenes (Experimental)", "Choose which cutscenes are skipped: each mission's intro, the one in its middle and its ending.", {}, {}, [] { go(kSkips); }});
     BuildSettings();
     for (size_t i = 0; i < g_settings.size(); ++i) g_pages[g_settings[i].page].rows.push_back(SettingRow((int)i));
+	for (size_t i = 0; i < g_addedKeys.size(); ++i)
+	{
+		Row r;
+		r.label = g_addedKeys[i].label;
+		r.hint = g_addedKeys[i].hint;
+		r.binding = true;
+		r.does = "Set Key";
+		r.value = [i] { return g_addedKeys[i].key.empty() ? std::string("-") : g_addedKeys[i].key; };
+		r.select = [i]
+		{
+			g_listening = g_row;
+			g_listenKey = (int)i;
+		};
+		r.clear = [i] { g_addedKeys[i].key.clear(); g_dirty = true; };
+		g_pages[g_addedKeys[i].page].rows.push_back(r);
+	}
 	auto& hop = g_pages[kBhop].rows; //the jump right under its toggle
 	hop.insert(hop.begin() + std::min<size_t>(1, hop.size()), BindingRow((int)std::size(kActions) - 1));
 	hop.push_back({"Settings", "Online through Connect to WFC Modded the host's are everyone's: a host sends its own, and in a game someone else hosts they're shown here and can't be changed. Yours are back after the game.",
@@ -1315,7 +1338,7 @@ void draw_frame(ImDrawList* dl, const Layout& L, const Page& page) {
         dl->AddRectFilledMultiColor(ImVec2(L.x(980), L.y(y)), ImVec2(L.x(1080), L.y(y + 3)), kCream, none, none, kCream);
     }
     const Row& row = page.rows[g_row];
-    std::string hint = g_listening < 0 ? row.hint : g_page == kHotkeyEdit ? "Press a key. Esc leaves it as it is."
+    std::string hint = g_listening < 0 ? row.hint : g_page == kHotkeyEdit || g_listenKey >= 0 ? "Press a key. Esc leaves it as it is."
         : "Press a key or a mouse button. Esc leaves it as it is.";
     float hs = fit(hint, 24 * u, 840 * u);
     text(dl, ImVec2(L.cx - text_width(hint, hs) / 2, L.y(592)), hs, kCream, hint);
@@ -1547,6 +1570,21 @@ bool HotkeyDown(const SDL_KeyboardEvent& k)
 	return true;
 }
 
+//a key pressed with the menu closed: the added keys on it are pressed
+bool AddedKeyDown(const SDL_KeyboardEvent& k)
+{
+	const char* name = SDL_GetScancodeName(k.scancode);
+	if (k.repeat || overlay_open() || !name || !*name) return false;
+	bool any = false;
+	for (const AddedKey& a : g_addedKeys)
+	{
+		if (a.key.empty() || SDL_strcasecmp(a.key.c_str(), name)) continue;
+		a.pressed();
+		any = true;
+	}
+	return any;
+}
+
 //what the hotkeys set in a recording (GE_REPLAY), said and logged like a press. the launcher's
 //file isn't the replay's to change
 void ReplayHotkeys()
@@ -1597,11 +1635,15 @@ void key_down(const SDL_KeyboardEvent& k) {
     if (g_listening >= 0) {
         if (k.repeat) return;
         const char* name = SDL_GetScancodeName(k.scancode);
-        if (k.scancode == SDL_SCANCODE_ESCAPE) g_listening = -1;
+        if (k.scancode == SDL_SCANCODE_ESCAPE) g_listening = g_listenKey = -1;
         else if (!name || !*name || SDL_GetScancodeFromName(name) != k.scancode) return;
         else if (g_page == kHotkeyEdit) {
             ChangeHotkey([name](Hotkey& h) { h.key = name; });
             g_listening = -1;
+        } else if (g_listenKey >= 0) {
+            g_addedKeys[g_listenKey].key = name;
+            g_listening = g_listenKey = -1;
+            g_dirty = true;
         } else bind(name);
         return;
     }
@@ -1722,6 +1764,16 @@ void settings_toggle(int page, const char* id, const char* label, const char* hi
 #endif
 }
 
+void settings_key(int page, const char* id, const char* label, const char* hint, void (*pressed)()) {
+#ifdef GE_IMGUI
+    std::string launch = "LAUNCH_KEY_";
+    for (const char* c = id; *c; ++c) launch += (char)std::toupper((unsigned char)*c);
+    g_addedKeys.push_back({page, launch, label, hint, saved_setting(launch.c_str(), launch.c_str()), pressed});
+#else
+    (void)page, (void)id, (void)label, (void)hint, (void)pressed;
+#endif
+}
+
 void save_settings()
 {
 #ifdef GE_IMGUI
@@ -1826,7 +1878,7 @@ bool settings_event(const SDL_Event* e) {
         g_toastUntil = Clock::now() + std::chrono::milliseconds(700);
         return true;
     }
-    if (!g_open) return e->type == SDL_EVENT_KEY_DOWN && HotkeyDown(e->key);
+    if (!g_open) return e->type == SDL_EVENT_KEY_DOWN && (AddedKeyDown(e->key) | HotkeyDown(e->key));
     bool taken = menu_event(e);
     RefreshHotkeyPages();
     RefreshTriggerPage();
@@ -1867,7 +1919,7 @@ bool menu_event(const SDL_Event* e) {
                     ChooseDrop();
                 } else g_drop = -1;
             } else if (g_listening >= 0) { //a hotkey is a key, the mouse's buttons stay the game's
-                if (const char* name = mouse_name(e->button.button); name && g_page != kHotkeyEdit) bind(name);
+                if (const char* name = mouse_name(e->button.button); name && g_page != kHotkeyEdit && g_listenKey < 0) bind(name);
             } else if (e->button.button == SDL_BUTTON_LEFT) click(e->button.x, e->button.y);
             else if (e->button.button == SDL_BUTTON_RIGHT) back();
             return true;

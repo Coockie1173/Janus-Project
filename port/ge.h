@@ -372,6 +372,8 @@ bool overlay_open(); //the watches or the settings menu are up, so the mouse is 
 bool settings_open(); //settings.cpp
 int settings_page(const char* title, const char* about); //a page of switches another file adds, before the menu is shown
 void settings_toggle(int page, const char* id, const char* label, const char* hint, bool (*get)(), void (*set)(bool));
+void settings_key(int page, const char* id, const char* label, const char* hint, void (*pressed)()); //a key to choose on the page, pressed with the menu closed it calls pressed
+void settings_say(const std::string& text); //a line at the top for a moment
 void save_settings(); //the settings file is written
 std::string saved_setting(const char* env, const char* name); //a setting as the game starts: the environment's, or what the menu saved under name in the launcher's file. empty for neither
 void install_render(); //render.cpp: anisotropic filtering and anti-aliasing
