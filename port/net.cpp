@@ -18,7 +18,8 @@ namespace ge {
 //(or half a patch would arrive), and the heap isn't laid out the way a console's is. so:
 //- writes into the dol's data and bss are made, the same as on a console
 //- writes into code are made only for a patch we know, done our own way instead
-//  (client-owned players, owned.cpp, by its write of li r3, 0x58 at 801C50F8)
+//  (client-owned players, owned.cpp, by its write of li r3, 0x58 at 801C50F8, or 0x68 for its
+//  second version with the sprint and falls)
 //- the rest (unknown code, the heap, anywhere else) is left out and logged
 //GE_PATCH_GAME_VERSION=hex takes patches of that game version (the local server's TEST ones),
 //GE_PATCH_FILE=a .bin is applied in place of what the server sent
@@ -40,9 +41,9 @@ const Range kDolCode[]{ { 0x80004000, 0x80006740 }, { 0x80006800, 0x8053AC80 } }
 const Range kDolData[]{ { 0x80006740, 0x80006800 }, { 0x8053AC80, 0x806F3878 } }; //data, then bss with the small data in it
 
 //client-owned players: the code it writes, done by owned.cpp here
-const uint32_t kOwnedMark = 0x801C50F8, kOwnedMarkWord = 0x38600058;
-const Range kOwnedCave{ 0x801BD470, 0x801BD92C };
-const uint32_t kOwnedHooks[]{ 0x801C50F8, 0x801C5150, 0x801BCBA8, 0x801D17B4, 0x801D1C34, 0x801D1FD8, 0x80129AC4, 0x8012AE20, 0x8012AEA8, 0x8012AEB8, 0x8012B9F8 };
+const uint32_t kOwnedMark = 0x801C50F8, kOwnedMarkWord = 0x38600058, kOwnedMarkWord2 = 0x38600068;
+const Range kOwnedCave{ 0x801BD470, 0x801BE554 };
+const uint32_t kOwnedHooks[]{ 0x801C50F8, 0x801C5150, 0x801BCBA8, 0x801D17B4, 0x801D1C34, 0x801D1FD8, 0x80129AC4, 0x8012AE20, 0x8012AEA8, 0x8012AEB8, 0x8012B9F8, 0x801215D8 };
 
 bool In(uint32_t at, const Range& r) { return at >= r.from && at < r.to; }
 
@@ -94,13 +95,18 @@ void ApplyPatch(PPCContext& c)
 	if (game != expected)
 	{
 		rt_log("goldeneye: the server's live patch is for game version %08X, not %08X: left out (as a console does)", game, expected);
-		owned_from_patch(false);
+		owned_from_patch(0);
 		return;
 	}
 	const uint32_t pokes = std::min(ld32(kPatchCopy + kPatchPokes), (kPatchSize - kPatchPokeData) / 8);
-	bool owned = false;
+	int owned = 0;
 	for (uint32_t i = 0; i < pokes; ++i)
-		owned |= ld32(kPatchCopy + kPatchPokeData + i * 8) == kOwnedMark && ld32(kPatchCopy + kPatchPokeData + i * 8 + 4) == kOwnedMarkWord;
+		if (ld32(kPatchCopy + kPatchPokeData + i * 8) == kOwnedMark)
+		{
+			const uint32_t word = ld32(kPatchCopy + kPatchPokeData + i * 8 + 4);
+			if (word == kOwnedMarkWord) owned = 1;
+			else if (word == kOwnedMarkWord2) owned = 2;
+		}
 	static const bool log = std::getenv("GE_NETLOG") != nullptr;
 	uint32_t made = 0, ours = 0, code = 0, elsewhere = 0, logged = 0;
 	for (uint32_t i = 0; i < pokes; ++i)

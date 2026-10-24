@@ -17,11 +17,20 @@
 //  are alive and within 4 m its own place, rotation and movement state are kept (the copy's +0xC74
 //  block, +0x71C..+0x76B, +0x1C0..+0x1CB and the body's flags are what it copies over them). every replica has a copy, so
 //  "its own" is the entity the last command was filled for
+//- v2 (the patch makes commands 0x68 long) also sends the sprint left (+0xE5C, 0..4 in steps of
+//  1/256), which the host takes with the place, and the console's last landing: a bit, then a 3-bit
+//  count and the distance fallen (+0xE90, 0..64 in steps of 1/64), sent for kFallFresh commands
+//  after it lands (PlayerLand's landing, 801215D8). the host hurts the player by it as PlayerLand
+//  would (80121608..80121690) once a count, and its own landing hurts only its own player: for the
+//  others it's as if fall damage (806EBA7D) were off. the fall past 40 that kills stays the host's
+//- either way a joined console's own look and aim (+0xC64 the pitch, +0xC5C, +0x528, +0x550,
+//  +0x554, blended towards the copy's) are kept too
 //every console in the game needs it, it changes what a command is
 #include "ge.h"
 #include <atomic>
 #include <cmath>
 #include <cstdlib>
+#include <iterator>
 #include <unordered_map>
 
 namespace ge {
@@ -40,16 +49,30 @@ const uint32_t kEntityPlace{ 0xF8 }, kEntityRot{ 0xD8 }, kEntityYaw{ 0xDC }, kEn
 const uint32_t kBlendCopy{ 0x4C }, kReplicaToCtrl{ 0x4E8 };
 const uint32_t kBlock{ 0xC74 }, kBlockSize{ 0x368 }, kLive{ 0x71C }, kLiveSize{ 0x50 }, kLive2{ 0x1C0 }; //what the blend copies over ours
 const uint32_t kEntityBody{ 0x158 }, kBodyFlags{ 0x8 };
+const uint32_t kLook[]{ 0x528, 0x550, 0x554, 0xC5C, 0xC64 };
 const size_t kPosesKept{ 4096 };
+const float kSprintMost{ 4.0f }, kSprintStep{ 1.0f / 256.0f }, kFallMost{ 64.0f }, kFallStep{ 1.0f / 64.0f };
+const int kFallFresh{ 30 };
+const uint32_t kCtrlHealth{ 0x3A8 }, kCtrlHealthScale{ 0x3AC }, kCtrlSprintLeft{ 0xE5C }, kCtrlFallen{ 0xE90 }, kCtrlLanded{ 0xE88 }, kStateSliding{ 0x24 };
+const uint32_t kEntityId{ 0x170 }, kCtrlHurt{ 0x128 }; //the hurt one's id, and its vtable's hurt (f1 damage, f2 yaw, r4 who, r5 kind, r6, r7)
+const uint32_t kFallDamageOn{ 0x806EBA7D }, kFallHurts{ 0x806EECF4 }, kFallScale{ 0x806EECEC }, kOne{ 0x806EEC20 };
+const uint32_t kHurtSound{ 0x2D7015A9 }, kFallKind{ 0xC };
+const uint32_t kCharacterSound{ 0x80283F60 }, kDie{ 0x80110170 };
 
-std::atomic<bool> g_on{ false };
+std::atomic<int> g_version{ 0 }; //0 off, else the patch's
 bool g_trace{ false };
-struct Pose { float place[3], yaw, pitch; };
+struct Pose { float place[3], yaw, pitch, sprint{ 0 }; bool landed{ false }; uint32_t landings{ 0 }; float fallen{ 0 }; };
 std::unordered_map<uint32_t, Pose> g_poses; //by the command
-uint32_t g_ownEntity{ 0 };
-PPCFunc write_bit{ nullptr }, write_float{ nullptr }, read_bit{ nullptr }, read_float{ nullptr }, orig_blend{ nullptr };
+uint32_t g_ownEntity{ 0 }; //this console's player, the host's too
+uint32_t g_landings{ 0 }; //this console's: how many, the last one's fall, commands it's still sent with
+float g_fallen{ 0 };
+int g_fresh{ 0 };
+std::unordered_map<uint32_t, uint32_t> g_heard; //the host's: the last landing count taken, by the controller
+PPCFunc write_bit{ nullptr }, write_float{ nullptr }, read_bit{ nullptr }, read_float{ nullptr }, orig_blend{ nullptr }, orig_land{ nullptr };
+PPCFunc character_sound{ nullptr }, die{ nullptr };
 
-bool On() { return g_on && network_game(); }
+bool On() { return g_version > 0 && network_game(); }
+bool Two() { return g_version >= 2 && network_game(); }
 bool Hosting() { return ld32(kNetServer) != 0; }
 
 float Apart(uint32_t a, const float b[3])
@@ -139,8 +162,8 @@ void Blend(PPCContext& c)
 	}
 	//all of how it moves stays ours, not only the place: the blend copies the copy's movement block
 	//and fn_8012BE60 puts its saved fields and body flags back, and a step from our place with the
-	//host's contacts goes back and forth against a wall
-	uint32_t kept[8], ownBlock[kBlockSize / 4], own71C[kLiveSize / 4], own1C0[3];
+	//host's contacts goes back and forth against a wall. the look it blends towards the copy's
+	uint32_t kept[8], ownBlock[kBlockSize / 4], own71C[kLiveSize / 4], own1C0[3], ownLook[std::size(kLook)];
 	for (uint32_t i = 0; i < 4; ++i)
 	{
 		kept[i] = ld32(me + kEntityPlace + i * 4);
@@ -149,6 +172,7 @@ void Blend(PPCContext& c)
 	for (uint32_t i = 0; i < kBlockSize / 4; ++i) ownBlock[i] = ld32(drawn + kBlock + i * 4);
 	for (uint32_t i = 0; i < kLiveSize / 4; ++i) own71C[i] = ld32(drawn + kLive + i * 4);
 	for (uint32_t i = 0; i < 3; ++i) own1C0[i] = ld32(drawn + kLive2 + i * 4);
+	for (size_t i = 0; i < std::size(kLook); ++i) ownLook[i] = ld32(drawn + kLook[i]);
 	const uint32_t body{ ld32(me + kEntityBody) };
 	const uint16_t bodyFlags{ guest_ptr(body) ? ld16(body + kBodyFlags) : (uint16_t)0 };
 	orig_blend(c);
@@ -160,15 +184,78 @@ void Blend(PPCContext& c)
 	for (uint32_t i = 0; i < kBlockSize / 4; ++i) st32(drawn + kBlock + i * 4, ownBlock[i]);
 	for (uint32_t i = 0; i < kLiveSize / 4; ++i) st32(drawn + kLive + i * 4, own71C[i]);
 	for (uint32_t i = 0; i < 3; ++i) st32(drawn + kLive2 + i * 4, own1C0[i]);
+	for (size_t i = 0; i < std::size(kLook); ++i) st32(drawn + kLook[i], ownLook[i]);
 	if (guest_ptr(body)) st16(body + kBodyFlags, bodyFlags);
+}
+
+//(controller): a joined console counts its own player's landings, the host leaves the others' to theirs
+void Land(PPCContext& c)
+{
+	const uint32_t ctrl{ c.r[3] }, entity{ guest_ptr(ctrl) ? ld32(ctrl + kCtrlEntity) : 0 };
+	if (!Two() || !guest_ptr(entity))
+	{
+		orig_land(c);
+		return;
+	}
+	if (Hosting())
+	{
+		if (entity == g_ownEntity)
+		{
+			orig_land(c);
+			return;
+		}
+		const uint8_t damage{ ld8(kFallDamageOn) };
+		st8(kFallDamageOn, 0);
+		orig_land(c);
+		st8(kFallDamageOn, damage);
+		return;
+	}
+	const bool falling{ ld8(ctrl + kCtrlLanded) == 0 };
+	orig_land(c);
+	if (entity != g_ownEntity || !falling || (ld8(ctrl + kCtrlLanded) == 0 && ld32(ctrl + kCtrlState) != kStateSliding)) return;
+	g_landings = (g_landings + 1) & 7;
+	g_fallen = std::fmin(std::fmax(ldf(ctrl + kCtrlFallen), 0.0f), kFallMost);
+	if (!std::isfinite(g_fallen)) g_fallen = 0;
+	g_fresh = kFallFresh;
+	if (g_trace) rt_log("goldeneye: owned: landed after %.3f m (landing %u)", g_fallen, g_landings);
+}
+
+//what PlayerLand does on the host when a landing hurts (80121608..80121690), for a joined console's
+void Hurt(PPCContext& c, uint32_t ctrl, float fallen)
+{
+	const uint32_t entity{ ld32(ctrl + kCtrlEntity) };
+	if (!ld8(kFallDamageOn) || !(fallen > ldf(kFallHurts)) || !guest_ptr(entity)) return;
+	PPCContext call{ c };
+	call.r[3] = ctrl;
+	call.r[4] = kHurtSound;
+	call.r[5] = 0;
+	call.f[1] = ldf(kOne);
+	character_sound(call);
+	const uint32_t hurt{ ld32(ld32(ctrl) + kCtrlHurt) };
+	PPCFunc fn{ ppc_lookup(hurt) };
+	if (!fn) return;
+	call = c;
+	call.r[3] = ctrl;
+	call.r[4] = ld32(entity + kEntityId);
+	call.r[5] = kFallKind;
+	call.r[6] = 1;
+	call.r[7] = 1;
+	call.f[1] = ldf(kFallScale) * (fallen - ldf(kFallHurts)) * ldf(ctrl + kCtrlHealthScale);
+	call.f[2] = ldf(entity + kEntityYaw);
+	fn(call);
+	if (!(ldf(ctrl + kCtrlHealth) <= ldf(kFallScale)) || ld32(ctrl + kCtrlState) == kStateDead) return;
+	call = c;
+	call.r[3] = ctrl;
+	call.f[1] = ldf(ctrl + kCtrlHealth);
+	die(call);
 }
 
 } //namespace
 
-void owned_from_patch(bool on)
+void owned_from_patch(int version)
 {
-	if (on != g_on) rt_log("goldeneye: client-owned players %s (the server's live patch)", on ? "on" : "off");
-	g_on = on;
+	if (version != g_version) rt_log("goldeneye: client-owned players %s (the server's live patch)", version ? (version >= 2 ? "on, with sprint and falls" : "on") : "off");
+	g_version = version;
 }
 
 //(input object, command) after ge_command_fill: a joined console's place goes with it
@@ -176,16 +263,22 @@ void owned_command_fill(uint32_t input, uint32_t cmd)
 {
 	if (!On() || !guest_ptr(cmd)) return;
 	const uint32_t ctrl{ guest_ptr(input) ? ld32(input + kInputCtrl) : 0 }, entity{ guest_ptr(ctrl) ? ld32(ctrl + kCtrlEntity) : 0 };
+	if (guest_ptr(entity)) g_ownEntity = entity;
 	if (Hosting() || !guest_ptr(entity))
 	{
 		g_poses.erase(cmd);
 		return;
 	}
-	g_ownEntity = entity;
 	Pose p;
 	for (int k = 0; k < 3; ++k) p.place[k] = ldf(entity + kEntityPlace + k * 4);
 	p.yaw = ldf(entity + kEntityYaw);
 	p.pitch = ldf(ctrl + kCtrlPitch);
+	p.sprint = std::fmin(std::fmax(ldf(ctrl + kCtrlSprintLeft), 0.0f), kSprintMost);
+	if (!std::isfinite(p.sprint)) p.sprint = 0;
+	p.landed = g_fresh > 0;
+	p.landings = g_landings;
+	p.fallen = g_fallen;
+	if (g_fresh > 0) --g_fresh;
 	Keep(cmd, p);
 }
 
@@ -200,6 +293,12 @@ void owned_command_write(PPCContext& c, uint32_t cmd, uint32_t stream)
 	for (float v : p.place) WriteFloat(c, stream, v, -kPlaceMost, kPlaceMost, kPlaceStep);
 	WriteFloat(c, stream, p.yaw, ldf(kCmdYawMin), ldf(kCmdYawMax), ldf(kCmdStep));
 	WriteFloat(c, stream, p.pitch, -kPitchMost, kPitchMost, ldf(kCmdStep));
+	if (g_version < 2) return;
+	WriteFloat(c, stream, p.sprint, 0, kSprintMost, kSprintStep);
+	WriteBit(c, stream, p.landed);
+	if (!p.landed) return;
+	for (int b = 0; b < 3; ++b) WriteBit(c, stream, (p.landings >> b) & 1);
+	WriteFloat(c, stream, p.fallen, 0, kFallMost, kFallStep);
 }
 
 void owned_command_read(PPCContext& c, uint32_t cmd, uint32_t stream)
@@ -211,13 +310,23 @@ void owned_command_read(PPCContext& c, uint32_t cmd, uint32_t stream)
 	for (float& v : p.place) v = ReadFloat(c, stream, -kPlaceMost, kPlaceMost, kPlaceStep);
 	p.yaw = ReadFloat(c, stream, ldf(kCmdYawMin), ldf(kCmdYawMax), ldf(kCmdStep));
 	p.pitch = ReadFloat(c, stream, -kPitchMost, kPitchMost, ldf(kCmdStep));
+	if (g_version >= 2)
+	{
+		p.sprint = ReadFloat(c, stream, 0, kSprintMost, kSprintStep);
+		p.landed = ReadBit(c, stream);
+		if (p.landed)
+		{
+			for (int b = 0; b < 3; ++b) p.landings |= (ReadBit(c, stream) ? 1u : 0u) << b;
+			p.fallen = ReadFloat(c, stream, 0, kFallMost, kFallStep);
+		}
+	}
 	const uint32_t buffer{ ld32(stream + 8) };
 	if (guest_ptr(buffer) && ld8(buffer + 0x20)) return; //the read went wrong
 	Keep(cmd, p);
 }
 
 //(controller, command) before ge_input_copy on the host: the player goes where its console had it
-void owned_input(uint32_t ctrl, uint32_t cmd)
+void owned_input(PPCContext& c, uint32_t ctrl, uint32_t cmd)
 {
 	if (!On() || !Hosting() || !guest_ptr(ctrl)) return;
 	const auto it{ g_poses.find(cmd) };
@@ -226,13 +335,26 @@ void owned_input(uint32_t ctrl, uint32_t cmd)
 	g_poses.erase(it);
 	const uint32_t entity{ ld32(ctrl + kCtrlEntity) };
 	if (!guest_ptr(entity) || ld32(ctrl + kCtrlState) == kStateDead) return;
+	if (g_version >= 2 && p.landed)
+	{
+		const auto heard{ g_heard.find(ctrl) };
+		if (heard == g_heard.end() || heard->second != p.landings)
+		{
+			g_heard[ctrl] = p.landings;
+			if (g_trace) rt_log("goldeneye: owned: %08X's console landed after %.3f m (landing %u)", ctrl, p.fallen, p.landings);
+			const float before{ ldf(ctrl + kCtrlHealth) };
+			Hurt(c, ctrl, p.fallen);
+			if (g_trace) rt_log("goldeneye: owned: health %.3f -> %.3f, state %u", before, ldf(ctrl + kCtrlHealth), ld32(ctrl + kCtrlState));
+			if (ld32(ctrl + kCtrlState) == kStateDead) return;
+		}
+	}
 	const float apart{ Apart(entity, p.place) };
 	if (g_trace)
 	{
 		static uint32_t said{ 0 };
 		if (ld32(kFrameCount) - said > 600)
 		{
-			rt_log("goldeneye: owned: %08X's console has it %.3f m from the host's (%s)", ctrl, apart, apart < kSnap ? "taken" : "stale, left");
+			rt_log("goldeneye: owned: %08X's console has it %.3f m from the host's (%s), sprint left %.3f here, %.3f there", ctrl, apart, apart < kSnap ? "taken" : "stale, left", ldf(ctrl + kCtrlSprintLeft), p.sprint);
 			said = ld32(kFrameCount);
 		}
 	}
@@ -241,6 +363,7 @@ void owned_input(uint32_t ctrl, uint32_t cmd)
 	stf(entity + kEntityYaw, p.yaw);
 	st8(entity + kEntityMatrixOk, 0);
 	stf(ctrl + kCtrlPitch, p.pitch);
+	if (g_version >= 2) stf(ctrl + kCtrlSprintLeft, p.sprint);
 	const uint32_t view{ ld32(entity + kEntityView) };
 	if (guest_ptr(view)) stf(view + kViewPitch, p.pitch);
 }
@@ -252,9 +375,12 @@ void install_owned()
 	write_float = ppc_lookup(kWriteFloat);
 	read_bit = ppc_lookup(kReadBit);
 	read_float = ppc_lookup(kReadFloat);
+	character_sound = ppc_lookup(kCharacterSound);
+	die = ppc_lookup(kDie);
 	orig_blend = ppc_hook("ge_player_blend", Blend);
-	if (!write_bit || !write_float || !read_bit || !read_float || !orig_blend)
-		rt_die("goldeneye: the stream functions or ge_player_blend aren't in this build, client-owned players can't work");
+	orig_land = ppc_hook("PlayerLand", Land);
+	if (!write_bit || !write_float || !read_bit || !read_float || !character_sound || !die || !orig_blend || !orig_land)
+		rt_die("goldeneye: the stream functions, ge_player_blend or PlayerLand aren't in this build, client-owned players can't work");
 }
 
 } //namespace ge

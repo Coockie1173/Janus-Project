@@ -261,11 +261,11 @@ void noclip_apply(uint32_t controller); //after the local controller's update
 bool player_state(uint32_t& state, float& fallen, uint32_t& bodyFlags); //the local player as of its last update, false before there is one
 void install_cheats(); //cheats.cpp
 void install_owned(); //owned.cpp: client-owned players online
-void owned_from_patch(bool on); //net.cpp, the server's live patch has it or not
+void owned_from_patch(int version); //net.cpp, the server's live patch has it (1, 2) or not (0)
 void owned_command_fill(uint32_t input, uint32_t cmd); //after ge_command_fill (input.cpp)
 void owned_command_write(PPCContext& c, uint32_t cmd, uint32_t stream); //behind the game's part of a command (bunnyhop.cpp)
 void owned_command_read(PPCContext& c, uint32_t cmd, uint32_t stream);
-void owned_input(uint32_t ctrl, uint32_t cmd); //before ge_input_copy (input.cpp)
+void owned_input(PPCContext& c, uint32_t ctrl, uint32_t cmd); //before ge_input_copy (input.cpp)
 void install_randomizer(); //randomizer.cpp
 bool weapon_randomizer(); //for fun, the campaign's weapons and the guards' guns are random, with a random attachment
 void set_weapon_randomizer(bool on);

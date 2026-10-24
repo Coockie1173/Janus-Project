@@ -393,7 +393,7 @@ void input_copy(PPCContext& c) {
     //a player's look is stepped from here on, not in its controller's update: the limits are this player's
     if (guest_ptr(ctrl)) set_pitch_limit(g_pitch_limit_now = pitch_limit_of(ctrl));
     uint32_t cmd = c.r[4];
-    owned_input(ctrl, cmd);
+    owned_input(c, ctrl, cmd);
     uint32_t kept = bunnyhop_input(ctrl, cmd);
     orig_input_copy(c);
     bunnyhop_input_done(cmd, kept);
