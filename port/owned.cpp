@@ -26,10 +26,13 @@
 //- either way a joined console's own look and aim (+0xC64 the pitch, +0xC5C, +0x528, +0x550,
 //  +0x554, blended towards the copy's) are kept too, and its weapon: what's in the hand and being
 //  changed to (+0xC96, +0xC97 and the rest the blend maps from the copy's inventory), the holster
-//  +0x5ED, the rounds in the gun and its two kinds of ammo (the weapon row's +0x174, +0x188,
-//  +0x18C, fn_8014A190). the host's word on them still comes through when the two have disagreed
-//  the same way for kWait (nothing changing on either side: a pickup, a shot the host didn't
-//  take), and the inventory itself (what's in it) is always the host's
+//  +0x5ED, the gun's firing mode and its two kinds of ammo (the weapon row's +0x174 item's +0xC,
+//  the attachments << 3 | the mode, and +0x188, +0x18C; fn_8014A190). the host's word on them
+//  still comes through when the two have disagreed the same way for kWait (nothing changing on
+//  either side: a shot the host didn't take), and at once when our inventory isn't the host's
+//  copy's (ids and attachments: a spawn, a pickup, the game's own all-attachments gun at the
+//  start) or our hand is empty. what's in the inventory is always the host's, and a pickup's
+//  ammo (the host's spare and clip going up together) is added to our spare
 //- the blend also puts the copy's whole state on ours when they've drifted apart
 //  (ge_player_state_apply 801250C0: the player state, crouch, sprinting, a fall, the gun's
 //  animation): for our own player it waits until it's been asked for kWait running
@@ -39,6 +42,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <iterator>
+#include <string>
 #include <unordered_map>
 
 namespace ge {
@@ -62,10 +66,11 @@ const size_t kPosesKept{ 4096 };
 const float kSprintMost{ 4.0f }, kSprintStep{ 1.0f / 256.0f }, kFallMost{ 64.0f }, kFallStep{ 1.0f / 64.0f };
 const int kFallFresh{ 30 };
 const float kWait{ 1.0f }; //seconds the host's word on the weapon or the state waits
-const uint32_t kCtrlFrameTime{ 0x578 }, kItemCount{ 0xC48 }, kItems{ 0xC4C }, kItemSize{ 0x10 }, kItemHas{ 0x4 }, kItemClip{ 0xC };
+const uint32_t kCtrlFrameTime{ 0x578 }, kItemCount{ 0xC48 }, kItems{ 0xC4C }, kItemSize{ 0x10 }, kItemHas{ 0x4 }, kItemFlags{ 0xC };
+const uint16_t kItemMode{ 7 }; //the flags' low bits, the rest the attachments (ge_give_weapon 8014B460)
 const uint32_t kInHand{ 0xC96 }, kChangingTo{ 0xC97 };
 const uint32_t kGunBytes[]{ 0x5ED, 0xC55, 0xC70, 0xC71, 0xC96, 0xC97, 0xC98, 0xC99 }, kGunHalf{ 0xC56 }, kGunWord{ 0xC6C };
-const uint32_t kRowAmmo[]{ 0x174, 0x188, 0x18C }; //the weapon's own item (its rounds at +0xC) and its two kinds of ammo
+const uint32_t kRowAmmo[]{ 0x174, 0x188, 0x18C }; //the weapon's own item (its flags at +0xC) and its two kinds of ammo
 const uint32_t kWeaponRow{ 0x8014A190 }; //(controller, -1) -> the row of what's in the hand
 const uint32_t kCtrlHealth{ 0x3A8 }, kCtrlHealthScale{ 0x3AC }, kCtrlSprintLeft{ 0xE5C }, kCtrlFallen{ 0xE90 }, kCtrlLanded{ 0xE88 }, kStateSliding{ 0x24 };
 const uint32_t kEntityId{ 0x170 }, kCtrlHurt{ 0x128 }; //the hurt one's id, and its vtable's hurt (f1 damage, f2 yaw, r4 who, r5 kind, r6, r7)
@@ -85,14 +90,15 @@ std::unordered_map<uint32_t, uint32_t> g_heard; //the host's: the last landing c
 PPCFunc write_bit{ nullptr }, write_float{ nullptr }, read_bit{ nullptr }, read_float{ nullptr }, orig_blend{ nullptr }, orig_land{ nullptr };
 PPCFunc character_sound{ nullptr }, die{ nullptr }, weapon_row{ nullptr }, orig_state_apply{ nullptr };
 
-//a weapon as one controller has it: what's in the hand, its rounds, its two ammo counts
+//a weapon as one controller has it: what's in the hand, its flags, its two ammo counts
 struct Gun
 {
 	uint32_t held{ 0 };
-	int32_t clip{ 0 }, ammo[2]{};
-	bool operator==(const Gun& o) const { return held == o.held && clip == o.clip && ammo[0] == o.ammo[0] && ammo[1] == o.ammo[1]; }
+	int32_t flags{ 0 }, ammo[2]{};
+	bool operator==(const Gun& o) const { return held == o.held && flags == o.flags && ammo[0] == o.ammo[0] && ammo[1] == o.ammo[1]; }
 };
 Gun g_lastOurs, g_lastHost;
+bool g_lastSeen{ false }; //g_lastHost is the blend before this one's
 float g_gunStale{ 0 }, g_stateWait{ 0 }, g_blendTime{ 0 };
 uint32_t g_ownBlend{ 0 }; //the drawn controller while its blend keeps our own
 bool g_stateAsked{ false };
@@ -193,7 +199,7 @@ Gun GunOf(PPCContext& c, uint32_t ctrl, uint32_t ids[3])
 	weapon_row(call);
 	const uint32_t row{ call.r[3] };
 	for (int k = 0; k < 3; ++k) ids[k] = guest_ptr(row) ? ld32(row + kRowAmmo[k]) : 0;
-	if (const uint32_t item{ ItemById(ctrl, ids[0]) }) g.clip = (int16_t)ld16(item + kItemClip);
+	if (const uint32_t item{ ItemById(ctrl, ids[0]) }) g.flags = (int16_t)ld16(item + kItemFlags);
 	for (int k = 0; k < 2; ++k)
 		if (const uint32_t item{ ItemById(ctrl, ids[k + 1]) }) g.ammo[k] = (int32_t)ld32(item + kItemHas);
 	return g;
@@ -201,12 +207,49 @@ Gun GunOf(PPCContext& c, uint32_t ctrl, uint32_t ids[3])
 
 bool Settled(uint32_t ctrl) { return ld8(ctrl + kInHand) == ld8(ctrl + kChangingTo); }
 
+//the same items with the same attachments, how many of each aside
+bool SameItems(uint32_t a, uint32_t b)
+{
+	const uint32_t n{ ld32(a + kItemCount) };
+	if (n != ld32(b + kItemCount)) return false;
+	for (uint32_t i = 0; i < n && i < 64; ++i)
+	{
+		const uint32_t x{ ItemAt(a, i) }, y{ ItemAt(b, i) };
+		if (!x || !y) return x == y;
+		if (ld32(x) != ld32(y) || ((ld16(x + kItemFlags) ^ ld16(y + kItemFlags)) & ~kItemMode)) return false;
+	}
+	return true;
+}
+
+//GE_TRACEOWNED: a controller's inventory (id, flags, how many)
+std::string Items(uint32_t ctrl)
+{
+	char line[64];
+	std::string s;
+	std::snprintf(line, sizeof line, "hand %d next %d:", (int8_t)ld8(ctrl + kInHand), (int8_t)ld8(ctrl + kChangingTo));
+	s = line;
+	for (int i = 0, n = (int)ld32(ctrl + kItemCount); i < n && i < 32; ++i)
+		if (const uint32_t item{ ItemAt(ctrl, i) })
+		{
+			std::snprintf(line, sizeof line, " %08X/%03X/%d", ld32(item), ld16(item + kItemFlags), (int32_t)ld32(item + kItemHas));
+			s += line;
+		}
+	return s;
+}
+
 //(drawn controller, its replica data): our own player keeps its place and rotation
 void Blend(PPCContext& c)
 {
 	const uint32_t drawn{ c.r[3] }, data{ c.r[4] };
 	const uint32_t copyData{ guest_ptr(data) ? ld32(data + kBlendCopy) : 0 }, copy{ copyData ? copyData - kReplicaToCtrl : 0 };
 	const uint32_t me{ guest_ptr(drawn) ? ld32(drawn + kCtrlEntity) : 0 }, its{ guest_ptr(copy) ? ld32(copy + kCtrlEntity) : 0 };
+	if (g_trace && guest_ptr(drawn) && guest_ptr(copy) && drawn == local_controller())
+	{
+		static std::string said[2];
+		const std::string now[2]{ Items(drawn), Items(copy) };
+		if (now[0] != said[0] || now[1] != said[1])
+			rt_log("goldeneye: owned: items here %s\ngoldeneye: owned: items there %s", now[0].c_str(), now[1].c_str()), said[0] = now[0], said[1] = now[1];
+	}
 	bool keep{ On() && !Hosting() && guest_ptr(me) && guest_ptr(its) && me == g_ownEntity
 		&& ld32(drawn + kCtrlState) != kStateDead && ld32(copy + kCtrlState) != kStateDead };
 	if (keep)
@@ -217,6 +260,7 @@ void Blend(PPCContext& c)
 	}
 	if (!keep)
 	{
+		g_lastSeen = false;
 		orig_blend(c);
 		return;
 	}
@@ -239,13 +283,24 @@ void Blend(PPCContext& c)
 	g_blendTime = ldf(drawn + kCtrlFrameTime);
 	if (!std::isfinite(g_blendTime) || g_blendTime < 0) g_blendTime = 0;
 	uint32_t ids[3], hostIds[3];
-	const Gun ours{ GunOf(c, drawn, ids) }, host{ GunOf(c, copy, hostIds) };
-	if (Settled(drawn) && Settled(copy) && !(ours == host))
+	Gun ours{ GunOf(c, drawn, ids) };
+	const Gun host{ GunOf(c, copy, hostIds) };
+	//a pickup's ammo: what the host's went up by is ours too, into the spare rounds (a reload only
+	//moves rounds from them to the clip, ammo[1])
+	if (g_lastSeen && host.held == g_lastHost.held && ours.held == host.held)
+		if (const int32_t up{ host.ammo[0] + host.ammo[1] - g_lastHost.ammo[0] - g_lastHost.ammo[1] }; up > 0)
+		{
+			if (g_trace) rt_log("goldeneye: owned: the host's ammo went up by %d, ours too", up);
+			ours.ammo[0] += up;
+		}
+	const bool ownKit{ ours.held != 0 && SameItems(drawn, copy) };
+	if (ownKit && Settled(drawn) && Settled(copy) && !(ours == host))
 		g_gunStale = ours == g_lastOurs && host == g_lastHost ? g_gunStale + g_blendTime : 0;
 	else
 		g_gunStale = 0;
 	g_lastOurs = ours;
 	g_lastHost = host;
+	g_lastSeen = true;
 	if (g_trace)
 	{
 		g_apartFrames += !(ours == host);
@@ -253,11 +308,15 @@ void Blend(PPCContext& c)
 		if (++g_blends % 1200 == 0)
 			rt_log("goldeneye: owned: of the last 1200 frames the weapon was apart from the host's in %u, the host's state asked for in %u", g_apartFrames, g_askedFrames), g_apartFrames = g_askedFrames = 0;
 	}
-	const bool keepGun{ g_gunStale < kWait };
-	if (!keepGun)
+	const bool keepGun{ ownKit && g_gunStale < kWait };
+	static bool saidKit{ false };
+	if (g_trace && !ownKit && !saidKit)
+		rt_log("goldeneye: owned: the host's weapon, our inventory isn't its (%08X %03X here, %08X %03X there)", ours.held, ours.flags, host.held, host.flags);
+	saidKit = !ownKit;
+	if (ownKit && !keepGun)
 	{
-		if (g_trace) rt_log("goldeneye: owned: the host's weapon after %.2f s apart (%08X %d %d %d here, %08X %d %d %d there)", g_gunStale,
-			ours.held, ours.clip, ours.ammo[0], ours.ammo[1], host.held, host.clip, host.ammo[0], host.ammo[1]);
+		if (g_trace) rt_log("goldeneye: owned: the host's weapon after %.2f s apart (%08X %03X %d %d here, %08X %03X %d %d there)", g_gunStale,
+			ours.held, ours.flags, ours.ammo[0], ours.ammo[1], host.held, host.flags, host.ammo[0], host.ammo[1]);
 		g_gunStale = 0;
 	}
 	uint8_t gunBytes[std::size(kGunBytes)];
@@ -285,7 +344,7 @@ void Blend(PPCContext& c)
 	for (size_t i = 0; i < std::size(kGunBytes); ++i) st8(drawn + kGunBytes[i], gunBytes[i]);
 	st16(drawn + kGunHalf, gunHalf);
 	st32(drawn + kGunWord, gunWord);
-	if (const uint32_t item{ ItemById(drawn, ids[0]) }) st16(item + kItemClip, (uint16_t)ours.clip);
+	if (const uint32_t item{ ItemById(drawn, ids[0]) }) st16(item + kItemFlags, (uint16_t)ours.flags);
 	for (int k = 0; k < 2; ++k)
 		if (const uint32_t item{ ItemById(drawn, ids[k + 1]) }) st32(item + kItemHas, (uint32_t)ours.ammo[k]);
 }
