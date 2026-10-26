@@ -284,6 +284,7 @@ void bunnyhop_read(PPCContext& c, uint32_t stream);
 bool bunnyhop_now(); //on for this game: the menu's, the host's online
 bool bhop_locked(); //a joined modded network game: the host's settings are the ones played by
 bool bhop_prestrafe_now();
+bool bhop_custom_now(); //on for this game and a rule isn't its default: the level timer flashes grey
 float bhop_value_now(int which);
 void bunnyhop_buttons(const ClassicState& s); //the jump key, as the pad was read
 bool bunnyhop_speed(float& speed); //the speedometer's, false with it off or nobody in play

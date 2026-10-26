@@ -49,6 +49,8 @@
 //
 //while a cheat is on (cheats_active) the level timer and the ammunition count flash red: their
 //texts' colour (+0x24) is red for the draw, every other half second, and the game's after it
+//while bunnyhopping by rules that aren't the defaults (bhop_custom_now) the level timer flashes
+//a lighter grey the same way, so a run on other rules is told apart without getting in the way
 //
 //GE_HUD=0 no hud
 //GE_LEVEL_TIMER=0 no level timer
@@ -93,6 +95,7 @@ const uint32_t kTextSize = 0x58, kTextColour = 0x24; //a hud text, its colour (R
 const uint32_t kTimerText = 0x1810; //the hud's text of the level timer
 const uint32_t kAmmoText = 0x13E8, kAmmoTexts = 4; //the ammunition count's texts (fn_8018F250 fills them)
 const uint32_t kCheatRed = 0x80101000; //the hud's colours go to 0x80
+const uint32_t kCustomGrey = 0x60606000;
 bool g_hud_hidden = false; //inside the hud's draw with the option off
 bool g_hud_was_hidden = false; //the hud's last draw was one
 PPCFunc orig_element_draw = nullptr, orig_text_draw = nullptr, orig_waypoints_draw = nullptr, orig_names_draw = nullptr;
@@ -196,15 +199,17 @@ void HudTextDraw(PPCContext& c)
 {
 	if (g_hud_hidden) return;
 	uint32_t text = c.r[3];
-	if (!cheats_active() || !CheatText(text, c.r[4]))
+	const bool cheat{ cheats_active() && CheatText(text, c.r[4]) };
+	const bool custom{ !cheat && text - c.r[4] == kTimerText && bhop_custom_now() };
+	if (!cheat && !custom)
 	{
 		orig_text_draw(c);
 		return;
 	}
-	//red for half of each second, the game's own colour for the other half
+	//red (grey) for half of each second, the game's own colour for the other half
 	auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
 	uint32_t colour = ld32(text + kTextColour);
-	if (ms % 1000 < 500) st32(text + kTextColour, kCheatRed | (colour & 0xFF));
+	if (ms % 1000 < 500) st32(text + kTextColour, (cheat ? kCheatRed : kCustomGrey) | (colour & 0xFF));
 	orig_text_draw(c);
 	st32(text + kTextColour, colour);
 }

@@ -113,7 +113,7 @@ BhopValue g_values[kBhopValueCount]{
 	{"Fall Damage", "Of each fall that counts towards hurting and killing you. 0.5 takes twice the drop.", "GE_BHOP_FALL", "LAUNCH_BHOP_FALL", 0.5f, 0.05f, 1.0f, 0.05f, 2},
 	{"Free Drop", "How far under where you jumped you fall before the game's own fall (and its landing) takes over, in metres.", "GE_BHOP_DROP", "LAUNCH_BHOP_DROP", 4.0f, 1.0f, 50.0f, 0.5f, 1},
 	{"Ground Accelerate", "Pre-strafing: how fast the run's speed is reached on the floor, Half-Life's sv_accelerate. Higher gains more speed turning.", "GE_BHOP_ACCEL", "LAUNCH_BHOP_ACCEL", 10.0f, 1.0f, 30.0f, 0.5f, 1},
-	{"Friction", "Pre-strafing: how fast the floor takes speed back, Half-Life's sv_friction. Lower keeps more.", "GE_BHOP_FRICTION", "LAUNCH_BHOP_FRICTION", 4.0f, 0.5f, 12.0f, 0.25f, 2},
+	{"Friction", "Pre-strafing: how fast the floor takes speed back, Half-Life's sv_friction. Lower keeps more.", "GE_BHOP_FRICTION", "LAUNCH_BHOP_FRICTION", 3.5f, 0.5f, 12.0f, 0.25f, 2},
 };
 //what play goes by this frame: the menu's offline, the host's in a modded network game
 struct Rules
@@ -586,6 +586,15 @@ bool bhop_prestrafe_now() { return g_locked ? g_now.prestrafe : (bool)g_prestraf
 void set_bhop_prestrafe(bool on) { g_prestrafe = on; }
 BhopValue& bhop_value(int which) { return g_values[which]; }
 float bhop_value_now(int which) { return g_locked ? g_now.v[which] : g_values[which].value; }
+
+bool bhop_custom_now()
+{
+	if (!g_onNow) return false;
+	if (!g_now.prestrafe) return true;
+	for (int i = 0; i < kBhopValueCount; ++i)
+		if (std::fabs(g_now.v[i] - g_values[i].initial) > g_values[i].by * 0.5f) return true; //the host's come in steps
+	return false;
+}
 
 void bhop_defaults()
 {
