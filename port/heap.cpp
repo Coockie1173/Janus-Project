@@ -20,9 +20,10 @@
 //passed on, which leaves the heap as it was. the last free of every block is kept (who and
 //in which frame), so a second one is logged with the first
 //
-//every heap is also walked once a frame, block by block (some 5000 in play): the first
-//block whose size the one behind it doesn't agree with is logged with the memory around it,
-//which tells the frame something wrote over the heap and what it wrote
+//every heap is also walked, block by block (some 5000 in play): the first block whose size
+//the one behind it doesn't agree with is logged with the memory around it, which tells the
+//frame something wrote over the heap and what it wrote. every frame in a network game, ten
+//times a second otherwise: a walk is ~0.6 ms of a busy level's frame (6% of it at 110 fps)
 //a network game's start and end are logged with what the checks saw so far, without being
 //asked for: the launcher's run.log (the Windows package's too) then tells they were on
 //
@@ -39,6 +40,7 @@
 #include "ge.h"
 #include <cstdio>
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <string>
 
@@ -130,6 +132,7 @@ uint64_t g_walked = 0, g_refused = 0; //frames walked, frees left out
 bool g_broken = false; //a walk found the heap broken: said once
 const uint32_t kHeapMutex = 0x8060B3F0, kMutexOwner = 8;
 const uint32_t kMaxBlocks = 4000000;
+const auto kWalkEvery = std::chrono::milliseconds(100); //outside a network game
 
 std::string Words(uint32_t from, uint32_t count)
 {
@@ -237,10 +240,14 @@ void NetworkLines(uint32_t blocks)
 
 void heap_frame()
 {
+	static auto lastWalk = std::chrono::steady_clock::time_point{};
+	const auto now = std::chrono::steady_clock::now();
+	const bool due = network_game() || now - lastWalk >= kWalkEvery;
 	uint32_t blocks = 0;
 	//not while a thread is in the middle of the heap
-	if (g_walk && !g_broken && ld32(kHeapMutex + kMutexOwner) == 0)
+	if (g_walk && due && !g_broken && ld32(kHeapMutex + kMutexOwner) == 0)
 	{
+		lastWalk = now;
 		for (uint32_t i = 0; i < kHeapCount && !g_broken; ++i)
 		{
 			uint32_t heap = ld32(kHeaps + 4 * i);

@@ -214,7 +214,7 @@ void install_files(); //files.cpp
 void install_records(); //records.cpp
 void records_freed(const PPCContext& c, uint32_t block); //a block is about to be freed
 void install_heap(); //heap.cpp
-void heap_frame(); //once a frame: the heaps are walked in a network game
+void heap_frame(); //once a frame: the heaps are walked (every frame in a network game)
 std::string call_chain(const PPCContext& c); //who called, from the guest's stack
 void install_sweep(); //sweep.cpp
 void install_zones(); //zones.cpp
