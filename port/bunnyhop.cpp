@@ -476,8 +476,11 @@ void Climb(Hopper& h, uint32_t ctrl, uint32_t entity, uint32_t body, const float
 	float pitch{ guest_ptr(view) ? ldf(view + kViewPitch) : 0.0f };
 	if (!std::isfinite(pitch)) pitch = 0;
 	const float climb{ kBaseSpeed * kClimb };
-	const bool moving{ std::hypot(stickX, stickY) >= kDeadZone };
-	const float forward{ moving ? std::clamp(stickY, -1.0f, 1.0f) * climb : 0.0f }, side{ moving ? std::clamp(stickX, -1.0f, 1.0f) * climb : 0.0f };
+	//half-life's forward and strafe are keys, each the whole climb: the stick's circle made a square,
+	//so a full diagonal at a ladder seen at 45 degrees climbs at 1.41 of it (strafing up it)
+	const float stick{ std::hypot(stickX, stickY) };
+	const float square{ stick >= kDeadZone ? std::min(stick, 1.0f) / std::max(std::fabs(stickX), std::fabs(stickY)) : 0.0f };
+	const float forward{ stickY * square * climb }, side{ stickX * square * climb };
 	float v[3]{ std::sin(yaw) * std::cos(pitch) * forward + std::cos(yaw) * side, -std::sin(pitch) * forward, std::cos(yaw) * std::cos(pitch) * forward - std::sin(yaw) * side };
 	const float into{ v[0] * n[0] + v[1] * n[1] + v[2] * n[2] };
 	//along the ladder and level, and up it
