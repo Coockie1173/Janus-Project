@@ -38,6 +38,19 @@ string(REGEX REPLACE "(..)" "0x\\1," GE_ICON_BYTES "${GE_ICON_HEX}")
 file(CONFIGURE OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/ge_gen/ge_icon.h
      CONTENT "static const unsigned char kIcon[] = {${GE_ICON_BYTES}};\n" @ONLY)
 target_include_directories(wiiboot PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/ge_gen)
+# the port's version, from the last v* tag (v1.0, v1.0-3-g4542d33, or the commit alone before
+# any tag), -dirty with uncommitted changes; wiikit's patched submodule doesn't count
+execute_process(COMMAND git describe --tags --match "v*" --always WORKING_DIRECTORY ${GE_ROOT}
+                OUTPUT_VARIABLE GE_VERSION OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+execute_process(COMMAND git status --porcelain --untracked-files=no --ignore-submodules=all WORKING_DIRECTORY ${GE_ROOT}
+                OUTPUT_VARIABLE GE_CHANGES OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+if(NOT GE_VERSION)
+  set(GE_VERSION "unknown")
+elseif(GE_CHANGES)
+  string(APPEND GE_VERSION "-dirty")
+endif()
+file(CONFIGURE OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/ge_gen/ge_version.h
+     CONTENT "#define GE_VERSION \"${GE_VERSION}\"\n" @ONLY)
 if(WIN32)
   enable_language(RC)
   target_sources(wiiboot PRIVATE ${GE_PORT}/win/icon.rc)

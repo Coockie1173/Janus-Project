@@ -22,6 +22,7 @@
 //tools/crash_report.py names the host frames and disassembles around the guest addresses
 //afterwards (launch.sh runs it when a run leaves a new dump).
 #include "ge.h"
+#include "ge_version.h"
 #include "mem.h"
 #include <algorithm>
 #include <atomic>
@@ -313,7 +314,7 @@ namespace
 		{
 			return {};
 		}
-		std::fprintf(Out, "GoldenEye 007 (SJBE52) %s dump, %s\n\n%s\n\n", Kind, Stamp, What);
+		std::fprintf(Out, "GoldenEye 007 (SJBE52) %s dump, %s\nJanus-Project %s\n\n%s\n\n", Kind, Stamp, GE_VERSION, What);
 		std::fflush(Out); //whatever happens next, this much is on disk
 		Guarded(Out, "the game's state", [Out] { WriteGameState(Out); });
 

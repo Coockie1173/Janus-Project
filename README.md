@@ -11,10 +11,12 @@ In any case, Wiikit worked well enough* for this recomp.
 Nevertheless it works. This port comes with a lot of quality of life fixes, native mouse & keyboard support, a bunch of cheats, even speedrun timers and some bonus for fun thingies for the fans!
 
 # No copyrighted data
-This port does not hold any copyrighted material. This repo only contains tools, names and  our own port layer. You'll need your own copy of the game run this.
-it's recommended you extract your disc via the launcher (launched by play.bat).
+This port does not hold any copyrighted material. This repo only contains tools, names and our own port layer. You'll need your own copy of the game to run this.
+it's recommended you extract your disc via the launcher (launched by `Play.bat`, or `Play.sh` on Linux).
 
 If you're stubborn however, you can also extract your files manually into `./game` (in Dolphin: right-click the game → Properties → Filesystem → Extract Entire Disc, or use `dolphin-tool extract`).
+
+This is an unofficial fan project. Activision, Eurocom, Nintendo, MGM and Danjaq have nothing to do with it, so please don't bug them about it.
 
 # Port
 All the files in `port/` are our layer on top of the runtime. Things like hooks, input mapping, settings, the mod loader, our online redirect to the unofficial servers (you can play online on this port!), crash dumps to name a few. `port/ge.h` lists which file does what, and [docs/CODE.md](docs/CODE.md) goes over all of it in a lot more detail.
@@ -87,7 +89,7 @@ New levels are made from glTF scenes with [eurochef-GE](https://github.com/Coock
 You'll need Python 3.8+, CMake, Ninja, a C++20 compiler (clang), OpenGL 4.5 and SDL3 (which gets built from source into `build/deps` if your system has no SDL3 development files). Linux is what I develop this on.
 
 ```sh
-git clone --recursive git@github.com:Coockie1173/GEWII-PC.git     # or: git submodule update --init
+git clone --recursive git@github.com:Coockie1173/Janus-Project.git     # or: git submodule update --init
 make            # mix the symbols, recompile main.dol, build build/out/wiiboot
 ./launch.sh     # build if needed and boot the game (log in build/run.log)
 make smoke      # 30 s headless boot, log in build/run.log
@@ -110,7 +112,14 @@ The boot ROM fonts and the DSP's resampling table (`font_western.bin`, `font_jap
 Both packages come with an empty `mods/` folder (the gamemode folders are in it). The mods are a download of their own: `make mods-zip` packs `mods/` exactly as it is (the `.edb` files, their `.png` pictures and `.txt` files, gamemode folders included) as `build/Janus-Project-mods.zip`, which gets unzipped into the game's folder, next to `Play`. No level in `mods/`, no zip.
 
 # Playing
-`./launch.sh`/`./play.bat` opens a small (and redundant window). I recommend using it to do your first launch for file extraction, but after that you can skip this window for the much superior F1 menu in game.
+Grab the zip for your OS from [Releases](https://github.com/Coockie1173/Janus-Project/releases), unzip it somewhere you can write to and run `Play.bat` (or `./Play.sh` on Linux). Hit "Extract disc...", pick your disc image (`.iso`, `.wbfs` or `.rvz`, only the US version `SJBE52` works) and you're good to go.
+
+That opens a small (and redundant) window. I recommend using it to do your first launch for file extraction, but after that you can skip this window for the much superior F1 menu in game.
+
+You'll need a 64-bit Windows or Linux, a CPU with AVX2 (roughly 2015 or newer) and a GPU with OpenGL 4.5. The `README.txt` in the zip has the controls and the rest.
+
+## Something broke?
+Open an issue with your `run.log`, and on Linux the `report.txt` from the folder in `crashes/` (just that file, the rest is a memory dump of the game). Please mention the version too, it's at the bottom of the F1 menu and near the top of `run.log`. A crash on a build that's a week old might already be fixed!
 
 # License
 Copyright (c) 2026 Mars
@@ -128,4 +137,5 @@ A couple of things in here aren't mine to license though:
 - [wiikit](https://github.com/vs-sr-dev/wiikit) and its ports ([pc-conduit2](https://github.com/vs-sr-dev/pc-conduit2), [pc-dragonquestswords](https://github.com/vs-sr-dev/pc-dragonquestswords)) by Samuele Voltan, MIT: the recompiler, the runtime, `tools/sigmatch.py`, and the method.
 - [Dolphin](https://dolphin-emu.org) for the signature database and as the reference for how the console behaves.
 - [SDL](https://libsdl.org).
+- [Dear ImGui](https://github.com/ocornut/imgui) for the F1 menu (with the Roboto font that comes with it).
 - Special thanks to FitterSpace and AlpineEscape for testing.

@@ -23,6 +23,9 @@ done
 [ -f "$FONTS/font-licenses.txt" ] && cp "$FONTS/font-licenses.txt" "$S/licenses/fonts.txt"
 cp build/deps/sdl3-win/share/licenses/SDL3/LICENSE.txt "$S/licenses/SDL3.txt"
 cp wiikit/LICENSE "$S/licenses/wiikit.txt" 2>/dev/null || true
+cp LICENSE "$S/licenses/Janus-Project.txt"
+cp build/deps/imgui/LICENSE.txt "$S/licenses/imgui.txt"
+cp port/licenses/Roboto.txt "$S/licenses/Roboto.txt"
 cp build/deps/llvm-mingw/LICENSE.TXT "$S/licenses/llvm-mingw-runtime.txt"
 cp build/deps/openssl-src/LICENSE.txt "$S/licenses/OpenSSL.txt"
 # the window before the game and the disc extraction: the launcher, wiikit's disc readers, a Python to run them

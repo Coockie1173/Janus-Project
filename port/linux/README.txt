@@ -123,13 +123,17 @@ If something goes wrong
 - "Illegal instruction": the processor has no AVX2. This build cannot run there.
 - No settings window ("launcher: no window"): Python's Tk is not installed.
 - Anything else: run.log ends with what happened, and crashes/ has a folder for
-  the crash. Send both along with a report.
+  the crash. Send both along with a report, and the version: run.log's first
+  lines have it, and so does the foot of the F1 menu.
 
 
 Credits
 -------
-Built on wiikit (MIT) and SDL3 (zlib license). Their licenses are in licenses/.
+Janus-Project itself is under the Mozilla Public License 2.0. It is built on
+wiikit (MIT), SDL3 (zlib license) and Dear ImGui (MIT, with the Roboto typeface,
+Apache 2.0). Their licenses are in licenses/.
 The fonts in "fonts" are Dolphin's free replacements for the console's
 (licenses/ has the note).
 GoldenEye 007 is the property of its owners; this package contains none of its
-data files.
+data files. This is an unofficial fan project, not made or endorsed by Activision,
+Eurocom, Nintendo, MGM or Danjaq.

@@ -21,6 +21,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           clean: false    # build/ stays between runs: only what changed is rebuilt
+          fetch-depth: 0  # the tags too: the version in the game comes from them
 
       - name: wiikit, pristine for the patch
         run: |

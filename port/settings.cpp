@@ -36,6 +36,7 @@
 
 #ifdef GE_IMGUI
 #include "ge_font.h"
+#include "ge_version.h"
 #include "imgui.h"
 #include <SDL3/SDL.h>
 #endif
@@ -1347,6 +1348,11 @@ void draw_frame(ImDrawList* dl, const Layout& L, const Page& page) {
     if (row.clear && g_listening < 0) key_hint(dl, L, left, L.y(625), "Del", row.clears ? row.clears : "Clear", false);
     const char* does = row.does ? row.does : row.options ? "Choose" : row.binding ? "Add Key" : row.select || !row.adjust ? "Select" : "Change";
     if (g_listening < 0) key_hint(dl, L, L.x(1070), L.y(625), row.select || !row.adjust ? "Enter" : "< >", does, true);
+    //the version under the foot, for bug reports
+    if (g_page == kRoot) {
+        const std::string version = "Janus-Project " GE_VERSION;
+        text(dl, ImVec2(L.x(1080) - text_width(version, 18 * u), L.y(682)), 18 * u, fade(kCream, 0.5f), version);
+    }
 }
 
 void draw_rows(ImDrawList* dl, const Layout& L, const Page& page) {

@@ -56,6 +56,7 @@
 //GE_DMW=F watch list for the debug overlay (F3), the .dmw in the project folder by default
 #include "debug.h"
 #include "ge.h"
+#include "ge_version.h"
 #include <cstdlib>
 
 namespace ge {
@@ -90,6 +91,7 @@ namespace {
 PPCFunc orig_main = nullptr;
 
 void install() {
+    rt_log("goldeneye: Janus-Project %s", GE_VERSION);
     install_hosts();
     install_live_patch();
     install_command_time();

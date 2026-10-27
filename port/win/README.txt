@@ -113,7 +113,8 @@ If something goes wrong
 - Windows SmartScreen says the program is unknown: More info -> Run anyway.
 - Online does not connect: allow Janus-Project.exe through the Windows firewall
   when it asks, and leave "Online" ticked in the Play.bat window.
-- Anything else: run.log ends with what happened. Send it along with a report.
+- Anything else: run.log ends with what happened. Send it along with a report,
+  and the version: its first lines have it, and so does the foot of the F1 menu.
 
 
 Not in this build
@@ -123,8 +124,11 @@ Not in this build
 
 Credits
 -------
-Built on wiikit (MIT) and SDL3 (zlib license); the launcher runs on Python with
-Tk and pycryptodome. Their licenses are in licenses\. The fonts in
+Janus-Project itself is under the Mozilla Public License 2.0. It is built on
+wiikit (MIT), SDL3 (zlib license) and Dear ImGui (MIT, with the Roboto typeface,
+Apache 2.0); the launcher runs on Python with Tk and pycryptodome. Their licenses
+are in licenses\. The fonts in
 "fonts" are Dolphin's free replacements for the console's (licenses\ has the note).
 GoldenEye 007 is the property of its owners; this package contains none of its
-data files.
+data files. This is an unofficial fan project, not made or endorsed by Activision,
+Eurocom, Nintendo, MGM or Danjaq.
