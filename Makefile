@@ -87,11 +87,13 @@ $(RECOMP)/report.txt: $(NAMES) $(PATCHED)/main.dol config/hooks.txt $(LOCAL_HOOK
 deps:
 	@if ! pkg-config --exists sdl3 && [ ! -d $(SDL3_DIR)/lib*/cmake/SDL3 ]; then sh tools/build_sdl3.sh $(BUILD)/deps; fi
 	@[ -d $(BUILD)/deps/imgui ] || sh tools/get_imgui.sh $(BUILD)/deps 2>/dev/null || echo "no Dear ImGui: the debug overlay is left out"
+	@sh tools/get_codecs.sh $(BUILD)/deps > /dev/null
 
 build: wiikit-patch recomp deps
 	cmake -S $(RECOMP) -B $(OUT) -G Ninja -DCMAKE_CXX_COMPILER=$(RECOMP_CXX) \
 	    -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS_RELEASE="$(OPT)" \
 	    -DCMAKE_PREFIX_PATH=$(SDL3_DIR) -DCMAKE_BUILD_RPATH=$(SDL3_DIR)/lib \
+	    -DGE_FONTS=$(if $(FONTS),$(abspath $(FONTS))) \
 	    -DWIIKIT_EXTRA=$(abspath port/goldeneye.cmake) > $(BUILD)/cmake.log 2>&1 || { tail -20 $(BUILD)/cmake.log; exit 1; }
 	ninja -C $(OUT) wiiboot
 
@@ -101,7 +103,6 @@ build: wiikit-patch recomp deps
 WIN_OUT   := $(BUILD)/out-win
 win: wiikit-patch recomp deps
 	@sh tools/get_mingw.sh $(BUILD)/deps
-	@sh tools/get_codecs.sh $(BUILD)/deps > /dev/null
 	@[ -f $(BUILD)/deps/sdl3-win/bin/SDL3.dll ] || sh tools/build_sdl3.sh $(BUILD)/deps win
 	@[ -f $(BUILD)/deps/openssl-win/lib/libssl.a ] || sh tools/build_openssl.sh $(BUILD)/deps
 	cmake -S $(RECOMP) -B $(WIN_OUT) -G Ninja -DCMAKE_TOOLCHAIN_FILE=$(abspath tools/mingw.cmake) \
@@ -117,7 +118,6 @@ win: wiikit-patch recomp deps
 .PHONY: linux
 LINUX_OUT := $(BUILD)/out-linux
 linux: wiikit-patch recomp deps
-	@sh tools/get_codecs.sh $(BUILD)/deps > /dev/null
 	@[ -d $(SDL3_DIR)/lib*/cmake/SDL3 ] || sh tools/build_sdl3.sh $(BUILD)/deps
 	cmake -S $(RECOMP) -B $(LINUX_OUT) -G Ninja -DCMAKE_CXX_COMPILER=$(RECOMP_CXX) \
 	    -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS_RELEASE="$(OPT)" \

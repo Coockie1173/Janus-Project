@@ -1,5 +1,6 @@
-# The launcher in the packaged builds (GE_PORTABLE): settings and options into the environment,
-# the disc extracted on a first start, then the game. Included by port/goldeneye.cmake.
+# The launcher: settings and options into the environment, the disc extracted on a first start,
+# then the game. Included by port/goldeneye.cmake. A package (GE_PORTABLE) keeps everything next
+# to the executable, a checkout keeps it in build/ (launch.sh starts it there).
 set(GE_LAUNCHER ${CMAKE_CURRENT_LIST_DIR})
 set(GE_CODECS ${GE_ROOT}/build/deps/codecs)
 if(NOT EXISTS ${GE_CODECS}/zstd/lib/zstd.h)
@@ -25,7 +26,13 @@ target_compile_options(ge_codecs PRIVATE -w)
 target_sources(wiiboot PRIVATE
     ${GE_LAUNCHER}/launch.cpp ${GE_LAUNCHER}/window.cpp ${GE_LAUNCHER}/disc.cpp ${GE_LAUNCHER}/extract.cpp)
 target_link_libraries(wiiboot ge_codecs)
-if(WIN32)
+if(GE_PORTABLE)
+  target_compile_definitions(wiiboot PRIVATE GE_LAUNCH_PORTABLE=1 GE_LAUNCH_STATE="." GE_LAUNCH_SYMBOLS="config/symbols.tsv" GE_LAUNCH_FONTS="")
+else()
+  # GE_FONTS: the Makefile's FONTS, Dolphin's Sys/GC when it's installed
+  target_compile_definitions(wiiboot PRIVATE GE_LAUNCH_STATE="build" GE_LAUNCH_SYMBOLS="build/recomp/symbols.tsv" GE_LAUNCH_FONTS="${GE_FONTS}")
+endif()
+if(WIN32 AND GE_PORTABLE)
   # no console window behind the game: the log is run.log, --extract finds the one it was started from
   set_target_properties(wiiboot PROPERTIES WIN32_EXECUTABLE ON)
 endif()

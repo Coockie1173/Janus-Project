@@ -22,7 +22,7 @@ This is an unofficial fan project. Activision, Eurocom, Nintendo, MGM and Danjaq
 All the files in `port/` are our layer on top of the runtime. Things like hooks, input mapping, settings, the mod loader, our online redirect to the unofficial servers (you can play online on this port!), crash dumps to name a few. `port/ge.h` lists which file does what, and [docs/CODE.md](docs/CODE.md) goes over all of it in a lot more detail.
 
 # Launcher
-`launcher/` is what runs before the game in the packages. It reads your settings, and on a first start it asks for your disc and takes the files out of it (`.rvz`, `.iso`, `.wbfs` and `.wia`, no Python needed anymore!). Starting `wiiboot game ...` the old way skips it entirely, so `./launch.sh` and the dev tools work like before.
+`launcher/` is what runs before the game, in the packages and with `./launch.sh` alike. It reads your settings, and on a first start it asks for your disc and takes the files out of it (`.rvz`, `.iso`, `.wbfs` and `.wia`, no Python needed anymore!). Starting `wiiboot game ...` the old way skips it entirely, so `make run`, `make smoke` and the test scripts work like before.
 
 # Config
 Bunch of config files used by the recomp.

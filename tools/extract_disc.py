@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The game's files out of a disc image (.rvz, .iso, .wbfs, .wia), into the game folder.
 
-    python3 tools/extract_disc.py IMAGE [OUT]     (./launch.sh --extract IMAGE; the launcher's button)
+    python3 tools/extract_disc.py IMAGE [OUT]     (./launch.sh --extract IMAGE, before there is a build)
     python3 tools/extract_disc.py IMAGE --info    what the image is, nothing written
 
 OUT is ./game by default. The image has to be GoldenEye 007, NTSC-U (SJBE52): the build is

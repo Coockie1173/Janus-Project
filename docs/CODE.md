@@ -1081,8 +1081,10 @@ Scripted input and memory tools (`debug.cpp`):
 
 ## 7. The launcher
 
-`launcher/` is compiled into the packaged builds only (`GE_PORTABLE`, `launcher/launcher.cmake`).
-It takes over wiiboot's command line through wiikit's `RtGameLauncher` (a patch in
+`launcher/` is compiled into every build (`launcher/launcher.cmake`): a package keeps the player's
+files next to the executable (`GE_PORTABLE`), a checkout in `build/` with the symbols from
+`build/recomp/` and the Makefile's `FONTS` (`launch.sh` starts it so, with `GE_RUN_LOG=` to tee
+the log itself). It takes over wiiboot's command line through wiikit's `RtGameLauncher` (a patch in
 `patches/wiikit.patch`) before anything else runs. Started with a game folder as its first
 argument (`wiiboot game --nand ...`) it gives the arguments back untouched.
 

@@ -1,9 +1,12 @@
 //the launcher: what Play.bat, Play.sh and tools/launcher.py did, now in the game's executable
 //
-//started without a game folder (a double click, or options only) it reads settings.env and the
-//options, puts them where the port looks for them (the environment), takes the game's files out
-//of the disc first when they aren't there yet (window.cpp), sends the log to run.log and hands
-//wiiboot its command line. started the old way (wiiboot game --nand ...) it stays out of it
+//started without a game folder (a double click, launch.sh, or options only) it reads settings.env
+//and the options, puts them where the port looks for them (the environment), takes the game's
+//files out of the disc first when they aren't there yet (window.cpp), sends the log to run.log
+//and hands wiiboot its command line. started the old way (wiiboot game --nand ...) it stays out
+//of it. a package keeps its files next to the executable, a checkout in build/ (launcher.cmake)
+//
+//GE_RUN_LOG=  (empty) leaves the output where it was going, launch.sh tees it itself
 #include "extract.h"
 #include "files.h"
 #include "rt.h"
@@ -30,7 +33,7 @@ namespace
 		"\n"
 		"  --extract IMAGE [--force]  take the game's files out of a disc image (.rvz .iso .wbfs .wia) into game\n"
 		"  --fps N --fov N --mouse N --mouse-mode auto|direct|stick\n"
-		"  --fullscreen --vsync --no-ping --fast-start --cheats --offline\n"
+		"  --fullscreen --vsync --no-ping --no-occlusion --no-sound-height --fast-start --cheats --offline\n"
 		"  --always-mouse             mouse look in every player state\n"
 		"  --skip dam-intro,...       those cutscenes are skipped as well: a mission's name and\n"
 		"                             intro, middle or ending; all, intros, middles, endings\n"
@@ -51,7 +54,7 @@ namespace
 		{ "mouseeverywhere", "0" }, { "skiplist", "" }, { "skipmovies", "0" }, { "notutorials", "0" }, { "nocolourfilter", "0" },
 		{ "autosave", "1" }, { "leveltimer", "1" }, { "autoqte", "0" }, { "autostart", "0" }, { "extrasmenu", "0" },
 		{ "onlineunlocks", "1" }, { "unlockall", "0" }, { "staminameter", "0" }, { "vsync", "0" }, { "ping", "1" },
-		{ "crashdump", "1" }, { "crashmem", "0" },
+		{ "occlusion", "1" }, { "soundheight", "1" }, { "crashdump", "1" }, { "crashmem", "0" },
 	};
 
 	//the environment variable the port reads for each
@@ -63,6 +66,7 @@ namespace
 		{ "GE_NO_TUTORIALS", "notutorials" }, { "GE_NO_COLOUR_FILTER", "nocolourfilter" }, { "GE_AUTOSAVE", "autosave" },
 		{ "GE_EXTRAS_MENU", "extrasmenu" }, { "GE_UNLOCK_ALL", "unlockall" }, { "GE_ONLINE_UNLOCKS", "onlineunlocks" },
 		{ "GE_STAMINA", "staminameter" }, { "GE_VSYNC", "vsync" }, { "GE_PING", "ping" },
+		{ "GE_OCCLUSION", "occlusion" }, { "GE_SOUND_HEIGHT", "soundheight" },
 	};
 
 	//the flags that just turn a setting on or off
@@ -73,8 +77,16 @@ namespace
 		{ "--no-tutorials", { "notutorials", "1" } }, { "--no-colour-filter", { "nocolourfilter", "1" } },
 		{ "--extras-menu", { "extrasmenu", "1" } }, { "--unlock-all", { "unlockall", "1" } }, { "--stamina-meter", { "staminameter", "1" } },
 		{ "--fast-start", { "faststart", "1" } }, { "--offline", { "online", "0" } }, { "--crash-dumps", { "crashdump", "1" } },
-		{ "--no-crash-dumps", { "crashdump", "0" } },
+		{ "--no-crash-dumps", { "crashdump", "0" } }, { "--no-occlusion", { "occlusion", "0" } },
+		{ "--no-sound-height", { "soundheight", "0" } },
 	};
+
+	//where the player's files are: "." in a package, "build" in a checkout
+	std::string State(const char* pName)
+	{
+		const std::string Dir{ GE_LAUNCH_STATE };
+		return Dir == "." ? pName : Dir + "/" + pName;
+	}
 
 	void SetVariable(const char* pName, const std::string& Value)
 	{
@@ -98,7 +110,7 @@ namespace
 	{
 		std::map<std::string, std::string> Settings{ kDefaults };
 		bool HasSkipList{};
-		std::ifstream File{ "settings.env" };
+		std::ifstream File{ GE_SETTINGS_FILE };
 		std::string Line;
 		while (std::getline(File, Line))
 		{
@@ -140,9 +152,9 @@ namespace
 	}
 
 	//a gecko file with at least one code in it
-	bool HasCodes(const char* pPath)
+	bool HasCodes(const std::string& Path)
 	{
-		std::ifstream File{ pPath };
+		std::ifstream File{ FsPath(Path) };
 		std::string Line;
 		while (std::getline(File, Line))
 		{
@@ -154,10 +166,10 @@ namespace
 		return false;
 	}
 
-	void CopyFile(const char* pFrom, const char* pTo)
+	void CopyFile(const std::string& From, const std::string& To)
 	{
 		std::error_code Ignored;
-		std::filesystem::copy_file(pFrom, pTo, std::filesystem::copy_options::overwrite_existing, Ignored);
+		std::filesystem::copy_file(FsPath(From), FsPath(To), std::filesystem::copy_options::overwrite_existing, Ignored);
 	}
 
 	//the command line's own output, for --extract and --help: a windows build has no console
@@ -211,15 +223,26 @@ namespace
 		{
 			return Args;
 		}
-		//everything is next to the executable, wherever it was started from (an image given on
-		//the command line is still found from where that was)
+		//everything is next to the executable (or in the checkout), wherever it was started from
+		//(an image given on the command line is still found from where that was)
 		std::error_code Ec;
 		const std::filesystem::path StartedIn{ std::filesystem::current_path(Ec) };
-		if (const char* pBase{ SDL_GetBasePath() })
+#ifdef GE_LAUNCH_PORTABLE
+		const char* pHome{ SDL_GetBasePath() };
+#else
+		const char* pHome{ GE_ROOT };
+#endif
+		if (pHome != nullptr)
 		{
-			std::error_code Ignored;
-			std::filesystem::current_path(FsPath(pBase), Ignored);
+			std::filesystem::current_path(FsPath(pHome), Ec);
 		}
+#ifndef _WIN32
+		//through x11 when there is one: a present on wayland costs the renderer 2 ms, 0.3 there
+		if (std::getenv("DISPLAY") != nullptr)
+		{
+			SetDefault("SDL_VIDEODRIVER", "x11,wayland");
+		}
+#endif
 
 		std::map<std::string, std::string> Settings{ LoadSettings() };
 		std::vector<std::string> Rest;
@@ -241,7 +264,11 @@ namespace
 			{
 				continue;
 			}
-			if (Arg == "--help" || Arg == "-h")
+			if (Arg == "--no-gui")
+			{
+				//the python launcher's, there's no window to skip any more
+			}
+			else if (Arg == "--help" || Arg == "-h")
 			{
 				UseConsole();
 				std::printf("%s", kHelp);
@@ -277,7 +304,7 @@ namespace
 			}
 			else if (Arg == "--cheats")
 			{
-				CopyFile("config/gecko/cheats.txt", "cheats.txt");
+				CopyFile("config/gecko/cheats.txt", State("cheats.txt"));
 			}
 			else if (Arg == "--crash-mem")
 			{
@@ -322,7 +349,7 @@ namespace
 		}
 		else
 		{
-			SetDefault("GE_CRASH_DIR", "crashes");
+			SetDefault("GE_CRASH_DIR", State("crashes"));
 		}
 		if (Settings["crashmem"] == "1")
 		{
@@ -330,9 +357,9 @@ namespace
 		}
 #endif
 		std::string Gecko{ Settings["faststart"] == "1" ? "config/gecko/faststart.txt" : "" };
-		if (HasCodes("cheats.txt"))
+		if (HasCodes(State("cheats.txt")))
 		{
-			Gecko += std::string(Gecko.empty() ? "" : ":") + "cheats.txt";
+			Gecko += std::string(Gecko.empty() ? "" : ":") + State("cheats.txt");
 		}
 		if (const char* pExtra{ std::getenv("GE_GECKO_EXTRA") })
 		{
@@ -342,18 +369,28 @@ namespace
 		{
 			SetVariable("GE_GECKO_EXTRA", Gecko);
 		}
-		if (!std::filesystem::exists("keys.txt"))
+		if (!std::filesystem::exists(FsPath(State("keys.txt"))))
 		{
-			CopyFile("config/keys.txt", "keys.txt");
+			CopyFile("config/keys.txt", State("keys.txt"));
 		}
 
-		//both appending to one emptied file, so neither writes over the other
-		std::ofstream{ "run.log", std::ios::trunc };
-		std::freopen("run.log", "a", stdout);
-		std::freopen("run.log", "a", stderr);
-		//freopen leaves it buffered, and the game leaves through _Exit
-		std::setvbuf(stderr, nullptr, _IONBF, 0);
-		std::vector<std::string> Out{ Args[0], "game", "--symbols", "config/symbols.tsv", "--watch", "10" };
+		const char* pLog{ std::getenv("GE_RUN_LOG") };
+		const std::string Log{ pLog != nullptr ? pLog : State("run.log") };
+		if (!Log.empty())
+		{
+			//both appending to one emptied file, so neither writes over the other
+			std::ofstream{ Log, std::ios::trunc };
+			std::freopen(Log.c_str(), "a", stdout);
+			std::freopen(Log.c_str(), "a", stderr);
+			//freopen leaves it buffered, and the game leaves through _Exit
+			std::setvbuf(stderr, nullptr, _IONBF, 0);
+		}
+		std::vector<std::string> Out{ Args[0], "game", "--nand", State("nand"), "--keys", State("keys.txt"),
+			"--symbols", GE_LAUNCH_SYMBOLS, "--watch", "10" };
+		if (std::string(GE_LAUNCH_FONTS) != "")
+		{
+			Out.insert(Out.end(), { "--fonts", GE_LAUNCH_FONTS });
+		}
 		if (Settings["fullscreen"] == "1")
 		{
 			Out.push_back("--fullscreen");
