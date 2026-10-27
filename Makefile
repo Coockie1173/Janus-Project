@@ -101,7 +101,7 @@ build: wiikit-patch recomp deps
 WIN_OUT   := $(BUILD)/out-win
 win: wiikit-patch recomp deps
 	@sh tools/get_mingw.sh $(BUILD)/deps
-	@sh tools/get_winpy.sh $(BUILD)/deps
+	@sh tools/get_codecs.sh $(BUILD)/deps > /dev/null
 	@[ -f $(BUILD)/deps/sdl3-win/bin/SDL3.dll ] || sh tools/build_sdl3.sh $(BUILD)/deps win
 	@[ -f $(BUILD)/deps/openssl-win/lib/libssl.a ] || sh tools/build_openssl.sh $(BUILD)/deps
 	cmake -S $(RECOMP) -B $(WIN_OUT) -G Ninja -DCMAKE_TOOLCHAIN_FILE=$(abspath tools/mingw.cmake) \
@@ -117,6 +117,7 @@ win: wiikit-patch recomp deps
 .PHONY: linux
 LINUX_OUT := $(BUILD)/out-linux
 linux: wiikit-patch recomp deps
+	@sh tools/get_codecs.sh $(BUILD)/deps > /dev/null
 	@[ -d $(SDL3_DIR)/lib*/cmake/SDL3 ] || sh tools/build_sdl3.sh $(BUILD)/deps
 	cmake -S $(RECOMP) -B $(LINUX_OUT) -G Ninja -DCMAKE_CXX_COMPILER=$(RECOMP_CXX) \
 	    -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS_RELEASE="$(OPT)" \

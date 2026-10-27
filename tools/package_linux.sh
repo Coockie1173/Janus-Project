@@ -29,19 +29,17 @@ cp wiikit/LICENSE "$S/licenses/wiikit.txt" 2>/dev/null || true
 cp LICENSE "$S/licenses/Janus-Project.txt"
 cp build/deps/imgui/LICENSE.txt "$S/licenses/imgui.txt"
 cp port/licenses/Roboto.txt "$S/licenses/Roboto.txt"
-# the window before the game and the disc extraction: the launcher, wiikit's disc readers (the system's Python runs them)
-mkdir -p "$S/launcher/wiikit"
-cp tools/launcher.py tools/extract_disc.py "$S/launcher/"
-cp wiikit/disc.py wiikit/rvz.py wiikit/aes.py "$S/launcher/wiikit/"
-: > "$S/launcher/wiikit/__init__.py"
+cp build/deps/codecs/zstd/LICENSE "$S/licenses/zstd.txt"
+cp build/deps/codecs/bzip2/LICENSE "$S/licenses/bzip2.txt"
+cp build/deps/codecs/lzma/DOC/lzma-sdk.txt "$S/licenses/lzma-sdk.txt"
 # the mods folder is there and empty, with its folder for each online gamemode (README.md, Mods):
 # the mods themselves are a download of their own (tools/package_mods.sh), unzipped into this one
 mkdir -p "$S/mods"
 for d in conflict team_conflict golden_gun black_box goldeneye heroes license_to_kill team_license_to_kill; do
     mkdir -p "$S/mods/$d"
 done
-cp port/linux/Play.sh port/linux/README.txt "$S/"
-chmod 755 "$S/Play.sh" "$S/Janus-Project"
-printf 'The game goes here: ./Play.sh, then "Extract disc..." and pick your GoldenEye 007 (SJBE52) image.\nWhen it is done this folder holds sys/main.dol and files/. See README.txt.\n' > "$S/game/PUT YOUR DISC HERE.txt"
+cp port/linux/README.txt "$S/"
+chmod 755 "$S/Janus-Project"
+printf 'The game goes here: start ./Janus-Project and pick your GoldenEye 007 (SJBE52) disc image.\nWhen it is done this folder holds sys/main.dol and files/. See README.txt.\n' > "$S/game/PUT YOUR DISC HERE.txt"
 (cd build/linux && zip -q -r -9 "../$NAME.zip" "$NAME")
 echo "build/$NAME.zip: $(du -h build/$NAME.zip | cut -f1)"

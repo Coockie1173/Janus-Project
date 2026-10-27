@@ -81,6 +81,22 @@ bool write_lines(const std::string& path, const std::vector<std::string>& lines)
 }
 
 bool g_fps_changed = false; //the frame rate was changed in the menu
+
+//read by the launcher (launcher/launch.cpp) as the game starts, so a change here waits for the next start
+struct NextStart { bool online = true, fast_start = false, fullscreen = false, crash_dumps = true; };
+NextStart& next_start() {
+    static NextStart n;
+    static bool loaded = false;
+    if (!loaded) {
+        loaded = true;
+        auto flag = [](const char* name, bool fallback) { std::string v = saved_setting("", name); return v.empty() ? fallback : v == "1"; };
+        n.online = flag("LAUNCH_ONLINE", true);
+        n.fast_start = flag("LAUNCH_FASTSTART", false);
+        n.fullscreen = flag("LAUNCH_FULLSCREEN", false);
+        n.crash_dumps = flag("LAUNCH_CRASHDUMP", true);
+    }
+    return n;
+}
 //keys other files listen for (settings_key): pressed with the menu closed they call theirs, kept in the launcher's file
 struct AddedKey { int page; std::string launch, label, hint, key; void (*pressed)(); };
 std::vector<AddedKey> g_addedKeys;
@@ -124,6 +140,11 @@ void save_launch_settings() {
     char forced_text[16];
     std::snprintf(forced_text, sizeof forced_text, "%08X", forced_weapon_id());
     values.push_back({"LAUNCH_FORCEDWEAPON", forced_text});
+    const NextStart& next = next_start();
+    values.push_back({"LAUNCH_ONLINE", next.online ? "1" : "0"});
+    values.push_back({"LAUNCH_FASTSTART", next.fast_start ? "1" : "0"});
+    values.push_back({"LAUNCH_FULLSCREEN", next.fullscreen ? "1" : "0"});
+    values.push_back({"LAUNCH_CRASHDUMP", next.crash_dumps ? "1" : "0"});
     if (g_fps_changed) values.push_back({"LAUNCH_FPS", std::to_string(fps_limit())}); //"auto" stays until it's changed
     auto lines = read_lines(GE_SETTINGS_FILE);
     if (lines.empty()) lines.push_back("# written by the launcher, read when the game is started");
@@ -417,6 +438,8 @@ void BuildSettings()
 	fps.step = [](float v, int d) { return (float)kFpsStops[std::clamp(FpsStop(v) + d, 0, kFpsStopCount - 1)]; };
 	fps.frac = [](float v) { return (float)FpsStop(v) / (float)(kFpsStopCount - 1); };
 	fps.at = [](float f) { return (float)kFpsStops[std::clamp((int)std::lround(f * (float)(kFpsStopCount - 1)), 0, kFpsStopCount - 1)]; };
+	AddToggle(kScreen, "start_fullscreen", "Start Fullscreen", "On: the game starts in fullscreen, from the next start on. F11 or Alt+Enter switches while you play.",
+		[] { return next_start().fullscreen; }, [](bool v) { next_start().fullscreen = v; });
 	AddToggle(kScreen, "vsync", "VSync", "On: frames wait for the screen's refresh, so the picture doesn't tear. The game runs at the screen's rate at most.", vsync, set_vsync);
 	AddChoice(kScreen, "anisotropy", "Anisotropic Filtering", "Keeps textures sharp on floors and walls seen at a slant. Off is the console's picture.",
 		{"Off", "2x", "4x", "8x", "16x"}, [] { return NearestOf(kAnisotropies, anisotropy()); },
@@ -479,6 +502,14 @@ void BuildSettings()
 	AddToggle(kEnhancements, "online_unlocks", "Online Unlocks", "On: online, every weapon, attachment, gadget and game mode is open at any level, but for the Proximity Mine.", online_unlocks, set_online_unlocks);
 	AddToggle(kEnhancements, "occlusion", "Sound Occlusion", "On: in multiplayer a sound behind a wall is quieter, one behind a floor more so, so someone a floor up doesn't sound next to you. Off: the game's own, distance only.", occlusion, set_occlusion);
 	AddToggle(kEnhancements, "sound_height", "Sound Height", "On: in multiplayer a sound from the floor above or below you is muffled, so you can hear that someone isn't on your floor. Off: the game's own, left and right only.", sound_height, set_sound_height);
+	AddToggle(kEnhancements, "online", "Online", "On: the game finds the community server that stands in for Nintendo's (config/hosts.txt). Off: it stays offline. From the next start on.",
+		[] { return next_start().online; }, [](bool v) { next_start().online = v; });
+	AddToggle(kEnhancements, "fast_start", "Quicker Start", "On: the screens before the main menu are hurried through. From the next start on.",
+		[] { return next_start().fast_start; }, [](bool v) { next_start().fast_start = v; });
+#ifndef _WIN32
+	AddToggle(kEnhancements, "crash_dumps", "Crash Dumps", "On: a crash or a stall writes a report into crashes/, to send along with a bug report. From the next start on.",
+		[] { return next_start().crash_dumps; }, [](bool v) { next_start().crash_dumps = v; });
+#endif
 	AddToggle(kEnhancements, "extras_menu", "Unused Extras Menu", "On: Extras also lists Mission Select, Character Viewer, Movies and the Calibration Menu.", extras_menu, set_extras_menu);
 
 	AddToggle(kCheats, "mouse_everywhere", "Always Enable Mouse", "On: the mouse turns the view where the game locks it: cutscenes, melee, climbing, death.", mouse_everywhere, set_mouse_everywhere);

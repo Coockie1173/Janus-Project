@@ -613,7 +613,7 @@ void install_hosts() {
     const char* path = std::getenv("GE_HOSTS");
     if (!path) path = GE_HOSTS_DEFAULT;
     ios_net_log(std::getenv("GE_NETLOG") != nullptr);
-    if (!*path) return;
+    if (!*path || !std::strcmp(path, "off")) return; //off: windows can't keep an empty variable
     FILE* f = std::fopen(path, "r");
     if (!f) { rt_log("goldeneye: no hosts file %s: the game's servers as the system resolves them", path); return; }
     char line[512], ip[64], name[256];

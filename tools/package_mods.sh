@@ -2,7 +2,7 @@
 # The mods as a download of their own: the mods folder as it is (the .edb files, their .png
 # pictures and .txt files, in it and in its folder for each online gamemode, and the custom
 # weapons with their sounds), zipped. It is
-# unzipped into the game's folder, next to Play, where the packages have an empty mods folder.
+# unzipped into the game's folder, next to the executable, where the packages have an empty mods folder.
 #     sh tools/package_mods.sh      -> build/Janus-Project-mods.zip, none without a level in mods/
 set -e
 cd "$(dirname "$0")/.."

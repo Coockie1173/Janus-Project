@@ -12,7 +12,7 @@ Nevertheless it works. This port comes with a lot of quality of life fixes, nati
 
 # No copyrighted data
 This port does not hold any copyrighted material. This repo only contains tools, names and our own port layer. You'll need your own copy of the game to run this.
-it's recommended you extract your disc via the launcher (launched by `Play.bat`, or `Play.sh` on Linux).
+it's recommended you extract your disc via the launcher (just start the game, it asks for your disc the first time).
 
 If you're stubborn however, you can also extract your files manually into `./game` (in Dolphin: right-click the game → Properties → Filesystem → Extract Entire Disc, or use `dolphin-tool extract`).
 
@@ -20,6 +20,9 @@ This is an unofficial fan project. Activision, Eurocom, Nintendo, MGM and Danjaq
 
 # Port
 All the files in `port/` are our layer on top of the runtime. Things like hooks, input mapping, settings, the mod loader, our online redirect to the unofficial servers (you can play online on this port!), crash dumps to name a few. `port/ge.h` lists which file does what, and [docs/CODE.md](docs/CODE.md) goes over all of it in a lot more detail.
+
+# Launcher
+`launcher/` is what runs before the game in the packages. It reads your settings, and on a first start it asks for your disc and takes the files out of it (`.rvz`, `.iso`, `.wbfs` and `.wia`, no Python needed anymore!). Starting `wiiboot game ...` the old way skips it entirely, so `./launch.sh` and the dev tools work like before.
 
 # Config
 Bunch of config files used by the recomp.
@@ -104,17 +107,19 @@ And if you change wiikit yourself, `make wiikit-save` writes your changes back i
 The boot ROM fonts and the DSP's resampling table (`font_western.bin`, `font_japanese.bin`, `dsp_coef.bin`) are taken from Dolphin's free replacements in `Sys/GC` if you have Dolphin installed (pass `FONTS=dir` otherwise). If Dolphin's `Sys/totaldb.dsy` is around (`DSY=file`) it'll name some more SDK functions by signature.
 
 ## Windows
-`make win` cross-compiles a 64-bit Windows build from Linux (llvm-mingw and SDL3 get fetched into `build/deps`) and packs it as `build/Janus-Project-win64.zip`. In there you'll find the executable, `Play.bat` which opens the same settings window (a Python with Tk is in the package), and a `README.txt` (see `port/win/`). The disc's files are not in it! The player takes them out of their own image using the window's "Extract disc..." button. Online works the same as on Linux (Winsock instead of BSD sockets).
+`make win` cross-compiles a 64-bit Windows build from Linux (llvm-mingw and SDL3 get fetched into `build/deps`) and packs it as `build/Janus-Project-win64.zip`. In there you'll find the executable and a `README.txt` (see `port/win/`). The disc's files are not in it! The player takes them out of their own image on the first start. Online works the same as on Linux (Winsock instead of BSD sockets).
 
 ## Linux package
-`make linux` builds the same portable layout for Linux and packs it as `build/Janus-Project-linux64.zip`: the executable (C++ runtime linked in, SDL3 next to it in `lib/`), `Play.sh` which opens the settings window with the system's Python, and a `README.txt` (see `port/linux/`). It needs glibc 2.38, OpenSSL 3 and OpenGL 4.5 wherever it runs. Online and crash dumps work there too.
+`make linux` builds the same portable layout for Linux and packs it as `build/Janus-Project-linux64.zip`: the executable (C++ runtime linked in, SDL3 next to it in `lib/`), and a `README.txt` (see `port/linux/`). It needs glibc 2.38, OpenSSL 3 and OpenGL 4.5 wherever it runs. Online and crash dumps work there too.
 
-Both packages come with an empty `mods/` folder (the gamemode folders are in it). The mods are a download of their own: `make mods-zip` packs `mods/` exactly as it is (the `.edb` files, their `.png` pictures and `.txt` files, gamemode folders included) as `build/Janus-Project-mods.zip`, which gets unzipped into the game's folder, next to `Play`. No level in `mods/`, no zip.
+For the launcher both packages also fetch zstd, bzip2 and the LZMA SDK into `build/deps/codecs` (that last one comes as a `.7z`, so you'll need `7z` around).
+
+Both packages come with an empty `mods/` folder (the gamemode folders are in it). The mods are a download of their own: `make mods-zip` packs `mods/` exactly as it is (the `.edb` files, their `.png` pictures and `.txt` files, gamemode folders included) as `build/Janus-Project-mods.zip`, which gets unzipped into the game's folder, next to the executable. No level in `mods/`, no zip.
 
 # Playing
-Grab the zip for your OS from [Releases](https://github.com/Coockie1173/Janus-Project/releases), unzip it somewhere you can write to and run `Play.bat` (or `./Play.sh` on Linux). Hit "Extract disc...", pick your disc image (`.iso`, `.wbfs` or `.rvz`, only the US version `SJBE52` works) and you're good to go.
+Grab the zip for your OS from [Releases](https://github.com/Coockie1173/Janus-Project/releases), unzip it somewhere you can write to and run `Janus-Project.exe` (or `./Janus-Project` on Linux). The first time it asks for your disc image (`.rvz`, `.iso`, `.wbfs` or `.wia`, only the US version `SJBE52` works), takes the files out and you're good to go.
 
-That opens a small (and redundant) window. I recommend using it to do your first launch for file extraction, but after that you can skip this window for the much superior F1 menu in game.
+The small (and redundant) settings window is gone, everything lives in the much superior F1 menu in game now.
 
 You'll need a 64-bit Windows or Linux, a CPU with AVX2 (roughly 2015 or newer) and a GPU with OpenGL 4.5. The `README.txt` in the zip has the controls and the rest.
 

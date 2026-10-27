@@ -17,6 +17,7 @@ Contents:
 4. [The files](#4-the-files)
 5. [Environment variables](#5-environment-variables)
 6. [Files read and written](#6-files-read-and-written)
+7. [The launcher](#7-the-launcher)
 
 ## 1. How the layer works
 
@@ -1077,3 +1078,22 @@ Scripted input and memory tools (`debug.cpp`):
 | `*.dmw` in the project folder or `config/` | overlay | the watch list |
 | `build/crashes/` | crashdump | the dumps |
 | `build/scan.txt`, `build/scan-obj.txt`, `build/obj.txt` | debug | scan results |
+
+## 7. The launcher
+
+`launcher/` is compiled into the packaged builds only (`GE_PORTABLE`, `launcher/launcher.cmake`).
+It takes over wiiboot's command line through wiikit's `RtGameLauncher` (a patch in
+`patches/wiikit.patch`) before anything else runs. Started with a game folder as its first
+argument (`wiiboot game --nand ...`) it gives the arguments back untouched.
+
+| File | What |
+|---|---|
+| `launch.cpp` | moves to the executable's folder, reads `settings.env`'s `LAUNCH_*` lines and the options (`--help` lists them), puts them in the `GE_*` variables the port reads (the environment wins), `--extract IMAGE [--force]` on the command line, `run.log` for stdout and stderr, then `game --symbols config/symbols.tsv --watch 10` and whatever it didn't know |
+| `window.cpp` | the first start's window (SDL3, Dear ImGui, the F1 menu's colours): a disc image from the system's file dialog or a drop, the extraction on a thread with its progress, then the game. `GE_LAUNCHER_PICK=IMAGE` picks one, `GE_LAUNCHER_SHOT=file.bmp` saves the window every second, `WIIKIT_HIDDEN` hides it |
+| `extract.cpp` | `ExtractGame`: checks the game id (SJBE52) and the free space, writes `game.extracting/` (`sys/`, `files/`, `disc/`, `ticket.bin`, `tmd.bin`) and only then renames it to `game/`, a filled `game/` is moved aside as `game.old` |
+| `disc.cpp` | wiikit's `disc.py` and `rvz.py` in C++: .iso, .wbfs, .rvz and .wia (none, bzip2, LZMA, LZMA2, zstd; not WIA's purge), the data partition decrypted with OpenSSL, the FST |
+
+The decompressors are compiled from source (`tools/get_codecs.sh` puts zstd, bzip2 and the LZMA
+SDK's decoders in `build/deps/codecs`). Online, Quicker Start, Start Fullscreen and Crash Dumps
+are F1 rows that only write `settings.env` (`next_start()` in settings.cpp), the launcher reads
+them on the next start; `--offline` sets `GE_HOSTS=off` (Windows drops an empty variable).

@@ -551,7 +551,7 @@ index 3941f3b..621bb0b 100644
      st32(0x80003154, 0xDEADBEEF);
      st32(0x80003158, 0x0000FF16);                  // DDR vendor
 diff --git a/runtime/core.cpp b/runtime/core.cpp
-index d0baebf..2cdc3db 100644
+index d0baebf..030c684 100644
 --- a/runtime/core.cpp
 +++ b/runtime/core.cpp
 @@ -11,6 +11,7 @@
@@ -601,7 +601,25 @@ index d0baebf..2cdc3db 100644
      if (ICalls* ic = icalls()) count_icall(*ic, addr);
      PPCFunc f = ppc_lookup(addr);
      if (!f) {
-@@ -159,14 +173,14 @@ uint32_t ppc_lc_dma(uint32_t dma_u, uint32_t dma_l) {
+@@ -86,6 +100,17 @@ std::vector<Layer>& layers() { static std::vector<Layer> v; return v; }   // fil
+ 
+ RtGameLayer::RtGameLayer(const char* name, void (*install)()) { layers().push_back({name, install}); }
+ 
++namespace {
++std::vector<std::string> (*g_launcher)(int, char**) = nullptr;
++}
++
++RtGameLauncher::RtGameLauncher(std::vector<std::string> (*launch)(int, char**)) { g_launcher = launch; }
++
++std::vector<std::string> rt_game_launch(int argc, char** argv) {
++    if (g_launcher) return g_launcher(argc, argv);
++    return std::vector<std::string>(argv, argv + argc);
++}
++
+ void rt_game_install() {
+     for (const Layer& l : layers()) {
+         rt_log("wiiboot: game layer %s", l.name);
+@@ -159,14 +184,14 @@ uint32_t ppc_lc_dma(uint32_t dma_u, uint32_t dma_l) {
      return dma_l & ~2u;
  }
  
@@ -618,7 +636,7 @@ index d0baebf..2cdc3db 100644
      for (uint32_t i = 0; i < n; ++i)
          st8(ea + i, (uint8_t)(c.r[(rs + i / 4) & 31] >> (24 - 8 * (i % 4))));
  }
-@@ -223,20 +237,38 @@ std::string rt_name(uint32_t a) {
+@@ -223,20 +248,38 @@ std::string rt_name(uint32_t a) {
      return buf;
  }
  
@@ -660,7 +678,7 @@ index d0baebf..2cdc3db 100644
          uint32_t lr = ld32(next + 4);
          std::fprintf(out, "  %08X  %s\n", lr, rt_name(lr).c_str());
          sp = next;
-@@ -244,13 +276,15 @@ void rt_backtrace(const PPCContext& c, FILE* out, int max) {
+@@ -244,13 +287,15 @@ void rt_backtrace(const PPCContext& c, FILE* out, int max) {
  }
  
  [[noreturn]] void rt_die(const char* fmt, ...) {
@@ -3930,10 +3948,18 @@ index 99351d5..f6af62d 100644
      if (!w) ps_quant(type, scale, ea + sz, c.ps1[s], &sz);
  }
 diff --git a/runtime/rt.h b/runtime/rt.h
-index 75fec5e..580e566 100644
+index 75fec5e..60f6c94 100644
 --- a/runtime/rt.h
 +++ b/runtime/rt.h
-@@ -17,6 +17,10 @@ void rt_load_symbols(const char* tsv);
+@@ -6,6 +6,7 @@
+ #include <cstdio>
+ #include <functional>
+ #include <string>
++#include <vector>
+ 
+ // ---- core.cpp ---------------------------------------------------------------------------
+ PPCFunc ppc_lookup(uint32_t addr);
+@@ -17,6 +18,10 @@ void rt_load_symbols(const char* tsv);
  std::string rt_name(uint32_t addr);               // "func+0x12", or the hex address
  [[noreturn]] void rt_die(const char* fmt, ...);
  void rt_log(const char* fmt, ...);                 // stderr, one line
@@ -3944,7 +3970,21 @@ index 75fec5e..580e566 100644
  // The guest call chain from a context: LR, then the saved LRs up the back chain.
  void rt_backtrace(const PPCContext& c, FILE* out, int max = 24);
  
-@@ -58,10 +62,27 @@ static inline uint64_t tb_hz() { return (uint64_t)g_bus_mhz * 250000; }
+@@ -27,6 +32,13 @@ void rt_backtrace(const PPCContext& c, FILE* out, int max = 24);
+ struct RtGameLayer { RtGameLayer(const char* name, void (*install)()); };
+ void rt_game_install();
+ 
++// A port can also take the command line over before anything starts (a launcher:
++// its settings, a disc to extract first): a static RtGameLauncher gets main's
++// arguments and returns the ones wiiboot goes on with, argv[0] first. Without
++// one the arguments are used as they are.
++struct RtGameLauncher { RtGameLauncher(std::vector<std::string> (*launch)(int argc, char** argv)); };
++std::vector<std::string> rt_game_launch(int argc, char** argv);
++
+ // ---- rso.cpp ----------------------------------------------------------------------------
+ // RSO modules: the run-time address of a loaded module's code -> the virtual
+ // one it was recompiled at (0 if no module is there); the module a virtual
+@@ -58,10 +70,27 @@ static inline uint64_t tb_hz() { return (uint64_t)g_bus_mhz * 250000; }
  
  // ---- the OS layer (os.cpp) --------------------------------------------------------------
  void os_report_running(int depth);                // stderr: where the running guest thread is
@@ -3972,7 +4012,7 @@ index 75fec5e..580e566 100644
  void os_watch(int seconds);                       // report the running thread periodically
  void os_profile();                                // WIIKIT_PROFILE: sample the guest code (=render: the renderer), list the hot functions
  
-@@ -74,7 +95,34 @@ void gx_submit_pending();                         // after a burst, outside g_hw
+@@ -74,7 +103,34 @@ void gx_submit_pending();                         // after a burst, outside g_hw
  // game that reads the copy on the CPU (the renderer otherwise keeps copies
  // on the host GPU only). False if no copy was made to addr (physical).
  bool gx_copy_to_ram(uint32_t addr);
@@ -4007,7 +4047,7 @@ index 75fec5e..580e566 100644
  void hw_run_locked(const std::function<void()>& fn);   // run fn holding the hardware lock
  
  // ---- the hardware (hw.cpp) -----------------------------------------------------------
-@@ -106,6 +154,9 @@ void wpad_set_classic_filter(WpadClassicFilter f);
+@@ -106,6 +162,9 @@ void wpad_set_classic_filter(WpadClassicFilter f);
  void wpad_filter_classic(int chan, ClassicState& s);  // the port's filter, if it has one
  
  // ---- audio (ax.cpp, audio.cpp) --------------------------------------------------------
@@ -4017,7 +4057,7 @@ index 75fec5e..580e566 100644
  void ax_command_list(uint32_t addr);               // the AX micro-code: mix one frame
  uint8_t aram_read(uint32_t addr);                  // the GameCube's ARAM (hw.cpp), where its AX reads samples
  bool ax_load_coefs(const char* dir);               // dsp_coef.bin: the polyphase resampler's table
-@@ -113,6 +164,11 @@ void audio_init(bool enabled);                     // the host's audio device (S
+@@ -113,6 +172,11 @@ void audio_init(bool enabled);                     // the host's audio device (S
  // A block the AI DMA starts playing: frames of big-endian 16-bit stereo,
  // right then left, as the Wii's AI reads them.
  void audio_play(const uint8_t* be_rl, uint32_t frames, uint32_t rate);
@@ -4029,7 +4069,7 @@ index 75fec5e..580e566 100644
  
  // ---- SYSCONF (sysconf.cpp) -----------------------------------------------------------
  // Writes the NAND's /shared2/sys/SYSCONF if it has none, sets what the
-@@ -123,6 +179,10 @@ extern bool g_sysconf_eurgb60;                     // IPL.E60, after sysconf_pre
+@@ -123,6 +187,10 @@ extern bool g_sysconf_eurgb60;                     // IPL.E60, after sysconf_pre
  
  // ---- IOS (ios.cpp) ------------------------------------------------------------------
  void ios_init(const char* disc_root, const char* nand_root);
@@ -6021,10 +6061,23 @@ index ecfb499..2cef6bc 100644
  // WIIKIT_PERF=1: where a frame's time goes, reported every second by the
  // renderer. Nanoseconds, summed since the last report.
 diff --git a/runtime/wiiboot.cpp b/runtime/wiiboot.cpp
-index 250d419..49720ce 100644
+index 250d419..71e1b59 100644
 --- a/runtime/wiiboot.cpp
 +++ b/runtime/wiiboot.cpp
-@@ -41,7 +41,7 @@ int main(int argc, char** argv) {
+@@ -35,13 +35,20 @@
+ #include <cstring>
+ #include <string>
+ #include <thread>
++#include <vector>
+ 
+ int main(int argc, char** argv) {
++    std::vector<std::string> args = rt_game_launch(argc, argv);   // a port's launcher may change them
++    std::vector<char*> argp;
++    for (std::string& a : args) argp.push_back(a.data());
++    argp.push_back(nullptr);
++    argc = (int)args.size();
++    argv = argp.data();
+     if (argc < 2) {
          std::fprintf(stderr, "usage: wiiboot EXTRACT_DIR [--nand DIR] [--fonts DIR] [--symbols symbols.tsv] "
                               "[--mmio-log] [--watch SECONDS]\n"
                               "                            [--no-video] [--no-audio] [--scale N] [--frames-ahead N] "
@@ -6033,7 +6086,7 @@ index 250d419..49720ce 100644
                               "                            [--aspect 16:9|4:3] [--language en|fr|es|de|it|nl|ja] "
                               "[--fullscreen] [--window WxH] [--keys FILE]\n"
                               "                            [--input auto|pad|keyboard]\n");
-@@ -64,6 +64,7 @@ int main(int argc, char** argv) {
+@@ -64,6 +71,7 @@ int main(int argc, char** argv) {
          else if (!std::strcmp(argv[i], "--frames-ahead") && i + 1 < argc) vo.frames_ahead = std::max(1, std::atoi(argv[++i]));
          else if (!std::strcmp(argv[i], "--dump") && i + 1 < argc) vo.dump_dir = argv[++i];
          else if (!std::strcmp(argv[i], "--dump-every") && i + 1 < argc) vo.dump_every = std::max(1, std::atoi(argv[++i]));

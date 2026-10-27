@@ -28,13 +28,9 @@ cp build/deps/imgui/LICENSE.txt "$S/licenses/imgui.txt"
 cp port/licenses/Roboto.txt "$S/licenses/Roboto.txt"
 cp build/deps/llvm-mingw/LICENSE.TXT "$S/licenses/llvm-mingw-runtime.txt"
 cp build/deps/openssl-src/LICENSE.txt "$S/licenses/OpenSSL.txt"
-# the window before the game and the disc extraction: the launcher, wiikit's disc readers, a Python to run them
-mkdir -p "$S/launcher/wiikit"
-cp tools/launcher.py tools/extract_disc.py "$S/launcher/"
-cp wiikit/disc.py wiikit/rvz.py wiikit/aes.py "$S/launcher/wiikit/"
-: > "$S/launcher/wiikit/__init__.py"
-cp -r build/deps/winpy/python "$S/python"
-cp "$S/python/LICENSE.txt" "$S/licenses/python.txt"
+cp build/deps/codecs/zstd/LICENSE "$S/licenses/zstd.txt"
+cp build/deps/codecs/bzip2/LICENSE "$S/licenses/bzip2.txt"
+cp build/deps/codecs/lzma/DOC/lzma-sdk.txt "$S/licenses/lzma-sdk.txt"
 # the mods folder is there and empty, with its folder for each online gamemode (README.md, Mods):
 # the mods themselves are a download of their own (tools/package_mods.sh), unzipped into this one
 mkdir -p "$S/mods"
@@ -42,7 +38,7 @@ for d in conflict team_conflict golden_gun black_box goldeneye heroes license_to
     mkdir -p "$S/mods/$d"
 done
 # Windows line ends for what Notepad and cmd read
-for f in Play.bat README.txt; do sed 's/$/\r/' "port/win/$f" > "$S/$f"; done
-printf 'The game goes here: Play.bat, then "Extract disc..." and pick your GoldenEye 007 (SJBE52) image.\r\nWhen it is done this folder holds sys\\main.dol and files\\. See README.txt.\r\n' > "$S/game/PUT YOUR DISC HERE.txt"
+sed 's/$/\r/' port/win/README.txt > "$S/README.txt"
+printf 'The game goes here: start Janus-Project.exe and pick your GoldenEye 007 (SJBE52) disc image.\r\nWhen it is done this folder holds sys\\main.dol and files\\. See README.txt.\r\n' > "$S/game/PUT YOUR DISC HERE.txt"
 (cd build/win && zip -q -r -9 "../$NAME.zip" "$NAME")
 echo "build/$NAME.zip: $(du -h build/$NAME.zip | cut -f1)"

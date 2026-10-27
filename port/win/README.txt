@@ -20,13 +20,13 @@ Setting it up (once)
 1. Unzip this whole folder somewhere you can write to (not Program Files),
    for instance C:\Games\Janus-Project.
 
-2. Double-click Play.bat. A small window opens.
+2. Double-click Janus-Project.exe. The first time, a window asks for your
+   disc image.
 
-3. Click "Extract disc..." and pick your disc image. The game's files are
-   taken out of it into the "game" folder (about 4 GB; under a minute from
-   an SSD). This is needed once.
-
-4. Click Play.
+3. Click "Choose Disc Image..." (or drop the file on the window) and pick it.
+   The game's files are taken out of it into the "game" folder (about 4 GB;
+   under a minute from an .rvz or .iso, a few minutes from a .wia). The game
+   starts when it's done. This is needed once.
 
 The first start takes a little longer and may stutter for a moment while the
 shaders are made; they are kept in the "shadercache" folder for next time.
@@ -52,7 +52,7 @@ A gamepad works as a Classic Controller: plug it in before starting.
 
 F1 in the game opens its settings menu: the field of view, the frame rate, the mouse, the
 gamepad and the key bindings, changed while you play (a mission is paused
-first). It writes the same settings.env and keys.txt as the window.
+first). It keeps them in settings.env and keys.txt.
 
 Its Hotkeys page puts settings on keys of your own: a key for 30 frames a second and back,
 one that turns the level timer on and off, one for a wider view... They work while you play,
@@ -64,24 +64,22 @@ Delete it to get the defaults back (a copy is in config\keys.txt).
 
 Settings
 --------
-The window Play.bat opens has them: frame rate, field of view, mouse
-sensitivity and mode, fullscreen, a quicker start; the Controls tab rebinds
-every action (Set, then press a key or a mouse button); the Enhancements tab has
-Skip Intro Cutscenes, the Level Timer and the Unused Extras Menu; the Cheats tab
-Always Enable Mouse and any code in config\gecko\cheats.txt.
+All of them are in F1. Start Fullscreen (Screen Settings), Online and Quicker
+Start (Enhancements) apply from the next start on.
 
-From a command line, any option skips the window:
-    Play.bat --no-gui                  start with what was saved
-    Play.bat --fps 120 --fov 70 --mouse 1.5 --fullscreen
-    Play.bat --extract D:\GoldenEye.rvz
-    Play.bat --window 1920x1080        (options of the game itself pass through)
+From a command prompt in this folder, options go over what's saved, for that start:
+    Janus-Project.exe --fps 120 --fov 70 --mouse 1.5 --fullscreen
+    Janus-Project.exe --offline                 the game doesn't look for its servers
+    Janus-Project.exe --extract D:\GoldenEye.rvz (--force replaces a game folder that's there)
+    Janus-Project.exe --window 1920x1080        (options of the game itself pass through)
+    Janus-Project.exe --help                    every option
 
 
 Where things are
 ----------------
     nand\           your saves and profiles (made on the first start). Back this up.
     keys.txt        key bindings
-    settings.env    what the settings window saved
+    settings.env    your settings (F1 writes them)
     mods/           levels that aren't the game's own (.edb files): Extras > Mods in the
                     game's menu lists them. It has a folder for each online game mode
                     (conflict, team_conflict, golden_gun, black_box, goldeneye, heroes,
@@ -95,15 +93,14 @@ Where things are
     run.log         the log of the last run
     shadercache\    compiled shaders; safe to delete
     config\         Gecko codes, cheats, the server list, function names for the log
-    launcher\, python\   the settings window and the disc extraction, and what runs them
 
 
 If something goes wrong
 -----------------------
-- "The game's files are missing": Extract disc... has not been done yet. If you
-  extracted with Dolphin instead, game\sys\main.dol and game\files\ must exist
-  (move what is inside a DATA folder up into "game").
-- Extract disc... says the image is another game: only the US version (SJBE52)
+- The window asks for the disc image again: the "game" folder has no
+  game\sys\main.dol and game\files\. If you extracted with Dolphin instead,
+  move what is inside its DATA folder up into "game".
+- The window says the image is another game: only the US version (SJBE52)
   works with this build.
 - A window that closes at once, or a black one: update the graphics driver. On
   a laptop, make Janus-Project.exe use the dedicated graphics card (Windows
@@ -112,7 +109,7 @@ If something goes wrong
   has no AVX2. This build cannot run there.
 - Windows SmartScreen says the program is unknown: More info -> Run anyway.
 - Online does not connect: allow Janus-Project.exe through the Windows firewall
-  when it asks, and leave "Online" ticked in the Play.bat window.
+  when it asks, and leave F1 > Enhancements > Online on.
 - Anything else: run.log ends with what happened. Send it along with a report,
   and the version: its first lines have it, and so does the foot of the F1 menu.
 
@@ -125,9 +122,9 @@ Not in this build
 Credits
 -------
 Janus-Project itself is under the Mozilla Public License 2.0. It is built on
-wiikit (MIT), SDL3 (zlib license) and Dear ImGui (MIT, with the Roboto typeface,
-Apache 2.0); the launcher runs on Python with Tk and pycryptodome. Their licenses
-are in licenses\. The fonts in
+wiikit (MIT), SDL3 (zlib license), Dear ImGui (MIT, with the Roboto typeface,
+Apache 2.0) and OpenSSL; the disc images are read with zstd (BSD), bzip2 and the
+LZMA SDK (public domain). Their licenses are in licenses\. The fonts in
 "fonts" are Dolphin's free replacements for the console's (licenses\ has the note).
 GoldenEye 007 is the property of its owners; this package contains none of its
 data files. This is an unofficial fan project, not made or endorsed by Activision,
