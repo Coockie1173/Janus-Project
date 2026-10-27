@@ -192,7 +192,7 @@ uint32_t ItemById(uint32_t ctrl, uint32_t id)
 Gun GunOf(PPCContext& c, uint32_t ctrl, uint32_t ids[3])
 {
 	Gun g;
-	if (const uint32_t item{ ItemAt(ctrl, (int8_t)ld8(ctrl + kInHand)) }) g.held = ld32(item);
+	if (const uint32_t item{ ItemAt(ctrl, (int8_t)ld8(ctrl + kInHand)) }; item && (int32_t)ld32(item + kItemHas) > 0) g.held = ld32(item); //a gun given away stays as an empty item
 	PPCContext call{ c };
 	call.r[3] = ctrl;
 	call.r[4] = ~0u;
@@ -333,7 +333,12 @@ void Blend(PPCContext& c)
 		st32(me + kEntityPlace + i * 4, kept[i]);
 		st32(me + kEntityRot + i * 4, kept[4 + i]);
 	}
+	//the hand and the weapon's row are in the movement block too: what the blend made of them stays
+	//unless ours are kept
+	uint8_t blendGun[std::size(kGunBytes)];
+	for (size_t i = 0; i < std::size(kGunBytes); ++i) blendGun[i] = ld8(drawn + kGunBytes[i]);
 	for (uint32_t i = 0; i < kBlockSize / 4; ++i) st32(drawn + kBlock + i * 4, ownBlock[i]);
+	for (size_t i = 0; i < std::size(kGunBytes); ++i) st8(drawn + kGunBytes[i], blendGun[i]);
 	for (uint32_t i = 0; i < kLiveSize / 4; ++i) st32(drawn + kLive + i * 4, own71C[i]);
 	for (uint32_t i = 0; i < 3; ++i) st32(drawn + kLive2 + i * 4, own1C0[i]);
 	for (size_t i = 0; i < std::size(kLook); ++i) st32(drawn + kLook[i], ownLook[i]);
