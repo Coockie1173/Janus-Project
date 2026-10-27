@@ -137,7 +137,8 @@ ge_load_soundbank      # a soundbank is loaded: GE_TRACESOUND logs it (port/soun
 ge_soundbank_slot      # a soundbank is checked for its slot: Weapon Randomizer's weapons bank has a slot of its own (port/randomizer.cpp)
 ge_soundbank_slot_memory # a soundbank slot's memory: the randomizer's slot is the port's (port/randomizer.cpp)
 ge_fall_start          # the player starts falling: not off a hop while bunnyhopping, only well below where it left the floor (port/bunnyhop.cpp)
-ge_move_grab           # a ladder or a ledge is looked for in the air: none while a hop is held
+ge_move_grab           # a ladder or a ledge is looked for in the air: none while a hop is held, and no ladder while bunnyhopping
+ge_ladder_foot         # a ladder's foot is looked for on foot: none while bunnyhopping, ladders are half-life's then
 ge_sprint_allowed      # bunnyhopping, no sprint starts and one going ends
 ge_move_speed          # bunnyhopping, the run is the menu's base speed
 ge_tank_level          # bunnyhopping, the tank's mission is on foot

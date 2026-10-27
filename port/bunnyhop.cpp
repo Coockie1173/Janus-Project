@@ -37,6 +37,17 @@
 //ge_action_update's vault and climb, still gets the game's). the run is kBaseSpeed instead:
 //ge_move_speed's 4.2 standing up (806E947C), the sprint's is 6.6, aimed and crouched stay the game's
 //
+//ladders are half-life's: the game's own (walked into from the foot, ge_ladder_foot, or backed off
+//the top, ge_move_grab's 0x100) are never taken. a ladder is its pieces, polygons with flags 0x1000
+//(see eurochef's goldeneye_wii.md), and the player is on one while a piece is within kLadderReach
+//in front of the feet or the chest: the search ge_ladder_foot makes, asked at those two points.
+//on it there's no gravity, the stick moves the player along where they look, pitch and all, and
+//what of that goes into the ladder goes up it instead (half-life's PM_LadderMove): so forward
+//looking up climbs, looking far down goes down, sideways strafes along it. backing off on the
+//floor walks away, past the top the speed up carries the player over, and the jump key pushes
+//off it (held, as while hopping, the player doesn't stay on it). the climb is kClimb of the base
+//speed, half-life's 200 of its 320
+//
 //pre-strafing: on the floor without the key it's half-life's ground move, friction (sv_friction,
 //stopspeed) then the accelerate (sv_accelerate) up to the game's walk speed along the stick. that only
 //caps the speed along the stick, so strafing while turning gains speed on the floor as in the air,
@@ -100,6 +111,8 @@ const uint32_t kMoveStick = 0x500, kTimeStep = 0x578, kPlayerState = 0x704;
 const uint32_t kSprinting = 0xE59, kCrouched = 0xC54, kSlowed = 0xD00;
 const uint32_t kAskStart = 0x8010D9B0, kAskGoOn = 0x8010DA8C; //ge_sprint_update's calls of ge_sprint_allowed
 const float kGameRun = 4.2f; //806E947C
+const uint32_t kView = 0x16C, kViewPitch = 0x768; //the entity's view, its pitch (down is positive)
+const uint32_t kGrabbed = 0xA30, kGrabLadder = 0x100; //ge_move_grab's find, a ladder's top
 const uint32_t kStateStanding = 0, kStateMoving = 2, kStateSprinting = 3, kStateFalling = 4;
 //the tunables, F1 > For Fun > Bunnyhopping, saved as LAUNCH_BHOP_*
 BhopValue g_values[kBhopValueCount]{
@@ -136,6 +149,9 @@ float& kFriction = g_now.v[kBhopFriction];
 const float kStopSpeed = 2.0f; //under this friction takes as if it were this, half-life's stopspeed of its run
 const float kGain = 0.1f; //the floor's speed is ours this much over the game's walk
 const float kDeadZone = 0.2f;
+const float kClimb = 0.625f, kPushOff = 0.84f; //of the base speed: half-life's climb and jump off a ladder, of its run
+const float kLadderReach = 0.6f; //a ladder's piece this far in front of the player has them
+const float kLadderAt[2]{ 0.3f, 1.1f }; //the points above the feet it's looked for at
 const float kWalkable = 0.7f; //a normal this far up is a floor, half-life's
 const float kRamp = 0.05f; //and this far up a ramp, not a wall
 const uint32_t kExtraJump = 1u << 5;
@@ -157,6 +173,8 @@ bool g_trace = false;
 bool g_log = true; //the speed in the log, twice a second
 PPCFunc orig_fall_start = nullptr, orig_move_grab = nullptr, orig_sprint_allowed = nullptr, orig_move_speed = nullptr;
 PPCFunc orig_command_write = nullptr, orig_command_read = nullptr;
+PPCFunc orig_ladder_foot = nullptr, search_near = nullptr, search_all = nullptr;
+const uint32_t kSearchNear = 0x8027D6F0, kSearchAll = 0x8032E5E0; //what ge_ladder_foot asks the world
 PPCFunc orig_tank_level = nullptr, orig_player_skin = nullptr;
 const uint32_t kLevels = 0x805D1804, kLevelRow = 0x805D1820, kRowSkin = 0x78; //the level manager, its row of the level
 const uint32_t kLevelKind = 0xFFFF0000, kCampaignLevel = 0x01810000;
@@ -198,6 +216,7 @@ struct Hopper
 	float gravityGame = 0, gravityOurs = 0;
 	float fallen = 0; //the deadly fall as we left it
 	float floorY = 0, topY = 0; //where the player left the floor, and the highest since
+	bool ladder = false; //on one, see the top
 };
 const int kHoppers = 16;
 Hopper g_hoppers[kHoppers];
@@ -331,10 +350,11 @@ void LowGravity(Hopper& h, uint32_t body)
 {
 	if (body != h.gravityBody) GameGravity(h);
 	const float now{ ldf(body + kBodyGravity) };
-	if (!std::isfinite(now) || now <= 0) return;
-	if (body != h.gravityBody || now != h.gravityOurs) h.gravityGame = now; //the game set it again
+	const bool ours{ body == h.gravityBody && now == h.gravityOurs };
+	if (!std::isfinite(now) || (now <= 0 && !ours)) return;
+	if (!ours) h.gravityGame = now; //the game set it again
 	h.gravityBody = body;
-	h.gravityOurs = h.gravityGame * kGravity;
+	h.gravityOurs = h.ladder ? 0.0f : h.gravityGame * kGravity;
 	stf(body + kBodyGravity, h.gravityOurs);
 }
 
@@ -379,6 +399,7 @@ void FallStart(PPCContext& c)
 		orig_fall_start(c);
 		return;
 	}
+	if (h->ladder) return;
 	const float y{ ldf(entity + kPos + 4) };
 	if (std::isfinite(y) && h->floorY - y < kFreeDrop) return;
 	orig_fall_start(c);
@@ -387,13 +408,96 @@ void FallStart(PPCContext& c)
 
 void MoveGrab(PPCContext& c)
 {
-	Hopper* h = Hops(c.r[3]);
+	const uint32_t ctrl{ c.r[3] };
+	Hopper* h = Hops(ctrl);
 	if (h && h->active && h->jump)
 	{
 		c.r[3] = 0;
 		return;
 	}
 	orig_move_grab(c);
+	if (h && search_all && (ld16(ctrl + kGrabbed) & kGrabLadder)) c.r[3] = 0;
+}
+
+void LadderFoot(PPCContext& c)
+{
+	if (search_all && Hops(c.r[3]))
+	{
+		c.r[3] = 0;
+		return;
+	}
+	orig_ladder_foot(c);
+}
+
+//a ladder's piece within reach of the point: ge_ladder_foot's search, in a frame below the caller's.
+//its normal (towards the side it's climbed from) and how far in front of it the place is
+bool LadderAt(PPCContext& c, const float at[3], const float place[3], float n[3], float& ahead)
+{
+	const uint32_t stack{ c.r[1] }, frame{ (stack - 0x120) & ~0xFu }, record{ frame + 0x10 };
+	st32(frame, stack);
+	for (uint32_t i = 0; i < 0xF0; i += 4) st32(record + i, 0);
+	for (int k = 0; k < 3; ++k) stf(record + 4 * k, at[k]);
+	st32(record + 0x10, 2); //polygons
+	stf(record + 0x14, kLadderReach);
+	st32(record + 0x1C, 0x400);
+	PPCContext call{ c };
+	call.r[1] = frame;
+	call.r[3] = kWorld;
+	call.r[4] = record;
+	search_near(call);
+	call = c;
+	call.r[1] = frame;
+	call.r[3] = kWorld;
+	call.r[4] = record;
+	search_all(call);
+	const uint32_t type{ ld32(record + 0x24) };
+	if ((type != 2 && type != 4) || !(ld16(record + 0x28) & 0x1000)) return false;
+	float corner[3][3];
+	for (int i = 0; i < 3; ++i)
+		for (int k = 0; k < 3; ++k) corner[i][k] = ldf(record + 0x50 + 0x10 * i + 4 * k);
+	float u[3], v[3];
+	for (int k = 0; k < 3; ++k) u[k] = corner[1][k] - corner[0][k], v[k] = corner[2][k] - corner[0][k];
+	n[0] = u[1] * v[2] - u[2] * v[1];
+	n[1] = u[2] * v[0] - u[0] * v[2];
+	n[2] = u[0] * v[1] - u[1] * v[0];
+	const float length{ std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]) };
+	if (!std::isfinite(length) || length < 1e-6f) return false;
+	for (int k = 0; k < 3; ++k) n[k] /= length;
+	if (std::fabs(n[1]) > kWalkable) return false; //a ladder stands up
+	ahead = 0;
+	for (int k = 0; k < 3; ++k) ahead += n[k] * (place[k] - corner[0][k]);
+	return ahead > 0.05f && ahead < kLadderReach;
+}
+
+//on a ladder: the stick along the look, what goes into the ladder up it (half-life's PM_LadderMove)
+void Climb(Hopper& h, uint32_t ctrl, uint32_t entity, uint32_t body, const float n[3], float stickX, float stickY, float yaw, bool floor, float dt)
+{
+	const uint32_t view{ ld32(entity + kView) };
+	float pitch{ guest_ptr(view) ? ldf(view + kViewPitch) : 0.0f };
+	if (!std::isfinite(pitch)) pitch = 0;
+	const float climb{ kBaseSpeed * kClimb };
+	const bool moving{ std::hypot(stickX, stickY) >= kDeadZone };
+	const float forward{ moving ? std::clamp(stickY, -1.0f, 1.0f) * climb : 0.0f }, side{ moving ? std::clamp(stickX, -1.0f, 1.0f) * climb : 0.0f };
+	float v[3]{ std::sin(yaw) * std::cos(pitch) * forward + std::cos(yaw) * side, -std::sin(pitch) * forward, std::cos(yaw) * std::cos(pitch) * forward - std::sin(yaw) * side };
+	const float into{ v[0] * n[0] + v[1] * n[1] + v[2] * n[2] };
+	//along the ladder and level, and up it
+	float across[3]{ n[2], 0.0f, -n[0] };
+	const float length{ std::hypot(across[0], across[2]) };
+	if (length > 1e-6f) across[0] /= length, across[2] /= length;
+	const float up[3]{ n[1] * across[2] - n[2] * across[1], n[2] * across[0] - n[0] * across[2], n[0] * across[1] - n[1] * across[0] };
+	for (int k = 0; k < 3; ++k) v[k] += -into * n[k] - into * up[k];
+	if (floor && into > 0) //backing off it on the floor walks away
+	{
+		for (int k = 0; k < 3; ++k) v[k] += climb * n[k];
+	}
+	h.vel[0] = v[0];
+	h.vel[1] = v[2];
+	h.active = true;
+	h.fallen = 0;
+	stf(ctrl + kFallen, 0.0f);
+	stf(body + kBodyStep, v[0] * dt);
+	stf(body + kBodyStep + 8, v[2] * dt);
+	stf(body + kBodyFallSpeed, v[1]);
 }
 
 void SprintAllowed(PPCContext& c)
@@ -690,7 +794,7 @@ void bunnyhop_read(PPCContext& c, uint32_t stream)
 }
 
 //after ge_look_apply, its step is in the body
-void bunnyhop_look(uint32_t ctrl)
+void bunnyhop_look(PPCContext& c, uint32_t ctrl)
 {
 	Hopper* hp = Hops(ctrl);
 	const uint32_t entity{ ld32(ctrl + kEntity) };
@@ -708,6 +812,7 @@ void bunnyhop_look(uint32_t ctrl)
 	if (!Free(ld32(ctrl + kPlayerState)))
 	{
 		h.active = false;
+		if (h.ladder) h.ladder = false, LowGravity(h, body);
 		return;
 	}
 	if (entity != h.entity) h.active = false;
@@ -738,6 +843,40 @@ void bunnyhop_look(uint32_t ctrl)
 	//the stick in the world, as noclip.cpp has it
 	const float wishX{ stick > 0 ? (std::cos(yaw) * stickX + std::sin(yaw) * stickY) / stick : 0 };
 	const float wishZ{ stick > 0 ? (-std::sin(yaw) * stickX + std::cos(yaw) * stickY) / stick : 0 };
+
+	const bool wasLadder{ h.ladder };
+	float n[3]{};
+	h.ladder = false;
+	if (search_near && search_all && std::isfinite(posY))
+	{
+		const float place[3]{ ldf(entity + kPos), posY, ldf(entity + kPos + 8) };
+		float ahead{ 0 };
+		for (float above : kLadderAt)
+		{
+			const float at[3]{ place[0], posY + above, place[2] };
+			if (LadderAt(c, at, place, n, ahead)) { h.ladder = true; break; }
+		}
+	}
+	if (h.ladder && h.jump) //off it
+	{
+		h.ladder = false;
+		h.vel[0] = n[0] * kBaseSpeed * kPushOff;
+		h.vel[1] = n[2] * kBaseSpeed * kPushOff;
+		h.active = true;
+		h.floorY = h.topY = posY;
+	}
+	if (h.ladder != wasLadder)
+	{
+		LowGravity(h, body);
+		if ((g_trace || g_log) && local) rt_log("goldeneye: bunnyhop: %s a ladder at %.2f %.2f %.2f", h.ladder ? "on" : "off", ldf(entity + kPos), posY, ldf(entity + kPos + 8));
+	}
+	if (h.ladder)
+	{
+		Climb(h, ctrl, entity, body, n, stickX, stickY, yaw, floor, dt);
+		h.floorY = h.topY = posY;
+		if (local) g_speed = std::hypot(h.vel[0], h.vel[1]);
+		return;
+	}
 
 	//a wall, a ceiling or a ramp the body touched takes the speed into it, as half-life's
 	//ClipVelocity: the push out of it (+0xEC) is its normal, and the speed is ours across and the
@@ -848,6 +987,10 @@ void install_bunnyhop()
 	}
 	orig_fall_start = ppc_hook("ge_fall_start", FallStart);
 	orig_move_grab = ppc_hook("ge_move_grab", MoveGrab);
+	orig_ladder_foot = ppc_hook("ge_ladder_foot", LadderFoot);
+	search_near = ppc_lookup(kSearchNear);
+	search_all = orig_ladder_foot && search_near ? ppc_lookup(kSearchAll) : nullptr;
+	if (!search_all) rt_log("goldeneye: bunnyhop: ge_ladder_foot or the world's search isn't in this build, ladders are the game's");
 	orig_sprint_allowed = ppc_hook("ge_sprint_allowed", SprintAllowed);
 	orig_move_speed = ppc_hook("ge_move_speed", MoveSpeed);
 	if (!orig_sprint_allowed || !orig_move_speed) rt_log("goldeneye: bunnyhop: ge_sprint_allowed or ge_move_speed isn't hooked, the sprint and the run are the game's");

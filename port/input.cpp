@@ -419,16 +419,16 @@ void look_apply(PPCContext& c) {
         float& turn = turn_of(ctrl);
         float add = dt > 0.0005f && dt < 0.3f ? turn / dt : 0;
         turn = 0;
-        if (add == 0) { orig_look_apply(c); bunnyhop_look(ctrl); return; }
+        if (add == 0) { orig_look_apply(c); bunnyhop_look(c, ctrl); return; }
         stf(ctrl + 0x97C, ldf(ctrl + 0x97C) + add);
         orig_look_apply(c);
         stf(ctrl + 0x97C, ldf(ctrl + 0x97C) - add);
-        bunnyhop_look(ctrl);
+        bunnyhop_look(c, ctrl);
         return;
     }
     if (ctrl != g_look_ctrl || g_look_yaw == 0 || !(dt > 0.0005f && dt < 0.2f)) {
         orig_look_apply(c);
-        if (guest_ptr(ctrl)) bunnyhop_look(ctrl);
+        if (guest_ptr(ctrl)) bunnyhop_look(c, ctrl);
         return;
     }
     float rate = ldf(ctrl + 0x97C), add = g_look_yaw / dt;
@@ -436,7 +436,7 @@ void look_apply(PPCContext& c) {
     stf(ctrl + 0x97C, rate + add);
     orig_look_apply(c);
     stf(ctrl + 0x97C, ldf(ctrl + 0x97C) - add);
-    bunnyhop_look(ctrl);
+    bunnyhop_look(c, ctrl);
 }
 
 const uint32_t kClA = 0x0010, kClB = 0x0040, kClZR = 0x0004, kClZL = 0x0080; //KPAD's classic bits

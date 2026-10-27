@@ -274,7 +274,7 @@ void set_no_attachment_limit(bool on);
 void install_bunnyhop(); //bunnyhop.cpp
 bool bunnyhop(); //for fun, the player hops by itself and strafing in the air adds speed
 void set_bunnyhop(bool on);
-void bunnyhop_look(uint32_t controller); //after ge_look_apply, the body's step is ours
+void bunnyhop_look(PPCContext& c, uint32_t controller); //after ge_look_apply, the body's step is ours
 void bunnyhop_apply(uint32_t controller); //after a controller's update: the local one's offline, every one's online
 void bunnyhop_command(uint32_t command); //a command of this console's was filled: the jump key goes in
 uint32_t bunnyhop_input(uint32_t controller, uint32_t command); //before ge_input_copy: the key is the controller's
