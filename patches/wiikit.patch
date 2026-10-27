@@ -933,10 +933,22 @@ index 3d2da4e..24964ed 100644
      X(PFNGLTEXTUREPARAMETERIPROC, glTextureParameteri)                                              \
      X(PFNGLBINDTEXTUREUNITPROC, glBindTextureUnit)                                                  \
 diff --git a/runtime/gx.cpp b/runtime/gx.cpp
-index a6b37f2..5fe79c1 100644
+index a6b37f2..462744d 100644
 --- a/runtime/gx.cpp
 +++ b/runtime/gx.cpp
-@@ -25,6 +25,7 @@
+@@ -21,10 +21,19 @@
+ // through the arrays, textures decoded to RGBA through TMEM's palettes and
+ // cached by content, and EFB copies remembered by address so that a texture
+ // read from there is the copy, kept on the host GPU.
++//
++// WIIKIT_GX_THREAD=1: the GP on a thread of its own. The pipe and the FIFO's
++// pointers stay with the CPU; each burst the GP would read goes to a ring, and
++// a worker parses it there, as the console's GP reads the FIFO while the CPU
++// goes on. Draw done and tokens come when the worker reaches them, which is
++// what the game waits for before it reuses what it drew from. What reads the
++// GP's state from the CPU's side (EFB peeks, copies read back, a port's debug
++// scene) waits for the worker to finish what it was given first.
+ #include "rt.h"
  #include <atomic>
  #include <chrono>
  #include "gxtex.h"
@@ -944,11 +956,12 @@ index a6b37f2..5fe79c1 100644
  #include "video.h"
  #include <algorithm>
  #include <mutex>
-@@ -33,8 +34,17 @@
+@@ -33,13 +42,48 @@
  #include <cstring>
  #include <set>
  #include <unordered_map>
 +#include <string>
++#include <thread>
  #include <vector>
  
 +#if defined(__x86_64__) || defined(_M_X64)
@@ -962,7 +975,38 @@ index a6b37f2..5fe79c1 100644
  namespace {
  
  uint32_t pi_base, pi_end, pi_wptr;                 // PI CPU FIFO (physical addresses)
-@@ -56,6 +66,8 @@ std::atomic<bool> trace_next{false};
+ uint16_t cp_reg16[0x40];                           // CP MMIO, 0xCC000000
+-uint16_t pe_ctrl, pe_token;                        // PE MMIO: interrupt control, token
++std::atomic<uint16_t> pe_ctrl{0}, pe_token{0};     // PE MMIO: interrupt control, token (the GP's thread sets them)
++
++// PE's interrupts one at a time. The SDK's token handler writes back the control register it
++// read, status bits and all, so a finish that came while a token was waiting is cleared with
++// it and GXDrawDone sleeps for good. The console's GP reaches the two far apart; the GP's
++// thread (or the renderer) may reach them together while the CPU has interrupts off. So a
++// token or a finish waits while the other is raised and enabled, and comes when it is cleared.
++std::mutex pe_mx;
++struct PeEvent { uint16_t bit, token; };
++std::vector<PeEvent> pe_queue;
++bool pe_busy(uint16_t pe) { return ((pe & 4) && (pe & 1)) || ((pe & 8) && (pe & 2)); }
++void pe_apply(const PeEvent& e) {
++    if (e.bit == 4) pe_token.store(e.token);
++    pe_ctrl |= e.bit;
++    os_raise();
++}
++void pe_signal(uint16_t bit, uint16_t token) {
++    std::lock_guard<std::mutex> lk(pe_mx);
++    if (pe_busy(pe_ctrl.load()) && pe_queue.size() < 64) pe_queue.push_back(PeEvent{bit, token});
++    else pe_apply(PeEvent{bit, token});
++}
++void pe_next() {                                    // pe_mx held: the CPU wrote the control register
++    size_t k = 0;
++    while (k < pe_queue.size() && !pe_busy(pe_ctrl.load())) pe_apply(pe_queue[k++]);
++    pe_queue.erase(pe_queue.begin(), pe_queue.begin() + (ptrdiff_t)k);
++}
+ uint32_t cp[0x100];                                // CP internal registers (VCD, VAT, arrays)
+ uint32_t bp[0x100];
+ uint32_t xf[0x1058];
+@@ -56,6 +100,8 @@ std::atomic<bool> trace_next{false};
  FILE* trace_file() {
      static long want = std::getenv("WIIKIT_GXTRACE") ? std::atol(std::getenv("WIIKIT_GXTRACE")) : -1;
      static FILE* f = nullptr;
@@ -971,7 +1015,20 @@ index a6b37f2..5fe79c1 100644
      if (!f && trace_next.exchange(false)) {
          want = (long)st.frames + 1;
          rt_log("gx: tracing frame %ld to gxtrace_%ld.txt", want, want);
-@@ -109,7 +121,7 @@ void warn_once(const char* what, uint32_t v) {
+@@ -76,6 +122,12 @@ FILE* trace_file() {
+ // CP control: 0 GP read enable, 1 breakpoint enable, 2/3 overflow/underflow
+ // interrupt enable, 4 GP link enable, 5 breakpoint interrupt enable
+ bool linked() { return (cp_reg16[1] & 0x11) == 0x11; }
++
++// the port's switches as they were when the GP was given the commands (WIIKIT_GX_THREAD)
++const bool gp_thread = std::getenv("WIIKIT_GX_THREAD") && std::atoi(std::getenv("WIIKIT_GX_THREAD")) != 0;
++bool gp_skip_now = false, gp_early_now = false;
++bool skip_frames() { return gp_thread ? gp_skip_now : g_gx_skip_frames; }
++bool early_done() { return gp_thread ? gp_early_now : g_gx_early_done; }
+ bool bp_enabled() { return (cp_reg16[1] & 0x3) == 0x3; }
+ uint32_t bp_addr() { return (uint32_t)(cp_reg16[0x1F] & 0x3FFF) << 16 | cp_reg16[0x1E]; }   // CP 0x3C, 0x3E
+ 
+@@ -109,7 +161,7 @@ void warn_once(const char* what, uint32_t v) {
  
  // guest physical range [a, a + n) is in MEM1 or MEM2
  bool mem_ok(uint32_t a, size_t n) {
@@ -980,7 +1037,7 @@ index a6b37f2..5fe79c1 100644
  }
  
  // ---- the record ------------------------------------------------------------------------------
-@@ -139,7 +151,9 @@ void flush(bool force) {
+@@ -139,7 +191,9 @@ void flush(bool force) {
      submit_pending = true;
  }
  
@@ -990,7 +1047,7 @@ index a6b37f2..5fe79c1 100644
      uint64_t h = 0x9E3779B97F4A7C15ull ^ n;
      size_t i = 0;
      for (; i + 8 <= n; i += 8) {
-@@ -152,6 +166,53 @@ uint64_t hash_mem(const uint8_t* p, size_t n) {
+@@ -152,6 +206,53 @@ uint64_t hash_mem(const uint8_t* p, size_t n) {
      return h;
  }
  
@@ -1044,7 +1101,7 @@ index a6b37f2..5fe79c1 100644
  // ---- textures --------------------------------------------------------------------------------
  // Decoded textures are cached by what names them (address, format, size,
  // levels, palette) and re-uploaded when their bytes change. Bytes are hashed
-@@ -169,14 +230,25 @@ struct TexKeyHash {
+@@ -169,14 +270,25 @@ struct TexKeyHash {
          return (size_t)(k.addr * 0x9E3779B1u ^ k.shape * 0x85EBCA77u ^ k.levels ^ k.tlut);
      }
  };
@@ -1072,7 +1129,7 @@ index a6b37f2..5fe79c1 100644
  
  // texture format an EFB copy format produces in RAM (for its size)
  uint32_t copy_tex_fmt(uint32_t cf) {
-@@ -184,7 +256,11 @@ uint32_t copy_tex_fmt(uint32_t cf) {
+@@ -184,7 +296,11 @@ uint32_t copy_tex_fmt(uint32_t cf) {
      return f[cf & 15];
  }
  
@@ -1084,7 +1141,7 @@ index a6b37f2..5fe79c1 100644
      uint32_t gen = bp[0x00], used = 0;
      int ntev = (int)(gen >> 10 & 15) + 1, nind = (int)(gen >> 16 & 7);
      for (int s = 0; s < ntev; ++s) {
-@@ -192,9 +268,11 @@ uint32_t used_maps() {
+@@ -192,9 +308,11 @@ uint32_t used_maps() {
          if (t & 0x40) used |= 1u << (t & 7);
      }
      for (int i = 0; i < nind && i < 4; ++i) used |= 1u << (bp[0x27] >> (6 * i) & 7);
@@ -1097,7 +1154,7 @@ index a6b37f2..5fe79c1 100644
  void bind_map(int m) {
      int off = (m & 3) + (m >= 4 ? 0x20 : 0);
      uint32_t mode0 = bp[0x80 + off], mode1 = bp[0x84 + off], img0 = bp[0x88 + off],
-@@ -203,9 +281,79 @@ void bind_map(int m) {
+@@ -203,9 +321,79 @@ void bind_map(int m) {
      uint32_t fmt = img0 >> 20 & 15, addr = (img3 & 0xFFFFFF) << 5;
      if (img1 >> 21 & 1) warn_once("texture preloaded in TMEM (not modelled), map", m);
  
@@ -1180,7 +1237,7 @@ index a6b37f2..5fe79c1 100644
          uint64_t tag = 1ull << 32 | addr;
          if (map_bound[m] != tag) {
              put<uint8_t>(VC_TEXEFB);
-@@ -216,7 +364,7 @@ void bind_map(int m) {
+@@ -216,7 +404,7 @@ void bind_map(int m) {
          return;
      }
      if (!gxtex_known(fmt)) { warn_once("unknown texture format", fmt); return; }
@@ -1189,7 +1246,7 @@ index a6b37f2..5fe79c1 100644
      int full = 1;
      while ((w >> full) || (h >> full)) ++full;
      int levels = 1;
-@@ -224,6 +372,19 @@ void bind_map(int m) {
+@@ -224,6 +412,19 @@ void bind_map(int m) {
          levels = (int)((mode1 >> 8 & 0xFF) + 15) / 16 + 1;
          if (levels > full) levels = full;
      }
@@ -1209,7 +1266,7 @@ index a6b37f2..5fe79c1 100644
      size_t total = 0;
      for (int l = 0; l < levels; ++l) total += gxtex_size(fmt, std::max(1, w >> l), std::max(1, h >> l));
      if (!addr || !mem_ok(addr, total)) { warn_once("texture outside memory at", addr); return; }
-@@ -246,13 +407,27 @@ void bind_map(int m) {
+@@ -246,13 +447,27 @@ void bind_map(int m) {
      TexEntry& e = it->second;
      bool upload = false;
      if (fresh || e.gen != tex_gen) {
@@ -1240,7 +1297,7 @@ index a6b37f2..5fe79c1 100644
          put<uint8_t>(VC_TEXUP);
          put<uint8_t>((uint8_t)m);
          put<uint32_t>(e.id);
-@@ -267,8 +442,10 @@ void bind_map(int m) {
+@@ -267,8 +482,10 @@ void bind_map(int m) {
              s += gxtex_size(fmt, lw, lh);
          }
          static const char* dump = std::getenv("WIIKIT_TEXDUMP");     // debugging: uploads as PNGs
@@ -1252,7 +1309,7 @@ index a6b37f2..5fe79c1 100644
              char name[512];
              std::snprintf(name, sizeof name, "%s/tex_%04d_%08X_f%u_%dx%d.png", dump, dumped++, addr, fmt, w, h);
              write_png(name, w, h, rec.data() + at);
-@@ -283,6 +460,7 @@ void bind_map(int m) {
+@@ -283,6 +500,7 @@ void bind_map(int m) {
  }
  
  void sync_textures() {
@@ -1260,7 +1317,7 @@ index a6b37f2..5fe79c1 100644
      uint32_t todo = used_maps() & tex_dirty;
      for (int m = 0; m < 8; ++m)
          if (todo >> m & 1) bind_map(m);
-@@ -351,11 +529,14 @@ VtxFmt vtx_fmt(int v) {
+@@ -351,11 +569,14 @@ VtxFmt vtx_fmt(int v) {
          f.tc_fmt[i] = t[i][1];
          f.tc_sc[i] = 1.0f / (float)(1u << t[i][2]);
      }
@@ -1276,7 +1333,7 @@ index a6b37f2..5fe79c1 100644
  }
  
  // bytes per vertex for vertex format `v`
-@@ -378,6 +559,35 @@ int vertex_size(const VtxFmt& f) {
+@@ -378,6 +599,35 @@ int vertex_size(const VtxFmt& f) {
      return n;
  }
  
@@ -1312,7 +1369,7 @@ index a6b37f2..5fe79c1 100644
  // an attribute's data: in the stream (direct) or in its array (indexed)
  const uint8_t* fetch(uint32_t mode, int arr, int size, const uint8_t*& p, uint32_t sub = 0) {
      if (mode == 1) { const uint8_t* q = p; p += size; return q; }
-@@ -387,53 +597,131 @@ const uint8_t* fetch(uint32_t mode, int arr, int size, const uint8_t*& p, uint32
+@@ -387,53 +637,131 @@ const uint8_t* fetch(uint32_t mode, int arr, int size, const uint8_t*& p, uint32
      return host(virt(cp[0xA0 + arr] + idx * cp[0xB0 + arr] + sub));
  }
  
@@ -1471,11 +1528,11 @@ index a6b37f2..5fe79c1 100644
 +        if (!(st.frames & 1023)) mem_watch_tick();
 +        if (g_vperf_on) perf_frame();
 +        frame_log();
-+        if (video && !g_gx_skip_frames) {
++        if (video && !skip_frames()) {
              put<uint8_t>(VC_FRAME);
              ++rec_frames;
              flush(true);
-@@ -445,7 +733,22 @@ void efb_copy(uint32_t v) {
+@@ -445,7 +773,22 @@ void efb_copy(uint32_t v) {
      if (v >> 9 & 1) { w = (w + 1) / 2; h = (h + 1) / 2; }
      uint32_t tpf = v >> 3 & 15, real = tpf / 2 + (tpf & 1) * 8;
      size_t size = gxtex_size(copy_tex_fmt(real), w, h);
@@ -1499,7 +1556,7 @@ index a6b37f2..5fe79c1 100644
      tex_dirty = 0xFF;
  }
  
-@@ -454,13 +757,15 @@ void bp_write(uint32_t v) {
+@@ -454,17 +797,20 @@ void bp_write(uint32_t v) {
      if (reg == 0xFE) { bp_mask = val; return; }
      bp[reg] = (bp[reg] & ~bp_mask) | (val & bp_mask);
      bp_mask = 0xFFFFFF;
@@ -1511,17 +1568,25 @@ index a6b37f2..5fe79c1 100644
          // for it asleep (GXWaitDrawDone), and its other threads (the
          // disc, the sound stream) run meanwhile
 -        if (video) { put<uint8_t>(VC_DRAWDONE); flush(true); return; }
-+        if (video && !g_gx_early_done) { put<uint8_t>(VC_DRAWDONE); flush(true); return; }
+-        pe_ctrl |= 8; ++st.done; os_raise();
++        if (video && !early_done()) { put<uint8_t>(VC_DRAWDONE); flush(true); return; }
 +        if (video) flush(true);                                       // the renderer follows, frames_ahead behind at most
-         pe_ctrl |= 8; ++st.done; os_raise();
++        ++st.done;
++        pe_signal(8, 0);
          return;
-     case 0x47: pe_token = (uint16_t)val; return;                      // token
-@@ -477,13 +782,18 @@ void bp_write(uint32_t v) {
+-    case 0x47: pe_token = (uint16_t)val; return;                      // token
+-    case 0x48: pe_token = (uint16_t)val; pe_ctrl |= 4; os_raise(); return;   // token + interrupt
++    case 0x47: pe_token.store((uint16_t)val); return;                 // token
++    case 0x48: pe_signal(4, (uint16_t)val); return;                   // token + interrupt
+     case 0x64: return;                                                // TLUT source address
+     case 0x65: {                                                      // load a TLUT into TMEM
+         uint32_t src = (bp[0x64] & 0xFFFFFF) << 5, dst = (val & 0x3FF) << 9, n = (val >> 10 & 0x7FF) << 5;
+@@ -477,13 +823,18 @@ void bp_write(uint32_t v) {
      }
      if ((reg >= 0x80 && reg < 0x9C) || (reg >= 0xA0 && reg < 0xBC))
          tex_dirty |= (uint8_t)(1u << ((reg & 3) + (reg >= 0xA0 ? 4 : 0)));
 -    if (video) {
-+    if (video && !(g_gx_skip_frames && reg == 0x52)) {                      // a skipped frame copies nothing: the EFB is the last one drawn
++    if (video && !(skip_frames() && reg == 0x52)) {                      // a skipped frame copies nothing: the EFB is the last one drawn
          put<uint8_t>(VC_BP);
          put<uint32_t>(reg << 24 | bp[reg]);
      }
@@ -1536,7 +1601,7 @@ index a6b37f2..5fe79c1 100644
  void xf_load(uint32_t addr, uint32_t n, const uint8_t* src) {
      if (addr >= 0x1058) return;
      if (addr + n > 0x1058) n = 0x1058 - addr;
-@@ -493,6 +803,7 @@ void xf_load(uint32_t addr, uint32_t n, const uint8_t* src) {
+@@ -493,6 +844,7 @@ void xf_load(uint32_t addr, uint32_t n, const uint8_t* src) {
          for (uint32_t i = 0; i < n && i < 16; ++i) { float fv; std::memcpy(&fv, &xf[addr + i], 4); std::fprintf(tf, " %08X(%g)", xf[addr + i], fv); }
          std::fprintf(tf, "\n");
      }
@@ -1544,7 +1609,7 @@ index a6b37f2..5fe79c1 100644
      if (video) {
          put<uint8_t>(VC_XF);
          put<uint16_t>((uint16_t)addr);
-@@ -504,16 +815,415 @@ void xf_load(uint32_t addr, uint32_t n, const uint8_t* src) {
+@@ -504,16 +856,415 @@ void xf_load(uint32_t addr, uint32_t n, const uint8_t* src) {
  // parse one command at p (n bytes available); returns its length, 0 if incomplete
  size_t parse(const uint8_t* p, size_t n, bool in_dl);
  
@@ -1870,7 +1935,7 @@ index a6b37f2..5fe79c1 100644
 -        off += k;
 +    dl_now = addr;
 +    if (frame_log_on) frame_lists.push_back(addr);
-+    if (!video || !dl_cache_on || dl_building || g_gx_skip_frames || trace_file()) { dl_parse(p, 0, size); return; }
++    if (!video || !dl_cache_on || dl_building || skip_frames() || trace_file()) { dl_parse(p, 0, size); return; }
 +
 +    ++dl_stat.calls;
 +    if (dl_cache.size() > 50000) dl_cache.clear();   // lists made anew at new addresses: start over
@@ -1965,7 +2030,7 @@ index a6b37f2..5fe79c1 100644
      }
  }
  
-@@ -525,6 +1235,9 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
+@@ -525,6 +1276,9 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
      case 0x08:
          if (n < 6) return 0;
          cp[p[1]] = be32(p + 2);
@@ -1975,7 +2040,7 @@ index a6b37f2..5fe79c1 100644
          TRACE("CP %02X %08X\n", p[1], cp[p[1]]);
          return 6;
      case 0x10: {
-@@ -556,54 +1269,29 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
+@@ -556,54 +1310,29 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
      if (op >= 0x80 && op < 0xC0) {
          if (n < 3) return 0;
          uint32_t count = (uint32_t)p[1] << 8 | p[2];
@@ -1989,7 +2054,7 @@ index a6b37f2..5fe79c1 100644
          st.verts += count;
          TRACE("DRAW %02X fmt %d n %u%s\n", op & 0xF8, op & 7, count, in_dl ? " (dl)" : "");
 -        if (video && count) {
-+        if (video && count && !g_gx_skip_frames) {
++        if (video && count && !skip_frames()) {
              if (bp[0xF1] >> 21 & 7) warn_once("fog (not drawn), type", bp[0xF1] >> 21 & 7);
              if (bp[0xF4] >> 2 & 3) warn_once("Z texture (not drawn), op", bp[0xF4] >> 2 & 3);
 +            const uint8_t fl = pl.flags;
@@ -1999,10 +2064,7 @@ index a6b37f2..5fe79c1 100644
 -                auto t0 = std::chrono::steady_clock::now();
 -                sync_textures();
 -                g_vperf.tex += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count();
-+                uint64_t t0 = perf_ticks();
-+                decode_vertices(f, fl, p + 3, count, out);
-+                perf_vtx += perf_ticks() - t0;
-             } else {
+-            } else {
 -                sync_textures();
 -            }
 -            // VC_DRAW, prim, vertex flags, pieces (u32), then each piece: n (u32), n vertices
@@ -2022,15 +2084,18 @@ index a6b37f2..5fe79c1 100644
 -                auto t0 = std::chrono::steady_clock::now();
 -                fl = decode_vertices(f, p + 3, count, out);
 -                g_vperf.vtx += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count();
--            } else {
++                uint64_t t0 = perf_ticks();
++                decode_vertices(f, fl, p + 3, count, out);
++                perf_vtx += perf_ticks() - t0;
+             } else {
 -                fl = decode_vertices(f, p + 3, count, out);
--            }
++                decode_vertices(f, fl, p + 3, count, out);
+             }
 -            if (extend && rec[draw_hdr + 2] != fl) {      // other attributes: a draw of its own
 -                const uint8_t hdr[7] = {VC_DRAW, (uint8_t)(op & 0xF8), 0, 0, 0, 0, 0};
 -                rec.insert(rec.begin() + (ptrdiff_t)at, hdr, hdr + sizeof hdr);
 -                draw_hdr = at;
-+                decode_vertices(f, fl, p + 3, count, out);
-             }
+-            }
 -            rec[draw_hdr + 2] = fl;
 -            uint32_t pieces;
 -            std::memcpy(&pieces, &rec[draw_hdr + 3], 4);
@@ -2044,7 +2109,7 @@ index a6b37f2..5fe79c1 100644
          }
          return len;
      }
-@@ -614,8 +1302,17 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
+@@ -614,8 +1343,17 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
  
  void feed(const uint8_t* b, int n) {
      if (desync) return;
@@ -2063,7 +2128,103 @@ index a6b37f2..5fe79c1 100644
      while (off < stream.size()) {
          size_t k = parse(stream.data() + off, stream.size() - off, false);
          if (!k) { --st.cmds; break; }
-@@ -714,7 +1411,10 @@ bool gx_copy_to_ram(uint32_t addr) {
+@@ -624,6 +1362,79 @@ void feed(const uint8_t* b, int n) {
+     stream.erase(stream.begin(), stream.begin() + (ptrdiff_t)off);
+ }
+ 
++// ---- the GP's thread (WIIKIT_GX_THREAD) -------------------------------------------------------
++// One writer (the running guest thread, under g_hw) and one reader (the worker): bursts with
++// the port's switches as they were, in a ring of 4 MB, about a busy frame and a half. The CPU
++// waits when it's full, as it would behind a GP that has fallen that far back.
++struct Slot { uint8_t b[32]; uint8_t flags; };
++constexpr uint64_t kSlots = 1u << 17;
++Slot* ring = nullptr;
++std::atomic<uint64_t> ring_head{0}, ring_tail{0};   // bursts given, bursts parsed
++std::atomic<bool> gp_waiting{false};                // the worker is asleep on ring_head
++uint64_t gp_most_behind = 0;
++thread_local bool t_gp = false;                     // this is the worker, or the worker is waited for
++
++void submit_now();
++
++void gp_main() {
++    t_gp = true;
++    uint64_t t = 0;
++    for (;;) {
++        uint64_t h = ring_head.load(std::memory_order_acquire);
++        if (h == t) {
++            // a frame's commands come in a stream: a short spin catches the next burst
++            for (int i = 0; i < 4000 && h == t; ++i) {
++#if defined(__x86_64__) || defined(_M_X64)
++                _mm_pause();
++#endif
++                h = ring_head.load(std::memory_order_acquire);
++            }
++            if (h == t) {
++                gp_waiting.store(true, std::memory_order_seq_cst);
++                if (ring_head.load(std::memory_order_seq_cst) == t) ring_head.wait(t, std::memory_order_acquire);
++                gp_waiting.store(false, std::memory_order_relaxed);
++                continue;
++            }
++        }
++        gp_most_behind = std::max(gp_most_behind, h - t);
++        for (; t < h; ++t) {
++            const Slot& sl = ring[t % kSlots];
++            gp_skip_now = sl.flags & 1;
++            gp_early_now = sl.flags & 2;
++            feed(sl.b, 32);
++            if (submit_pending) submit_now();
++            if ((t & 63) == 63) ring_tail.store(t + 1, std::memory_order_release);
++        }
++        ring_tail.store(t, std::memory_order_release);
++        ring_tail.notify_all();
++    }
++}
++
++// a burst for the GP: parsed here, or handed to its thread
++void gp_feed(const uint8_t* b) {
++    if (!gp_thread) { feed(b, 32); return; }
++    const uint64_t h = ring_head.load(std::memory_order_relaxed);
++    while (h - ring_tail.load(std::memory_order_acquire) >= kSlots) std::this_thread::yield();
++    Slot& sl = ring[h % kSlots];
++    std::memcpy(sl.b, b, 32);
++    sl.flags = (uint8_t)((g_gx_skip_frames ? 1 : 0) | (g_gx_early_done ? 2 : 0));
++    ring_head.store(h + 1, std::memory_order_seq_cst);
++    if (gp_waiting.load(std::memory_order_seq_cst)) ring_head.notify_one();
++}
++
++// until the GP's thread has parsed everything it was given: then its state may be read and
++// written from here (this thread gives it nothing more meanwhile)
++struct GpSync {
++    bool was;
++    GpSync() : was(t_gp) {
++        if (!gp_thread || t_gp) return;
++        const uint64_t h = ring_head.load(std::memory_order_seq_cst);
++        for (uint64_t t; (t = ring_tail.load(std::memory_order_acquire)) < h;) ring_tail.wait(t, std::memory_order_acquire);
++        t_gp = true;
++    }
++    ~GpSync() { t_gp = was; }
++};
++
+ }  // namespace
+ 
+ void gx_trace_next_frame() { trace_next = true; }
+@@ -633,6 +1444,7 @@ void gx_trace_next_frame() { trace_next = true; }
+ // record so far is handed over, and the renderer reads the EFB back once it
+ // has drawn it; peeks read that copy until anything more is recorded.
+ uint32_t gx_efb_peek(uint32_t a) {
++    GpSync gp;
+     static std::mutex mx;
+     static std::vector<uint32_t> argb, z;
+     static uint64_t at = UINT64_MAX;
+@@ -698,6 +1510,7 @@ static void encode_tex(uint32_t fmt, int w, int h, const uint8_t* rgba, uint8_t*
+ }
+ 
+ bool gx_copy_to_ram(uint32_t addr) {
++    GpSync gp;
+     CopyRec rec_copy;
+     bool known = false;
+     hw_run_locked([&] {
+@@ -714,13 +1527,21 @@ bool gx_copy_to_ram(uint32_t addr) {
      hw_run_locked([&] {
          std::memcpy(host(virt(addr)), out.data(), out.size());
          auto c = copies.find(addr);                          // the GPU's copy still stands for these bytes
@@ -2075,18 +2236,32 @@ index a6b37f2..5fe79c1 100644
      });
      return true;
  }
-@@ -729,16 +1429,47 @@ void gx_init() {
+ 
+ void gx_init() {
+     video = video_enabled();
++    if (gp_thread) {
++        ring = new Slot[kSlots];
++        std::thread(gp_main).detach();
++        rt_log("gx: the GP runs on a thread of its own (WIIKIT_GX_THREAD)");
++    }
+     g_efb_peek = gx_efb_peek;
+ }
+ 
+@@ -729,19 +1550,61 @@ void gx_init() {
  // AI's, which start each audio frame's mix, above all. So does this wait.
  // A handler may switch guest threads, and another thread may hand the
  // record over in the meantime.
 +bool g_gx_early_done = false;
 +bool g_gx_skip_frames = false;
  void gx_draw_done_reached() {
-     hw_run_locked([] { pe_ctrl |= 8; ++st.done; os_raise(); });
- }
- 
+-    hw_run_locked([] { pe_ctrl |= 8; ++st.done; os_raise(); });
++    ++st.done;                                       // not under g_hw: the GP's thread may be waited for under it
++    pe_signal(8, 0);
++}
++
 +void gx_debug_mesh(const void* vertices, uint32_t count) {
 +    if (!video) return;
++    GpSync gp;
 +    hw_run_locked([&] {
 +        put<uint8_t>(VC_DBGMESH);
 +        put<uint32_t>(count);
@@ -2097,6 +2272,7 @@ index a6b37f2..5fe79c1 100644
 +}
 +void gx_debug_overlay(const void* vertices, uint32_t count) {
 +    if (!video) return;
++    GpSync gp;
 +    hw_run_locked([&] {
 +        put<uint8_t>(VC_DBGOVER);
 +        put<uint32_t>(count);
@@ -2107,14 +2283,21 @@ index a6b37f2..5fe79c1 100644
 +}
 +void gx_debug_view(uint8_t views, const float* clip) {
 +    if (!video) return;
++    GpSync gp;
 +    hw_run_locked([&] {
 +        put<uint8_t>(VC_DBGVIEW);
 +        put<uint8_t>(views);
 +        std::memcpy(grow(64), clip, 64);
 +    });
-+}
-+
+ }
+ 
++// with the GP on its thread, its thread hands the record over
  void gx_submit_pending() {
++    if (gp_thread && !t_gp) return;
++    submit_now();
++}
++namespace {
++void submit_now() {
      if (!submit_pending) return;
      submit_pending = false;
      while (!rec.empty()) {
@@ -2124,7 +2307,20 @@ index a6b37f2..5fe79c1 100644
          if (t_ppc && g_ppc_pending.load(std::memory_order_relaxed)) ppc_poll(*t_ppc);
      }
  }
-@@ -768,12 +1499,17 @@ static void gp_run() {
++}  // namespace
+ 
+ // The write-gather pipe: CPU stores to 0xCC008000 collect in a 32-byte
+ // buffer, and reach the FIFO in memory as 32-byte bursts, as on the console
+@@ -760,7 +1623,7 @@ static void gp_run() {
+     if (!(cp_reg16[1] & 1)) return;
+     size_t k = 0;
+     while (k < held.size() && !(bp_enabled() && held[k].addr == bp_addr())) {
+-        feed(held[k].b, 32);
++        gp_feed(held[k].b);
+         ++k;
+     }
+     held.erase(held.begin(), held.begin() + (ptrdiff_t)k);
+@@ -768,15 +1631,20 @@ static void gp_run() {
  
  void gx_pipe_burst(const uint8_t* b, int n) {
      uint32_t at = pi_wptr_addr();
@@ -2147,8 +2343,41 @@ index a6b37f2..5fe79c1 100644
 +        }
      }
      if (!linked()) return;
-     if (held.empty() && !(bp_enabled() && at == bp_addr())) { feed(b, n); return; }
-@@ -861,4 +1597,11 @@ void gx_report() {
+-    if (held.empty() && !(bp_enabled() && at == bp_addr())) { feed(b, n); return; }
++    if (held.empty() && !(bp_enabled() && at == bp_addr())) { gp_feed(b); return; }
+     Burst h{at, {}};
+     std::memcpy(h.b, b, 32);
+     held.push_back(h);
+@@ -840,14 +1708,17 @@ uint32_t gx_pe_read(uint32_t off, int) {
+ void gx_pe_write(uint32_t off, uint32_t v, int) {
+     if (off == 0x0A) {
+         uint16_t clear = (uint16_t)(v & 0xC);            // status bits: write 1 to clear
+-        pe_ctrl = (uint16_t)((v & 3) | (pe_ctrl & 0xC & ~clear));
++        std::lock_guard<std::mutex> lk(pe_mx);
++        pe_ctrl.store((uint16_t)((v & 3) | (pe_ctrl.load() & 0xC & ~clear)));
++        pe_next();
+     }
+ }
+ 
+ uint32_t gx_irq() {
+     uint32_t c = 0;
+-    if ((pe_ctrl & 4) && (pe_ctrl & 1)) c |= 0x200;      // PE token
+-    if ((pe_ctrl & 8) && (pe_ctrl & 2)) c |= 0x400;      // PE finish
++    const uint16_t pe = pe_ctrl.load();
++    if ((pe & 4) && (pe & 1)) c |= 0x200;                // PE token
++    if ((pe & 8) && (pe & 2)) c |= 0x400;                // PE finish
+     if (bp_reached() && (cp_reg16[1] & 0x20)) c |= 0x800;   // CP breakpoint
+     if ((cp_reg16[1] & 0x04) && cp_overflow()) c |= 0x800;   // CP overflow: the FIFO is full
+     if ((cp_reg16[1] & 0x08) && cp_underflow()) c |= 0x800;  // CP underflow: drained again
+@@ -855,10 +1726,19 @@ uint32_t gx_irq() {
+ }
+ 
+ void gx_report() {
++    GpSync gp;
++    if (gp_thread) rt_log("gx: the GP's thread was %llu bursts behind at most", (unsigned long long)gp_most_behind);
+     rt_log("gx: %llu commands, %llu draws (%llu vertices), %llu display lists, %llu EFB copies "
+            "(%llu frames), %llu draw-done, %llu texture uploads, %llu EFB peeks (%llu read-backs)",
+            (unsigned long long)st.cmds, (unsigned long long)st.draws, (unsigned long long)st.verts,
             (unsigned long long)st.dls, (unsigned long long)st.copies, (unsigned long long)st.frames,
             (unsigned long long)st.done, (unsigned long long)st.uploads, (unsigned long long)st.peeks,
             (unsigned long long)st.readbacks);
