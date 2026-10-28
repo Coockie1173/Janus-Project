@@ -1,4 +1,4 @@
-# Skip Cutscenes (port/cutscenes.cpp): cutscenes after the opening that are skipped like it, each
+# Skip Cutscenes (port/gameplay/cutscenes.cpp): cutscenes after the opening that are skipped like it, each
 # its own cell of the grid. level hash, the hash of the timeline that takes the player (the log's
 # "cut: t ... the player is taken by cutscene"), the seconds from then until the picture is back
 # (0: not known, it fades back in when the mouse is back, a button is wanted or the level changes),

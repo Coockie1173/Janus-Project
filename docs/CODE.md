@@ -472,21 +472,28 @@ action bit's two button hashes), `fn_8023D140` (the menus' confirm character).
 
 ## 4. The files
 
-### ge.h
+### `ge.h`, `guest.h` and the folders' headers
 
-What the files share: the three globals (`kFrameCount`, `kPlayerPtr`, `kPaused`), `guest_ptr`,
-`ldf`, `stf`, `in_play()` (a player exists and the pause menu is not up), and the declaration
-of every function one file offers another. Limits and defaults are here too: `kGameFps` 30,
-`kGameFov` 49 (20..120), `kGameAdsFov` 22.5 (from 10), `kRadPerPixel` 0.0022,
-`kMouseSensMax` 5, `kAdsSensMin/Max` 0.05..2.
+The port is a folder a concern, and each folder has a header with what its files offer the
+others: `engine/engine.h`, `sound/sound.h`, `input/input.h`, `gameplay/gameplay.h`,
+`cheats/cheats.h`, `fun/fun.h`, `mods/mods.h`, `net/net.h`, `ui/ui.h`, `speedrun/speedrun.h`,
+`debug/debug.h`. `ge.h` includes them all (every file includes `ge.h`) and lists the folders.
+`guest.h` has the game's memory: the three globals (`kFrameCount`, `kPlayerPtr`, `kPaused`),
+`guest_ptr`, `ldf`, `stf`, `in_play()` (a player exists and the pause menu is not up). Limits
+and defaults sit with their file's declarations: `kGameFps` 30, `kGameFov` 49 (20..120),
+`kGameAdsFov` 22.5 (from 10), `kRadPerPixel` 0.0022, `kMouseSensMax` 5, `kAdsSensMin/Max`
+0.05..2. A folder whose files share more than that has an inner header of its own
+(`input/mouse.h`, `ui/settings/menu.h`, `speedrun/splits.h`, `mods/weapons/weapon.h`).
+Includes are written from `port/` (`"debug/debug.h"`), it is on the include path with
+`-iquote`. `package/` is what the Windows and Linux packages ship.
 
-### goldeneye.cpp
+### `goldeneye.cpp`
 
 The entry point. `install()` calls every `install_*`, hooks `main` under `GE_TRACE`, and puts
 the runtime on the classic controller. `each_frame(frame)` is the once-a-frame list in
 section 1. The file's header is the list of the main environment variables.
 
-### framerate.cpp
+### `engine/framerate.cpp`
 
 The engine is variable-rate: `ge_frame_tick` runs a frame once `OSGetTime` passes the next
 frame's time and moves its current rate one up when the frame was on time, one down when late,
@@ -510,10 +517,14 @@ lowest rate and climb by 1 a frame. After the game's tick the rate is put back t
 minus 1, and a climbing rate climbs 4 a frame. `GE_NO_RATE_FIX` turns it off, `GE_HITCH`
 makes 60 ms stalls to test it.
 
-### input.cpp
+### input/: `players.cpp`, `look.cpp`, `buttons.cpp`, `input.cpp`, `mouse.h`
 
 Keyboard and mouse. The mouse does not go through the stick: its motion is added to the
-view's angles once a frame.
+view's angles once a frame. `players.cpp` has whose controller is this console's and the
+player's state (`controller_update`, `look_mode`, the aim blend), `look.cpp` the mouse look
+(directly, through the command online, on the right stick, the sensitivities), `buttons.cpp`
+the classic's filter (wheel, sprint, aim lock, menus), `input.cpp` the settings and
+`install_mouse`; `mouse.h` is what they share.
 
 | Function | What |
 |---|---|
@@ -537,7 +548,7 @@ view's angles once a frame.
 | `install_mouse` | environment, the filter, all the hooks |
 | `mouse_frame`, `mouse_applied`, `mouse_capture` | unused motion dropped once a frame; the cursor captured and hidden only in play (`in_play()`, no overlay up), free and seen in a menu, a pause or a load (`video_keep_cursor`) |
 
-### fov.cpp
+### `gameplay/fov.cpp`
 
 `fov_apply()` writes the view's angle (`*806EB694 + 0x328`) only over the game's 49 or what
 it wrote last, so a cutscene keeps its own. `ads_fov_apply(ctrl)` runs after the controller's
@@ -551,7 +562,7 @@ stretched by `tan(view / 2) / tan(24.5)` for that draw. With Disable Colour Filt
 (`no_colour_filter`) the filter is left out, at any angle: `IsColourFilter` knows it by the mesh
 (entry `+0x10`), flags `0x1004` and a box a unit wide from 0.397 behind to 0.48 or more ahead.
 
-### gecko.cpp
+### `cheats/gecko.cpp`
 
 Codes that patch code are applied to the dol before recompiling (`tools/gecko.py`); the rest
 run here once a frame. `gecko_cheats()` is true when a file named `cheats.txt` (the launcher's
@@ -560,7 +571,7 @@ Cheats tab) had codes. `gecko_load(path)` reads Dolphin's notation (`$` starts a
 serial write, `20..2E` conditions (an odd address is an endif first), `CC` on/off switch,
 `E0`, `E2`. Writes outside MEM1/MEM2 are dropped.
 
-### cutscenes.cpp
+### `gameplay/cutscenes.cpp`
 
 Skip Cutscenes: a cutscene plays through in very long steps (the engine held at 3 frames a
 second of game time, nothing waits for a frame), muted, one frame in four drawn. Each one is
@@ -585,7 +596,7 @@ State machine (`Skip::Idle`, `Waiting`, `Running`):
 | `CutsceneMessage`, `PlayerTake` | hooks: the last timeline that sent the cutscene player a message (its hash at `+0x20`) names the cutscene the player is taken by; `GE_TRACECUT` logs every message |
 | `TraceFrames` | `GE_TRACE`: frame times through the easing |
 
-### qte.cpp
+### `gameplay/qte.cpp`
 
 `CutsceneInput` (hook on `ge_cutscene_input`): with Auto Quick Time Events on, the buttons
 the input waits for (`Wanted`) are put into the controller's pressed actions for the call.
@@ -595,13 +606,13 @@ before the call and the smoothed level set up so its fifth lands where the step'
 have. `cutscene_input_waiting()` is true for 4 frames after an input waited for a button
 (the cutscene skip stops on it).
 
-### movies.cpp
+### `gameplay/movies.cpp`
 
 `MovieStart` (hook on `ge_movie_start`): with Skip Movies on, a movie that does not loop is
 not opened and its widget's "finished" byte (`+0x8E`) is set, which is all that anything
 waiting for a movie reads.
 
-### autosave.cpp
+### `gameplay/autosave.cpp`
 
 A checkpoint saves the game. The game only writes a mission's progress from the pause menu's
 "Save and Quit", whose screen calls `ge_save_game` each frame until it answers; the port makes
@@ -615,7 +626,7 @@ the same calls after every checkpoint.
 | `ManagerIdle()`, `CanSave()` | the manager's state is 0 or 10; there is a profile, no time challenge, no network game (`network_game()`) and no multiplayer map (level `01A0xxxx`) |
 | `SaveWrite` | hook on `ge_save_write`: flag bit 0 set for the port's own calls, so no "Saved" box waits for a button |
 
-### files.cpp
+### `engine/files.cpp`
 
 A fix for a race in the game. `ge_file_read_start` and `ge_file_read_done` ask the drive
 whether a piece is over with interrupts on; when the read's interrupt lands inside the
@@ -624,14 +635,14 @@ the heap. `Atomic(c, orig)` runs both with interrupts off (MSR bit `0x8000` clea
 `ppc_mtmsr`). `GE_FILE_RACE=off` leaves the game's own, `=force` provokes the race every
 100th piece; both log a piece counted twice.
 
-### records.cpp
+### `engine/records.cpp`
 
 A diagnostic, nothing is changed. Every array of collision records `ge_records_new` makes is
 remembered with its slot; a free (`records_freed`, called by heap.cpp's hook) or a release
 through another slot while the slot still holds the array is logged with the guest call chain
 (`call_chain`, 14 frames deep), at most 16 reports.
 
-### heap.cpp
+### `engine/heap.cpp`
 
 Keeps the game's heap whole and tells when it isn't. The heaps (pointers at `80643040`, four
 at most; `+4` the first block, `+8` the last) are blocks with a `0x10` header in front of what
@@ -648,13 +659,13 @@ size of the block in front. The game's free (`fn_8033DD90`) trusts the header.
 | `NetworkLines` | a network game's start and end logged with the walks and the frees left out since, without being asked |
 | `call_chain(c)` | the guest's callers from the stack, by name |
 
-### sweep.cpp
+### `engine/sweep.cpp`
 
 `SweepUpdate`, a hook on `ge_sweep_update` (`80351AD0`): the count of steps a moving physics
 shape is swept in (`+0x58`: the way its body went over 0.75 of the shape's size, unbounded in
 the game) is kept to 64, and a shape that asked for more is logged with its body's places.
 
-### zones.cpp
+### `engine/zones.cpp`
 
 The portal walk. The moment the camera is past a portal's plane the zone it came out of was
 dropped and the level went black for a moment in vents.
@@ -669,7 +680,7 @@ dropped and the level went black for a moment in vents.
 
 Nothing is hooked when `GE_PORTAL_NEAR=0` and there is no log.
 
-### tweaks.cpp
+### `gameplay/tweaks.cpp`
 
 | Option | How |
 |---|---|
@@ -683,7 +694,7 @@ Nothing is hooked when `GE_PORTAL_NEAR=0` and there is no log.
 `Keep(writes, on, written)` remembers what the game had and puts it back when the option is
 turned off. `tweaks_apply()` runs both once a frame.
 
-### custom.cpp
+### `gameplay/custom.cpp`
 
 007 Custom: a mission as 007 Classic with the guards set by four sliders. A mission's row of
 values by difficulty (levels `805D1804` `+0x34`, the difficulty the short at `805DE6CC`) is
@@ -712,7 +723,7 @@ works: a press on a bar (`menu_cursor`, pointer.cpp) takes hold of it, and a cli
 switch's row (`RowAt`) changes it. `custom_frame` lets go of a held slider when the page goes, `custom_buttons` keeps a
 press that holds a slider from being a select.
 
-### pointer.cpp
+### `input/pointer.cpp`
 
 The mouse's cursor picks the menus' items. The menus have a pointer of their own
 (MenuPointer, the menu's `+0x1A98`: `+0`, `+4` its place from 0 to 1, `+0x24` in use, `+0x38`
@@ -723,7 +734,7 @@ crosshair are the game's. `pointer_frame` leaves the system's cursor out while t
 its own (`video_keep_cursor`). `menu_cursor` is the cursor in the menus' screen for custom.cpp;
 `Cursor` reads wiikit's `video_mouse`, or `GE_POINTER` for a test.
 
-### tank.cpp
+### `gameplay/tank.cpp`
 
 The tank's controller never reaches `ge_look_apply`, so `TankLook` (hook on `ge_tank_look`)
 adds the mouse to both look rates for the call. `tank_buttons` moves the buttons round by one
@@ -738,7 +749,7 @@ happen once a call with no time step in them; each is scaled for the call and pu
 `ShortStep` only lets a step shorter than a 30th of a second be scaled. `is_tank(ctrl)` tests
 the vtable.
 
-### noclip.cpp
+### `cheats/noclip.cpp`
 
 `noclip_look(ctrl)` (before `ge_look_apply`) zeroes the controller's velocity and step.
 `noclip_apply(ctrl)` (after the controller's update) keeps its own position, moved by the move
@@ -747,7 +758,7 @@ keeps the body's flags `0x1` and `0x2` set and the fall speed, velocity and dist
 position is taken again when it jumps more than 4 units or the player is not in a free state;
 `Land(body)` clears them again.
 
-### stamina.cpp
+### `cheats/stamina.cpp`
 
 The stamina meter (a cheat). `stamina_apply(ctrl)` (after the local controller's update) keeps
 the sprint left (`+0xE5C`), full (`806E9490`, or `806E9494` with the byte at `806EBA7D` set,
@@ -758,7 +769,7 @@ tenth of full back a second, and a refill that gets from under that tenth (0.31)
 it 0.36 of full (`806EEC84`, 1.116) at once; a new sprint needs 1.0 (`806EEC20`). With
 `GE_TRACE` a sprint's start and end and every such jump are logged.
 
-### weapons.cpp
+### `input/weapons.cpp`
 
 A key for each weapon slot. `weapon_buttons` (in the classic's filter) keeps the slot whose
 key went down for 250 ms. `WeaponInput` (hook on `ge_weapon_input`) presses "next weapon" for
@@ -766,7 +777,7 @@ that call, and `NextSlot` (hook on `ge_weapon_next_slot`, only for the cycle's t
 answers with the item in the key's slot that `fn_8014AEC0` says is usable, so everything the
 game does around a change still happens.
 
-### prompts.cpp
+### `input/prompts.cpp`
 
 The game's prompts show the bound key in place of a controller button.
 
@@ -783,7 +794,7 @@ The game's prompts show the bound key in place of a controller button.
 | `StringSet` | hook: a button in any string set; a menu's lone button string is emptied and its key goes with the label set next |
 | `TextMsg` | `GE_TRACETEXT`: every text looked up, once |
 
-### collision.cpp
+### `cheats/collision.cpp`
 
 The collision viewer (a cheat). The level's collision triangles are gathered from the game's
 structures (2.6, 2.7) and sent to the runtime (`gx_debug_mesh`, `gx_debug_view`), which draws
@@ -805,7 +816,7 @@ them with the game's own clip matrix in place of what the game draws in 3D.
 | `WorldDraw` | hook: takes the clip matrix as the player's world draw begins |
 | `collision_tick()` | the viewer goes off with the option or the level |
 
-### triggers.cpp
+### `cheats/triggers.cpp`
 
 The trigger viewer (a cheat). The triggers that go off when someone walks into them are drawn
 over the world, see-through, in the shape the game tests (`gx_debug_overlay`; collision.cpp's
@@ -822,9 +833,9 @@ camera hooks gather it and tell the runtime which views are on).
 | `trigger_labels()` | the lines for the overlay (overlay.cpp `trigger_list`) |
 | `trigger_type_name(type)` | what a type does, from its class's update; nullptr when not known |
 | `DeathColumn`, `Column` | a death barrier without a shape: in it as fn_800429C0 tests, drawn as a column |
-| `trigger_types()`, `trigger_type_shown`, `set_trigger_types_shown`, `trigger_xray` | the menu's Trigger Viewer page (settings.cpp `RefreshTriggerPage`): the types asked about, which are drawn, and the faint pass behind walls |
+| `trigger_types()`, `trigger_type_shown`, `set_trigger_types_shown`, `trigger_xray` | the menu's Trigger Viewer page (`ui/settings/pages.cpp` `RefreshTriggerPage`): the types asked about, which are drawn, and the faint pass behind walls |
 
-### body.cpp
+### `engine/body.cpp`
 
 Vents at high frame rates. How far the collision pushes a body out depends on how deep the
 step went in, and the levels lean on a 30th of a second's step to get through a vent's frame.
@@ -835,7 +846,7 @@ added up and taking them as one step. Free again when nothing is pushed, it is c
 and ceilings, or 15 steps in a row got half their way. `BodyUpdateTraced` is the
 `GE_TRACEPOS` variant.
 
-### native.cpp
+### `engine/native.cpp`
 
 Ten of Eurocom's hand-written paired-single routines written as plain float code in the same
 order of operations (`madd` fuses the multiply-adds the console fuses; `FP_CONTRACT OFF` for
@@ -848,7 +859,7 @@ Constants read from the game's small data: `r2 - 0x2538` (the Newton step's cons
 `plane_ray`), `r2 - 0x2E04` (zero, `segment_closest`), `r2 - 0x31FC` and `r2 - 0x3200` (one
 and zero, `BoxInRect`), `r13 - 0x4CE8` and `r13 - 0x4CE4` (the screen's offset).
 
-### net.cpp
+### `net/net.cpp`
 
 `install_hosts()` reads a hosts file (`/etc/hosts` format) into the runtime
 (`ios_net_add_host`) so the game's server names go to a community server, and turns on the
@@ -882,14 +893,14 @@ its name: the name's pointer (the scoreboard's +0xC + 4 * slot) is one to "name 
 the call, the slot's player found by the controller's +0x998 (`PingOfSlot`).
 `show_ping` / `set_show_ping` are the setting (`GE_PING`).
 
-### overlay.cpp, dmw.cpp, dmw.h
+### `ui/overlay.cpp`, `ui/dmw.cpp`, `ui/dmw.h`
 
 The debug overlay (F3), drawn with Dear ImGui on the renderer's thread through
 `video_set_overlay` (only when ImGui's sources are in `build/deps/imgui`, `GE_IMGUI`). It
 shows a Dolphin Memory Engine watch list live, grouped as the file groups it or flat under a
 filter; the local player's state in the top right corner when asked; "Skipping cutscene..."
 in the bottom right; "Cheats active" in the bottom left while anything on the menu's Cheats
-page is on or a code of the launcher's Cheats tab runs (`cheats_active()`, settings.cpp); the
+page is on or a code of the launcher's Cheats tab runs (`cheats_active()`, `ui/settings/catalog.cpp`); the
 stamina meter's bar at the bottom (`stamina_bar`: green under the line, dimmer while it
 refills). The settings menu and the hotkeys' line are drawn in the same frame.
 `overlay_open()` is true for either window, which frees the mouse.
@@ -899,9 +910,12 @@ refills). The settings menu and the hotkeys' line are drawn in the same frame.
 false when anything is not readable) and `watch_value` (types 0 byte, 1 halfword, 2 word,
 3 float, 4 double, 5 string, 6 bytes; bases decimal, hex, octal, binary).
 
-### settings.cpp, hotkeys.cpp, hotkeys.h
+### ui/settings/: `menu.cpp`, `catalog.cpp`, `pages.cpp`, `draw.cpp`, `files.cpp`, `menu.h`, `hotkeys.cpp`, `hotkeys.h`
 
-The settings menu (F1), drawn like the game's own menus. Pages: root, Screen, Controls, Key
+The settings menu (F1), drawn like the game's own menus. `menu.cpp` opens it and takes the
+keys, the mouse and the pads, `catalog.cpp` builds the list of settings, `pages.cpp` the pages
+and the level grids, `draw.cpp` draws it, `files.cpp` writes the launcher's file and the key
+file; `menu.h` has their shared state (namespace `ge::menu`). Pages: root, Screen, Controls, Key
 Bindings, Enhancements, Cheats, Hotkeys (and the page editing one hotkey). While it is up the
 game gets no input and a game in play is paused first (a press of +); Esc with the menu closed
 is + as well.
@@ -938,7 +952,7 @@ classic's filter adds.
 `ActionName`, `Describe`, `PressHotkeys(scancode, said)`. A press
 is handed to `debug_setting` so a recording keeps the value.
 
-### crashdump.cpp
+### `debug/crashdump.cpp`
 
 Crash, die and stall dumps into `build/crashes/<date>-<time>-<kind>/report.txt` (POSIX only):
 what happened, the host's faulting instruction and call stack (a stall: every host thread's), every guest thread with its
@@ -959,7 +973,7 @@ log lines; `mem1.bin` and `mem2.bin` with `GE_CRASH_MEM`.
 
 `tools/crash_report.py` names the host frames and disassembles around the guest addresses.
 
-### diagnostics.cpp
+### `debug/diagnostics.cpp`
 
 The sampling profiler (POSIX only). `GE_PROFILE=F`: SIGPROF every millisecond of CPU time;
 `on_prof` stores the thread and the pc as an offset in the executable (`FFFFFFFF` outside it)
@@ -967,7 +981,7 @@ and 40 return addresses. Every 10 s `F`, `F.stacks` and `F.maps` are written;
 `tools/profile_report.py` reads them. `install_pgo_writer` writes an instrumented build's
 counts every 15 s.
 
-### debug.cpp, debug.h
+### `debug/debug.cpp`, `debug/debug.h`
 
 Aids for finding things in the running game, each a thread or a filter started by an
 environment variable (section 5). Times are seconds of guest time from start, or from the end
@@ -1097,5 +1111,5 @@ argument (`wiiboot game --nand ...`) it gives the arguments back untouched.
 
 The decompressors are compiled from source (`tools/get_codecs.sh` puts zstd, bzip2 and the LZMA
 SDK's decoders in `build/deps/codecs`). Online, Quicker Start, Start Fullscreen and Crash Dumps
-are F1 rows that only write `settings.env` (`next_start()` in settings.cpp), the launcher reads
+are F1 rows that only write `settings.env` (`next_start()` in `ui/settings/files.cpp`), the launcher reads
 them on the next start; `--offline` sets `GE_HOSTS=off` (Windows drops an empty variable).

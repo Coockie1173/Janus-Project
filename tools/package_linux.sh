@@ -28,7 +28,7 @@ cp build/deps/SDL3-src/LICENSE.txt "$S/licenses/SDL3.txt"
 cp wiikit/LICENSE "$S/licenses/wiikit.txt" 2>/dev/null || true
 cp LICENSE "$S/licenses/Janus-Project.txt"
 cp build/deps/imgui/LICENSE.txt "$S/licenses/imgui.txt"
-cp port/licenses/Roboto.txt "$S/licenses/Roboto.txt"
+cp port/package/licenses/Roboto.txt "$S/licenses/Roboto.txt"
 cp build/deps/codecs/zstd/LICENSE "$S/licenses/zstd.txt"
 cp build/deps/codecs/bzip2/LICENSE "$S/licenses/bzip2.txt"
 cp build/deps/codecs/lzma/DOC/lzma-sdk.txt "$S/licenses/lzma-sdk.txt"
@@ -38,7 +38,7 @@ mkdir -p "$S/mods"
 for d in conflict team_conflict golden_gun black_box goldeneye heroes license_to_kill team_license_to_kill; do
     mkdir -p "$S/mods/$d"
 done
-cp port/linux/README.txt "$S/"
+cp port/package/linux/README.txt "$S/"
 chmod 755 "$S/Janus-Project"
 printf 'The game goes here: start ./Janus-Project and pick your GoldenEye 007 (SJBE52) disc image.\nWhen it is done this folder holds sys/main.dol and files/. See README.txt.\n' > "$S/game/PUT YOUR DISC HERE.txt"
 (cd build/linux && zip -q -r -9 "../$NAME.zip" "$NAME")

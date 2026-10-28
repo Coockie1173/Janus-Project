@@ -1,0 +1,26 @@
+//what's drawn over the game: the settings menu (F1), the debug overlay (F3), the window's icon
+#pragma once
+#include "guest.h"
+
+namespace ge
+{
+
+//settings/: menu.cpp, catalog.cpp, files.cpp
+bool cheats_active(); //something on the menu's Cheats page is on or a Cheats tab code runs
+bool settings_open();
+int settings_page(const char* title, const char* about); //a page of switches another file adds, before the menu is shown
+void settings_toggle(int page, const char* id, const char* label, const char* hint, bool (*get)(), void (*set)(bool));
+void settings_key(int page, const char* id, const char* label, const char* hint, void (*pressed)()); //a key to choose on the page, pressed with the menu closed it calls pressed
+void settings_say(const std::string& text); //a line at the top for a moment
+void save_settings(); //the settings file is written
+std::string saved_setting(const char* env, const char* name); //a setting as the game starts: the environment's, or what the menu saved under name in the launcher's file. empty for neither
+uint32_t settings_buttons(); //classic buttons the menu presses itself (+ to pause as it opens)
+
+//overlay.cpp
+void install_overlay();
+bool overlay_open(); //the watches or the settings menu are up, so the mouse is free
+
+//icon.cpp
+void window_icon(SDL_Window* win); //port/package/icon.bmp on the window
+
+} //namespace ge

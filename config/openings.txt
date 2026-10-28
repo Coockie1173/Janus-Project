@@ -1,4 +1,4 @@
-# The missions the settings menu's Skip Cutscenes grid lists, in its order (port/cutscenes.cpp), and
+# The missions the settings menu's Skip Cutscenes grid lists, in its order (port/gameplay/cutscenes.cpp), and
 # the level time each one's opening ends at, so the picture can fade back in before it. level hash,
 # seconds (0: not known, it fades in after the opening), the name. Measured with the level left
 # out of here and the skip at 30 frames a second (GE_SKIP_RATE=30, GE_TRACE=1: "cutscene left

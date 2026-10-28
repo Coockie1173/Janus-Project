@@ -1,0 +1,2 @@
+//the executable's icon in Explorer and on the taskbar (port/package/win/icon.ico, from icon.tga)
+1 ICON "icon.ico"

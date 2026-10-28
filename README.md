@@ -19,7 +19,7 @@ If you're stubborn however, you can also extract your files manually into `./gam
 This is an unofficial fan project. Activision, Eurocom, Nintendo, MGM and Danjaq have nothing to do with it, so please don't bug them about it.
 
 # Port
-All the files in `port/` are our layer on top of the runtime. Things like hooks, input mapping, settings, the mod loader, our online redirect to the unofficial servers (you can play online on this port!), crash dumps to name a few. `port/ge.h` lists which file does what, and [docs/CODE.md](docs/CODE.md) goes over all of it in a lot more detail.
+All the files in `port/` are our layer on top of the runtime. Things like hooks, input mapping, settings, the mod loader, our online redirect to the unofficial servers (you can play online on this port!), crash dumps to name a few. It's split into a folder per concern (`engine/`, `input/`, `mods/`, `net/`, `ui/`...), `port/ge.h` lists which folder does what and each folder's header lists its files, and [docs/CODE.md](docs/CODE.md) goes over all of it in a lot more detail.
 
 # Launcher
 `launcher/` is what runs before the game, in the packages and with `./launch.sh` alike. It reads your settings, and on a first start it asks for your disc and takes the files out of it (`.rvz`, `.iso`, `.wbfs` and `.wia`, no Python needed anymore!). Starting `wiiboot game ...` the old way skips it entirely, so `make run`, `make smoke` and the test scripts work like before.
@@ -107,10 +107,10 @@ And if you change wiikit yourself, `make wiikit-save` writes your changes back i
 The boot ROM fonts and the DSP's resampling table (`font_western.bin`, `font_japanese.bin`, `dsp_coef.bin`) are taken from Dolphin's free replacements in `Sys/GC` if you have Dolphin installed (pass `FONTS=dir` otherwise). If Dolphin's `Sys/totaldb.dsy` is around (`DSY=file`) it'll name some more SDK functions by signature.
 
 ## Windows
-`make win` cross-compiles a 64-bit Windows build from Linux (llvm-mingw and SDL3 get fetched into `build/deps`) and packs it as `build/Janus-Project-win64.zip`. In there you'll find the executable and a `README.txt` (see `port/win/`). The disc's files are not in it! The player takes them out of their own image on the first start. Online works the same as on Linux (Winsock instead of BSD sockets).
+`make win` cross-compiles a 64-bit Windows build from Linux (llvm-mingw and SDL3 get fetched into `build/deps`) and packs it as `build/Janus-Project-win64.zip`. In there you'll find the executable and a `README.txt` (see `port/package/win/`). The disc's files are not in it! The player takes them out of their own image on the first start. Online works the same as on Linux (Winsock instead of BSD sockets).
 
 ## Linux package
-`make linux` builds the same portable layout for Linux and packs it as `build/Janus-Project-linux64.zip`: the executable (C++ runtime linked in, SDL3 next to it in `lib/`), and a `README.txt` (see `port/linux/`). It needs glibc 2.38, OpenSSL 3 and OpenGL 4.5 wherever it runs. Online and crash dumps work there too.
+`make linux` builds the same portable layout for Linux and packs it as `build/Janus-Project-linux64.zip`: the executable (C++ runtime linked in, SDL3 next to it in `lib/`), and a `README.txt` (see `port/package/linux/`). It needs glibc 2.38, OpenSSL 3 and OpenGL 4.5 wherever it runs. Online and crash dumps work there too.
 
 For the launcher both packages also fetch zstd, bzip2 and the LZMA SDK into `build/deps/codecs` (that last one comes as a `.7z`, so you'll need `7z` around).
 

@@ -12,17 +12,15 @@ if(GE_PORTABLE)
   set(GE_GECKO_FILE config/gecko-codes.txt)
   set(GE_SETTINGS_FILE settings.env)
 endif()
-target_sources(wiiboot PRIVATE
-    ${GE_PORT}/goldeneye.cpp ${GE_PORT}/framerate.cpp ${GE_PORT}/input.cpp ${GE_PORT}/fov.cpp
-    ${GE_PORT}/gecko.cpp ${GE_PORT}/net.cpp ${GE_PORT}/overlay.cpp ${GE_PORT}/dmw.cpp ${GE_PORT}/settings.cpp
-    ${GE_PORT}/diagnostics.cpp ${GE_PORT}/debug.cpp ${GE_PORT}/native.cpp ${GE_PORT}/crashdump.cpp
-    ${GE_PORT}/cutscenes.cpp ${GE_PORT}/tweaks.cpp ${GE_PORT}/qte.cpp ${GE_PORT}/movies.cpp
-    ${GE_PORT}/tank.cpp ${GE_PORT}/hotkeys.cpp ${GE_PORT}/noclip.cpp ${GE_PORT}/bunnyhop.cpp ${GE_PORT}/stamina.cpp ${GE_PORT}/files.cpp ${GE_PORT}/records.cpp ${GE_PORT}/zones.cpp
-    ${GE_PORT}/autosave.cpp ${GE_PORT}/weapons.cpp ${GE_PORT}/collision.cpp ${GE_PORT}/triggers.cpp ${GE_PORT}/prompts.cpp ${GE_PORT}/body.cpp ${GE_PORT}/unload.cpp
-    ${GE_PORT}/timeline.cpp ${GE_PORT}/flipbooks.cpp ${GE_PORT}/heap.cpp ${GE_PORT}/sweep.cpp ${GE_PORT}/mods.cpp ${GE_PORT}/modmenu.cpp ${GE_PORT}/pictures.cpp ${GE_PORT}/shake.cpp ${GE_PORT}/render.cpp ${GE_PORT}/sound.cpp ${GE_PORT}/occlusion.cpp ${GE_PORT}/height.cpp ${GE_PORT}/typing.cpp ${GE_PORT}/custom.cpp ${GE_PORT}/pointer.cpp ${GE_PORT}/cheats.cpp ${GE_PORT}/randomizer.cpp ${GE_PORT}/customweapons.cpp ${GE_PORT}/customsound.cpp ${GE_PORT}/icon.cpp ${GE_PORT}/speedrun.cpp ${GE_PORT}/owned.cpp)
-# dev only, never committed: port/dev.cpp when it is there (F1 > Dev)
-if(EXISTS ${GE_PORT}/dev.cpp)
-  target_sources(wiiboot PRIVATE ${GE_PORT}/dev.cpp)
+# every .cpp under port/, a folder each concern (ge.h lists them). includes go from port/
+file(GLOB_RECURSE GE_SOURCES CONFIGURE_DEPENDS ${GE_PORT}/*.cpp)
+list(FILTER GE_SOURCES EXCLUDE REGEX "/debug/dev\\.cpp$")
+target_sources(wiiboot PRIVATE ${GE_SOURCES})
+# -iquote, not -I: port/debug/debug.h would shadow libstdc++'s <debug/debug.h>
+target_compile_options(wiiboot PRIVATE "SHELL:-iquote ${GE_PORT}")
+# dev only, never committed: port/debug/dev.cpp when it is there (F1 > Dev)
+if(EXISTS ${GE_PORT}/debug/dev.cpp)
+  target_sources(wiiboot PRIVATE ${GE_PORT}/debug/dev.cpp)
   target_compile_definitions(wiiboot PRIVATE GE_DEV=1)
 endif()
 # files found wherever the game is started from
@@ -31,9 +29,9 @@ target_compile_definitions(wiiboot PRIVATE
     GE_HOSTS_DEFAULT="${GE_HOME}/config/hosts.txt"
     GE_GECKO_DEFAULT="${GE_GECKO_FILE}"
     GE_SETTINGS_FILE="${GE_SETTINGS_FILE}")
-# the window's icon (port/icon.bmp, from icon.tga) as an array in the executable, and on
-# Windows the executable's own icon as a resource (port/win/icon.rc)
-file(READ ${GE_PORT}/icon.bmp GE_ICON_HEX HEX)
+# the window's icon (port/package/icon.bmp, from icon.tga) as an array in the executable, and on
+# Windows the executable's own icon as a resource (port/package/win/icon.rc)
+file(READ ${GE_PORT}/package/icon.bmp GE_ICON_HEX HEX)
 string(REGEX REPLACE "(..)" "0x\\1," GE_ICON_BYTES "${GE_ICON_HEX}")
 file(CONFIGURE OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/ge_gen/ge_icon.h
      CONTENT "static const unsigned char kIcon[] = {${GE_ICON_BYTES}};\n" @ONLY)
@@ -53,7 +51,7 @@ file(CONFIGURE OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/ge_gen/ge_version.h
      CONTENT "#define GE_VERSION \"${GE_VERSION}\"\n" @ONLY)
 if(WIN32)
   enable_language(RC)
-  target_sources(wiiboot PRIVATE ${GE_PORT}/win/icon.rc)
+  target_sources(wiiboot PRIVATE ${GE_PORT}/package/win/icon.rc)
 endif()
 # the debug overlay and the settings menu: Dear ImGui's sources (tools/get_imgui.sh), compiled in when they are there
 set(GE_IMGUI ${GE_ROOT}/build/deps/imgui)

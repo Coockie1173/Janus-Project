@@ -3,7 +3,7 @@
 
     python3 tools/crash_report.py [build/crashes/<dump>]     (the newest one by default)
 
-The game writes report.txt while it dies (port/crashdump.cpp) and can't do much more than
+The game writes report.txt while it dies (port/debug/crashdump.cpp) and can't do much more than
 offsets there. This adds analysis.txt next to it: every wiiboot+0x... frame named from the
 executable's symbols, and a disassembly around the guest addresses of the crashing thread's
 call chain. Only right while build/out/wiiboot is still the build that crashed.

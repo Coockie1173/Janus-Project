@@ -22,7 +22,7 @@ namespace launcher
 {
 namespace
 {
-	//the f1 menu's colours (port/settings.cpp)
+	//the f1 menu's colours (port/ui/settings/draw.cpp)
 	const ImU32 kCream{ IM_COL32(243, 232, 208, 255) };
 	const ImU32 kBlue{ IM_COL32(88, 124, 170, 255) };
 	const ImU32 kBack{ IM_COL32(6, 14, 18, 255) };

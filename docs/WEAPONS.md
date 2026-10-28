@@ -2,7 +2,7 @@
 
 What makes up a weapon, where each part lives, and what a custom weapon needs. All of it was read
 from the game's own data and code (addresses are the DOL's, SJBE52). The custom weapons of
-`mods/weapons` (port/customweapons.cpp) are built on this.
+`mods/weapons` (port/mods/weapons/weapons.cpp) are built on this.
 
 ## The pieces
 
@@ -125,7 +125,7 @@ weapon that isn't in it has no pose: neither the hands nor the gun are drawn.
 
 ## What a custom weapon is now (stage 1)
 
-`mods/weapons/NAME.txt` (see port/customweapons.cpp's header for the keys):
+`mods/weapons/NAME.txt` (see port/mods/weapons/read.cpp's header for the keys):
 
 ```
 name = Golden AK
@@ -238,7 +238,7 @@ Making one from the export:
   as the file's. A script is one block from its header to its keyframes with only relative
   pointers inside. Parts are numbered as the scripts first name them; two on the same locator
   are one.
-- **In the game** (`port/customweapons.cpp`):
+- **In the game** (`port/mods/weapons/weapons.cpp`):
   - the file is a mod (mods.cpp reads `weapons/`); its hash is what the mods give it.
   - the first time a script of it is asked for in a level the file is got as `fn_801461C0` gets
     o_guns (`fn_800E3740`: files manager 805D36A4, the hash, 0), which loads it there and then.
@@ -338,7 +338,7 @@ entity (the same entity is the same mesh in every gun that has it), else by its 
 ## A shot of its own (sound)
 
 `fire sound = NAME.wav` (next to the .txt; `fire volume` scales it) plays that file for every
-shot of the weapon in place of its base's sounds (`port/customsound.cpp`, `port/customweapons.cpp`):
+shot of the weapon in place of its base's sounds (`port/sound/customsound.cpp`, `port/mods/weapons/weapons.cpp`):
 
 - **the player's and another player's**: `ge_weapon_fire_sound` (8012E3A0: controller, the shot's
   place) plays the held row's (the controller's byte +0xC98 in the weapons table) +0x1E4..+0x1F0,

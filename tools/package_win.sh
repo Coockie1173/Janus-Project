@@ -25,7 +25,7 @@ cp build/deps/sdl3-win/share/licenses/SDL3/LICENSE.txt "$S/licenses/SDL3.txt"
 cp wiikit/LICENSE "$S/licenses/wiikit.txt" 2>/dev/null || true
 cp LICENSE "$S/licenses/Janus-Project.txt"
 cp build/deps/imgui/LICENSE.txt "$S/licenses/imgui.txt"
-cp port/licenses/Roboto.txt "$S/licenses/Roboto.txt"
+cp port/package/licenses/Roboto.txt "$S/licenses/Roboto.txt"
 cp build/deps/llvm-mingw/LICENSE.TXT "$S/licenses/llvm-mingw-runtime.txt"
 cp build/deps/openssl-src/LICENSE.txt "$S/licenses/OpenSSL.txt"
 cp build/deps/codecs/zstd/LICENSE "$S/licenses/zstd.txt"
@@ -38,7 +38,7 @@ for d in conflict team_conflict golden_gun black_box goldeneye heroes license_to
     mkdir -p "$S/mods/$d"
 done
 # Windows line ends for what Notepad and cmd read
-sed 's/$/\r/' port/win/README.txt > "$S/README.txt"
+sed 's/$/\r/' port/package/win/README.txt > "$S/README.txt"
 printf 'The game goes here: start Janus-Project.exe and pick your GoldenEye 007 (SJBE52) disc image.\r\nWhen it is done this folder holds sys\\main.dol and files\\. See README.txt.\r\n' > "$S/game/PUT YOUR DISC HERE.txt"
 (cd build/win && zip -q -r -9 "../$NAME.zip" "$NAME")
 echo "build/$NAME.zip: $(du -h build/$NAME.zip | cut -f1)"

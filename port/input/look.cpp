@@ -1,0 +1,426 @@
+//mouse look: the mouse turns the view itself, through the command online, or on the right stick
+#include "input/mouse.h"
+#include "debug/debug.h"
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <cmath>
+#include <cstdlib>
+#include <cstring>
+
+namespace ge {
+
+//the game plays with the classic controller: left stick moves (WASD in the key file),
+//right stick looks. the mouse doesn't go through the stick, its motion gets added to the
+//view's angles once a frame before the game's own frame runs
+//so one pixel is one step of the angle at any frame rate, and there's no turning-speed cap
+//
+//whose view: every player in a match has a controller object, updated once a frame by
+//ge_controller_update (80108A60, controller+4 is its player). the game decides itself which
+//controllers take this console's input: fn_8012A1D0 calls fn_80108D70(controller) before the
+//look update, which returns 0 for the console's own players
+//the mouse goes to the first controller of the frame that returns 0 for (a host's own
+//players are told apart by the list behind that test, see controller_is_local)
+//(the globals 806EB698 and 805D43EC hold whichever player was made last, online that's someone else)
+//
+//the angles: the player's yaw is the float at +0xDC, radians, growing to the right
+//(+0x250 and the matrix at +0x98 are computed from it)
+//the pitch is in the object at the player's +0x16C, at +0x768, radians, negative up
+//how far up and down the view goes: the game keeps the pitch within 45 degrees, the floats
+//at 806EEEAC (0.7854) and 806EEEB0. the wanted pitch (controller+0xC64) is kept there through
+//two getters (8013D130, 8013D140: fn_8010C880, fn_80163B20...), and what the view is drawn
+//with (+0xC5C, the pitch less the recoil) once more by PlayerMovement and fn_801374F0, which
+//read the floats themselves. so the two floats are ours, stick and mouse go as far
+//ge_player_modifiers (8013AA00) is the one other reader: it has the 0.7854 for how far
+//sideways the move stick may be, and sees the game's for its call
+const float kPitchLimit = 1.48f, kGamePitchLimit = 0.78539819f;
+const uint32_t kPitchMax = 0x806EEEAC, kPitchMin = 0x806EEEB0;
+PPCFunc orig_player_modifiers = nullptr;
+void set_pitch_limit(float limit) {
+    stf(kPitchMax, limit);
+    stf(kPitchMin, -limit);
+}
+bool joined_game();
+//in a network game the pitch goes to the others as a number within a range (net.cpp): the
+//game's 45 degrees, ours between players who came through Connect to WFC Modded. a joined
+//player's own pitch comes back from the host through it (see controller_update), so past the
+//range the view got pulled back all the time. there it stops at the range's end instead
+bool net_turns();
+float pitch_limit() {
+    return joined_game() || net_turns() ? net_pitch_range() : kPitchLimit;
+}
+//the host of a network game steps everyone's player with the two floats. over Nintendo WFC the
+//others keep theirs within the game's 45 degrees on their own consoles: with ours here a player
+//held up or down went on past it on the host, and came back that much later than on its console
+//so there only this console's own player gets ours
+extern uint32_t g_local_ctrl;
+float g_pitch_limit_now = kPitchLimit; //what the two floats hold for the controller being updated
+float pitch_limit_of(uint32_t ctrl) {
+    if (network_game() && !modded_lobby() && ctrl != g_local_ctrl) return kGamePitchLimit;
+    return pitch_limit();
+}
+void player_modifiers(PPCContext& c) {
+    set_pitch_limit(kGamePitchLimit);
+    orig_player_modifiers(c);
+    set_pitch_limit(g_pitch_limit_now);
+}
+
+PPCFunc orig_look_apply = nullptr;
+uint32_t g_look_frame = ~0u; //the frame the mouse was last applied in
+uint32_t g_look_ctrl = 0; //the controller it's for, and what's still left to turn
+float g_look_yaw = 0;
+
+//the mouse's motion for this frame. the pitch gets written directly, the yaw is handed to
+//the game as input: ge_look_apply (80101EC0) turns the controller's angular velocity
+//(+0x97C, radians a second) times the frame's time step (+0x578) into rotation
+//for that one call the mouse's turn is added to it and taken out again after, so the game
+//turns the player by stick and mouse together through its own code
+
+//the aim inside a cutscene's view, within the limits fn_80124130 itself picks
+void mouse_aim(uint32_t ctrl) {
+    float dx = 0, dy = 0;
+    video_take_mouse_motion(dx, dy);
+    debug_mouse(dx, dy);
+    if (g_mouse_invert) dy = -dy;
+    if (dx == 0 && dy == 0) return;
+    float lim[4];
+    bool narrow = (ld32(ctrl + kStateFlags) & 0x80) != 0, cutscene = ld8(ctrl + kInCutscene) != 0;
+    for (int i = 0; i < 4; ++i)
+        lim[i] = kRadPerDegree * (narrow ? ldf(kAimLimitsNarrow + 4 * i) : cutscene ? ldf(ctrl + kAimLimits + 4 * i) : ldf(kAimLimitsPlay + 4 * i));
+    float sens = g_mouse_sens * aim_sens_scale(ctrl); //aimed down the sight in there (the motorbike, the truck) it zooms as on foot
+    float pitch = ldf(ctrl + kAimPitch) + dy * kRadPerPixel * sens;
+    float yaw = ldf(ctrl + kAimYaw) + dx * kRadPerPixel * sens;
+    if (!std::isfinite(pitch) || !std::isfinite(yaw) || !(lim[0] <= lim[1]) || !(lim[2] <= lim[3])) return;
+    stf(ctrl + kAimPitch, std::clamp(pitch, lim[0], lim[1]));
+    stf(ctrl + kAimYaw, std::clamp(yaw, lim[2], lim[3]));
+}
+
+//the aim snap. with aim pressed the game holds the view where it is, or on someone near the
+//middle, while the gun comes up: ge_aim_snap (80162B70) sets the byte at +0xD25 and fn_80163340,
+//late in the controller's update, turns the yaw back to that point every frame. what lets go
+//with nobody to snap to is a stick: the move stick's size (+0x564) or the look stick (+0x518
+//across, +0x51C up and down) past 0.01, so on a console a push of the stick has the view at once
+//the mouse isn't on the stick: standing still nothing let go, and the view was locked until
+//the gun was up. for that call a moving mouse is the look stick pushed its way
+//"moving" is within the last tenth of a second, at a high frame rate a slow mouse has frames without a step
+const uint32_t kLookStickX = 0x518;
+const float kSnapStick = 0.02f; //past the game's 0.01
+const auto kMouseStill = std::chrono::milliseconds(100);
+std::chrono::steady_clock::time_point g_mouse_moved{}; //when the mouse last turned the view
+float g_mouse_way = 1; //and which way across
+PPCFunc orig_aim_snap = nullptr;
+
+void mouse_moved(float dx) {
+    g_mouse_moved = std::chrono::steady_clock::now();
+    if (dx != 0) g_mouse_way = dx;
+}
+
+void aim_snap(PPCContext& c) {
+    uint32_t ctrl = c.r[3];
+    bool moving = ctrl == g_local_ctrl && ld32(kFrameCount) == g_local_frame && std::chrono::steady_clock::now() - g_mouse_moved < kMouseStill;
+    if (!moving || std::fabs(ldf(ctrl + kLookStickX)) > kSnapStick) { orig_aim_snap(c); return; }
+    uint32_t stick = ld32(ctrl + kLookStickX);
+    stf(ctrl + kLookStickX, std::copysign(kSnapStick, g_mouse_way));
+    orig_aim_snap(c);
+    st32(ctrl + kLookStickX, stick);
+}
+
+void mouse_look(uint32_t ctrl, uint32_t player) {
+    float dx = 0, dy = 0;
+    video_take_mouse_motion(dx, dy);
+    debug_mouse(dx, dy);
+    if (g_mouse_invert) dy = -dy;
+    if (dx == 0 && dy == 0) return;
+    mouse_moved(dx);
+    static uint32_t seen = 0;
+    if (player != seen && std::getenv("GE_TRACE")) {
+        uint32_t v = ld32(player + 0x16C);
+        rt_log("goldeneye: controller %08X, player %08X, yaw %f; view %08X, pitch %f", ctrl, player,
+               ldf(player + 0xDC), v, guest_ptr(v) ? ldf(v + 0x768) : 0.0f);
+    }
+    seen = player;
+    g_look_ctrl = ctrl;
+    float sens = g_mouse_sens * aim_sens_scale(ctrl);
+    g_look_yaw += dx * kRadPerPixel * sens;
+    uint32_t view = ld32(player + 0x16C);
+    if (guest_ptr(view)) {
+        float pitch = ldf(view + 0x768);
+        if (std::isfinite(pitch) && std::fabs(pitch) < 2.0f)
+            stf(view + 0x768, std::clamp(pitch + dy * kRadPerPixel * sens, -pitch_limit(), pitch_limit()));
+    }
+}
+
+//the mouse in a network game between players of Connect to WFC Modded
+//a joined console's player is run three times: here on screen, here again as the host's copy
+//(stepped from what the host sent with the commands since), and on the host. all three go by
+//the command (bdUserCommand, filled by fn_801CA8B0, copied into the controller by
+//ge_input_copy), so the view only turns the same on all three if the turn is in the command.
+//the stick is: the mouse on the stick (mouse_stick) works, within what a stick can say
+//two of the command's floats are free to take the turn itself:
+//+0x2C, the player's own yaw (-pi to pi in steps of 0.0001), which the host only uses as the
+//  heading the move stick is turned by (the controller's +0x52C). every machine has the
+//  player's yaw itself, so +0x52C gets that after the copy
+//+0x28, within 0.5 in the same steps (the controller's +0x528, sent on to the others and never
+//  read by the game's own play code): a pad's axis 0x13 while aiming, nothing on a classic
+//there the two are the frame's turn in radians, across and up and down: net_command_look
+//puts them in after the game's own fill (ge_command_fill), and after ge_input_copy the pitch is turned right
+//there and the yaw kept for ge_look_apply, which turns the player by it through its own rate
+//as the mouse's turn always went. the same on every machine, whoever's player it is
+//every console in the game has to read the two that way: it is part of the modded games'
+//version (kPortProtocol, modmenu.cpp). a game over Nintendo WFC stays the game's
+const uint32_t kCmdPitchTurn = 0x28, kCmdYawTurn = 0x2C; //in the command
+const uint32_t kCtrlLean = 0x528, kCtrlHeading = 0x52C; //where ge_input_copy puts them
+const uint32_t kCtrlPitch = 0xC64;
+const float kTurnStep = 0.0001f, kMaxYawTurn = 3.1f, kMaxPitchTurn = 0.49f; //what the two floats hold
+//on the wire a float is a count of steps up from its lowest (bdBitBuffer's ranged float), and
+//0 is not one of the yaw's: -pi + 31416 steps is 0.0000073, a view that creeps a degree every
+//17 s. so a turn is a whole count of steps either side of that one, worked back out of the
+//float the same way on every machine. the lean's 0 is sent as a bit of its own and stays 0
+const uint32_t kCmdYawMin = 0x806EFF20, kCmdLeanMin = 0x806EFF28, kCmdStep = 0x806EFF14; //the game's own numbers for the two
+const int kYawZero = 31416, kLeanZero = 5000; //the step that stands for no turn
+
+float turn_float(int steps, uint32_t min, int zero) {
+    return (float)((double)ldf(min) + (double)(zero + steps) * (double)ldf(kCmdStep));
+}
+int turn_steps(float v, uint32_t min, int zero) {
+    return (int)std::lround(((double)v - (double)ldf(min)) / (double)ldf(kCmdStep)) - zero;
+}
+const int kTurnSlots = 16;
+struct Turn { uint32_t ctrl; float yaw; };
+Turn g_turns[kTurnSlots]; //a controller's yaw still to turn, from its last command
+PPCFunc orig_input_copy = nullptr;
+
+float& turn_of(uint32_t ctrl) {
+    int free = 0;
+    for (int i = 0; i < kTurnSlots; ++i) {
+        if (g_turns[i].ctrl == ctrl) return g_turns[i].yaw;
+        if (g_turns[i].yaw == 0) free = i;
+    }
+    g_turns[free] = {ctrl, 0};
+    return g_turns[free].yaw;
+}
+
+//the mouse's motion since the last command, into the command. what the steps of 0.0001 cut
+//off is kept for the next. once a frame, a console's other players turn nothing
+void net_command_look(uint32_t cmd, bool first) {
+    if (!net_turns() || !guest_ptr(cmd)) return;
+    static float left_yaw = 0, left_pitch = 0;
+    float yaw = 0, pitch = 0;
+    if (first) {
+        uint32_t ctrl = local_controller();
+        bool turns = ctrl && g_mouse_sens > 0 && g_mouse_mode != 2 && !ld8(kPaused) && !overlay_open() && !is_tank(ctrl) && look_mode(ctrl) == kLookView;
+        if (turns) {
+            float dx = 0, dy = 0;
+            video_take_mouse_motion(dx, dy);
+            debug_mouse(dx, dy);
+            if (g_mouse_invert) dy = -dy;
+            if (dx != 0 || dy != 0) mouse_moved(dx);
+            float sens = g_mouse_sens * aim_sens_scale(ctrl);
+            left_yaw += dx * kRadPerPixel * sens;
+            left_pitch += dy * kRadPerPixel * sens;
+            g_look_frame = ld32(kFrameCount);
+            g_look_ctrl = ctrl; //for the angle trace
+        } else left_yaw = left_pitch = 0;
+        yaw = std::clamp(std::round(left_yaw / kTurnStep) * kTurnStep, -kMaxYawTurn, kMaxYawTurn);
+        pitch = std::clamp(std::round(left_pitch / kTurnStep) * kTurnStep, -kMaxPitchTurn, kMaxPitchTurn);
+        left_yaw -= yaw;
+        left_pitch -= pitch;
+        if (std::fabs(left_yaw) > kTurnStep) left_yaw = 0; //more than a command holds: gone
+        if (std::fabs(left_pitch) > kTurnStep) left_pitch = 0;
+    }
+    int lean = (int)std::lround(pitch / kTurnStep);
+    stf(cmd + kCmdYawTurn, turn_float((int)std::lround(yaw / kTurnStep), kCmdYawMin, kYawZero));
+    stf(cmd + kCmdPitchTurn, lean ? turn_float(lean, kCmdLeanMin, kLeanZero) : 0.0f);
+}
+
+//(the console's input object, the command): the game's own fill, then the turn
+PPCFunc orig_command_fill = nullptr;
+void command_fill(PPCContext& c) {
+    static uint32_t frame = ~0u;
+    uint32_t input = c.r[3], cmd = c.r[4], now = ld32(kFrameCount);
+    orig_command_fill(c);
+    net_command_look(cmd, now != frame);
+    bunnyhop_command(cmd);
+    owned_command_fill(input, cmd);
+    frame = now;
+}
+
+//(controller, command or the input of a game that isn't a network game)
+void input_copy(PPCContext& c) {
+    uint32_t ctrl = c.r[3];
+    //a player's look is stepped from here on, not in its controller's update: the limits are this player's
+    if (guest_ptr(ctrl)) set_pitch_limit(g_pitch_limit_now = pitch_limit_of(ctrl));
+    uint32_t cmd = c.r[4];
+    owned_input(c, ctrl, cmd);
+    uint32_t kept = bunnyhop_input(ctrl, cmd);
+    orig_input_copy(c);
+    bunnyhop_input_done(cmd, kept);
+    if (!net_turns() || !guest_ptr(ctrl)) return;
+    float yaw = ldf(ctrl + kCtrlHeading), pitch = ldf(ctrl + kCtrlLean);
+    uint32_t player = ld32(ctrl + 4);
+    if (std::isfinite(yaw)) yaw = turn_steps(yaw, kCmdYawMin, kYawZero) * kTurnStep;
+    if (std::isfinite(pitch) && pitch != 0) pitch = turn_steps(pitch, kCmdLeanMin, kLeanZero) * kTurnStep;
+    stf(ctrl + kCtrlLean, 0.0f);
+    if (guest_ptr(player)) stf(ctrl + kCtrlHeading, ldf(player + 0xDC));
+    if (is_tank(ctrl) || !std::isfinite(yaw) || !std::isfinite(pitch)) return;
+    turn_of(ctrl) = std::clamp(yaw, -kMaxYawTurn, kMaxYawTurn);
+    float had = ldf(ctrl + kCtrlPitch);
+    if (pitch != 0 && std::isfinite(had) && std::fabs(had) < 2.0f)
+        stf(ctrl + kCtrlPitch, std::clamp(had + std::clamp(pitch, -kMaxPitchTurn, kMaxPitchTurn), -pitch_limit(), pitch_limit()));
+}
+
+void look_apply(PPCContext& c) {
+    uint32_t ctrl = c.r[3];
+    float dt = guest_ptr(ctrl) ? ldf(ctrl + 0x578) : 0;
+    if (guest_ptr(ctrl)) noclip_look(ctrl);
+    if (guest_ptr(ctrl) && net_turns()) { //the command's turn, whoever's player this is
+        float& turn = turn_of(ctrl);
+        float add = dt > 0.0005f && dt < 0.3f ? turn / dt : 0;
+        turn = 0;
+        if (add == 0) { orig_look_apply(c); bunnyhop_look(c, ctrl); return; }
+        stf(ctrl + 0x97C, ldf(ctrl + 0x97C) + add);
+        orig_look_apply(c);
+        stf(ctrl + 0x97C, ldf(ctrl + 0x97C) - add);
+        bunnyhop_look(c, ctrl);
+        return;
+    }
+    if (ctrl != g_look_ctrl || g_look_yaw == 0 || !(dt > 0.0005f && dt < 0.2f)) {
+        orig_look_apply(c);
+        if (guest_ptr(ctrl)) bunnyhop_look(c, ctrl);
+        return;
+    }
+    float rate = ldf(ctrl + 0x97C), add = g_look_yaw / dt;
+    g_look_yaw = 0;
+    stf(ctrl + 0x97C, rate + add);
+    orig_look_apply(c);
+    stf(ctrl + 0x97C, ldf(ctrl + 0x97C) - add);
+    bunnyhop_look(c, ctrl);
+}
+
+//the mouse on the right stick (a joined network game)
+//the game turns a deflection d into a turning rate: nothing up to 0.12, then
+//3.094 * sensitivity * (d - 0.12) / 0.88 radians a second
+//the sensitivity is the float the options menu sets: 805DE7A4 across and 805DE7A8 up and
+//down, 805DE7CC and 805DE7D0 when aiming down the sight
+//at the menu's sensitivities the stick tops out near 6 radians a second, so while the game
+//reads them (ge_look_sens, ge_look_sens_ads) they're kStickSens, a hundred times that, and
+//put back right after so the options and the save never see it
+//the deflection is then whatever gives the mouse's speed at that sensitivity
+const float kStickSens = 100.0f, kStickRate = 2.95f, kStickDead = 0.12f; //the rate as measured with the mouse test
+const uint32_t kSensAddr[4] = {0x805DE7A4, 0x805DE7A8, 0x805DE7CC, 0x805DE7D0};
+float g_pitch_rate_scale = 1.25f; //the pitch's rate compared to the yaw's at the same sensitivity
+bool g_stick_took = false;
+std::atomic<float> g_stick_sens[2]{kStickSens, kStickSens}; //what the game turns the stick with, across and up and down (look_settings)
+void mouse_stick(ClassicState& s) {
+    g_stick_took = g_mouse_sens > 0 && in_play() && !overlay_open() && stick_look_allowed() && mouse_on_stick();
+    if (!g_stick_took) return;
+    //the mouse's speed measured over at least 4 ms, every read in between gets the same
+    static auto last = std::chrono::steady_clock::now();
+    static float ax = 0, ay = 0, defl_x = 0, defl_y = 0;
+    auto now = std::chrono::steady_clock::now();
+    float dt = std::chrono::duration<float>(now - last).count();
+    float dx = 0, dy = 0;
+    video_take_mouse_motion(dx, dy);
+    debug_mouse(dx, dy);
+    ax += dx;
+    ay += g_mouse_invert ? -dy : dy;
+    if (dt >= 0.004f) {
+        defl_x = defl_y = 0;
+        if (dt <= 0.25f) {
+            float blend = 0, aim = local_aim_blend(blend) ? aim_sens_at(blend) : 1.0f;
+            float k = kRadPerPixel * g_mouse_sens * aim / dt / kStickRate;
+            float across = g_stick_sens[0], up = g_stick_sens[1]; //0 is an axis the game has turned off
+            //the game takes the dead zone off each axis by itself, so each gets past it by itself
+            auto past_dead = [](float v) {
+                return std::fabs(v) > 1e-7f ? std::copysign(std::min(1.0f, kStickDead + (1 - kStickDead) * std::fabs(v)), v) : 0.0f;
+            };
+            defl_x = across > 0 ? past_dead(ax * k / across) : 0.0f;
+            defl_y = up > 0 ? past_dead(ay * k / (up * g_pitch_rate_scale)) : 0.0f;
+        }
+        ax = ay = 0;
+        last = now;
+    }
+    s.rx = std::clamp(s.rx + defl_x, -1.0f, 1.0f);
+    s.ry = std::clamp(s.ry - defl_y, -1.0f, 1.0f);
+}
+
+//the game's two readers of the sensitivities, with the mouse on the stick they see kStickSens
+PPCFunc orig_look_sens[2];
+bool g_sens_ours[2] = {}; //the set the game keeps (and has sent the host) is kStickSens
+template <int I> void look_sens(PPCContext& c) {
+    g_sens_ours[I] = g_stick_took;
+    if (!g_stick_took) { orig_look_sens[I](c); return; }
+    uint32_t saved[4];
+    for (int i = 0; i < 4; ++i) { saved[i] = ld32(kSensAddr[i]); stf(kSensAddr[i], kStickSens); }
+    orig_look_sens[I](c);
+    for (int i = 0; i < 4; ++i) st32(kSensAddr[i], saved[i]);
+}
+
+//what the look update turns the stick with: ge_look_settings (the controller's vtable +0x1D4)
+//fills ten values, the sensitivities across and up and down at +0x18 and +0x1C
+//hip fire copies the ones ge_look_sens keeps, aiming the ones of ge_look_sens_ads times a
+//factor that goes by the angle the view is drawn with (+0x71C, between 805E04A8 and 805E04AC),
+//and a weapon of type 4B200006 aimed (fn_8014C220) takes a table of its own at 805E0458
+//so through a scope the mouse on the stick turned at the table's sensitivity, not kStickSens
+//the two are kStickSens here, how far a zoomed view turns is the Aim Sensitivity's alone
+//as in the direct mode
+//0 stays 0, that's the game turning an axis off
+//
+//not in a game someone else hosts. the host turns this console's player too, from the stick in
+//the command and with its own answer here: the set this console sent it (kStickSens), aimed
+//times the factor or a scope's table. a console can't be told otherwise, so with kStickSens
+//here the view turned further than the host's while aimed and was drawn back to it all the
+//time. there the answer stays the game's, worked out for the angle the host draws the aim
+//with (the game's view, the weapon's own angle: fov.cpp), and the stick's deflection is made
+//for it (mouse_stick): the two turn the same, as far as a stick goes through a scope
+const uint32_t kCtrlFovDrawn = 0x71C; //the angle the view is drawn with (fov.cpp)
+PPCFunc orig_look_settings = nullptr;
+void look_settings(PPCContext& c) {
+    uint32_t ctrl = c.r[3], out = c.r[4];
+    bool hosted = joined_game();
+    bool ours = guest_ptr(ctrl) && guest_ptr(g_local_ctrl) && (ctrl == g_local_ctrl || ld32(ctrl + kCtrlHostCopyOf) == g_local_ctrl);
+    float theirs = hosted && ours ? host_drawn_fov() : 0;
+    uint32_t drawn = theirs > 0 ? ld32(ctrl + kCtrlFovDrawn) : 0;
+    if (theirs > 0) stf(ctrl + kCtrlFovDrawn, theirs);
+    orig_look_settings(c);
+    if (theirs > 0) st32(ctrl + kCtrlFovDrawn, drawn);
+    if (!g_stick_took || !guest_ptr(out)) return;
+    static const bool trace = std::getenv("GE_TRACEAIM") != nullptr;
+    static uint32_t seen[2] = {};
+    if (trace && (ld32(out + 0x18) != seen[0] || ld32(out + 0x1C) != seen[1])) { //what the game would have turned with
+        seen[0] = ld32(out + 0x18); seen[1] = ld32(out + 0x1C);
+        rt_log("aim: frame %u the game's look sensitivities %.3f across, %.3f up and down, aim held %d, drawn at %.1f degrees%s", ld32(kFrameCount),
+               ldf(out + 0x18), ldf(out + 0x1C), ld8(ctrl + 0xD00), ldf(ctrl + kCtrlFovDrawn), hosted ? ", kept: the host's" : "");
+    }
+    if (hosted) {
+        //once the game has kStickSens in the set it reads here, before that the deflection stays kStickSens's
+        bool sent = g_sens_ours[ld8(ctrl + 0xD00) != 0];
+        if (ctrl == g_local_ctrl)
+            for (int i = 0; i < 2; ++i) g_stick_sens[i] = sent ? std::max(ldf(out + 0x18 + 4 * i), 0.0f) : kStickSens;
+        return;
+    }
+    for (int i = 0; i < 2; ++i) {
+        uint32_t at = out + 0x18 + 4 * i;
+        if (ldf(at) > 0) stf(at, kStickSens);
+        g_stick_sens[i] = kStickSens;
+    }
+}
+
+void install_look() {
+    orig_look_apply = ppc_hook("ge_look_apply", look_apply);
+    orig_input_copy = ppc_hook("ge_input_copy", input_copy);
+    orig_command_fill = ppc_hook("ge_command_fill", command_fill);
+    if (!orig_input_copy || !orig_command_fill) rt_die("goldeneye: ge_input_copy and ge_command_fill are not hooked in this build");
+    if (!orig_look_apply) rt_die("goldeneye: the look is not hooked in this build");
+    orig_look_sens[0] = ppc_hook("ge_look_sens", look_sens<0>);
+    orig_look_sens[1] = ppc_hook("ge_look_sens_ads", look_sens<1>);
+    if (!orig_look_sens[0] || !orig_look_sens[1]) rt_die("goldeneye: the sensitivity readers are not hooked in this build");
+    orig_look_settings = ppc_hook("ge_look_settings", look_settings);
+    if (!orig_look_settings) rt_die("goldeneye: the look settings are not hooked in this build");
+    orig_aim_snap = ppc_hook("ge_aim_snap", aim_snap);
+    if (!orig_aim_snap) rt_die("goldeneye: the aim snap is not hooked in this build");
+    orig_player_modifiers = ppc_hook("ge_player_modifiers", player_modifiers);
+    if (!orig_player_modifiers) rt_die("goldeneye: the pitch limit's other reader is not hooked in this build");
+}
+
+} //namespace ge
