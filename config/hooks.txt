@@ -34,6 +34,8 @@ ge_matrix_flush
 ge_box_in_rect
 ge_plane_from_tri
 ge_ray_mesh
+ge_node_matrix
+ge_euler_matrix
 ge_menu_pending        # the menu's pending action: a mission starts, its opening gets skipped (skip cutscenes)
 ge_cutscene_input      # a cutscene's input, once a frame: auto qte presses what it waits for
 ge_record_restart      # a checkpoint is recorded: the game is saved (autosave)

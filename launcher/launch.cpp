@@ -34,6 +34,7 @@ namespace
 		"  --extract IMAGE [--force]  take the game's files out of a disc image (.rvz .iso .wbfs .wia) into game\n"
 		"  --fps N --fov N --mouse N --mouse-mode auto|direct|stick\n"
 		"  --fullscreen --vsync --no-ping --no-occlusion --no-sound-height --fast-start --cheats --offline\n"
+		"  --no-gx-thread             the graphics commands on the game's own thread\n"
 		"  --always-mouse             mouse look in every player state\n"
 		"  --skip dam-intro,...       those cutscenes are skipped as well: a mission's name and\n"
 		"                             intro, middle or ending; all, intros, middles, endings\n"
@@ -54,7 +55,7 @@ namespace
 		{ "mouseeverywhere", "0" }, { "skiplist", "" }, { "skipmovies", "0" }, { "notutorials", "0" }, { "nocolourfilter", "0" },
 		{ "autosave", "1" }, { "leveltimer", "1" }, { "autoqte", "0" }, { "autostart", "0" }, { "extrasmenu", "0" },
 		{ "onlineunlocks", "1" }, { "unlockall", "0" }, { "staminameter", "0" }, { "vsync", "0" }, { "ping", "1" },
-		{ "occlusion", "1" }, { "soundheight", "1" }, { "crashdump", "1" }, { "crashmem", "0" },
+		{ "occlusion", "1" }, { "soundheight", "1" }, { "crashdump", "1" }, { "crashmem", "0" }, { "gxthread", "1" },
 	};
 
 	//the environment variable the port reads for each
@@ -66,7 +67,7 @@ namespace
 		{ "GE_NO_TUTORIALS", "notutorials" }, { "GE_NO_COLOUR_FILTER", "nocolourfilter" }, { "GE_AUTOSAVE", "autosave" },
 		{ "GE_EXTRAS_MENU", "extrasmenu" }, { "GE_UNLOCK_ALL", "unlockall" }, { "GE_ONLINE_UNLOCKS", "onlineunlocks" },
 		{ "GE_STAMINA", "staminameter" }, { "GE_VSYNC", "vsync" }, { "GE_PING", "ping" },
-		{ "GE_OCCLUSION", "occlusion" }, { "GE_SOUND_HEIGHT", "soundheight" },
+		{ "GE_OCCLUSION", "occlusion" }, { "GE_SOUND_HEIGHT", "soundheight" }, { "WIIKIT_GX_THREAD", "gxthread" },
 	};
 
 	//the flags that just turn a setting on or off
@@ -78,7 +79,7 @@ namespace
 		{ "--extras-menu", { "extrasmenu", "1" } }, { "--unlock-all", { "unlockall", "1" } }, { "--stamina-meter", { "staminameter", "1" } },
 		{ "--fast-start", { "faststart", "1" } }, { "--offline", { "online", "0" } }, { "--crash-dumps", { "crashdump", "1" } },
 		{ "--no-crash-dumps", { "crashdump", "0" } }, { "--no-occlusion", { "occlusion", "0" } },
-		{ "--no-sound-height", { "soundheight", "0" } },
+		{ "--no-sound-height", { "soundheight", "0" } }, { "--no-gx-thread", { "gxthread", "0" } },
 	};
 
 	//where the player's files are: "." in a package, "build" in a checkout

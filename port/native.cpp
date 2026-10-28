@@ -12,8 +12,11 @@
 //volatile registers (r0, r3-r12, f0-f13, ctr) are left alone apart from the result,
 //the callers are compiled C so that's fine
 #include "ge.h"
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -29,6 +32,13 @@ inline float madd(float a, float c, float b) { //a * c + b
     return __builtin_fmaf(a, c, b);
 #else
     return (float)((double)a * (double)c + (double)b);
+#endif
+}
+inline float msub(float a, float c, float b) { //a * c - b
+#ifdef __FMA__
+    return __builtin_fmaf(a, c, -b);
+#else
+    return (float)((double)a * (double)c - (double)b);
 #endif
 }
 inline bool ram(uint32_t a) { return !PPC_IS_IO(a); } //memory or the locked cache, not a register
@@ -75,6 +85,7 @@ struct Routine {
     uint64_t calls = 0, differ = 0;
 };
 extern Routine g_routines[];
+const int kEulerRoutine = 13;
 
 //ge_box_clip_codes (803AB100): (4x4 matrix, box {min xyz, -, max xyz}, out[2])
 //the box's eight corners through the matrix, a corner's six bits say which of x, y, z is
@@ -239,15 +250,9 @@ void segment_closest(PPCContext& c) {
 const uint32_t kMtxBlock = 0x80641F60;
 const uint32_t kMtxDirty = 0x806EC2BC; //+0 the Qs, +1 everything, +2 P0, +3 P1, +5 P2
 
-void MatrixMultiply(uint32_t out, uint32_t a, uint32_t m)
+//column by column, the same order the game's paired-single code adds things up in
+void Multiply(float* O, const float* A, const float* M)
 {
-	//column by column, the same order the game's paired-single code adds things up in
-	float A[16], M[16], O[16];
-	for (int i = 0; i < 16; ++i)
-	{
-		A[i] = F(a + 4 * i);
-		M[i] = F(m + 4 * i);
-	}
 	for (int col = 0; col < 4; ++col)
 	{
 		for (int row = 0; row < 4; ++row)
@@ -256,10 +261,31 @@ void MatrixMultiply(uint32_t out, uint32_t a, uint32_t m)
 				madd(A[8 + row], M[4 * col + 2], madd(A[4 + row], M[4 * col + 1], A[row] * M[4 * col])));
 		}
 	}
+}
+
+void LoadMatrix(float* M, uint32_t at)
+{
 	for (int i = 0; i < 16; ++i)
 	{
-		S(out + 4 * i, O[i]);
+		M[i] = F(at + 4 * i);
 	}
+}
+
+void StoreMatrix(uint32_t at, const float* M)
+{
+	for (int i = 0; i < 16; ++i)
+	{
+		S(at + 4 * i, M[i]);
+	}
+}
+
+void MatrixMultiply(uint32_t out, uint32_t a, uint32_t m)
+{
+	float A[16], M[16], O[16];
+	LoadMatrix(A, a);
+	LoadMatrix(M, m);
+	Multiply(O, A, M);
+	StoreMatrix(out, O);
 }
 
 void MatrixFlush(PPCContext&)
@@ -287,6 +313,266 @@ void MatrixFlush(PPCContext&)
 		}
 	}
 	st8r(kMtxDirty, 0);
+}
+
+//ge_euler_matrix (802A54D0): (out 4x4, angles x y z, order) -> the rotation of the three angles
+//one after the other, in the order 2..7 say (others: fn_802A5360 and an axis and angle, left to
+//the recompiled one). each angle's sine and cosine from 8054E070: |a| less the nearest multiple
+//of pi (rounded through 2^52), its sign by the multiple's parity and a's, then the odd
+//polynomial x + x * x^2 (c1 + x^2 (c2 + x^2 (c3 + x^2 c4))); the cosine the same, shifted half
+//a turn. the products in the order the six inlined matrices have them (tools: a symbolic run of
+//each case's paired singles). under ge_node_matrix, for every node of everything drawn
+const uint32_t kTrig = 0x8054E070, kEulerOne = 0x806F1868;
+
+float Poly(float X, const float* C)
+{
+	const float X2{ X * X };
+	float P{ madd(X2, C[0], C[1]) };
+	P = madd(X2, P, C[2]);
+	P = madd(X2, P, C[3]);
+	return madd(X, X2 * P, X);
+}
+
+void SinCos(float A, float& Sin, float& Cos)
+{
+	const double Round{ as_f64((uint64_t)ld32r(kTrig) << 32 | ld32r(kTrig + 4)) };
+	const float InvPi{ F(kTrig + 8) }, Pi{ F(kTrig + 0xC) }, Half{ F(kTrig + 0x20) };
+	const float C[4] = { F(kTrig + 0x10), F(kTrig + 0x14), F(kTrig + 0x18), F(kTrig + 0x1C) };
+	const float Abs{ std::fabs(A) };
+	const double N{ ((double)(Abs * InvPi) + Round) - Round };
+	const int32_t Whole{ N != N ? INT32_MIN : N >= 2147483647.0 ? INT32_MAX : (int32_t)N }; //fctiwz
+	float R{ -msub((float)N, Pi, Abs) };
+	float Sign{ R >= 0 ? -Half : Half };
+	const float Shift{ R >= 0 ? Half : -Half };
+	if (Whole & 1)
+	{
+		R = -R;
+		Sign = -Sign;
+	}
+	Sin = Poly(A >= 0 ? R : -R, C);
+	const float Y{ -msub((float)N + Shift, Pi, Abs) };
+	Cos = Poly(Sign >= 0 ? Y : -Y, C);
+}
+
+void EulerMatrix(PPCContext& c)
+{
+	const uint32_t Order{ c.r[5] };
+	if (Order < 2 || Order > 7)
+	{
+		g_routines[kEulerRoutine].orig(c);
+		return;
+	}
+	float Sin[3], Cos[3], M[16];
+	for (int i = 0; i < 3; ++i)
+	{
+		SinCos(F(c.r[4] + 4 * i), Sin[i], Cos[i]);
+	}
+	const float One{ F(kEulerOne) }, Zero{ One - One };
+	switch (Order)
+	{
+	case 2:
+		M[0] = madd((One * Cos[1]), Cos[2], (Zero * Sin[2]));
+		M[1] = madd((-Sin[0] * -Sin[1]), Cos[2], (Cos[0] * Sin[2]));
+		M[2] = madd((Cos[0] * -Sin[1]), Cos[2], (Sin[0] * Sin[2]));
+		M[3] = madd((Zero * -Sin[1]), Cos[2], (Zero * Sin[2]));
+		M[4] = -msub((One * Cos[1]), Sin[2], (Zero * Cos[2]));
+		M[5] = -msub((-Sin[0] * -Sin[1]), Sin[2], (Cos[0] * Cos[2]));
+		M[6] = -msub((Cos[0] * -Sin[1]), Sin[2], (Sin[0] * Cos[2]));
+		M[7] = -msub((Zero * -Sin[1]), Sin[2], (Zero * Cos[2]));
+		M[8] = One * Sin[1];
+		M[9] = -Sin[0] * Cos[1];
+		M[10] = Cos[0] * Cos[1];
+		M[11] = Zero * Cos[1];
+		M[12] = Zero;
+		M[13] = Zero;
+		M[14] = Zero;
+		M[15] = One;
+		break;
+	case 3:
+		M[0] = madd((One * Cos[2]), Cos[1], (Zero * -Sin[1]));
+		M[1] = madd((Cos[0] * Sin[2]), Cos[1], (-Sin[0] * -Sin[1]));
+		M[2] = madd((Sin[0] * Sin[2]), Cos[1], (Cos[0] * -Sin[1]));
+		M[3] = madd((Zero * Sin[2]), Cos[1], (Zero * -Sin[1]));
+		M[4] = One * -Sin[2];
+		M[5] = Cos[0] * Cos[2];
+		M[6] = Sin[0] * Cos[2];
+		M[7] = Zero * Cos[2];
+		M[8] = -msub((One * Cos[2]), -Sin[1], (Zero * Cos[1]));
+		M[9] = -msub((Cos[0] * Sin[2]), -Sin[1], (-Sin[0] * Cos[1]));
+		M[10] = -msub((Sin[0] * Sin[2]), -Sin[1], (Cos[0] * Cos[1]));
+		M[11] = -msub((Zero * Sin[2]), -Sin[1], (Zero * Cos[1]));
+		M[12] = Zero;
+		M[13] = Zero;
+		M[14] = Zero;
+		M[15] = One;
+		break;
+	case 4:
+		M[0] = madd((Sin[1] * Sin[0]), Sin[2], (Cos[1] * Cos[2]));
+		M[1] = madd((One * Cos[0]), Sin[2], (Zero * Cos[2]));
+		M[2] = madd((Cos[1] * Sin[0]), Sin[2], (-Sin[1] * Cos[2]));
+		M[3] = madd((Zero * Sin[0]), Sin[2], (Zero * Cos[2]));
+		M[4] = -msub(Cos[1], Sin[2], ((Sin[1] * Sin[0]) * Cos[2]));
+		M[5] = -msub(Zero, Sin[2], ((One * Cos[0]) * Cos[2]));
+		M[6] = -msub(-Sin[1], Sin[2], ((Cos[1] * Sin[0]) * Cos[2]));
+		M[7] = -msub(Zero, Sin[2], ((Zero * Sin[0]) * Cos[2]));
+		M[8] = Sin[1] * Cos[0];
+		M[9] = One * -Sin[0];
+		M[10] = Cos[1] * Cos[0];
+		M[11] = Zero * Cos[0];
+		M[12] = Zero;
+		M[13] = Zero;
+		M[14] = Zero;
+		M[15] = One;
+		break;
+	case 5:
+		M[0] = Cos[1] * Cos[2];
+		M[1] = One * Sin[2];
+		M[2] = -Sin[1] * Cos[2];
+		M[3] = Zero * Cos[2];
+		M[4] = madd((Cos[1] * -Sin[2]), Cos[0], (Sin[1] * Sin[0]));
+		M[5] = madd((One * Cos[2]), Cos[0], (Zero * Sin[0]));
+		M[6] = madd((-Sin[1] * -Sin[2]), Cos[0], (Cos[1] * Sin[0]));
+		M[7] = madd((Zero * -Sin[2]), Cos[0], (Zero * Sin[0]));
+		M[8] = -msub((Cos[1] * -Sin[2]), Sin[0], (Sin[1] * Cos[0]));
+		M[9] = -msub((One * Cos[2]), Sin[0], (Zero * Cos[0]));
+		M[10] = -msub((-Sin[1] * -Sin[2]), Sin[0], (Cos[1] * Cos[0]));
+		M[11] = -msub((Zero * -Sin[2]), Sin[0], (Zero * Cos[0]));
+		M[12] = Zero;
+		M[13] = Zero;
+		M[14] = Zero;
+		M[15] = One;
+		break;
+	case 6:
+		M[0] = madd((-Sin[2] * -Sin[0]), -Sin[1], (Cos[2] * Cos[1]));
+		M[1] = madd((Cos[2] * -Sin[0]), -Sin[1], (Sin[2] * Cos[1]));
+		M[2] = madd((One * Cos[0]), -Sin[1], (Zero * Cos[1]));
+		M[3] = madd((Zero * Cos[0]), -Sin[1], (Zero * Cos[1]));
+		M[4] = -Sin[2] * Cos[0];
+		M[5] = Cos[2] * Cos[0];
+		M[6] = One * Sin[0];
+		M[7] = Zero * Sin[0];
+		M[8] = -msub(Cos[2], -Sin[1], ((-Sin[2] * -Sin[0]) * Cos[1]));
+		M[9] = -msub(Sin[2], -Sin[1], ((Cos[2] * -Sin[0]) * Cos[1]));
+		M[10] = -msub(Zero, -Sin[1], ((One * Cos[0]) * Cos[1]));
+		M[11] = -msub(Zero, -Sin[1], ((Zero * Cos[0]) * Cos[1]));
+		M[12] = Zero;
+		M[13] = Zero;
+		M[14] = Zero;
+		M[15] = One;
+		break;
+	case 7:
+		M[0] = Cos[2] * Cos[1];
+		M[1] = Sin[2] * Cos[1];
+		M[2] = One * -Sin[1];
+		M[3] = Zero * -Sin[1];
+		M[4] = -msub((Cos[2] * Sin[1]), -Sin[0], (-Sin[2] * Cos[0]));
+		M[5] = -msub((Sin[2] * Sin[1]), -Sin[0], (Cos[2] * Cos[0]));
+		M[6] = -msub((One * Cos[1]), -Sin[0], (Zero * Cos[0]));
+		M[7] = -msub((Zero * Cos[1]), -Sin[0], (Zero * Cos[0]));
+		M[8] = madd((Cos[2] * Sin[1]), Cos[0], (-Sin[2] * -Sin[0]));
+		M[9] = madd((Sin[2] * Sin[1]), Cos[0], (Cos[2] * -Sin[0]));
+		M[10] = madd((One * Cos[1]), Cos[0], (Zero * -Sin[0]));
+		M[11] = madd((Zero * Cos[1]), Cos[0], (Zero * -Sin[0]));
+		M[12] = Zero;
+		M[13] = Zero;
+		M[14] = Zero;
+		M[15] = One;
+		break;
+	}
+	StoreMatrix(c.r[3], M);
+}
+
+//ge_node_matrix (80301960): (node, parent matrix, flags out) -> node + 0x98
+//a node's matrix (+0x98) made again when it's out of date: +0x8F bit 0x10 forces it, otherwise
+//+0x8E clear, bit 0x80 of *flags or bits 0xC of +0x8C. bit 1 of +0x8C clear copies the parent's;
+//set, it's the rotation of the angles at +0xD8 in the order +0x93 says (fn_802A54D0), times the
+//scale at +0xE8 (bit 2, unless all four are within 806F1F70 of one), moved to +0xF8; then
+//the matrix +0x94 points at times it (bits 0xC, and the parent's after that with bit 8) or the
+//parent's. +0x8E then 1, +0x8F gets 0x20, and *flags the low bits of +0x8C (and 0x80 if made)
+//under the draw walk (fn_80302D00), for every node of everything drawn
+PPCFunc g_euler = nullptr;
+const uint32_t kOne = 0x806F1F60, kZero = 0x806F1F64, kScaleNear = 0x806F1F70;
+
+void NodeMatrix(PPCContext& c)
+{
+	const uint32_t Node{ c.r[3] }, Parent{ c.r[4] }, Flags{ c.r[5] };
+	const uint32_t Out{ Node + 0x98 };
+	uint32_t Bits{ ld8r(Node + 0x8C) }, Dirty{};
+	if (ld8r(Node + 0x8F) & 0x10)
+	{
+		Bits |= 1;
+		Dirty = 1;
+	}
+	else
+	{
+		Dirty = ((int8_t)ld8r(Node + 0x8E) == 0) | (ld32r(Flags) & 0x80) | (Bits & 0xC);
+	}
+	uint32_t Made{};
+	if (Dirty != 0)
+	{
+		float M[16], O[16], P[16];
+		if (!(Bits & 1))
+		{
+			LoadMatrix(M, Parent);
+		}
+		else
+		{
+			c.r[3] = Out;
+			c.r[4] = Node + 0xD8;
+			c.r[5] = ld8r(Node + 0x93);
+			g_euler(c);
+			LoadMatrix(M, Out);
+			const float One{ F(kOne) };
+			if (Bits & 2)
+			{
+				const float Near{ F(kScaleNear) };
+				bool Scaled{};
+				for (int i = 0; i < 4; ++i)
+				{
+					Scaled = Scaled || std::fabs(F(Node + 0xE8 + 4 * i) - One) >= Near;
+				}
+				if (Scaled)
+				{
+					float Scale[16];
+					std::fill(Scale, Scale + 16, F(kZero));
+					for (int i = 0; i < 4; ++i)
+					{
+						Scale[5 * i] = F(Node + 0xE8 + 4 * i);
+					}
+					Multiply(O, M, Scale);
+					std::memcpy(M, O, sizeof M);
+				}
+			}
+			M[12] = F(Node + 0xF8);
+			M[13] = F(Node + 0xFC);
+			M[14] = F(Node + 0x100);
+			M[15] = One;
+			if (Bits & 0xC)
+			{
+				LoadMatrix(P, ld32r(Node + 0x94));
+				Multiply(O, P, M);
+				std::memcpy(M, O, sizeof M);
+				if (ld8r(Node + 0x8C) & 8)
+				{
+					LoadMatrix(P, Parent);
+					Multiply(O, P, M);
+					std::memcpy(M, O, sizeof M);
+				}
+			}
+			else
+			{
+				LoadMatrix(P, Parent);
+				Multiply(O, P, M);
+				std::memcpy(M, O, sizeof M);
+			}
+		}
+		StoreMatrix(Out, M);
+		st8r(Node + 0x8E, 1);
+		st8r(Node + 0x8F, ld8r(Node + 0x8F) | 0x20);
+		Made = 0x80;
+	}
+	st32r(Flags, ld32r(Flags) | Made | (Bits & 0xF));
+	c.r[3] = Out;
 }
 
 //ge_box_in_rect (802F2340): (rect {min x, min y, max x, max y, near}, box, 4x4 matrix)
@@ -413,6 +699,37 @@ void PlaneFromTriGuest(PPCContext& c)
 //every triangle: its plane (ge_plane_from_tri), t = -(plane . start) / (plane . direction)
 //where the second is at least 806F1E7C in size, and the hit point inside the triangle
 //(fn_802AC770, ge_tri_contains). 7% of a busy Memorial frame, under fn_800552B0
+//
+//a triangle's plane is kept with the corners it was made from and used again while they're the
+//same bits, so a mesh that moves (or memory that's another mesh by now) just gets new ones
+struct CachedPlane
+{
+	uint32_t Corners[9];
+	float Plane[4];
+	bool Valid;
+};
+std::unordered_map<uint32_t, std::vector<CachedPlane>> g_planes;
+size_t g_planeCount{};
+const size_t kPlanesMax{ 1u << 20 }; //56 MB, then it starts over
+
+//the mesh's planes, one for each of its triangles
+CachedPlane* MeshPlanes(uint32_t Mesh, uint32_t Count)
+{
+	std::vector<CachedPlane>& Planes{ g_planes[Mesh] };
+	if (Planes.size() != Count)
+	{
+		if (g_planeCount + Count > kPlanesMax)
+		{
+			g_planes.clear();
+			g_planeCount = 0;
+			return MeshPlanes(Mesh, Count);
+		}
+		g_planeCount += Count - Planes.size();
+		Planes.assign(Count, CachedPlane{});
+	}
+	return Planes.data();
+}
+
 void RayMesh(PPCContext& c)
 {
 	const uint32_t Mesh{ c.r[3] }, Start{ c.r[4] }, Dir{ c.r[5] };
@@ -420,7 +737,8 @@ void RayMesh(PPCContext& c)
 	const double W{ F(0x806F1E6C) }, Zero{ F(0x806F1E70) }, Parallel{ F(0x806F1E7C) };
 	auto At = [&](uint32_t Field) { return ld32r(Mesh + Field) ? Mesh + Field + ld32r(Mesh + Field) : 0; };
 	const uint32_t Tris{ At(0x7C) }, Verts{ At(0x78) };
-	uint32_t First{ 0 }, End{ ld32r(Mesh + 0x70) };
+	const uint32_t Count{ ld32r(Mesh + 0x70) };
+	uint32_t First{ 0 }, End{ Count };
 	if (Group >= 0 && (uint32_t)Group < ld32r(Mesh + 0x74))
 	{
 		const uint32_t Entry{ At(0x84) + 8 * (uint32_t)Group };
@@ -431,19 +749,29 @@ void RayMesh(PPCContext& c)
 	double D0{ F(Dir) }, D1{ F(Dir + 4) }, D2{ F(Dir + 8) }, D3{ F(Dir + 12) };
 	double Farthest{ c.f[1] };
 	uint32_t Hit{ 0xFFFFFFFFu };
+	CachedPlane* const Planes{ Count <= kPlanesMax ? MeshPlanes(Mesh, Count) : nullptr };
+	CachedPlane Spare;
 	for (uint32_t Tri = First; Tri < End; ++Tri)
 	{
-		float Corner[3][3];
+		uint32_t Bits[9];
 		for (int i = 0; i < 3; ++i)
 		{
 			const uint32_t Vert{ Verts + (ld32r(Tris + 16 * Tri + 4 * i) & 0xFFFFF) * 12 };
 			for (int k = 0; k < 3; ++k)
 			{
-				Corner[i][k] = F(Vert + 4 * k);
+				Bits[3 * i + k] = ld32r(Vert + 4 * k);
 			}
 		}
-		float Plane[4];
-		PlaneFromTri(Plane, Corner[0], Corner[1], Corner[2]);
+		float Corner[3][3];
+		std::memcpy(Corner, Bits, sizeof Corner);
+		CachedPlane& Cached{ Planes && Tri < Count ? Planes[Tri] : (Spare.Valid = false, Spare) };
+		if (!Cached.Valid || std::memcmp(Cached.Corners, Bits, sizeof Bits))
+		{
+			PlaneFromTri(Cached.Plane, Corner[0], Corner[1], Corner[2]);
+			std::memcpy(Cached.Corners, Bits, sizeof Bits);
+			Cached.Valid = true;
+		}
+		const float* Plane{ Cached.Plane };
 		const double Den{ Rs(Rs(Plane[2] * D2 + Rs(Plane[0] * D0)) + Rs(Plane[3] * D3 + Rs(Plane[1] * D1))) };
 		if (!(std::fabs(Den) >= Parallel))
 		{
@@ -472,8 +800,10 @@ uint32_t out_r4_4(const PPCContext& c, uint32_t* len) { *len = 4; return c.r[4];
 uint32_t out_none(const PPCContext&, uint32_t* len) { *len = 0; return 0; }
 uint32_t out_r3_16(const PPCContext& c, uint32_t* len) { *len = 16; return c.r[3]; }
 uint32_t out_r5_16(const PPCContext& c, uint32_t* len) { *len = 16; return c.r[5]; }
+uint32_t out_r3_64(const PPCContext& c, uint32_t* len) { *len = 64; return c.r[3]; }
 
 uint32_t OutMatrices(const PPCContext&, uint32_t* len) { *len = 0x180; return kMtxBlock + 0x180; }
+uint32_t OutNode(const PPCContext& c, uint32_t* len) { *len = 0x40; return c.r[3] + 0x98; }
 
 Routine g_routines[] = {
     {"ge_box_clip_codes", box_clip_codes, out_r5_8, 2},
@@ -488,9 +818,11 @@ Routine g_routines[] = {
     {"ge_box_in_rect", BoxInRect, out_none, 0},
     {"ge_plane_from_tri", PlaneFromTriGuest, out_r3_16, 0},
     {"ge_ray_mesh", RayMesh, out_none, 0},
+    {"ge_node_matrix", NodeMatrix, OutNode, 0},
+    {"ge_euler_matrix", EulerMatrix, out_r3_64, 0},
 };
 const int kRoutines = sizeof g_routines / sizeof g_routines[0];
-static_assert(kRoutines == 12, "install_native lists them by index");
+static_assert(kRoutines == 14, "install_native lists them by index");
 
 bool close_f(uint32_t a, uint32_t b) {
     float x = as_f32(a), y = as_f32(b);
@@ -544,6 +876,7 @@ template <int... I> void install_checked(std::integer_sequence<int, I...>) {
 void install_native() {
     const char* e = std::getenv("GE_NATIVE");
     if (e && !std::strcmp(e, "0")) return;
+    g_euler = ppc_lookup(0x802A54D0);
     if (e && !std::strcmp(e, "check")) {
         install_checked(std::make_integer_sequence<int, kRoutines>{});
         rt_log("goldeneye: native routines checked against the recompiled ones");

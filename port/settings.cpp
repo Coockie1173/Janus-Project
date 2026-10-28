@@ -83,7 +83,7 @@ bool write_lines(const std::string& path, const std::vector<std::string>& lines)
 bool g_fps_changed = false; //the frame rate was changed in the menu
 
 //read by the launcher (launcher/launch.cpp) as the game starts, so a change here waits for the next start
-struct NextStart { bool online = true, fast_start = false, fullscreen = false, crash_dumps = true; };
+struct NextStart { bool online = true, fast_start = false, fullscreen = false, crash_dumps = true, gx_thread = true; };
 NextStart& next_start() {
     static NextStart n;
     static bool loaded = false;
@@ -94,6 +94,7 @@ NextStart& next_start() {
         n.fast_start = flag("LAUNCH_FASTSTART", false);
         n.fullscreen = flag("LAUNCH_FULLSCREEN", false);
         n.crash_dumps = flag("LAUNCH_CRASHDUMP", true);
+        n.gx_thread = flag("LAUNCH_GXTHREAD", true);
     }
     return n;
 }
@@ -145,6 +146,7 @@ void save_launch_settings() {
     values.push_back({"LAUNCH_FASTSTART", next.fast_start ? "1" : "0"});
     values.push_back({"LAUNCH_FULLSCREEN", next.fullscreen ? "1" : "0"});
     values.push_back({"LAUNCH_CRASHDUMP", next.crash_dumps ? "1" : "0"});
+    values.push_back({"LAUNCH_GXTHREAD", next.gx_thread ? "1" : "0"});
     if (g_fps_changed) values.push_back({"LAUNCH_FPS", std::to_string(fps_limit())}); //"auto" stays until it's changed
     auto lines = read_lines(GE_SETTINGS_FILE);
     if (lines.empty()) lines.push_back("# written by the launcher, read when the game is started");
@@ -441,6 +443,8 @@ void BuildSettings()
 	AddToggle(kScreen, "start_fullscreen", "Start Fullscreen", "On: the game starts in fullscreen, from the next start on. F11 or Alt+Enter switches while you play.",
 		[] { return next_start().fullscreen; }, [](bool v) { next_start().fullscreen = v; });
 	AddToggle(kScreen, "vsync", "VSync", "On: frames wait for the screen's refresh, so the picture doesn't tear. The game runs at the screen's rate at most.", vsync, set_vsync);
+	AddToggle(kScreen, "gx_thread", "Graphics Thread", "On: the game's drawing commands are read on a thread of their own while the game goes on, as the console's graphics chip does: a higher frame rate. Off: on the game's thread. From the next start on.",
+		[] { return next_start().gx_thread; }, [](bool v) { next_start().gx_thread = v; });
 	AddChoice(kScreen, "anisotropy", "Anisotropic Filtering", "Keeps textures sharp on floors and walls seen at a slant. Off is the console's picture.",
 		{"Off", "2x", "4x", "8x", "16x"}, [] { return NearestOf(kAnisotropies, anisotropy()); },
 		[](int v) { set_anisotropy(kAnisotropies[v]); g_dirty = true; });

@@ -933,7 +933,7 @@ index 3d2da4e..24964ed 100644
      X(PFNGLTEXTUREPARAMETERIPROC, glTextureParameteri)                                              \
      X(PFNGLBINDTEXTUREUNITPROC, glBindTextureUnit)                                                  \
 diff --git a/runtime/gx.cpp b/runtime/gx.cpp
-index a6b37f2..462744d 100644
+index a6b37f2..2422fcd 100644
 --- a/runtime/gx.cpp
 +++ b/runtime/gx.cpp
 @@ -21,10 +21,19 @@
@@ -941,7 +941,7 @@ index a6b37f2..462744d 100644
  // cached by content, and EFB copies remembered by address so that a texture
  // read from there is the copy, kept on the host GPU.
 +//
-+// WIIKIT_GX_THREAD=1: the GP on a thread of its own. The pipe and the FIFO's
++// The GP on a thread of its own (WIIKIT_GX_THREAD=0: on the CPU's, as it was). The pipe and the FIFO's
 +// pointers stay with the CPU; each burst the GP would read goes to a ring, and
 +// a worker parses it there, as the console's GP reads the FIFO while the CPU
 +// goes on. Draw done and tokens come when the worker reaches them, which is
@@ -1021,7 +1021,7 @@ index a6b37f2..462744d 100644
  bool linked() { return (cp_reg16[1] & 0x11) == 0x11; }
 +
 +// the port's switches as they were when the GP was given the commands (WIIKIT_GX_THREAD)
-+const bool gp_thread = std::getenv("WIIKIT_GX_THREAD") && std::atoi(std::getenv("WIIKIT_GX_THREAD")) != 0;
++const bool gp_thread = !std::getenv("WIIKIT_GX_THREAD") || std::atoi(std::getenv("WIIKIT_GX_THREAD")) != 0;
 +bool gp_skip_now = false, gp_early_now = false;
 +bool skip_frames() { return gp_thread ? gp_skip_now : g_gx_skip_frames; }
 +bool early_done() { return gp_thread ? gp_early_now : g_gx_early_done; }
@@ -2242,7 +2242,7 @@ index a6b37f2..462744d 100644
 +    if (gp_thread) {
 +        ring = new Slot[kSlots];
 +        std::thread(gp_main).detach();
-+        rt_log("gx: the GP runs on a thread of its own (WIIKIT_GX_THREAD)");
++        rt_log("gx: the GP runs on a thread of its own (WIIKIT_GX_THREAD=0 turns it off)");
 +    }
      g_efb_peek = gx_efb_peek;
  }
