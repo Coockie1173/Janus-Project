@@ -3,8 +3,7 @@ This project aims to get **GoldenEye 007** (Wii, Eurocom / Activision, 2010, NTS
 
 It's built on [wiikit](https://github.com/vs-sr-dev/wiikit) (MIT).
 
-Since WiiKit was the first option I came across I opted for this one. I only realised quite late into development the entire thing was shamelessly vibecoded, oh well.
-In any case, Wiikit worked well enough* for this recomp.
+WiiKit was the first option I came across, so I went with it, and it worked well enough* for this recomp.
 
 <sub>*after adding a decent amount of patches in ./patches<sub>
 
