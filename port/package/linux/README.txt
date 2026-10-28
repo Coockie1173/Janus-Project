@@ -93,9 +93,9 @@ Where things are
                     mode's maps after Multiplayer > Connect to WFC Modded, where you
                     pick the pack first, and a mode with an empty folder isn't offered
                     there
-                    It comes with an empty pack "default": Janus-Project-mods.zip, a
-                    download of its own next to this one, has levels for it. Unzip it
-                    into this folder.
+                    It comes with an empty pack "default". The modpacks are downloads
+                    of their own next to this one (default.zip, ...): put a pack's zip
+                    in modpacks/ as it is, no unzipping, and it is the pack of its name.
                     Without any level in those folders Multiplayer is the game's own
                     menu, with Nintendo Wi-Fi Connection alone.
     run.log         the log of the last run

@@ -28,11 +28,15 @@ jobs:
           git submodule update --init --force
           git -C wiikit clean -q -fdx
 
-      - name: disc and mods
+      - name: disc and modpacks
         run: |
           test -f "$GE_GAME/sys/main.dol" || { echo "GE_GAME in the runner's .env has to be an extracted disc"; exit 1; }
           ln -sfn "$GE_GAME" game
-          if [ -n "$GE_MODS" ]; then ln -sfn "$GE_MODS" mods; fi
+          # GE_MODPACKS: the modpacks folder, each pack in it is a zip of its own in the release.
+          # an older runner's GE_MODS (one mods folder) is the pack "default"
+          rm -rf modpacks mods
+          if [ -n "$GE_MODPACKS" ]; then ln -sfn "$GE_MODPACKS" modpacks
+          elif [ -n "$GE_MODS" ]; then mkdir modpacks && ln -sfn "$GE_MODS" modpacks/default; fi
 
       - run: make linux
       - run: make win
@@ -41,4 +45,4 @@ jobs:
       - name: release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: sh tools/publish_release.sh build/Janus-Project-linux64.zip build/Janus-Project-win64.zip $(ls build/Janus-Project-mods.zip 2>/dev/null)
+        run: sh tools/publish_release.sh build/Janus-Project-linux64.zip build/Janus-Project-win64.zip build/modpacks/*.zip

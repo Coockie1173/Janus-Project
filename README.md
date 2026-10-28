@@ -119,7 +119,7 @@ The boot ROM fonts and the DSP's resampling table (`font_western.bin`, `font_jap
 
 For the launcher both packages also fetch zstd, bzip2 and the LZMA SDK into `build/deps/codecs` (that last one comes as a `.7z`, so you'll need `7z` around).
 
-Both packages come with an empty `modpacks/default/` folder (the gamemode folders are in it). The mods are a download of their own: `make mods-zip` packs `modpacks/` exactly as it is (every pack's `.edb` files, their `.png` pictures and `.txt` files, gamemode folders and weapons included) as `build/Janus-Project-mods.zip`, which gets unzipped into the game's folder, next to the executable. No level in `modpacks/`, no zip.
+Both packages come with an empty `modpacks/default/` folder (the gamemode folders are in it). The modpacks are downloads of their own, one zip per pack: `make mods-zip` packs every folder in `modpacks/` as `build/modpacks/NAME.zip` (its `.edb` files, their `.png` pictures and `.txt` files, gamemode folders and weapons included), and players drop that zip into their `modpacks/` as it is. A zip beats the empty `default` folder the packages come with. A pack without any `.edb` gets no zip. The release workflow uploads every one of them, so a new pack folder is a new download on the next push (the runner's `.env` has `GE_MODPACKS=` pointing at the modpacks folder).
 
 # Playing
 Grab the zip for your OS from [Releases](https://github.com/Coockie1173/Janus-Project/releases), unzip it somewhere you can write to and run `Janus-Project.exe` (or `./Janus-Project` on Linux). The first time it asks for your disc image (`.rvz`, `.iso`, `.wbfs` or `.wia`, only the US version `SJBE52` works), takes the files out and you're good to go.

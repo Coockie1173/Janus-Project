@@ -127,7 +127,7 @@ linux: wiikit-patch recomp deps
 	ninja -C $(LINUX_OUT) wiiboot
 	sh tools/package_linux.sh $(FONTS)
 
-# the modpacks as a download of their own, for the packages' empty modpacks folder
+# the modpacks as downloads of their own, a zip each (build/modpacks)
 .PHONY: mods-zip
 mods-zip:
 	sh tools/package_mods.sh

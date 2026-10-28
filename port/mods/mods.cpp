@@ -712,14 +712,24 @@ void FindPacks()
 		if (entry.is_directory(error)) g_packs.push_back({ name, entry.path().string(), {}, {}, {} });
 		else if (Lower(entry.path().extension().string()) == ".zip") zips.push_back(entry.path());
 	}
+	//a folder and a zip of the same name: the folder, unless it has no file at all (the packages'
+	//empty default, its gamemode folders and nothing in them)
+	auto hasFiles = [&](const std::string& folder)
+	{
+		for (const auto& entry : std::filesystem::recursive_directory_iterator(folder, error))
+			if (entry.is_regular_file(error)) return true;
+		return false;
+	};
 	for (const auto& zip : zips)
 	{
 		const std::string name = zip.stem().string();
-		if (std::any_of(g_packs.begin(), g_packs.end(), [&](const Pack& p) { return Lower(p.name) == Lower(name); }))
+		const auto same = std::find_if(g_packs.begin(), g_packs.end(), [&](const Pack& p) { return Lower(p.name) == Lower(name); });
+		if (same != g_packs.end() && hasFiles(same->folder))
 		{
 			rt_log("goldeneye: modpacks: there is a folder %s, %s is left out", name.c_str(), zip.filename().string().c_str());
 			continue;
 		}
+		if (same != g_packs.end()) g_packs.erase(same);
 		const std::filesystem::path folder = root / kUnzipped / name;
 		if (unzip_pack(zip.string(), folder.string())) g_packs.push_back({ name, folder.string(), {}, {}, {} });
 	}

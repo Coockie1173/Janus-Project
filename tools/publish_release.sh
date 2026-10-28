@@ -1,7 +1,7 @@
 #!/bin/sh
 # Publishes the packages as a GitHub release, from the release workflow
 # (.github/workflows/release.yml), which gives GITHUB_TOKEN and the rest.
-#     sh tools/publish_release.sh FILE...
+#     sh tools/publish_release.sh FILE...      (the packages, then the modpacks' zips)
 # A push to main replaces the "latest" release, a pushed tag (v1.0) gets its own.
 set -e
 API=https://api.github.com/repos/$GITHUB_REPOSITORY
@@ -23,14 +23,18 @@ if [ "$TAG" = latest ]; then api -X DELETE "$API/git/refs/tags/latest" 2>/dev/nu
 BODY="$(git log -1 --format=%s)
 
 Bring your own disc: nothing of the game's files is in here. Start Play, then \"Extract disc...\"."
-case " $* " in *mods.zip*) BODY="$BODY
+# every zip that isn't a package is a modpack (tools/package_mods.sh)
+PACKS=""
+for f in "$@"; do case "$(basename "$f")" in Janus-Project-*) ;; *.zip) PACKS="$PACKS, $(basename "$f")" ;; esac; done
+[ -n "$PACKS" ] && BODY="$BODY
 
-Janus-Project-mods.zip is the modpacks: unzip it into the game's folder, next to Play." ;; esac
+Modpacks: ${PACKS#, }. Each is a pack of its own: put the zip in the game's modpacks folder as it is (no unzipping), it shows up under Extras > Mods and Connect to WFC Modded by its name."
 UPLOAD=$(jq -n --arg t "$TAG" --arg c "$GITHUB_SHA" --arg n "$TITLE" --arg b "$BODY" \
             '{tag_name: $t, target_commitish: $c, name: $n, body: $b}' |
          api -X POST "$API/releases" -d @- | jq -r .upload_url | sed 's/{.*//')
 
 for f in "$@"; do
-    api -X POST -H "Content-Type: application/zip" --data-binary "@$f" "$UPLOAD?name=$(basename "$f")" > /dev/null
+    [ -f "$f" ] || continue #build/modpacks/*.zip when there is no pack
+    api -X POST -H "Content-Type: application/zip" --data-binary "@$f" "$UPLOAD?name=$(printf %s "$(basename "$f")" | jq -sRr @uri)" > /dev/null
     echo "uploaded $(basename "$f")"
 done
