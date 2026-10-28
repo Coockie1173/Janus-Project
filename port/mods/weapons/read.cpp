@@ -1,4 +1,4 @@
-//mods/weapons/NAME.txt, a weapon a file (weapons.cpp has what a weapon is in the game)
+//a modpack's weapons/NAME.txt, a weapon a file (weapons.cpp has what a weapon is in the game)
 //
 //a weapon's file, `key = value` a line, # a comment:
 //  name = Golden AK           what the menus and the hud call it
@@ -43,7 +43,7 @@ std::string Lower(std::string s)
 	return s;
 }
 
-bool ReadWeapon(const std::filesystem::path& path, Weapon& w)
+bool ReadWeapon(const std::filesystem::path& path, Weapon& w, std::vector<uint8_t>& sum)
 {
 	std::ifstream in(path);
 	if (!in) return false;
@@ -51,8 +51,8 @@ bool ReadWeapon(const std::filesystem::path& path, Weapon& w)
 	std::string line;
 	while (std::getline(in, line))
 	{
-		g_sum.insert(g_sum.end(), line.begin(), line.end());
-		g_sum.push_back('\n');
+		sum.insert(sum.end(), line.begin(), line.end());
+		sum.push_back('\n');
 		if (const size_t hash = line.find('#'); hash != std::string::npos) line.resize(hash);
 		const size_t eq = line.find('=');
 		if (eq == std::string::npos) continue;
@@ -95,31 +95,41 @@ bool ReadWeapon(const std::filesystem::path& path, Weapon& w)
 	return true;
 }
 
+//the keys and ids go on in order through the packs: they stay on this console (a network game
+//sends a weapon by its place among the installed pack's, weapons.cpp)
 void ReadWeapons()
 {
-	if (mods_folder().empty()) return;
-	const std::filesystem::path folder = std::filesystem::path(mods_folder()) / "weapons";
-	std::error_code error;
-	if (!std::filesystem::is_directory(folder, error)) return;
-	std::vector<std::filesystem::path> files;
-	for (const auto& entry : std::filesystem::directory_iterator(folder, error))
-		if (entry.is_regular_file() && Lower(entry.path().extension().string()) == ".txt") files.push_back(entry.path());
-	std::sort(files.begin(), files.end()); //the same keys on every console with the same files
-	for (const auto& path : files)
+	g_sums.assign((size_t)modpack_count(), {});
+	for (int pack = 0; pack < modpack_count(); ++pack)
 	{
-		if (g_weapons.size() == kMostWeapons) break;
-		Weapon w;
-		const std::string name = path.filename().string();
-		g_sum.insert(g_sum.end(), name.begin(), name.end());
-		if (!ReadWeapon(path, w)) continue;
-		const uint32_t n = (uint32_t)g_weapons.size();
-		w.key = kFirstKey + n;
-		w.id = kFirstId + n;
-		w.text = kFirstText + n * 2;
-		w.aboutText = w.text + 1;
-		g_weapons.push_back(w);
+		const std::filesystem::path folder = std::filesystem::path(modpack_folder(pack)) / "weapons";
+		std::error_code error;
+		if (!std::filesystem::is_directory(folder, error)) continue;
+		std::vector<std::filesystem::path> files;
+		for (const auto& entry : std::filesystem::directory_iterator(folder, error))
+			if (entry.is_regular_file() && Lower(entry.path().extension().string()) == ".txt") files.push_back(entry.path());
+		std::sort(files.begin(), files.end()); //the same places on every console with the same files
+		size_t had = g_weapons.size(), ofPack = 0;
+		for (const auto& path : files)
+		{
+			if (ofPack == kMostWeapons || g_weapons.size() == kMostAll) break;
+			Weapon w;
+			const std::string name = path.filename().string();
+			g_sums[pack].insert(g_sums[pack].end(), name.begin(), name.end());
+			if (!ReadWeapon(path, w, g_sums[pack])) continue;
+			const uint32_t n = (uint32_t)g_weapons.size();
+			w.pack = pack;
+			w.key = kFirstKey + n;
+			w.id = kFirstId + n;
+			w.text = kFirstText + n * 2;
+			w.aboutText = w.text + 1;
+			g_weapons.push_back(w);
+			++ofPack;
+		}
+		if (g_weapons.size() > had) rt_log("goldeneye: %zu custom weapon(s) in %s", g_weapons.size() - had, folder.string().c_str());
 	}
-	if (!g_weapons.empty()) rt_log("goldeneye: %zu custom weapon(s) in %s", g_weapons.size(), folder.string().c_str());
 }
+
+bool Installed(const Weapon& w) { return w.pack == modpack_active(); }
 
 } //namespace ge::weapons

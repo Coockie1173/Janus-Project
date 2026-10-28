@@ -25,7 +25,7 @@ BODY="$(git log -1 --format=%s)
 Bring your own disc: nothing of the game's files is in here. Start Play, then \"Extract disc...\"."
 case " $* " in *mods.zip*) BODY="$BODY
 
-Janus-Project-mods.zip is the mod levels: unzip it into the game's folder, next to Play." ;; esac
+Janus-Project-mods.zip is the modpacks: unzip it into the game's folder, next to Play." ;; esac
 UPLOAD=$(jq -n --arg t "$TAG" --arg c "$GITHUB_SHA" --arg n "$TITLE" --arg b "$BODY" \
             '{tag_name: $t, target_commitish: $c, name: $n, body: $b}' |
          api -X POST "$API/releases" -d @- | jq -r .upload_url | sed 's/{.*//')

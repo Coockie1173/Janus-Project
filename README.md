@@ -36,38 +36,44 @@ A bunch of scripts to help me test rapidly. Feel free to use and or ignore them!
 # Mods
 You read that right! Custom levels! In my Eurocom game! We truly are blessed.
 
-Every `.edb` file in `mods/` (or `GE_MODS=folder`) gets loaded in place of the disc's file with the same hash. If no file on the disc has that hash, it just comes on top. Any levels among them show up in the game's menu under Extras > Mods.
+Mods come in modpacks: every folder in `modpacks/` is one, and `modpacks/default` is the one the game starts with. Every `.edb` file in a pack gets loaded in place of the disc's file with the same hash. If no file on the disc has that hash, it just comes on top. Extras > Mods lists the packs, and each pack's levels are in its own page under it.
 
-Online maps go by folder. `mods/` has one for every online gamemode:
+Only one pack is installed at a time, and switching is instant: whichever pack you highlight in a list of packs gets swapped in right there, no restart. Two packs can use the same file hashes without stepping on each other, so levels made by different people don't clash. (An older `mods/` folder still works as `default` as long as there's no `modpacks/` folder; `GE_MODPACKS=folder` points somewhere else, and `GE_MODPACK=name` starts with another pack.)
+
+Online maps go by folder. A pack has one for every online gamemode:
 
 ```
-mods/
-  mt_grid.edb              only in Extras > Mods
-  conflict/                Conflict, and Classic Conflict (it has Conflict's maps in the game too)
-    mt_yard.edb
-    mt_yard.png
-  team_conflict/
-  golden_gun/
-  black_box/
-  goldeneye/
-  heroes/
-  license_to_kill/
-  team_license_to_kill/
+modpacks/
+  default/
+    mt_grid.edb              only in Extras > Mods
+    conflict/                Conflict, and Classic Conflict (it has Conflict's maps in the game too)
+      mt_yard.edb
+      mt_yard.png
+    team_conflict/
+    golden_gun/
+    black_box/
+    goldeneye/
+    heroes/
+    license_to_kill/
+    team_license_to_kill/
+    weapons/                 custom weapons
+  my_other_pack/
+    ...
 ```
 
 Every level in a gamemode's folder is in that gamemode's map pool. Want a map in more than one? Just copy it into each, it's loaded once.
 
-A map with different things per gamemode (the golden gun only in Golden Gun, team spawns only in team games) is made the way the game's own are: its geometry once, as `mg_yard.edb` in `mods/` itself, and a tiny `mt_yard.edb` in each gamemode's folder with that gamemode's spawn points and objects, which loads the geometry. eurochef's `ge new-map` writes exactly that from one glTF scene, straight into `mods/`. Such a map is in Extras > Mods once. Anything in `mods/` itself isn't online at all, it only shows up under Extras > Mods (the ones in the folders are listed there as well, so you can walk around in them alone).
+A map with different things per gamemode (the golden gun only in Golden Gun, team spawns only in team games) is made the way the game's own are: its geometry once, as `mg_yard.edb` in the pack's folder itself, and a tiny `mt_yard.edb` in each gamemode's folder with that gamemode's spawn points and objects, which loads the geometry. eurochef's `ge new-map` writes exactly that from one glTF scene, straight into a pack. Such a map is in its pack's page once. Anything in the pack's folder itself isn't online at all, it only shows up under Extras > Mods (the ones in the folders are listed there as well, so you can walk around in them alone).
 
-With a level in any of those folders the Multiplayer menu gets two ways to go online:
+With a level in any of those folders, in any pack, the Multiplayer menu gets two ways to go online:
 - Connect to Nintendo WFC, with the game's own gamemodes and maps
-- Connect to WFC Modded, with yours: Choose Game Mode only lists the gamemodes whose folder has a level in it, an empty (or missing) folder means the gamemode is gone from the list
+- Connect to WFC Modded, with yours: you pick a modpack first (Choose Modpack lists the packs that have maps), then Choose Game Mode only lists the gamemodes whose folder in that pack has a level in it, an empty (or missing) folder means the gamemode is gone from the list
 
-Modded games are kept apart from everyone else's: the game's version number for matchmaking is made from every gamemode's maps and their files (and every other mod that isn't a level, like a map's geometry), so you only find players who have the exact same folders (the log prints it at start, `a network game with them is version ...`). Got a friend who can't find your lobby? Compare that number.
+Modded games are kept apart from everyone else's: the game's version number for matchmaking is made from the pack's maps and their files (and every other file of the pack that isn't a level, like a map's geometry, and its custom weapons), so you only find players who picked the exact same pack (the log prints it once you search or host with it, `a network game with modpack ... is version ...`). Got a friend who can't find your lobby? Compare that number.
 
-A `.png` with the level's name next to it, in the same folder (so `mt_yard.png` for `mt_yard.edb`), is its picture in the menus (a level in a gamemode's folder without one takes `mods/mt_yard.png`, so one picture does for all of a map's gamemodes): beside the list in Extras > Mods, in Conflict's map list, and for the two maps a network game offers. Any size works, the middle gets cut to the panel's shape (0.85 times as wide as high) and shown at 256 x 256. Can't be bothered making one? Press F12 while in a mod's level and it'll make that `.png` from whatever is on screen: black and white, without the HUD, the crosshair and the gun.
+A `.png` with the level's name next to it, in the same folder (so `mt_yard.png` for `mt_yard.edb`), is its picture in the menus (a level in a gamemode's folder without one takes the pack's own `mt_yard.png`, so one picture does for all of a map's gamemodes): beside the list in Extras > Mods, in Conflict's map list, and for the two maps a network game offers. Any size works, the middle gets cut to the panel's shape (0.85 times as wide as high) and shown at 256 x 256. Can't be bothered making one? Press F12 while in a mod's level and it'll make that `.png` from whatever is on screen: black and white, without the HUD, the crosshair and the gun.
 
-Online the game dresses the two teams by the map, and a mod level gets Archives' characters. A `mt_yard.txt` next to the level (or in `mods/` itself, for all of the map's gamemodes) picks others:
+Online the game dresses the two teams by the map, and a mod level gets Archives' characters. A `mt_yard.txt` next to the level (or in the pack's folder itself, for all of the map's gamemodes) picks others:
 ```
 team0 = Jones
 team1 = Oddjob
@@ -82,7 +88,7 @@ A level is just the hash of its file, so
 ```sh
 GE_LEVEL=01810201 ./launch.sh
 ```
-starts that level no matter which mission you pick in the menu.
+starts that level no matter which mission you pick in the menu (add `GE_MODPACK=name` for a level of a pack other than `default`).
 
 New levels are made from glTF scenes with [eurochef-GE](https://github.com/Coockie1173/eurochef-GE), my fork of [eurochef](https://github.com/eurotools/eurochef).
 
@@ -113,7 +119,7 @@ The boot ROM fonts and the DSP's resampling table (`font_western.bin`, `font_jap
 
 For the launcher both packages also fetch zstd, bzip2 and the LZMA SDK into `build/deps/codecs` (that last one comes as a `.7z`, so you'll need `7z` around).
 
-Both packages come with an empty `mods/` folder (the gamemode folders are in it). The mods are a download of their own: `make mods-zip` packs `mods/` exactly as it is (the `.edb` files, their `.png` pictures and `.txt` files, gamemode folders included) as `build/Janus-Project-mods.zip`, which gets unzipped into the game's folder, next to the executable. No level in `mods/`, no zip.
+Both packages come with an empty `modpacks/default/` folder (the gamemode folders are in it). The mods are a download of their own: `make mods-zip` packs `modpacks/` exactly as it is (every pack's `.edb` files, their `.png` pictures and `.txt` files, gamemode folders and weapons included) as `build/Janus-Project-mods.zip`, which gets unzipped into the game's folder, next to the executable. No level in `modpacks/`, no zip.
 
 # Playing
 Grab the zip for your OS from [Releases](https://github.com/Coockie1173/Janus-Project/releases), unzip it somewhere you can write to and run `Janus-Project.exe` (or `./Janus-Project` on Linux). The first time it asks for your disc image (`.rvz`, `.iso`, `.wbfs` or `.wia`, only the US version `SJBE52` works), takes the files out and you're good to go.

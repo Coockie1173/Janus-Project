@@ -8,7 +8,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 cd "$HERE/../.." || exit 1
 mkdir -p build/netlab && cd build/netlab || exit 1
 N=${1:-8}; SECS=${2:-300}; GAP=${GAP:-12}
-S=${S:-"8:A 11:D 12:D 13:D 15:A 18:D 19:D 21:A 52:A 58:A"}
+S=${S:-"8:A 11:D 12:D 13:D 15:A 18:D 19:D 21:A 23:A 52:A 58:A"}
 #(name, from) -> GE_STICK, GE_MOUSEMOVE and GE_BUTTONS lines, seeded by the name
 inputs()
 {

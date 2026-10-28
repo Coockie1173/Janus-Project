@@ -1,6 +1,6 @@
 #!/bin/sh
 # The Linux package: the portable build (make linux), what it needs beside it, the
-# instructions and an empty mods folder, zipped. Nothing of the disc goes in: game/ is left for the
+# instructions and an empty modpacks/default, zipped. Nothing of the disc goes in: game/ is left for the
 # player to fill.
 #     sh tools/package_linux.sh [FONTS_DIR]      -> build/Janus-Project-linux64.zip
 set -e
@@ -32,11 +32,12 @@ cp port/package/licenses/Roboto.txt "$S/licenses/Roboto.txt"
 cp build/deps/codecs/zstd/LICENSE "$S/licenses/zstd.txt"
 cp build/deps/codecs/bzip2/LICENSE "$S/licenses/bzip2.txt"
 cp build/deps/codecs/lzma/DOC/lzma-sdk.txt "$S/licenses/lzma-sdk.txt"
-# the mods folder is there and empty, with its folder for each online gamemode (README.md, Mods):
-# the mods themselves are a download of their own (tools/package_mods.sh), unzipped into this one
-mkdir -p "$S/mods"
+# the modpacks folder is there with an empty pack "default", with its folder for each online
+# gamemode (README.md, Mods): the packs themselves are a download of their own
+# (tools/package_mods.sh), unzipped into this one
+mkdir -p "$S/modpacks/default"
 for d in conflict team_conflict golden_gun black_box goldeneye heroes license_to_kill team_license_to_kill; do
-    mkdir -p "$S/mods/$d"
+    mkdir -p "$S/modpacks/default/$d"
 done
 cp port/package/linux/README.txt "$S/"
 chmod 755 "$S/Janus-Project"

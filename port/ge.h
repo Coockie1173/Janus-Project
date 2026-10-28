@@ -7,7 +7,7 @@
 //gameplay/      fov, cutscenes, qte, movies, tweaks, autosave, the tank, 007 Custom
 //cheats/        god mode and the rest, noclip, stamina, collision and trigger views, gecko codes
 //fun/           bunnyhopping, the weapon randomizer
-//mods/          loose .edb files, the Mods and Level Select menus, pictures, custom weapons
+//mods/          modpacks of loose .edb files, the Mods and Level Select menus, pictures, custom weapons
 //net/           the hosts file, the server's live patch, client-owned players
 //ui/            the settings menu (F1, ui/settings/), the debug overlay (F3), the window's icon
 //speedrun/      the speedrun timer

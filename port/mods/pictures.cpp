@@ -74,6 +74,7 @@ uint32_t g_front_end = 0; //the game's object for the file
 PPCFunc orig_level_picture = nullptr, orig_lobby_picture = nullptr, set_frame = nullptr;
 bool g_trace = false;
 std::atomic<bool> g_wanted{false}, g_shoot{false}, g_again{false}; //F12 was pressed, the picture is ready to be taken, a .png was written
+int g_pack = -1; //the pack whose pictures these are
 //for the picture the hud's meshes, the gun and the player's own body are left out of the mesh
 //draw for some frames (fov.cpp). the hud's texts (the timer, the ammunition) are drawn
 //another way and stay: they are at the sides, outside the part that is kept
@@ -265,6 +266,7 @@ void ReadPictures()
 		loan.pPicture = nullptr;
 	}
 	g_pictures.clear();
+	g_pack = modpack_active();
 	for (const ModLevel& mod : mod_files())
 	{
 		const std::string path = PngOf(mod);
@@ -283,7 +285,7 @@ void LevelPicture(PPCContext& c)
 {
 	const uint32_t menu = c.r[4];
 	orig_level_picture(c);
-	if (g_again.exchange(false)) ReadPictures();
+	if (g_again.exchange(false) || g_pack != modpack_active()) ReadPictures();
 	if (g_pictures.empty() || !guest_ptr(menu)) return;
 	const uint32_t lit = ld32(menu + kMenuLit);
 	const uint32_t row = lit < 4096 ? ld32(menu + kMenuRows + lit * 4) : 0;
@@ -312,7 +314,7 @@ void LobbyPicture(PPCContext& c)
 {
 	const uint32_t text = guest_ptr(c.r[4]) ? ld32(c.r[4]) : 0;
 	orig_lobby_picture(c);
-	if (g_again.exchange(false)) ReadPictures();
+	if (g_again.exchange(false) || g_pack != modpack_active()) ReadPictures();
 	if (g_pictures.empty()) return;
 	//the name's characters, their count in the short four before them
 	std::string name;
@@ -381,7 +383,9 @@ std::string pictures_draw()
 void install_pictures()
 {
 	g_trace = std::getenv("GE_TRACE") != nullptr;
-	if (mod_files().empty()) return;
+	bool any = false;
+	for (int pack = 0; pack < modpack_count(); ++pack) any |= !modpack_files(pack).empty();
+	if (!any) return;
 	ReadPictures();
 	orig_level_picture = ppc_hook("ge_level_picture", LevelPicture);
 	orig_lobby_picture = ppc_hook("ge_lobby_picture", LobbyPicture);

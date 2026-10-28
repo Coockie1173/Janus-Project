@@ -11,7 +11,7 @@
 //GE_AIM_LOCK=1 a press of aim stays aimed until the next
 //GE_MOUSE_EVERYWHERE=1 cheat, mouse look in every player state
 //GE_HOSTS=F hosts file for the game's servers (config/hosts.txt by default)
-//GE_MODS=DIR loose .edb files in place of the disc's, or on top of them (mods by default)
+//GE_MODPACKS=DIR the modpacks, a folder each of loose .edb files in place of the disc's or on top of them (modpacks by default), GE_MODPACK=NAME the one installed first, GE_MODS=DIR one folder as the only pack
 //GE_NETLOG=1 log sockets, lookups and TLS sessions
 //GE_GECKO=F gecko codes to run each frame (build/patched/gecko.txt by default, empty for none)
 //GE_GECKO_EXTRA=F[:F...] more gecko files

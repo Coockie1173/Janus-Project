@@ -1,4 +1,4 @@
-//custom weapons, what their two files share: read.cpp reads mods/weapons/NAME.txt, weapons.cpp
+//custom weapons, what their two files share: read.cpp reads a pack's weapons/NAME.txt, weapons.cpp
 //puts them in the game
 #pragma once
 #include "ge.h"
@@ -13,12 +13,13 @@ namespace ge::weapons
 const uint32_t kWeapons = 0x805D1A4C, kRowSize = 0x254;
 const uint32_t kRowKey = 0, kRowSilenced = 8, kRowClip = 0xD, kRowClips = 0xE, kRowId = 0x174, kRowName = 0x190;
 const uint32_t kFirstKey = 0x4B000100, kFirstId = 0x0200F000, kFirstText = 0x4300F300; //the game's stop at 4B00005A, 02001EBC, 430017xx
-const uint32_t kMostWeapons = 64, kMostPages = 4096;
+const uint32_t kMostWeapons = 64, kMostAll = 192, kMostPages = 4096; //a pack's, every pack's
 
 struct Patch { uint32_t at, size; uint32_t value; }; //size 1, 4, or 0 for a float
 struct Weapon
 {
 	std::string file, name, about, base;
+	int pack{}; //the modpack it is of
 	float damage{ 1.0f };
 	int clip{ -1 }, clips{ -1 };
 	std::vector<Patch> patches;
@@ -36,10 +37,11 @@ struct Weapon
 };
 
 inline std::vector<Weapon> g_weapons;
-inline std::vector<uint8_t> g_sum; //what the files say, for the network game's version
+inline std::vector<std::vector<uint8_t>> g_sums; //what each pack's files say, for the network game's version
 
 //read.cpp
 std::string Lower(std::string s);
-void ReadWeapons(); //the weapons folder's files, sorted, into g_weapons
+void ReadWeapons(); //every pack's weapons folder's files, a pack after the other and sorted, into g_weapons
+bool Installed(const Weapon& w); //of the installed pack
 
 } //namespace ge::weapons

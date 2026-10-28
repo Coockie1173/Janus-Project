@@ -84,14 +84,18 @@ Where things are
     nand/           your saves and profiles (made on the first start). Back this up.
     keys.txt        key bindings
     settings.env    your settings (F1 writes them)
-    mods/           levels that aren't the game's own (.edb files): Extras > Mods in the
-                    game's menu lists them. It has a folder for each online game mode
+    modpacks/       levels that aren't the game's own (.edb files), a folder for each
+                    modpack (modpacks/default, ...). Extras > Mods in the game's menu
+                    lists the packs and their levels; the pack you highlight is the
+                    one that's loaded. A pack has a folder for each online game mode
                     (conflict, team_conflict, golden_gun, black_box, goldeneye, heroes,
                     license_to_kill, team_license_to_kill): the levels in one are that
-                    mode's maps after Multiplayer > Connect to WFC Modded, and a mode
-                    with an empty folder isn't offered there
-                    It comes empty: Janus-Project-mods.zip, a download of its own
-                    next to this one, has levels for it. Unzip it into this folder.
+                    mode's maps after Multiplayer > Connect to WFC Modded, where you
+                    pick the pack first, and a mode with an empty folder isn't offered
+                    there
+                    It comes with an empty pack "default": Janus-Project-mods.zip, a
+                    download of its own next to this one, has levels for it. Unzip it
+                    into this folder.
                     Without any level in those folders Multiplayer is the game's own
                     menu, with Nintendo Wi-Fi Connection alone.
     run.log         the log of the last run

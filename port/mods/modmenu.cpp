@@ -16,9 +16,11 @@
 //row: where kind 0xB was found
 //
 //the Mods page is one more entry in the array (a new block from the game's own allocator, so
-//the game can grow or free it as it would its own): a level select (class 7D030007, the lit
-//level's picture beside the list, port/mods/pictures.cpp) with the rows Conflict's has before its
-//maps and a kind 0xB row for each level. Extras gets rows made here, its items and "Mods". a
+//the game can grow or free it as it would its own): a list of the modpacks (port/mods/mods.cpp)
+//that have levels, each to a page of its own, a level select (class 7D030007, the lit level's
+//picture beside the list, port/mods/pictures.cpp) with the rows Conflict's has before its maps
+//and a kind 0xB row for each level of the pack. the pack that is lit is installed, so its
+//levels are there as its page opens. Extras gets rows made here, its items and "Mods". a
 //layout draws all of its slots, filled or not, so each list is given the layout of one of the
 //game's pages with as many slots as it has items (kLayouts). the texts are answered from here (prompts.cpp asks for every text the game looks
 //up)
@@ -28,15 +30,16 @@
 //the maps of multiplayer's Conflict are a page of the same kind (7D000045, rows 805830C8: six
 //of dressing with one list widget, then a kind 0xB row for each of its ten maps), and each of the seven other
 //online gamemodes has one like it (kModes). a gamemode's page can get rows made here, a map
-//for every level in its folder of the mods folder (mods/conflict, mods/team_conflict, ...
-//port/mods/mods.cpp), as many as there are. the code this replaces wrote other hashes into the
-//game's ten rows
+//for every level in its folder of the installed pack (modpacks/default/conflict,
+//modpacks/default/team_conflict, ... port/mods/mods.cpp), as many as there are. the code this
+//replaces wrote other hashes into the game's ten rows
 //which of the two it has is picked in the Multiplayer menu (7D000061, rows 8057E5A0: Split
 //Screen and Nintendo Wi-Fi Connection, which goes to page 7D000049). with a level in any of
-//those folders that page gets rows made here too: Split Screen, "Connect to Nintendo WFC" and "Connect to WFC
-//Modded", both to 7D000049. the line under the list that says what the lit item is gets
-//looked up as the item is lit, and each of the two has a text of its own for it: the one
-//asked for last says which maps the gamemodes have
+//those folders of any pack that page gets rows made here too: Split Screen, "Connect to
+//Nintendo WFC" to 7D000049 and "Connect to WFC Modded" to Choose Modpack, a page made here with
+//the packs that have maps, each to 7D000049. the line under the list that says what the lit item
+//is gets looked up as the item is lit, and each item has a text of its own for it: the one asked
+//for last says which maps the gamemodes have, and which pack is installed
 //
 //the gamemode is picked in Choose Game Mode (rows 8057FBE0: nine slots, the eight gamemodes and
 //Classic Conflict, each to its page of maps; and a second one at 8057FE60, to the search). which one was picked goes by the row's text
@@ -45,10 +48,10 @@
 //Conflict's page, and with it Conflict's folder
 //
 //a console doesn't have those maps and stops on one, and so does someone with other files in
-//their mods folder. a network game has a version, 0x4F: the host's session is advertised with
-//it and a search asks the server for it (the queries are called ..._VERSIONPROTOCOL...). after
-//Connect to WFC Modded both get a number made here from each gamemode's maps and the mods'
-//bytes, so only those with the same maps find each other
+//their pack. a network game has a version, 0x4F: the host's session is advertised with it and a
+//search asks the server for it (the queries are called ..._VERSIONPROTOCOL...). after Connect to
+//WFC Modded both get a number made here from each gamemode's maps and the installed pack's
+//bytes, so only those with the same pack find each other
 //
 //Extras also gets "Level Select" and "Multiplayer Maps", with mods or without: two more pages
 //of the same kind with every level the disc's file list has (port/mods/mods.cpp), the ones no menu
@@ -114,10 +117,9 @@ const uint32_t kUnusedFoot = 16; //the footer's row there, then a row a item: th
 const uint32_t kKindAbout = 0x00AB0000;
 const uint32_t kKindPage = 0x00010000, kKindLevel = 0x000B0000;
 const uint32_t kMissionStart = 1; //the entrance a level begins at
-const uint32_t kTextMods = 0x4300F0FF, kTextAbout = 0x4300F0FE, kTextLevel = 0x4300F000; //the game's own texts stop at 430017xx
+const uint32_t kTextMods = 0x4300F0FF, kTextAbout = 0x4300F0FE; //the game's own texts stop at 430017xx
 const uint32_t kConflictRows = 0x805830C8; //the game's
 const uint32_t kConflictHead = 6; //the rows before the maps
-const uint32_t kTextMap = 0x4300F100; //a text for each level of the mods in a gamemode's maps
 const uint32_t kTextLevels = 0x4300F0F4, kTextAboutLevels = 0x4300F0F5, kTextMaps = 0x4300F0F6, kTextAboutMaps = 0x4300F0F7;
 const uint32_t kTextDisc = 0x4300F200; //a text for each level of the disc
 const uint32_t kLevelFiles = 0x01810000; //mt_, the others of the disc's levels are multiplayer's (mpt_)
@@ -152,6 +154,11 @@ const uint32_t kSplitScreenRow = 6, kSplitScreenAboutRow = 9;
 const uint32_t kTextMultiplayer = 0x43000C88; //the page's title, the game's
 const uint32_t kOnlinePage = 0x7D000049; //Nintendo Wi-Fi Connection
 const uint32_t kTextWfc = 0x4300F0F0, kTextWfcModded = 0x4300F0F1, kTextAboutWfc = 0x4300F0F2, kTextAboutModded = 0x4300F0F3;
+//the modpacks: Choose Modpack after Connect to WFC Modded, a page of levels each in Extras > Mods
+const uint32_t kOnlinePacksPage = 0x7D000DFB, kPackPages = 0x7D000E00, kMostPacks = 0x100;
+const uint32_t kTextChoosePack = 0x4300F0F8;
+const uint32_t kTextPack = 0x43030000, kTextAboutPack = 0x43031000, kTextAboutOnlinePack = 0x43032000; //+ the pack
+const uint32_t kTextPackLevels = 0x43040000, kTextPackMaps = 0x43080000, kPackTexts = 0x400; //+ the pack times kPackTexts + the level
 const uint32_t kDifficultyRows[] = { 0x80582248, 0x805823D8 }, kDifficultyItems[] = { 5, 4 }; //Select Difficulty, the game's: with Time Trial and without
 const uint32_t kTextDifficulty = 0x430004E1; //its title
 const uint32_t kCustomPage = 0x7D000DFC;
@@ -164,10 +171,23 @@ const uint32_t kAlloc = 0x803428C0; //(bytes, flags) -> a block of the game's he
 const uint32_t kMostPages = 4096;
 
 PPCFunc game_alloc = nullptr;
-std::vector<ModLevel> g_levels;
-std::vector<const ModLevel*> g_listed; //the ones Extras > Mods lists: a name once
 std::map<uint32_t, uint32_t> g_texts; //a text's hash, its characters in the game's memory
-uint32_t g_mods_rows = 0, g_mods_row_count = 0;
+uint32_t g_mods_rows = 0, g_mods_row_count = 0; //Extras > Mods: the packs with levels
+uint32_t g_online_rows = 0, g_online_row_count = 0; //Choose Modpack: the packs with maps
+
+//what the menus have of a pack, made as it is first shown
+struct PackMenu
+{
+	std::vector<const ModLevel*> listed; //the ones its page in Extras > Mods lists: a name once
+	std::vector<const ModLevel*> pool[kModeCount]; //the levels in each gamemode's folder
+	bool anyPool = false;
+	uint32_t version = 0; //a network game's version with its maps, 0 until it is installed
+	uint32_t rows = 0, rowCount = 0; //its page of levels
+	uint32_t poolRows[kModeCount] = {}, poolRowCount[kModeCount] = {};
+	uint32_t chooseRows[2] = {}, chooseRowCount[2] = {}; //Choose Game Mode without the gamemodes that have no maps
+};
+std::vector<PackMenu> g_menus;
+std::atomic<int> g_lit_pack{-1}; //the pack lit last in either list of them
 struct DiscLevel { uint32_t hash; std::string shown; };
 std::vector<DiscLevel> g_disc[2]; //the disc's levels: the missions and tests, multiplayer's maps
 uint32_t g_disc_rows[2] = {}, g_disc_row_count[2] = {};
@@ -175,15 +195,12 @@ bool g_built = false;
 uint32_t g_extras_rows[2] = {}, g_extras_row_count[2] = {}; //without and with the unused items
 bool g_failed = false;
 
-std::vector<const ModLevel*> g_pool[kModeCount]; //the levels in each gamemode's folder
-bool g_any_pool = false;
+bool g_any_pool = false; //a pack has maps
+bool g_mods_wanted = false; //a pack has levels
 std::atomic<bool> g_map_pool{false}; //Connect to WFC Modded was the item lit last
-uint32_t g_pool_rows[kModeCount] = {}, g_pool_row_count[kModeCount] = {};
 uint32_t g_game_rows[kModeCount] = {}; //the game's own rows of each gamemode's page, as found
-uint32_t g_choose_rows[2] = {}, g_choose_row_count[2] = {}; //Choose Game Mode without the gamemodes that have no maps
 uint32_t g_multiplayer_rows = 0, g_multiplayer_row_count = 0;
 bool g_pool_failed = false;
-uint32_t g_pool_version = 0; //a network game's version with those maps
 bool g_trace = false;
 uint32_t g_mods_target = kModsPage; //GE_MODS_PAGE
 
@@ -257,17 +274,35 @@ uint32_t ListRows(const PPCContext& c, uint32_t items, uint32_t title, uint32_t&
 	return rows + head * kRowSize;
 }
 
-//a map that has a level of its own triggers in each gamemode's folder is in Extras > Mods once:
-//the level in the mods folder itself when there is one, the first of the others when not
-void ListLevels()
+//a map that has a level of its own triggers in each gamemode's folder is in its pack's page once:
+//the level in the pack's folder itself when there is one, the first of the others when not
+void ListLevels(int pack)
 {
-	for (const ModLevel& level : g_levels)
+	auto& listed = g_menus[pack].listed;
+	for (const ModLevel& level : modpack_levels(pack))
 	{
-		auto same = std::find_if(g_listed.begin(), g_listed.end(), [&](const ModLevel* p) { return p->name == level.name; });
-		if (same == g_listed.end()) g_listed.push_back(&level);
+		auto same = std::find_if(listed.begin(), listed.end(), [&](const ModLevel* p) { return p->name == level.name; });
+		if (same == listed.end()) listed.push_back(&level);
 		else if ((*same)->modes != 0 && level.modes == 0) *same = &level;
 	}
 }
+
+//a list of the packs: each to its own page or all to one, with a line of its own
+uint32_t PackRows(const PPCContext& c, const std::vector<int>& packs, uint32_t title, uint32_t about, bool toLevels, uint32_t& count)
+{
+	uint32_t rows = 0;
+	const uint32_t items = (uint32_t)packs.size(), at = ListRows(c, items, title, rows, count);
+	if (!at) return 0;
+	const uint32_t line = at + (items + 1) * kRowSize;
+	for (uint32_t i = 0; i < items; ++i)
+	{
+		Row(at + i * kRowSize, kTextPack + (uint32_t)packs[i], toLevels ? kPackPages + (uint32_t)packs[i] : kOnlinePage, 0, kKindPage);
+		Row(line + i * kRowSize, about + (uint32_t)packs[i], 0, 0, kKindAbout);
+	}
+	return rows;
+}
+
+std::string Count(size_t n, const char* what) { return std::to_string(n) + " " + what + (n == 1 ? "" : "s"); }
 
 //a multiplayer level's map and gamemode: mpt_frigate_fdm.edb is "Frigate" and Conflict's number
 std::string MapOf(const std::string& file, int& mode)
@@ -341,14 +376,47 @@ bool Build(const PPCContext& c)
 		}
 		items.push_back({ discTitles[list], discPages[list], discAbouts[list] });
 	}
-	if (!g_listed.empty())
+	//Mods: the packs with levels, and a page of each one's
+	std::vector<int> packs;
+	for (int pack = 0; pack < (int)g_menus.size(); ++pack)
+	{
+		const auto& listed = g_menus[pack].listed;
+		if (listed.empty()) continue;
+		packs.push_back(pack);
+		g_texts[kTextPack + (uint32_t)pack] = Text(c, modpack_name(pack));
+		g_texts[kTextAboutPack + (uint32_t)pack] = Text(c, Count(listed.size(), "level") + " in modpacks/" + std::filesystem::path(modpack_folder(pack)).filename().string() + ".");
+		const uint32_t texts = kTextPackLevels + (uint32_t)pack * kPackTexts;
+		for (size_t i = 0; i < listed.size() && i < kPackTexts; ++i) g_texts[texts + (uint32_t)i] = Text(c, Shown(listed[i]->name));
+		PackMenu& menu = g_menus[pack];
+		menu.rows = LevelRows(c, kTextPack + (uint32_t)pack, (uint32_t)std::min<size_t>(listed.size(), kPackTexts), menu.rowCount);
+		if (!menu.rows) return false;
+		for (uint32_t i = 0; i < (uint32_t)listed.size() && i < kPackTexts; ++i) Row(menu.rows + (kConflictHead + i) * kRowSize, texts + i, listed[i]->hash, kMissionStart, kKindLevel);
+	}
+	//Choose Modpack: the packs with maps
+	std::vector<int> online;
+	for (int pack = 0; pack < (int)g_menus.size(); ++pack)
+	{
+		const PackMenu& menu = g_menus[pack];
+		if (!menu.anyPool) continue;
+		online.push_back(pack);
+		std::string says;
+		for (int mode = 0; mode < kModeCount; ++mode)
+			if (!menu.pool[mode].empty()) says += std::string(says.empty() ? "" : ", ") + kMapKinds[mode].mode + " " + std::to_string(menu.pool[mode].size());
+		if (!g_texts[kTextPack + (uint32_t)pack]) g_texts[kTextPack + (uint32_t)pack] = Text(c, modpack_name(pack));
+		g_texts[kTextAboutOnlinePack + (uint32_t)pack] = Text(c, "Maps: " + says + ".");
+	}
+	if (!online.empty())
+	{
+		g_texts[kTextChoosePack] = Text(c, "Choose Modpack");
+		g_online_rows = PackRows(c, online, kTextChoosePack, kTextAboutOnlinePack, false, g_online_row_count);
+		if (!g_online_rows) return false;
+	}
+	if (!packs.empty())
 	{
 		g_texts[kTextMods] = Text(c, "Mods");
-		g_texts[kTextAbout] = Text(c, "Play the levels in the mods folder.");
-		for (size_t i = 0; i < g_listed.size(); ++i) g_texts[kTextLevel + (uint32_t)i] = Text(c, Shown(g_listed[i]->name));
-		g_mods_rows = LevelRows(c, kTextMods, (uint32_t)g_listed.size(), g_mods_row_count);
+		g_texts[kTextAbout] = Text(c, "Play the levels of a modpack.");
+		g_mods_rows = PackRows(c, packs, kTextMods, kTextAboutPack, true, g_mods_row_count);
 		if (!g_mods_rows) return false;
-		for (uint32_t i = 0; i < (uint32_t)g_listed.size(); ++i) Row(g_mods_rows + (kConflictHead + i) * kRowSize, kTextLevel + i, g_listed[i]->hash, kMissionStart, kKindLevel);
 		items.push_back({ kTextMods, kModsPage, kTextAbout });
 	}
 	for (const auto& made : g_texts)
@@ -409,14 +477,15 @@ void Mix32(uint32_t& sum, uint32_t value)
 	Mix(sum, bytes, sizeof bytes);
 }
 
-uint32_t PoolVersion()
+//the installed pack's
+uint32_t PoolVersion(const PackMenu& menu)
 {
 	std::map<std::string, uint32_t> sums; //a file in several gamemodes is read once
 	uint32_t sum = kFnvStart;
 	Mix(sum, &kPortProtocol, 1);
 	for (int mode = 0; mode < kModeCount; ++mode)
 	{
-		std::vector<const ModLevel*> maps = g_pool[mode];
+		std::vector<const ModLevel*> maps = menu.pool[mode];
 		std::sort(maps.begin(), maps.end(), [](const ModLevel* a, const ModLevel* b) { return a->hash < b->hash; });
 		Mix32(sum, (uint32_t)mode);
 		for (const ModLevel* pMap : maps)
@@ -433,8 +502,9 @@ uint32_t PoolVersion()
 	}
 	//what isn't a level goes in too: the geometry a map's levels load, a file in place of the disc's
 	std::vector<const ModLevel*> others;
+	const auto& levels = mod_levels();
 	for (const ModLevel& file : mod_files())
-		if (std::none_of(g_levels.begin(), g_levels.end(), [&](const ModLevel& level) { return level.hash == file.hash; })) others.push_back(&file);
+		if (std::none_of(levels.begin(), levels.end(), [&](const ModLevel& level) { return level.hash == file.hash; })) others.push_back(&file);
 	std::sort(others.begin(), others.end(), [](const ModLevel* a, const ModLevel* b) { return a->hash < b->hash; });
 	for (const ModLevel* pFile : others)
 	{
@@ -447,21 +517,38 @@ uint32_t PoolVersion()
 	return kModdedVersions | (sum & (kModdedVersions - 1));
 }
 
-//each gamemode's maps: the levels in its folder
-void ReadPool()
+//a pack's maps for each gamemode: the levels in its folder
+void ReadPool(int pack)
 {
-	for (const ModLevel& level : g_levels)
+	PackMenu& menu = g_menus[pack];
+	for (const ModLevel& level : modpack_levels(pack))
 		for (int mode = 0; mode < kModeCount; ++mode)
-			if (level.modes & (1u << mode)) g_pool[mode].push_back(&level);
+			if (level.modes & (1u << mode)) menu.pool[mode].push_back(&level);
 	for (int mode = 0; mode < kModeCount; ++mode)
 	{
-		if (g_pool[mode].empty()) continue;
-		g_any_pool = true;
-		rt_log("goldeneye: %zu map(s) in %s/%s", g_pool[mode].size(), mods_folder().c_str(), kModeFolders[mode]);
+		if (menu.pool[mode].empty()) continue;
+		menu.anyPool = g_any_pool = true;
+		rt_log("goldeneye: %zu map(s) in %s/%s", menu.pool[mode].size(), modpack_folder(pack).c_str(), kModeFolders[mode]);
 	}
-	if (!g_any_pool) return;
-	g_pool_version = PoolVersion();
-	rt_log("goldeneye: a network game with them is version %08X (the game's own: %X)", g_pool_version, kGameVersion);
+}
+
+PackMenu* Installed()
+{
+	const int pack = modpack_active();
+	return pack >= 0 && pack < (int)g_menus.size() ? &g_menus[pack] : nullptr;
+}
+
+//the installed pack's version, made the first time it is asked for
+uint32_t Version()
+{
+	PackMenu* menu = Installed();
+	if (!menu) return kGameVersion;
+	if (!menu->version)
+	{
+		menu->version = PoolVersion(*menu);
+		rt_log("goldeneye: a network game with modpack %s is version %08X (the game's own: %X)", modpack_name(modpack_active()).c_str(), menu->version, kGameVersion);
+	}
+	return menu->version;
 }
 
 //the Multiplayer menu with the two ways online, when there is a pool to pick
@@ -474,14 +561,14 @@ void MultiplayerFrame(const PPCContext& c, uint32_t data, uint32_t count)
 		g_texts[kTextWfc] = Text(c, "Connect to Nintendo WFC");
 		g_texts[kTextWfcModded] = Text(c, "Connect to WFC Modded");
 		g_texts[kTextAboutWfc] = Text(c, "Connect to Nintendo WFC.");
-		g_texts[kTextAboutModded] = Text(c, "Connect to Nintendo WFC with the gamemodes and maps of the mods folder.");
+		g_texts[kTextAboutModded] = Text(c, "Connect to Nintendo WFC with the gamemodes and maps of a modpack.");
 		const uint32_t items = 3;
 		uint32_t rows = 0;
 		const uint32_t at = ListRows(c, items, kTextMultiplayer, rows, g_multiplayer_row_count);
 		if (!at || !g_texts[kTextWfc] || !g_texts[kTextWfcModded] || !g_texts[kTextAboutWfc] || !g_texts[kTextAboutModded]) { g_pool_failed = true; return; }
 		CopyRows(at, kMultiplayerRows + kSplitScreenRow * kRowSize, 1);
 		Row(at + kRowSize, kTextWfc, kOnlinePage, 0, kKindPage);
-		Row(at + 2 * kRowSize, kTextWfcModded, kOnlinePage, 0, kKindPage);
+		Row(at + 2 * kRowSize, kTextWfcModded, kOnlinePacksPage, 0, kKindPage);
 		const uint32_t about = at + (items + 1) * kRowSize;
 		CopyRows(about, kMultiplayerRows + kSplitScreenAboutRow * kRowSize, 1);
 		Row(about + kRowSize, kTextAboutWfc, 0, 0, kKindAbout);
@@ -594,53 +681,63 @@ void CustomFrame(const PPCContext& c, uint32_t& data, uint32_t& count)
 	st32(kPages + kPagesRoom, count);
 }
 
-bool Modded() { return g_map_pool && g_any_pool && !g_pool_failed; }
+bool Modded()
+{
+	const PackMenu* menu = Installed();
+	return g_map_pool && menu && menu->anyPool && !g_pool_failed;
+}
 
-//a gamemode's page gets its pool's rows after Connect to WFC Modded, the game's own otherwise
+//a gamemode's page gets the installed pack's maps after Connect to WFC Modded, the game's own otherwise
 void PoolFrame(const PPCContext& c, uint32_t data, uint32_t count, int mode)
 {
 	const uint32_t page = FindPage(data, count, kModes[mode].page);
 	if (!page) return;
 	if (!g_game_rows[mode]) g_game_rows[mode] = ld32(page + kPageRows);
 	const uint32_t game = g_game_rows[mode];
-	const auto& pool = g_pool[mode];
-	const bool on = Modded() && !pool.empty() && game_alloc;
-	if (on && !g_pool_rows[mode])
+	PackMenu* menu = Installed();
+	const bool on = Modded() && !menu->pool[mode].empty() && game_alloc;
+	if (on && !menu->poolRows[mode])
 	{
-		g_pool_row_count[mode] = kConflictHead + (uint32_t)pool.size();
-		const uint32_t rows = Alloc(c, g_pool_row_count[mode] * kRowSize);
+		const auto& pool = menu->pool[mode];
+		const int pack = modpack_active();
+		const uint32_t texts = kTextPackMaps + (uint32_t)pack * kPackTexts;
+		menu->poolRowCount[mode] = kConflictHead + (uint32_t)pool.size();
+		const uint32_t rows = Alloc(c, menu->poolRowCount[mode] * kRowSize);
 		if (!rows) { g_pool_failed = true; return; }
 		CopyRows(rows, game, kConflictHead);
 		for (size_t i = 0; i < pool.size(); ++i)
 		{
-			const uint32_t text = kTextMap + uint32_t(pool[i] - g_levels.data());
+			const uint32_t text = texts + uint32_t(pool[i] - modpack_levels(pack).data()) % kPackTexts;
 			if (!g_texts[text]) g_texts[text] = Text(c, Shown(pool[i]->name));
 			if (!g_texts[text]) { g_pool_failed = true; return; }
 			Row(rows + (kConflictHead + (uint32_t)i) * kRowSize, text, pool[i]->hash, kMissionStart, kKindLevel);
 		}
-		g_pool_rows[mode] = rows;
-		rt_log("goldeneye: the maps of %s are the %zu of its folder", kModeFolders[mode], pool.size());
+		menu->poolRows[mode] = rows;
+		rt_log("goldeneye: the maps of %s are the %zu of modpack %s", kModeFolders[mode], pool.size(), modpack_name(pack).c_str());
 	}
-	const uint32_t rows = on ? g_pool_rows[mode] : game, have = ld32(page + kPageRows);
-	if (have == rows || (have != game && have != g_pool_rows[mode])) return;
+	const uint32_t rows = on ? menu->poolRows[mode] : game, have = ld32(page + kPageRows);
+	const bool ours = have == game || std::any_of(g_menus.begin(), g_menus.end(), [&](const PackMenu& m) { return m.poolRows[mode] == have; });
+	if (have == rows || !ours) return;
 	st32(page + kPageRows, rows);
-	st32(page + kPageRowCount, on ? g_pool_row_count[mode] : kMapRowCount);
+	st32(page + kPageRowCount, on ? menu->poolRowCount[mode] : kMapRowCount);
 }
 
-//a Choose Game Mode after Connect to WFC Modded: only the gamemodes that have maps
+//a Choose Game Mode after Connect to WFC Modded: only the gamemodes the installed pack has maps for
 void ChooseFrame(const PPCContext& c, uint32_t data, uint32_t count, int which)
 {
 	const uint32_t game = kChooseRows[which];
-	uint32_t& made = g_choose_rows[which];
 	uint32_t page = 0;
 	for (uint32_t i = 0; i < count && !page; ++i)
 	{
 		const uint32_t rows = ld32(data + i * kPageSize + kPageRows);
-		if (rows == game || (made && rows == made)) page = data + i * kPageSize;
+		if (rows == game || std::any_of(g_menus.begin(), g_menus.end(), [&](const PackMenu& m) { return m.chooseRows[which] == rows; })) page = data + i * kPageSize;
 	}
 	if (!page || !g_any_pool || g_pool_failed || !game_alloc) return;
-	if (!made)
+	const bool on = Modded();
+	PackMenu* menu = Installed();
+	if (on && !menu->chooseRows[which])
 	{
+		uint32_t& made = menu->chooseRows[which];
 		std::vector<uint32_t> items; //which of the game's nine stay
 		for (uint32_t i = 0; i < kChooseItemCount; ++i)
 		{
@@ -648,13 +745,13 @@ void ChooseFrame(const PPCContext& c, uint32_t data, uint32_t count, int which)
 			int mode = 0;
 			while (mode < kModeCount && kModes[mode].text != text) ++mode;
 			if (text == kTextClassic) mode = 0;
-			if (mode == kModeCount || !g_pool[mode].empty()) items.push_back(i);
+			if (mode == kModeCount || !menu->pool[mode].empty()) items.push_back(i);
 		}
-		if (items.size() == kChooseItemCount) { made = game; g_choose_row_count[which] = kChooseRowCount; }
+		if (items.size() == kChooseItemCount) { made = game; menu->chooseRowCount[which] = kChooseRowCount; }
 		else
 		{
 			uint32_t rows = 0;
-			const uint32_t at = ListRows(c, (uint32_t)items.size(), kTextChoose, rows, g_choose_row_count[which]);
+			const uint32_t at = ListRows(c, (uint32_t)items.size(), kTextChoose, rows, menu->chooseRowCount[which]);
 			if (!at) { g_pool_failed = true; return; }
 			const uint32_t about = at + uint32_t(items.size() + 1) * kRowSize;
 			for (size_t i = 0; i < items.size(); ++i)
@@ -663,14 +760,13 @@ void ChooseFrame(const PPCContext& c, uint32_t data, uint32_t count, int which)
 				CopyRows(about + uint32_t(i) * kRowSize, game + (kChooseAbout + items[i]) * kRowSize, 1);
 			}
 			made = rows;
-			rt_log("goldeneye: Choose Game Mode (page %08X) has %zu of the %u gamemodes after Connect to WFC Modded", ld32(page), items.size(), kChooseItemCount);
+			rt_log("goldeneye: Choose Game Mode (page %08X) has %zu of the %u gamemodes with modpack %s", ld32(page), items.size(), kChooseItemCount, modpack_name(modpack_active()).c_str());
 		}
 	}
-	const bool on = Modded();
-	const uint32_t rows = on ? made : game;
+	const uint32_t rows = on ? menu->chooseRows[which] : game;
 	if (ld32(page + kPageRows) == rows) return;
 	st32(page + kPageRows, rows);
-	st32(page + kPageRowCount, on ? g_choose_row_count[which] : kChooseRowCount);
+	st32(page + kPageRowCount, on ? menu->chooseRowCount[which] : kChooseRowCount);
 }
 
 //ge_pick_next_maps (801E5860): a network game's next two maps, each drawn at random from the
@@ -722,16 +818,16 @@ void SessionExport(PPCContext& c)
 	const uint32_t record = ld32(c.r[3] + kExportRecord);
 	orig_session_export(c);
 	if (!Modded() || !guest_ptr(record)) return;
-	st32(record + kRecordVersion, g_pool_version);
-	if (g_trace) rt_log("goldeneye: online: the session is advertised as version %08X", g_pool_version);
+	st32(record + kRecordVersion, Version());
+	if (g_trace) rt_log("goldeneye: online: the session is advertised as version %08X", Version());
 }
 
 void FindQuery(PPCContext& c)
 {
 	if (Modded())
 	{
-		st32(c.r[3] + kTaskVersion, g_pool_version);
-		if (g_trace) rt_log("goldeneye: online: searching for games of version %08X", g_pool_version);
+		st32(c.r[3] + kTaskVersion, Version());
+		if (g_trace) rt_log("goldeneye: online: searching for games of version %08X", Version());
 	}
 	orig_find_query(c);
 }
@@ -753,6 +849,9 @@ uint32_t mods_menu_text(uint32_t hash)
 		const bool modded = hash == kTextAboutModded;
 		if (g_map_pool.exchange(modded) != modded && g_trace) rt_log("goldeneye: Multiplayer: %s is lit", modded ? "Connect to WFC Modded" : "Connect to Nintendo WFC");
 	}
+	//under a list of the packs: the pack that is lit, installed on the game's next frame
+	for (const uint32_t about : { kTextAboutPack, kTextAboutOnlinePack })
+		if (hash >= about && hash < about + (uint32_t)g_menus.size()) g_lit_pack = int(hash - about);
 	auto found = g_texts.find(hash);
 	return found == g_texts.end() ? 0 : found->second;
 }
@@ -763,6 +862,11 @@ void mods_menu_frame(PPCContext& c)
 	uint32_t count = ld32(kPages + kPagesCount);
 	uint32_t data = ld32(kPages + kPagesData);
 	if (!guest_ptr(data) || count == 0 || count > kMostPages) return;
+	if (const int lit = g_lit_pack; lit >= 0 && lit != modpack_active())
+	{
+		modpack_select(lit);
+		if (g_trace) rt_log("goldeneye: modpack %s is lit", modpack_name(lit).c_str());
+	}
 	CustomFrame(c, data, count);
 	MultiplayerFrame(c, data, count);
 	for (int mode = 0; mode < kModeCount; ++mode) PoolFrame(c, data, count, mode);
@@ -770,7 +874,7 @@ void mods_menu_frame(PPCContext& c)
 	const uint32_t extras = FindPage(data, count, kExtrasPage);
 	if (!extras) return;
 
-	if ((g_listed.empty() && g_disc[0].empty() && g_disc[1].empty()) || g_failed)
+	if ((!g_mods_wanted && g_disc[0].empty() && g_disc[1].empty()) || g_failed)
 	{
 		//nothing to add: the game's rows, or the code's
 		const bool unused = extras_menu();
@@ -790,8 +894,13 @@ void mods_menu_frame(PPCContext& c)
 	}
 	g_built = true;
 
-	struct Own { uint32_t page, rows, count; };
-	const Own all[] = { { kLevelsPage, g_disc_rows[0], g_disc_row_count[0] }, { kMapsPage, g_disc_rows[1], g_disc_row_count[1] }, { kModsPage, g_mods_rows, g_mods_row_count } };
+	//the lists of packs are lists like Extras and Multiplayer, the levels' like Conflict's maps
+	struct Own { uint32_t page, rows, count, kind; };
+	const uint32_t multiplayer = FindPage(data, count, kMultiplayerPage);
+	std::vector<Own> all = { { kLevelsPage, g_disc_rows[0], g_disc_row_count[0], kLevelSelectClass }, { kMapsPage, g_disc_rows[1], g_disc_row_count[1], kLevelSelectClass },
+		{ kModsPage, g_mods_rows, g_mods_row_count, ld32(extras + kPageClass) } };
+	if (multiplayer) all.push_back({ kOnlinePacksPage, g_online_rows, g_online_row_count, ld32(multiplayer + kPageClass) });
+	for (size_t pack = 0; pack < g_menus.size(); ++pack) all.push_back({ kPackPages + (uint32_t)pack, g_menus[pack].rows, g_menus[pack].rowCount, kLevelSelectClass });
 	std::vector<Own> missing;
 	for (const Own& own : all)
 		if (own.rows && !FindPage(data, count, own.page)) missing.push_back(own);
@@ -809,13 +918,13 @@ void mods_menu_frame(PPCContext& c)
 			st32(page, missing[i].page);
 			st32(page + kPageRows, missing[i].rows);
 			st32(page + kPageRowCount, missing[i].count);
-			st32(page + kPageClass, kLevelSelectClass);
+			st32(page + kPageClass, missing[i].kind);
 		}
 		st32(kPages + kPagesData, fresh);
 		st32(kPages + kPagesCount, pages);
 		st32(kPages + kPagesRoom, pages);
 		data = fresh;
-		rt_log("goldeneye: Extras has Level Select: %zu level(s), Multiplayer Maps: %zu, Mods: %zu", g_disc[0].size(), g_disc[1].size(), g_listed.size());
+		rt_log("goldeneye: Extras has Level Select: %zu level(s), Multiplayer Maps: %zu, Mods: %zu modpack(s)", g_disc[0].size(), g_disc[1].size(), g_mods_row_count ? g_menus.size() : 0);
 	}
 
 	const int unused = extras_menu() ? 1 : 0;
@@ -829,13 +938,17 @@ void mods_menu_frame(PPCContext& c)
 
 void install_mods_menu()
 {
-	g_levels = mod_levels();
-	ListLevels();
+	g_menus.resize((size_t)std::min<int>(modpack_count(), (int)kMostPacks));
+	for (int pack = 0; pack < (int)g_menus.size(); ++pack)
+	{
+		ListLevels(pack);
+		ReadPool(pack);
+		g_mods_wanted |= !g_menus[pack].listed.empty() || g_menus[pack].anyPool;
+	}
 	ListDisc();
 	game_alloc = ppc_lookup(kAlloc);
 	g_trace = std::getenv("GE_TRACE") != nullptr;
 	if (const char* e = std::getenv("GE_MODS_PAGE")) g_mods_target = (uint32_t)std::strtoul(e, nullptr, 16);
-	ReadPool();
 	random_map = ppc_lookup(kRandomMap);
 	if (random_map) ppc_hook("ge_pick_next_maps", PickNextMaps);
 	if (g_any_pool)

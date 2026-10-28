@@ -1,6 +1,7 @@
 #!/bin/sh
 # tools/netlab/pair.sh SECONDS: two hidden instances in one network game against a local server:
 # a host (a) and, 45 s later, a joiner (b) with a console of its own, both through Connect to WFC Modded
+# and the first modpack ("default")
 # (find a game, none there, host one; the second finds the first's). everything lands in build/netlab
 #
 # the server is the Goldeneye-Wii-Server project, on this machine's loopback:
@@ -19,7 +20,7 @@ cd "$HERE/../.." || exit 1
 mkdir -p build/netlab && cd build/netlab || exit 1
 [ -f a.env ] || echo GE_NETTRACE=1 > a.env
 [ -f b.env ] || echo GE_NETTRACE=1 > b.env
-SECS=${1:-185}; S=${S:-"8:A 11:D 12:D 13:D 15:A 18:D 19:D 21:A 52:A 58:A"} #S="... 52:A 57:D 58:A" is the second gamemode
+SECS=${1:-185}; S=${S:-"8:A 11:D 12:D 13:D 15:A 18:D 19:D 21:A 23:A 52:A 58:A"} #23:A takes the first modpack (D before it another), S="... 52:A 57:D 58:A" is the second gamemode
 ( set -a; . ./a.env; set +a; "$HERE/run.sh" a "$S" "$SECS" ${EVERY:-100000} ) &
 sleep 45
 ( set -a; . ./b.env; set +a; "$HERE/run.sh" b "$S" $((SECS - 45)) ${EVERY:-100000} )

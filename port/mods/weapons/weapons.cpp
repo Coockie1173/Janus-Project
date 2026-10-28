@@ -1,4 +1,4 @@
-//custom weapons: mods/weapons/NAME.txt is a weapon of its own, made from one of the game's (its
+//custom weapons: a modpack's weapons/NAME.txt is a weapon of its own, made from one of the game's (its
 //base) with a name, a key, an id and the stats the file changes. it is in the online loadout
 //menu's lists next to the game's guns
 //
@@ -70,9 +70,11 @@ const uint32_t kProfiles = 0x805DE788, kProfileSize = 0x590; //a pad's profile, 
 
 
 bool g_trace = false;
-bool g_listed = false, g_failed = false;
+bool g_failed = false;
+int g_listed = -2; //the pack whose weapons the loadout list has
+std::vector<uint32_t> g_gameList; //the list as the game has it
 struct OwnPage { uint32_t gameRows, gameCount, rows, count; };
-std::map<uint32_t, OwnPage> g_pages; //a weapon page's hash, its rows with these in them
+std::map<std::pair<int, uint32_t>, OwnPage> g_pages; //a pack and a weapon page's hash, its rows with the pack's weapons in them
 PPCFunc orig_loadout_give = nullptr, orig_script_set = nullptr;
 const uint32_t kLoadoutPrimary = 8, kLoadoutSecondary = 0xC; //a loadout row's keys
 bool g_traceGives = false;
@@ -203,7 +205,7 @@ uint32_t WorldModel(size_t n, uint32_t model)
 //the scripts a gun file has, read from the file itself
 void ReadModel(Weapon& w)
 {
-	const std::filesystem::path path = std::filesystem::path(mods_folder()) / "weapons" / w.model;
+	const std::filesystem::path path = std::filesystem::path(modpack_folder(w.pack)) / "weapons" / w.model;
 	std::ifstream in(path, std::ios::binary);
 	std::vector<uint8_t> d((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
 	auto be32 = [&](size_t at) { return at + 4 <= d.size() ? (uint32_t)d[at] << 24 | d[at + 1] << 16 | d[at + 2] << 8 | d[at + 3] : 0u; };
@@ -215,7 +217,7 @@ void ReadModel(Weapon& w)
 	const uint32_t count = be32(kScriptList) >> 16, list = kScriptList + 4 + be32(kScriptList + 4);
 	for (uint32_t i = 0; i < count && i < 256; ++i) w.modelScripts.insert(be32(list + i * kScriptRow));
 	std::error_code error;
-	for (const ModLevel& file : mod_files())
+	for (const ModLevel& file : modpack_files(w.pack))
 		if (std::filesystem::equivalent(file.path, path, error)) w.modelFile = file.hash;
 	if (!w.modelFile) rt_log("goldeneye: weapons: %s: %s isn't among the mods, the base's gun is drawn", w.file.c_str(), w.model.c_str());
 	else if (g_trace) rt_log("goldeneye: weapons: %s is drawn with %s (%08X, %zu script(s))", w.name.c_str(), w.model.c_str(), w.modelFile, w.modelScripts.size());
@@ -412,14 +414,18 @@ void DefAdd(PPCContext& c)
 	if (g_trace) rt_log("goldeneye: weapons: %zu definition(s) made", g_weapons.size());
 }
 
-//a free place among the guns of the base's kind of the loadout list, the base's picture
+//a free place among the guns of the base's kind of the loadout list, the base's picture: the
+//installed pack's weapons, in the game's list as it was
 void ListWeapons(const PPCContext& c)
 {
+	if (g_gameList.empty())
+		for (uint32_t at = 0; at < kListWeapons * kListSize; at += 4) g_gameList.push_back(ld32(kList + at));
+	for (uint32_t i = 0; i < (uint32_t)g_gameList.size(); ++i) st32(kList + i * 4, g_gameList[i]);
 	for (Weapon& w : g_weapons)
 	{
-		if (!w.baseKey && !FindBase(c, w)) continue;
-		w.chars = Chars(c, w.name);
-		w.aboutChars = Chars(c, w.about);
+		if (!Installed(w) || (!w.baseKey && !FindBase(c, w))) continue;
+		if (!w.chars) w.chars = Chars(c, w.name);
+		if (!w.aboutChars) w.aboutChars = Chars(c, w.about);
 		uint32_t picture = 0;
 		for (uint32_t i = 0; i < kListWeapons; ++i)
 			if (ld32(kList + i * kListSize) == w.baseKey) picture = ld32(kList + i * kListSize + 0xC);
@@ -462,18 +468,19 @@ bool Pistol(uint32_t key)
 //a page of the loadout menu with these in it: the game's rows, the weapons after its last gun
 void WeaponPage(const PPCContext& c, uint32_t page)
 {
-	const uint32_t hash = ld32(page + kPageHash), rows = ld32(page + kPageRows), count = ld32(page + kPageRowCount);
-	auto own = g_pages.find(hash);
-	if (!modded_lobby())
+	const uint32_t hash = ld32(page + kPageHash);
+	uint32_t rows = ld32(page + kPageRows), count = ld32(page + kPageRowCount);
+	//a pack's rows in it go back to the game's: outside a game over WFC Modded (the others don't
+	//have them), and for another pack's
+	const int pack = modpack_active();
+	for (const auto& [which, made] : g_pages)
 	{
-		//a game over Nintendo WFC: the others don't have them
-		if (own != g_pages.end() && rows == own->second.rows)
-		{
-			st32(page + kPageRows, own->second.gameRows);
-			st32(page + kPageRowCount, own->second.gameCount);
-		}
-		return;
+		if (which.second != hash || rows != made.rows || (which.first == pack && modded_lobby())) continue;
+		st32(page + kPageRows, rows = made.gameRows);
+		st32(page + kPageRowCount, count = made.gameCount);
 	}
+	if (!modded_lobby()) return;
+	auto own = g_pages.find({ pack, hash });
 	if (own != g_pages.end() && rows == own->second.rows) return;
 	if (own != g_pages.end() && rows == own->second.gameRows)
 	{
@@ -496,7 +503,7 @@ void WeaponPage(const PPCContext& c, uint32_t page)
 	std::vector<const Weapon*> adds;
 	for (const Weapon& w : g_weapons)
 	{
-		if (!w.chars || !InList(w.key)) continue;
+		if (!Installed(w) || !w.chars || !InList(w.key)) continue;
 		const bool pistol = Pistol(w.key);
 		if ((pistol && pistols) || (!pistol && others)) adds.push_back(&w);
 	}
@@ -536,7 +543,7 @@ void WeaponPage(const PPCContext& c, uint32_t page)
 		}
 	}
 	const uint32_t total = count + (uint32_t)adds.size() + relayout;
-	g_pages[hash] = { rows, count, fresh, total };
+	g_pages[{ pack, hash }] = { rows, count, fresh, total };
 	st32(page + kPageRows, fresh);
 	st32(page + kPageRowCount, total);
 	if (g_trace)
@@ -576,16 +583,16 @@ void Poses(PPCContext& c)
 }
 
 //a player's loadout is given (from a copy on the stack). outside a modded game the others don't
-//have these, a custom weapon is its base
+//have these, a custom weapon is its base. so is one of a pack that isn't installed
 void LoadoutGive(PPCContext& c)
 {
 	const uint32_t ctrl = c.r[3], row = c.r[4];
-	if (guest_ptr(row) && !modded_lobby())
+	if (guest_ptr(row))
 		for (uint32_t at : {kLoadoutPrimary, kLoadoutSecondary})
 		{
 			const uint32_t key = ld32(row + at);
 			const auto w = std::find_if(g_weapons.begin(), g_weapons.end(), [&](const Weapon& w) { return w.key == key; });
-			if (w == g_weapons.end()) continue;
+			if (w == g_weapons.end() || (modded_lobby() && Installed(*w))) continue;
 			st32(row + at, w->baseKey);
 			if (g_trace) rt_log("goldeneye: weapons: %s is %08X outside a modded game", w->name.c_str(), w->baseKey);
 		}
@@ -658,7 +665,7 @@ void NodePoint(PPCContext& c)
 //nothing else points at it), which moves to the heap to make the room
 const uint32_t kNetItemsEnd = 0x80574EA0, kNetMostItems = 63, kNetGameItems = 37;
 const uint32_t kP99Table = 0x80574EA8, kP99TableSize = 0xA8, kP99TableAt = 0x80578B08 + 0x20;
-bool g_netListed = false;
+int g_netListed = -2; //the pack whose weapons follow the game's
 
 void NetItems(const PPCContext& c)
 {
@@ -674,6 +681,7 @@ void NetItems(const PPCContext& c)
 	uint32_t place = kNetGameItems;
 	for (const Weapon& w : g_weapons)
 	{
+		if (!Installed(w)) continue;
 		if (place == kNetMostItems)
 		{
 			rt_log("goldeneye: weapons: a network game has room for %u custom weapons, %s isn't sent", kNetMostItems - kNetGameItems, w.name.c_str());
@@ -683,7 +691,7 @@ void NetItems(const PPCContext& c)
 		++place;
 	}
 	st32(kNetItemsEnd + (place - kNetGameItems) * 4, 0);
-	g_netListed = true;
+	g_netListed = modpack_active();
 	if (g_trace) rt_log("goldeneye: weapons: network items %u to %u", kNetGameItems + 1, place);
 }
 
@@ -782,21 +790,36 @@ uint32_t custom_weapon_text(uint32_t hash)
 	return 0;
 }
 
-const std::vector<uint8_t>& custom_weapons_sum() { return g_sum; }
+const std::vector<uint8_t>& custom_weapons_sum()
+{
+	static const std::vector<uint8_t> none;
+	const int pack = modpack_active();
+	return pack >= 0 && pack < (int)g_sums.size() ? g_sums[pack] : none;
+}
+
 bool custom_weapon(uint32_t id) { return std::any_of(g_weapons.begin(), g_weapons.end(), [&](const Weapon& w) { return w.id == id; }); }
-int custom_weapon_count() { return (int)g_weapons.size(); }
-uint32_t custom_weapon_id(int n) { return n >= 0 && n < (int)g_weapons.size() ? g_weapons[n].id : 0; }
-const char* custom_weapon_name(int n) { return n >= 0 && n < (int)g_weapons.size() ? g_weapons[n].name.c_str() : ""; }
+
+//the installed pack's, the nth of them
+static const Weapon* InstalledWeapon(int n)
+{
+	for (const Weapon& w : g_weapons)
+		if (Installed(w) && n-- == 0) return &w;
+	return nullptr;
+}
+
+int custom_weapon_count() { return (int)std::count_if(g_weapons.begin(), g_weapons.end(), [](const Weapon& w) { return Installed(w); }); }
+uint32_t custom_weapon_id(int n) { const Weapon* w = InstalledWeapon(n); return w ? w->id : 0; }
+const char* custom_weapon_name(int n) { const Weapon* w = InstalledWeapon(n); return w ? w->name.c_str() : ""; }
 
 //once a frame on the game's thread: the list's places and the loadout pages
 void custom_weapons_frame(PPCContext& c)
 {
 	if (g_weapons.empty() || g_failed) return;
-	if (!g_netListed) NetItems(c);
+	if (g_netListed != modpack_active()) NetItems(c);
 	if (!ld32(kWeapons + 8)) return;
-	if (!g_listed)
+	if (g_listed != modpack_active())
 	{
-		g_listed = true;
+		g_listed = modpack_active();
 		ListWeapons(c);
 	}
 	const uint32_t count = ld32(kPages + kPagesCount), data = ld32(kPages + kPagesData);
@@ -827,7 +850,7 @@ void install_custom_weapons()
 	for (Weapon& w : g_weapons)
 	{
 		if (!w.model.empty()) ReadModel(w);
-		if (!w.fireSound.empty()) w.fireClip = custom_sound_load((std::filesystem::path(mods_folder()) / "weapons" / w.fireSound).string());
+		if (!w.fireSound.empty()) w.fireClip = custom_sound_load((std::filesystem::path(modpack_folder(w.pack)) / "weapons" / w.fireSound).string());
 	}
 	if (std::any_of(g_weapons.begin(), g_weapons.end(), [](const Weapon& w) { return w.fireClip >= 0; }))
 	{

@@ -698,10 +698,10 @@ index d0baebf..030c684 100644
      std::fflush(stdout);
      std::_Exit(1);
 diff --git a/runtime/disc.cpp b/runtime/disc.cpp
-index 356b1e4..53d3ad5 100644
+index 356b1e4..1791a99 100644
 --- a/runtime/disc.cpp
 +++ b/runtime/disc.cpp
-@@ -8,8 +8,10 @@
+@@ -8,10 +8,13 @@
  // out the same way, as a whole, but its offsets are in bytes where a Wii
  // partition's are shifted right by 2.
  #include "disc.h"
@@ -711,8 +711,11 @@ index 356b1e4..53d3ad5 100644
 +#include <cctype>
  #include <cstring>
  #include <map>
++#include <mutex>
  #include <vector>
-@@ -20,7 +22,11 @@
+ #ifndef _WIN32
+ #define _fseeki64 fseeko
+@@ -20,11 +23,16 @@
  
  namespace {
  
@@ -725,7 +728,12 @@ index 356b1e4..53d3ad5 100644
  std::vector<Region> g_regions;
  std::map<std::string, FILE*> g_files;
  std::vector<uint8_t> g_boot, g_fst;
-@@ -50,7 +56,33 @@ uint64_t file_size(const std::string& path) {
+ int g_shift = 2;                                     // offsets in boot.bin and the FST: >> 2 on the Wii
++std::mutex g_lock;                                   // the regions: disc_rewrite runs while the game reads
+ 
+ uint32_t be32(const uint8_t* p) { return (uint32_t)p[0] << 24 | p[1] << 16 | p[2] << 8 | p[3]; }
+ 
+@@ -50,7 +58,33 @@ uint64_t file_size(const std::string& path) {
  }
  
  void add(uint64_t off, const std::string& path, uint64_t n) {
@@ -760,7 +768,7 @@ index 356b1e4..53d3ad5 100644
  }
  void add(uint64_t off, const std::string& path) { add(off, path, file_size(path)); }
  
-@@ -84,7 +116,63 @@ bool disc_open(const char* dir) {
+@@ -84,11 +118,108 @@ bool disc_open(const char* dir) {
      add((uint64_t)be32(&g_boot[0x420]) << g_shift, root + "/sys/main.dol");
      add((uint64_t)be32(&g_boot[0x424]) << g_shift, root + "/sys/fst.bin");
      walk(root);
@@ -785,6 +793,9 @@ index 356b1e4..53d3ad5 100644
 +    const uint64_t old_off = (uint64_t)be32(e + 4) << g_shift, old_size = be32(e + 8);
 +    uint64_t end = 0;
 +    for (const Region& r : g_regions) end = std::max(end, r.off + r.size);
++    const uint32_t files = be32(g_fst.data() + 8);           // and every file, whose end may read as zeros
++    for (uint32_t k = 1; k < files; ++k)
++        if (!g_fst[k * 12]) end = std::max(end, ((uint64_t)be32(&g_fst[k * 12 + 4]) << g_shift) + be32(&g_fst[k * 12 + 8]));
 +    const uint64_t at = (end + 0x7FFF) & ~0x7FFFull;         // behind everything, on a sector group
 +    uint64_t total = 0;
 +    std::vector<Region> fresh;
@@ -822,10 +833,52 @@ index 356b1e4..53d3ad5 100644
 +        }
 +    for (Region& r : g_regions)
 +        if (r.off == (uint64_t)be32(&g_boot[0x424]) << g_shift && r.data) *r.data = g_fst;
++    return true;
++}
++
++bool disc_rewrite(const char* name, uint64_t at, uint64_t size, const std::vector<DiscPart>& parts) {
++    uint64_t start = 0, length = 0;
++    if (!disc_file(name, &start, &length) || at + size > length) return false;
++    const uint64_t from = start + at, to = from + size;
++    std::vector<Region> fresh;
++    uint64_t total = 0;
++    for (const DiscPart& p : parts) {
++        if (p.original) return false;                // the disc's bytes there are what the regions are now
++        if (!p.data && p.path.empty()) { total += p.size; continue; }
++        uint64_t n = p.data ? p.data->size() : p.size ? p.size : file_size(p.path) - std::min(file_size(p.path), p.off);
++        if (!n) continue;
++        fresh.push_back({from + total, n, p.path, p.off, p.data});
++        total += n;
++    }
++    if (total > size) return false;
++    std::lock_guard<std::mutex> hold(g_lock);
++    // what reaches into the piece is cut at its edges, a region over all of it in two
++    std::vector<Region> kept;
++    for (const Region& r : g_regions) {
++        if (r.off + r.size <= from || r.off >= to) { kept.push_back(r); continue; }
++        if (r.off < from) kept.push_back({r.off, from - r.off, r.path, r.file_off, r.data});
++        if (r.off + r.size > to) {
++            const uint64_t cut = to - r.off;
++            Region tail{to, r.size - cut, r.path, r.file_off + cut, r.data};
++            if (r.data) {                            // a buffer is copied from the cut on
++                tail.data = std::make_shared<std::vector<uint8_t>>(r.data->begin() + (ptrdiff_t)(r.file_off + cut), r.data->begin() + (ptrdiff_t)(r.file_off + r.size));
++                tail.file_off = 0;
++            }
++            kept.push_back(tail);
++        }
++    }
++    kept.insert(kept.end(), fresh.begin(), fresh.end());
++    g_regions.swap(kept);
++    sort_regions();
      return true;
  }
  
-@@ -97,9 +185,16 @@ size_t disc_read(uint64_t off, void* dst, size_t n) {
+ size_t disc_read(uint64_t off, void* dst, size_t n) {
++    std::lock_guard<std::mutex> hold(g_lock);
+     uint8_t* out = static_cast<uint8_t*>(dst);
+     std::memset(out, 0, n);
+     auto it = std::upper_bound(g_regions.begin(), g_regions.end(), off,
+@@ -97,9 +228,16 @@ size_t disc_read(uint64_t off, void* dst, size_t n) {
      for (; it != g_regions.end() && it->off < off + n; ++it) {
          uint64_t a = std::max(off, it->off), b = std::min(off + n, it->off + it->size);
          if (a >= b) continue;
@@ -843,7 +896,7 @@ index 356b1e4..53d3ad5 100644
          if (log && !std::strcmp(log, "all"))
              rt_log("disc: %s +%llX %llX", it->path.c_str(), (unsigned long long)(a - it->off), (unsigned long long)(b - a));
          if (!f) {
-@@ -107,7 +202,8 @@ size_t disc_read(uint64_t off, void* dst, size_t n) {
+@@ -107,7 +245,8 @@ size_t disc_read(uint64_t off, void* dst, size_t n) {
              f = std::fopen(it->path.c_str(), "rb");
          }
          if (!f) continue;
@@ -854,7 +907,7 @@ index 356b1e4..53d3ad5 100644
          (void)got;
      }
 diff --git a/runtime/disc.h b/runtime/disc.h
-index 6709dd6..9b59222 100644
+index 6709dd6..8af3664 100644
 --- a/runtime/disc.h
 +++ b/runtime/disc.h
 @@ -3,6 +3,8 @@
@@ -866,7 +919,7 @@ index 6709dd6..9b59222 100644
  #include <vector>
  
  bool disc_open(const char* extract_dir);             // sys/ and files/ from wiikit.disc --extract
-@@ -11,3 +13,15 @@ const std::vector<uint8_t>& disc_boot();             // boot.bin: the disc heade
+@@ -11,3 +13,18 @@ const std::vector<uint8_t>& disc_boot();             // boot.bin: the disc heade
  bool disc_is_gamecube();                              // the header's GameCube magic (0xC2339F3D at 0x1C)
  const std::vector<uint8_t>& disc_fst();
  size_t disc_regions();
@@ -882,6 +935,9 @@ index 6709dd6..9b59222 100644
 +};                                                   // none of the three: size bytes of zeros
 +bool disc_replace(const char* name, const std::vector<DiscPart>& parts);   // name: Dir/File.bin, as in files/
 +bool disc_file(const char* name, uint64_t* off, uint64_t* size);            // where a file is on the disc
++// A piece of a file gets other bytes while the game runs, the file staying where it is (the game
++// may have it open): [at, at + size) of it is the parts in order, zeros after them. They must fit
++bool disc_rewrite(const char* name, uint64_t at, uint64_t size, const std::vector<DiscPart>& parts);
 diff --git a/runtime/gl.h b/runtime/gl.h
 index 3d2da4e..24964ed 100644
 --- a/runtime/gl.h

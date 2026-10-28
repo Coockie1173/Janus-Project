@@ -1,5 +1,18 @@
 //mods: loose .edb files take the place of the disc's, or come on top of them
 //
+//they come in modpacks: a folder each in modpacks/ (modpacks/default, modpacks/NAME), one of them
+//installed at a time. Extras > Mods and Connect to WFC Modded first ask which (modmenu.cpp). every
+//hash of every pack has a place behind the end of Filelist.000 with room for each pack's file of it
+//and a row in the list from the start; a pack is installed by putting its files in those places
+//(disc_rewrite) and its rows into the game's copy of the list. a hash the pack hasn't got is the
+//disc's file again, or, when the disc has none, stays as it was (nothing of the pack leads to it)
+//the game reads Filelist.bin once (the file system 806EC2D0: +8 how many lists, +0xC the lists;
+//a list +0 its path, +0x24 how many files, +0x28 the files, 0x40 each by hash: +4 the size that
+//stays loaded, +8 where it starts and which Filelist.00N, four times, +0x28 the file object once
+//it has been asked for, +0x30 the hash, +0x34 the flags with the top bit the game's, +0x38 the
+//version, +0x3C how many places). a file object keeps a copy of the places (its +0xC: +4 each 0xC
+//bytes) and the size (+0x30)
+//
 //the game finds a file by its hash in Filelist.bin (version 7): a row for each file with the size
 //of the part that stays loaded (the .edb header's +0x18), its hash (+4), version (+8), flags (+0xC)
 //and where it starts in Filelist.000, then the names, scrambled by row and place
@@ -17,7 +30,10 @@
 //a .txt with a level's name says who the players of a network game are in it (LevelSet)
 //weapons/ has the custom weapons: their .txt files (port/mods/weapons/weapons.cpp) and the guns they are drawn with, mods too
 //
-//GE_MODS=DIR the folder, every .edb in it and in its gamemode folders (mods in the game's folder by default)
+//GE_MODPACKS=DIR the packs' folder (modpacks in the game's folder by default). a mods folder of an
+//older build, when there is no modpacks folder, is the pack "default"
+//GE_MODS=DIR that folder is the only pack
+//GE_MODPACK=NAME the pack installed at the start ("default", else the first)
 //GE_TRACEFILES=1 log every file the game gives memory to, with its size
 #include "ge.h"
 #include "disc.h"
@@ -28,6 +44,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <map>
 #include <memory>
 #include <set>
 #include <vector>
@@ -166,8 +183,31 @@ void OnLoad(PPCContext& c)
 		rt_log("goldeneye: no memory for the file %s (%u bytes), it isn't loaded", guest_ptr(name) ? (const char*)PPC_MEM(name) : "?", size);
 }
 
-std::vector<ModLevel> g_levels, g_files, g_disc_levels;
-std::string g_folder;
+std::vector<ModLevel> g_disc_levels;
+
+struct Pack
+{
+	std::string name, folder;
+	std::vector<Mod> mods;
+	std::vector<ModLevel> levels, files; //what got a place
+};
+std::vector<Pack> g_packs;
+int g_active = -1;
+const char* const kDefaultPack = "default";
+const std::vector<ModLevel> kNone;
+const std::string kNoFolder;
+
+//a hash of any pack: its place in Filelist.000 and each pack's file of it
+struct Slot
+{
+	uint32_t hash{};
+	uint64_t at{}, room{};
+	bool onDisc{};
+	Row disc; //the disc's row of the hash
+	std::vector<int> mods; //by pack, its mod of the hash, -1 for none
+	int shown = -2; //the pack whose file is there now, -1 the disc's
+};
+std::vector<Slot> g_slots;
 
 //a folder's name as it is looked for: lower case, a space or a dash is an underscore
 std::string FolderName(std::string name)
@@ -332,8 +372,9 @@ void StandIn(PPCContext& c, uint32_t levels, uint32_t hash)
 	g_kind_level = 0;
 	g_named[0] = g_named[1] = false;
 	if (!guest_ptr(levels) || ld32(levels + kLevelRow) != 0) return;
-	const auto level = std::find_if(g_files.begin(), g_files.end(), [&](const ModLevel& m) { return m.hash == hash; });
-	if (level == g_files.end()) return;
+	const auto& files = mod_files();
+	const auto level = std::find_if(files.begin(), files.end(), [&](const ModLevel& m) { return m.hash == hash; });
+	if (level == files.end()) return;
 	uint32_t cast[4] = {};
 	std::string names[2];
 	const bool ownCast = ReadCast(c, *level, cast, names);
@@ -509,19 +550,212 @@ float world_trace(const PPCContext& c, const float start[3], const float way[3])
 const char* const kWeaponsFolder = "weapons";
 const char* const kModeFolders[kModeCount] = { "conflict", "team_conflict", "golden_gun", "black_box", "goldeneye", "heroes", "license_to_kill", "team_license_to_kill" };
 
-const std::vector<ModLevel>& mod_levels() { return g_levels; }
-const std::vector<ModLevel>& mod_files() { return g_files; }
+const std::vector<ModLevel>& mod_levels() { return modpack_levels(g_active); }
+const std::vector<ModLevel>& mod_files() { return modpack_files(g_active); }
 const std::vector<ModLevel>& disc_levels() { return g_disc_levels; }
-const std::string& mods_folder() { return g_folder; }
+const std::string& mods_folder() { return modpack_folder(g_active); }
+
+int modpack_count() { return (int)g_packs.size(); }
+int modpack_active() { return g_active; }
+static bool ValidPack(int pack) { return pack >= 0 && pack < (int)g_packs.size(); }
+const std::string& modpack_name(int pack) { return ValidPack(pack) ? g_packs[pack].name : kNoFolder; }
+const std::string& modpack_folder(int pack) { return ValidPack(pack) ? g_packs[pack].folder : kNoFolder; }
+const std::vector<ModLevel>& modpack_levels(int pack) { return ValidPack(pack) ? g_packs[pack].levels : kNone; }
+const std::vector<ModLevel>& modpack_files(int pack) { return ValidPack(pack) ? g_packs[pack].files : kNone; }
 
 //next to the mod's file, in whichever folder that is. a level in a gamemode's folder that has
-//none there has the one in the mods folder itself: one for the map, whichever gamemode
+//none there has the one in its pack's folder itself: one for the map, whichever gamemode
 std::string mod_side_file(const ModLevel& mod, const char* extension)
 {
 	const std::filesystem::path next = std::filesystem::path(mod.path).replace_extension(extension);
 	std::error_code error;
-	if (mod.modes == 0 || g_folder.empty() || std::filesystem::exists(next, error)) return next.string();
-	return (std::filesystem::path(g_folder) / next.filename()).string();
+	if (mod.modes == 0 || std::filesystem::exists(next, error)) return next.string();
+	return (next.parent_path().parent_path() / next.filename()).string();
+}
+
+namespace
+{
+
+//the pack whose file a slot has for a pack: its own, the disc's (-1), or the one already there
+int Pick(const Slot& slot, int pack)
+{
+	if (ValidPack(pack) && slot.mods[pack] >= 0) return pack;
+	if (slot.onDisc) return -1;
+	if (slot.shown != -2) return slot.shown;
+	for (size_t i = 0; i < slot.mods.size(); ++i)
+		if (slot.mods[i] >= 0) return (int)i;
+	return -1;
+}
+
+const Mod& ModOf(const Slot& slot, int pack) { return g_packs[pack].mods[slot.mods[pack]]; }
+
+//a mod's bytes: the file, with GEOM and the hash it has here in front when that isn't its own
+std::vector<DiscPart> PartsOf(const Mod& mod)
+{
+	DiscPart file; file.path = mod.path; file.size = mod.size;
+	if (!mod.ownHash || mod.size <= kHeadSize) return { file };
+	DiscPart head;
+	head.data = std::make_shared<std::vector<uint8_t>>();
+	Put32(*head.data, kGeom); Put32(*head.data, mod.hash);
+	file.off = kHeadSize; file.size = mod.size - kHeadSize;
+	return { head, file };
+}
+
+//a slot's row as the pack has it
+void RowOf(const Slot& slot, int pack, Row& row)
+{
+	if (pack < 0) { row = slot.disc; return; }
+	const Mod& mod = ModOf(slot, pack);
+	row.size = mod.loaded; row.hash = mod.hash; row.version = mod.version; row.flags = mod.flags;
+	row.places = { { uint32_t(slot.at), 0 } };
+}
+
+//the game's copy of Filelist.bin's rows
+const uint32_t kFileSystem = 0x806EC2D0, kSystemCount = 0x8, kSystemLists = 0xC;
+const uint32_t kListPath = 0x0, kListFileCount = 0x24, kListFiles = 0x28, kEntrySize = 0x40;
+const uint32_t kEntryLoaded = 0x4, kEntryPlaces = 0x8, kEntryFile = 0x28, kEntryHash = 0x30, kEntryFlags = 0x34, kEntryVersion = 0x38, kEntryPlaceCount = 0x3C;
+const uint32_t kPlaceSize = 0x8, kPlaceCount = 4, kFlagGame = 0x80000000;
+const uint32_t kInfoPlaces = 0x4, kInfoPlaceSize = 0xC; //a file object's copy, its size at kInfoSize
+const char* const kListFile = "filelist.bin";
+
+uint32_t GameList()
+{
+	const uint32_t system = ld32(kFileSystem);
+	if (!guest_ptr(system)) return 0;
+	const uint32_t count = ld32(system + kSystemCount), lists = ld32(system + kSystemLists);
+	for (uint32_t i = 0; guest_ptr(lists) && i < count && i < 16; ++i)
+	{
+		const uint32_t list = ld32(lists + i * 4), path = guest_ptr(list) ? ld32(list + kListPath) : 0;
+		if (!guest_ptr(path)) continue;
+		const std::string name = Lower((const char*)PPC_MEM(path));
+		if (name.size() >= std::strlen(kListFile) && name.compare(name.size() - std::strlen(kListFile), std::string::npos, kListFile) == 0) return list;
+	}
+	return 0;
+}
+
+void SetEntry(uint32_t list, const Row& row)
+{
+	const uint32_t count = ld32(list + kListFileCount), files = ld32(list + kListFiles);
+	uint32_t entry = 0;
+	for (uint32_t i = 0; guest_ptr(files) && i < count && i < 65536 && !entry; ++i)
+		if (ld32(files + i * kEntrySize + kEntryHash) == row.hash) entry = files + i * kEntrySize;
+	if (!entry || row.places.empty())
+	{
+		rt_log("goldeneye: modpacks: the game's file list has no row for %08X", row.hash);
+		return;
+	}
+	const uint32_t place = row.places[0].first, which = row.places[0].second;
+	st32(entry + kEntryLoaded, row.size);
+	for (uint32_t k = 0; k < kPlaceCount; ++k) { st32(entry + kEntryPlaces + k * kPlaceSize, place); st32(entry + kEntryPlaces + k * kPlaceSize + 4, which); }
+	st32(entry + kEntryPlaceCount, 1);
+	st32(entry + kEntryFlags, row.flags | (ld32(entry + kEntryFlags) & kFlagGame));
+	st32(entry + kEntryVersion, row.version);
+	const uint32_t file = ld32(entry + kEntryFile), info = guest_ptr(file) ? ld32(file + kFileInfo) : 0;
+	if (!guest_ptr(info)) return;
+	if (ld32(file + kFileLoaded)) rt_log("goldeneye: modpacks: %08X is loaded as its pack changes, it keeps the last one's until it loads again", row.hash);
+	for (uint32_t k = 0; k < kPlaceCount; ++k) st32(info + kInfoPlaces + k * kInfoPlaceSize, place);
+	st32(info + kInfoSize, row.size);
+}
+
+//every slot gets the pack's file. the game's rows too, once it has read them
+void Install(int pack)
+{
+	const uint32_t list = GameList();
+	int changed = 0;
+	for (Slot& slot : g_slots)
+	{
+		const int want = Pick(slot, pack);
+		if (want == slot.shown) continue;
+		if (want >= 0 && !disc_rewrite("Filelist.000", slot.at, slot.room, PartsOf(ModOf(slot, want))))
+		{
+			rt_log("goldeneye: modpacks: %s's %s couldn't be put in place", g_packs[want].name.c_str(), ModOf(slot, want).name.c_str());
+			continue;
+		}
+		slot.shown = want;
+		++changed;
+		if (!list) continue;
+		Row row;
+		RowOf(slot, want, row);
+		SetEntry(list, row);
+	}
+	g_active = pack;
+	rt_log("goldeneye: modpack %s installed: %zu level(s), %zu file(s), %d place(s) changed", modpack_name(pack).c_str(), modpack_levels(pack).size(), modpack_files(pack).size(), changed);
+}
+
+//a folder's name as it is looked for: lower case, a space or a dash is an underscore. the packs
+//by their folders: "default" first, then by name
+void FindPacks()
+{
+	std::error_code error;
+	if (const char* one = std::getenv("GE_MODS"))
+	{
+		if (std::filesystem::is_directory(one, error)) g_packs.push_back({ kDefaultPack, one, {}, {}, {} });
+		return;
+	}
+	const char* env = std::getenv("GE_MODPACKS");
+	const std::filesystem::path root = env ? std::filesystem::path(env) : std::filesystem::path(GE_ROOT) / "modpacks";
+	if (!std::filesystem::is_directory(root, error))
+	{
+		const std::filesystem::path old = std::filesystem::path(GE_ROOT) / "mods";
+		if (env || !std::filesystem::is_directory(old, error)) return;
+		rt_log("goldeneye: modpacks: no modpacks folder, %s is the pack \"%s\" (move it to modpacks/%s)", old.string().c_str(), kDefaultPack, kDefaultPack);
+		g_packs.push_back({ kDefaultPack, old.string(), {}, {}, {} });
+		return;
+	}
+	for (const auto& entry : std::filesystem::directory_iterator(root, error))
+		if (entry.is_directory(error)) g_packs.push_back({ entry.path().filename().string(), entry.path().string(), {}, {}, {} });
+	std::sort(g_packs.begin(), g_packs.end(), [](const Pack& a, const Pack& b)
+	{
+		const bool aFirst = Lower(a.name) == kDefaultPack, bFirst = Lower(b.name) == kDefaultPack;
+		return aFirst != bFirst ? aFirst : Lower(a.name) < Lower(b.name);
+	});
+}
+
+//a pack's .edb files: in its folder, its gamemode folders and weapons/. two with the same hash
+//(two levels made with the same number): the second by name gets the first free hash of its
+//kind, counted up from where the made ones start, among the disc's and the pack's own (so a pack
+//numbers its files the same whatever other packs there are). the file is served with that hash in
+//its header. one that has the hash of a file of the disc is meant to take that file's place and keeps it
+void ReadPack(Pack& pack, const std::set<uint32_t>& disc)
+{
+	std::error_code error;
+	ReadFolder(pack.folder, 0, pack.mods);
+	std::vector<std::filesystem::path> folders;
+	for (const auto& entry : std::filesystem::directory_iterator(pack.folder, error))
+		if (entry.is_directory(error)) folders.push_back(entry.path());
+	std::sort(folders.begin(), folders.end());
+	for (const auto& folder : folders)
+	{
+		const std::string name = FolderName(folder.filename().string());
+		const auto mode = std::find(std::begin(kModeFolders), std::end(kModeFolders), name);
+		if (mode != std::end(kModeFolders)) ReadFolder(folder, 1u << (mode - std::begin(kModeFolders)), pack.mods);
+		else if (name == kWeaponsFolder) ReadFolder(folder, 0, pack.mods); //the custom weapons' guns (weapons/weapons.cpp)
+		else rt_log("goldeneye: modpack %s: the folder %s isn't a gamemode's, left out", pack.name.c_str(), folder.filename().string().c_str());
+	}
+	std::sort(pack.mods.begin(), pack.mods.end(), [](const Mod& a, const Mod& b) { return a.name != b.name ? a.name < b.name : a.path < b.path; });
+	std::set<uint32_t> taken = disc, ofMods;
+	for (const Mod& mod : pack.mods) taken.insert(mod.hash);
+	for (auto mod = pack.mods.begin(); mod != pack.mods.end();)
+	{
+		if (ofMods.insert(mod->hash).second) { ++mod; continue; }
+		uint32_t fresh = (mod->hash & 0xFFFF0000u) | kFirstFree;
+		while (taken.count(fresh) && (fresh & 0xFFFF) != 0xFFFF) ++fresh;
+		if (taken.count(fresh)) { rt_log("goldeneye: modpack %s: no hash left for %s", pack.name.c_str(), mod->name.c_str()); mod = pack.mods.erase(mod); continue; }
+		rt_log("goldeneye: modpack %s: %s has the hash of another mod (%08X): it is %08X here", pack.name.c_str(), mod->name.c_str(), mod->hash, fresh);
+		mod->ownHash = mod->hash;
+		mod->hash = fresh;
+		taken.insert(fresh);
+		ofMods.insert(fresh);
+		++mod;
+	}
+}
+
+} //namespace
+
+void modpack_select(int pack)
+{
+	if (!ValidPack(pack) || pack == g_active || g_slots.empty()) return;
+	Install(pack);
 }
 
 void install_mods()
@@ -556,28 +790,8 @@ void install_mods()
 		g_disc_levels.push_back({ row.hash, slash == std::string::npos ? row.name : row.name.substr(slash + 1), {}, 0 });
 	}
 
-	const char* env = std::getenv("GE_MODS");
-	const std::string dir = env ? env : std::string(GE_ROOT) + "/mods";
-	std::error_code error;
-	if (dir.empty() || !std::filesystem::is_directory(dir, error)) return;
-	g_folder = dir;
-	std::vector<Mod> mods;
-	ReadFolder(dir, 0, mods);
-	std::vector<std::filesystem::path> folders;
-	for (const auto& entry : std::filesystem::directory_iterator(dir, error))
-		if (entry.is_directory(error)) folders.push_back(entry.path());
-	std::sort(folders.begin(), folders.end());
-	for (const auto& folder : folders)
-	{
-		const std::string name = FolderName(folder.filename().string());
-		const auto mode = std::find(std::begin(kModeFolders), std::end(kModeFolders), name);
-		if (mode != std::end(kModeFolders)) ReadFolder(folder, 1u << (mode - std::begin(kModeFolders)), mods);
-		else if (name == kWeaponsFolder) ReadFolder(folder, 0, mods); //the custom weapons' guns (weapons/weapons.cpp)
-		else rt_log("goldeneye: mods: the folder %s isn't a gamemode's, left out", folder.filename().string().c_str());
-	}
-	if (mods.empty()) return;
-	std::sort(mods.begin(), mods.end(), [](const Mod& a, const Mod& b) { return a.name != b.name ? a.name < b.name : a.path < b.path; });
-
+	FindPacks();
+	if (g_packs.empty()) return;
 	if (!listed)
 	{
 		rt_log("goldeneye: mods: the disc has no Filelist.bin and Filelist.000");
@@ -588,61 +802,93 @@ void install_mods()
 		rt_log("goldeneye: mods: Filelist.bin isn't a version %u list", kListVersion);
 		return;
 	}
+	std::set<uint32_t> disc;
+	for (const Row& row : rows) disc.insert(row.hash);
+	for (Pack& pack : g_packs) ReadPack(pack, disc);
 
-	//two mods with the same hash (two levels made with the same number): the second by name gets
-	//the first free hash of its kind, counted up from where the made ones start. the file is
-	//served with that hash in its header. one that has the hash of a file of the disc is meant
-	//to take that file's place and keeps it
-	std::set<uint32_t> taken;
-	for (const Row& row : rows) taken.insert(row.hash);
-	std::set<uint32_t> ofMods;
-	for (const Mod& mod : mods) taken.insert(mod.hash);
-	for (Mod& mod : mods)
-	{
-		if (ofMods.insert(mod.hash).second) continue;
-		uint32_t fresh = (mod.hash & 0xFFFF0000u) | kFirstFree;
-		while (taken.count(fresh) && (fresh & 0xFFFF) != 0xFFFF) ++fresh;
-		if (taken.count(fresh)) { rt_log("goldeneye: mods: no hash left for %s", mod.name.c_str()); continue; }
-		rt_log("goldeneye: mod %s has the hash of another mod (%08X): it is %08X here", mod.name.c_str(), mod.hash, fresh);
-		mod.ownHash = mod.hash;
-		mod.hash = fresh;
-		taken.insert(fresh);
-		ofMods.insert(fresh);
-	}
-
+	//a slot for every hash, as big as the biggest of its files
+	std::map<uint32_t, size_t> slotOf;
+	for (size_t p = 0; p < g_packs.size(); ++p)
+		for (size_t m = 0; m < g_packs[p].mods.size(); ++m)
+		{
+			const Mod& mod = g_packs[p].mods[m];
+			auto found = slotOf.find(mod.hash);
+			if (found == slotOf.end())
+			{
+				found = slotOf.emplace(mod.hash, g_slots.size()).first;
+				Slot slot;
+				slot.hash = mod.hash;
+				slot.mods.assign(g_packs.size(), -1);
+				const auto row = std::find_if(rows.begin(), rows.end(), [&](const Row& r) { return r.hash == mod.hash; });
+				if (row != rows.end()) { slot.onDisc = true; slot.disc = *row; }
+				g_slots.push_back(slot);
+			}
+			Slot& slot = g_slots[found->second];
+			slot.mods[p] = (int)m;
+			slot.room = std::max<uint64_t>(slot.room, mod.size);
+		}
 	std::vector<DiscPart> parts;
 	DiscPart original; original.original = true;
 	parts.push_back(original);
 	uint64_t end = dataSize;
-	for (const Mod& mod : mods)
+	for (auto slot = g_slots.begin(); slot != g_slots.end();)
 	{
 		const uint64_t at = (end + kSector - 1) & ~(kSector - 1);
-		if (at + mod.size > 0xFFFFFFFFull) { rt_log("goldeneye: mods: no room left for %s", mod.name.c_str()); continue; }
-		DiscPart gap; gap.size = at - end;
-		DiscPart file; file.path = mod.path; file.size = mod.size;
-		parts.push_back(gap);
-		if (mod.ownHash && mod.size > kHeadSize)
+		if (at + slot->room > 0xFFFFFFFFull)
 		{
-			//the first eight bytes from here: GEOM and the new hash, the rest from the file
-			DiscPart head;
-			head.data = std::make_shared<std::vector<uint8_t>>();
-			Put32(*head.data, kGeom); Put32(*head.data, mod.hash);
-			parts.push_back(head);
-			file.off = kHeadSize; file.size = mod.size - kHeadSize;
+			rt_log("goldeneye: mods: no room left for %08X", slot->hash);
+			for (size_t p = 0; p < g_packs.size(); ++p) slot->mods[p] = -1;
+			slot = g_slots.erase(slot);
+			continue;
 		}
-		parts.push_back(file);
-		end = at + mod.size;
-		auto row = std::find_if(rows.begin(), rows.end(), [&](const Row& r) { return r.hash == mod.hash; });
+		DiscPart gap; gap.size = at - end;
+		DiscPart room; room.size = slot->room; //zeros until a pack's file is put there
+		parts.push_back(gap);
+		parts.push_back(room);
+		slot->at = at;
+		end = at + slot->room;
+		++slot;
+	}
+	for (Pack& pack : g_packs)
+	{
+		const size_t p = size_t(&pack - g_packs.data());
+		for (const Slot& slot : g_slots)
+		{
+			if (slot.mods[p] < 0) continue;
+			const Mod& mod = ModOf(slot, (int)p);
+			pack.files.push_back({ mod.hash, mod.name, mod.path, mod.modes });
+			if ((mod.hash & 0xFFFF0000u) == kLevelFiles) pack.levels.push_back({ mod.hash, mod.name, mod.path, mod.modes });
+		}
+		auto byName = [](const ModLevel& a, const ModLevel& b) { return a.name != b.name ? a.name < b.name : a.path < b.path; };
+		std::sort(pack.files.begin(), pack.files.end(), byName);
+		std::sort(pack.levels.begin(), pack.levels.end(), byName);
+		rt_log("goldeneye: modpack %s (%s): %zu file(s), %zu level(s)", pack.name.c_str(), pack.folder.c_str(), pack.files.size(), pack.levels.size());
+	}
+
+	//the pack the game starts with
+	int first = 0;
+	const char* wanted = std::getenv("GE_MODPACK");
+	for (size_t p = 0; p < g_packs.size(); ++p)
+		if (Lower(g_packs[p].name) == Lower(wanted ? wanted : kDefaultPack)) first = (int)p;
+	if (wanted && Lower(g_packs[first].name) != Lower(wanted)) rt_log("goldeneye: modpacks: there is no pack %s, %s is installed", wanted, g_packs[first].name.c_str());
+
+	//the list gets a row for every slot: the first pack's file in it, or the disc's
+	for (const Slot& slot : g_slots)
+	{
+		const int pick = Pick(slot, first);
+		auto row = std::find_if(rows.begin(), rows.end(), [&](const Row& r) { return r.hash == slot.hash; });
 		const bool isNew = row == rows.end();
-		if (isNew) { rows.push_back(Row{}); row = rows.end() - 1; row->name = kNamePrefix + mod.name; }
-		row->size = mod.loaded; row->hash = mod.hash; row->version = mod.version; row->flags = mod.flags;
-		row->places = { { uint32_t(at), 0 } };
-		rt_log("goldeneye: mod %s: file %08X, %s", mod.name.c_str(), mod.hash, isNew ? "new" : "in place of the disc's");
-		g_files.push_back({ mod.hash, mod.name, mod.path, mod.modes });
-		if ((mod.hash & 0xFFFF0000u) == kLevelFiles) g_levels.push_back({ mod.hash, mod.name, mod.path, mod.modes });
+		if (isNew) { rows.push_back(Row{}); row = rows.end() - 1; row->name = kNamePrefix + ModOf(slot, pick).name; }
+		RowOf(slot, pick, *row);
+		if (pick >= 0) rt_log("goldeneye: mod %s: file %08X, %s", ModOf(slot, pick).name.c_str(), slot.hash, isNew ? "new" : "in place of the disc's");
 	}
 	if (!disc_replace("Filelist.000", parts) || !disc_replace("Filelist.bin", { DiscPart{ {}, 0, 0, WriteList(rows, buildType, lists) } }))
+	{
 		rt_log("goldeneye: mods: the disc's file list couldn't be replaced");
+		g_slots.clear();
+		return;
+	}
+	Install(first);
 }
 
 } //namespace ge
