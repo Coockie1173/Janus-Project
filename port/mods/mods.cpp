@@ -1,6 +1,6 @@
 //mods: loose .edb files take the place of the disc's, or come on top of them
 //
-//they come in modpacks: a folder each in modpacks/ (modpacks/default, modpacks/NAME), one of them
+//they come in modpacks: a folder or a zip each in modpacks/ (modpacks/default, modpacks/NAME.zip), one of them
 //installed at a time. Extras > Mods and Connect to WFC Modded first ask which (modmenu.cpp). every
 //hash of every pack has a place behind the end of Filelist.000 with room for each pack's file of it
 //and a row in the list from the start; a pack is installed by putting its files in those places
@@ -194,6 +194,7 @@ struct Pack
 std::vector<Pack> g_packs;
 int g_active = -1;
 const char* const kDefaultPack = "default";
+const char* const kUnzipped = ".unzipped"; //where the zips' packs are unpacked, in the packs' folder
 const std::vector<ModLevel> kNone;
 const std::string kNoFolder;
 
@@ -702,8 +703,26 @@ void FindPacks()
 		g_packs.push_back({ kDefaultPack, old.string(), {}, {}, {} });
 		return;
 	}
+	//a folder is a pack, and so is a zip (unzip.cpp: unpacked into .unzipped, which isn't one)
+	std::vector<std::filesystem::path> zips;
 	for (const auto& entry : std::filesystem::directory_iterator(root, error))
-		if (entry.is_directory(error)) g_packs.push_back({ entry.path().filename().string(), entry.path().string(), {}, {}, {} });
+	{
+		const std::string name = entry.path().filename().string();
+		if (name.empty() || name[0] == '.') continue;
+		if (entry.is_directory(error)) g_packs.push_back({ name, entry.path().string(), {}, {}, {} });
+		else if (Lower(entry.path().extension().string()) == ".zip") zips.push_back(entry.path());
+	}
+	for (const auto& zip : zips)
+	{
+		const std::string name = zip.stem().string();
+		if (std::any_of(g_packs.begin(), g_packs.end(), [&](const Pack& p) { return Lower(p.name) == Lower(name); }))
+		{
+			rt_log("goldeneye: modpacks: there is a folder %s, %s is left out", name.c_str(), zip.filename().string().c_str());
+			continue;
+		}
+		const std::filesystem::path folder = root / kUnzipped / name;
+		if (unzip_pack(zip.string(), folder.string())) g_packs.push_back({ name, folder.string(), {}, {}, {} });
+	}
 	std::sort(g_packs.begin(), g_packs.end(), [](const Pack& a, const Pack& b)
 	{
 		const bool aFirst = Lower(a.name) == kDefaultPack, bFirst = Lower(b.name) == kDefaultPack;

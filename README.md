@@ -36,7 +36,7 @@ A bunch of scripts to help me test rapidly. Feel free to use and or ignore them!
 # Mods
 You read that right! Custom levels! In my Eurocom game! We truly are blessed.
 
-Mods come in modpacks: every folder in `modpacks/` is one, and `modpacks/default` is the one the game starts with. Every `.edb` file in a pack gets loaded in place of the disc's file with the same hash. If no file on the disc has that hash, it just comes on top. Extras > Mods lists the packs, and each pack's levels are in its own page under it.
+Mods come in modpacks: every folder in `modpacks/` is one, and so is every `.zip` (`modpacks/my_pack.zip` is the pack `my_pack`, its files at the top of the zip or in one folder in it), and `modpacks/default` is the one the game starts with. A zip gets unpacked into `modpacks/.unzipped/` the first time the game sees it (and again whenever it changes), so sharing a pack is just sending the zip. Every `.edb` file in a pack gets loaded in place of the disc's file with the same hash. If no file on the disc has that hash, it just comes on top. Extras > Mods lists the packs, and each pack's levels are in its own page under it.
 
 Only one pack is installed at a time, and switching is instant: whichever pack you highlight in a list of packs gets swapped in right there, no restart. Two packs can use the same file hashes without stepping on each other, so levels made by different people don't clash. (An older `mods/` folder still works as `default` as long as there's no `modpacks/` folder; `GE_MODPACKS=folder` points somewhere else, and `GE_MODPACK=name` starts with another pack.)
 

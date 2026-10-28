@@ -80,8 +80,8 @@ Where things are
     nand\           your saves and profiles (made on the first start). Back this up.
     keys.txt        key bindings
     settings.env    your settings (F1 writes them)
-    modpacks/       levels that aren't the game's own (.edb files), a folder for each
-                    modpack (modpacks/default, ...). Extras > Mods in the game's menu
+    modpacks/       levels that aren't the game's own (.edb files), a folder or a .zip
+                    for each modpack (modpacks/default, modpacks/my_pack.zip, ...). Extras > Mods in the game's menu
                     lists the packs and their levels; the pack you highlight is the
                     one that's loaded. A pack has a folder for each online game mode
                     (conflict, team_conflict, golden_gun, black_box, goldeneye, heroes,
