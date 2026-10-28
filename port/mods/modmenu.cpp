@@ -97,10 +97,10 @@ const uint32_t kUnusedRows = 0x80580990, kUnusedRowCount = 0x19; //the code's, a
 //a layout draws all its slots, with an item in them or not, so a list takes the layout of one
 //of the game's pages that has as many slots as it has items: the rows of that page up to its
 //last slot (layout, two of dressing, title, the slots) and its footer row. past eight the list
-//scrolls
+//scrolls. the game's only plain list with one slot is the screen calibration test (7D000016,
+//its layout draws the test pattern), so a list of one item has two slots, the second empty
 struct Layout { uint32_t rows, foot; }; //a page's rows, and which of them is the footer (kind AA)
 const Layout kLayouts[] = {
-	{0x8057F5D8, 6}, //one slot: 7D000016
 	{0x805808B4, 8}, //two: Extras as the game has it
 	{0x8057E798, 10}, //three: Options
 	{0x80580CF0, 12}, //four: 7D00009E
@@ -108,7 +108,7 @@ const Layout kLayouts[] = {
 	{0x80580990, 16}, //six: the unused extras menu
 	{0x8057EDA0, 18}, //seven: 7D000082
 	{0x80580EF8, 25}}; //eight: 7D0000A2, whose own list is longer and scrolls
-const uint32_t kLayoutTop = 4, kMostSlots = 8;
+const uint32_t kLayoutTop = 4, kFewestSlots = 2, kMostSlots = 8;
 const uint32_t kTitleRow = 3;
 const uint32_t kLevelSelectClass = 0x7D030007; //the class of a page that is a list of levels with the lit one's picture
 const uint32_t kUnusedItems = 10, kUnusedItemCount = 6; //Credits, Cheat Codes, then the four unused ones
@@ -262,8 +262,8 @@ std::string Shown(const std::string& file)
 //the items, the footer and a line an item are the caller's. where the items go
 uint32_t ListRows(const PPCContext& c, uint32_t items, uint32_t title, uint32_t& rows, uint32_t& count)
 {
-	const uint32_t slots = std::min(std::max(items, 1u), kMostSlots);
-	const Layout& layout = kLayouts[slots - 1];
+	const uint32_t slots = std::min(std::max(items, kFewestSlots), kMostSlots);
+	const Layout& layout = kLayouts[slots - kFewestSlots];
 	const uint32_t head = kLayoutTop + slots;
 	count = head + items * 2 + 1;
 	rows = Alloc(c, count * kRowSize);
