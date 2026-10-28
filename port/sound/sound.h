@@ -12,6 +12,9 @@ void install_sound();
 void install_occlusion(); //after install_mods
 bool occlusion(); //sounds behind a wall or a floor are quieter
 void set_occlusion(bool on);
+//for a sound of the port's own at place (the traces end low and high above it): 1 in the open,
+//less behind the level, on the game's thread
+float occlusion_gain(const PPCContext& c, const float place[3], float low, float high);
 
 //height.cpp
 void install_height();

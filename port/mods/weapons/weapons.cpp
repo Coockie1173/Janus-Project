@@ -746,8 +746,9 @@ void FireSound(PPCContext& c)
 	orig_fire_sound(c);
 	st8(kNoShotSounds, was);
 	if (was) return;
+	//the shot is at the gun, about where the eyes are: one trace to it and one to the body below
 	const float at[3]{ ldf(place), ldf(place + 4), ldf(place + 8) };
-	custom_sound_play(w->fireClip, at, w->fireVolume);
+	custom_sound_play(w->fireClip, at, w->fireVolume * occlusion_gain(c, at, -0.7f, 0.0f));
 }
 
 //a guard's shot doesn't come through there: fn_80057060 plays its row's (the guard's +0x754) three
@@ -775,7 +776,7 @@ void CharacterSound(PPCContext& c)
 	const uint32_t entity = ld32(guard + kEntity);
 	if (sound != first || !guest_ptr(entity)) return;
 	const float at[3]{ ldf(entity + kEntityPlace), ldf(entity + kEntityPlace + 4), ldf(entity + kEntityPlace + 8) };
-	custom_sound_play(w->fireClip, at, w->fireVolume);
+	custom_sound_play(w->fireClip, at, w->fireVolume * occlusion_gain(c, at, 0.4f, 1.1f));
 }
 
 } //namespace

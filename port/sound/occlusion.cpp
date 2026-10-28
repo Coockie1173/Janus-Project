@@ -75,10 +75,10 @@ double Now()
 }
 
 //how much of the way from the listener to the sound the level blocks, 0 to 1
-float Traced(const PPCContext& c, const float listener[3], const float place[3])
+float Traced(const PPCContext& c, const float listener[3], const float place[3], float low = kLow, float high = kHigh)
 {
 	float blocked = 0.0f;
-	for (const float above : { kLow, kHigh })
+	for (const float above : { low, high })
 	{
 		const float way[3] = { place[0] - listener[0], place[1] + above - listener[1], place[2] - listener[2] };
 		const float length = std::sqrt(way[0] * way[0] + way[1] * way[1] + way[2] * way[2]);
@@ -87,6 +87,31 @@ float Traced(const PPCContext& c, const float listener[3], const float place[3])
 		if (hit >= 0.0f && hit * length < length - kShort) blocked += 0.5f;
 	}
 	return blocked;
+}
+
+//the listener nearest to place: how far it is, and where it hears from
+float Nearest(uint32_t listeners, const float place[3], float listener[3])
+{
+	float distance = -1.0f;
+	for (int i = 0; i < kListenerCount; ++i)
+	{
+		const uint32_t l = listeners + kListenerFirst + i * kListenerSize;
+		if (!ld8(l)) continue;
+		const float x = ldf(l + kListenerEar) - place[0], y = ldf(l + kListenerEar + 4) - place[1], z = ldf(l + kListenerEar + 8) - place[2];
+		const float d = std::sqrt(x * x + y * y + z * z);
+		if (distance >= 0.0f && d >= distance) continue;
+		distance = d;
+		for (int k = 0; k < 3; ++k) listener[k] = ldf(l + kListenerPlace + k * 4);
+	}
+	return distance;
+}
+
+//decibels the level takes off a sound at place, by how much of the way is blocked
+float Decibels(const float listener[3], const float place[3], float distance, float blocked)
+{
+	//straight above or below is a floor, level with the listener a wall
+	const float upright = std::fmin(1.0f, std::fabs(place[1] + kLow - listener[1]) / distance);
+	return blocked * (kWall + (kFloor - kWall) * upright);
 }
 
 //how much quieter the game makes this sound at a distance, as fn_80390A50 does. negative for
@@ -112,17 +137,8 @@ float Quieter(const PPCContext& c, uint32_t sound)
 
 	const uint32_t listeners = ld32(kListeners);
 	if (!guest_ptr(listeners)) return 0.0f;
-	float listener[3] = {}, distance = -1.0f;
-	for (int i = 0; i < kListenerCount; ++i)
-	{
-		const uint32_t l = listeners + kListenerFirst + i * kListenerSize;
-		if (!ld8(l)) continue;
-		const float x = ldf(l + kListenerEar) - place[0], y = ldf(l + kListenerEar + 4) - place[1], z = ldf(l + kListenerEar + 8) - place[2];
-		const float d = std::sqrt(x * x + y * y + z * z);
-		if (distance >= 0.0f && d >= distance) continue;
-		distance = d;
-		for (int k = 0; k < 3; ++k) listener[k] = ldf(l + kListenerPlace + k * 4);
-	}
+	float listener[3] = {};
+	const float distance = Nearest(listeners, place, listener);
 	if (distance < kOwn || distance > far) return 0.0f;
 	const float own = Falloff(sound, distance);
 	if (own < 0.0f) return 0.0f;
@@ -142,9 +158,7 @@ float Quieter(const PPCContext& c, uint32_t sound)
 	heard.m_Updated = now;
 	if (heard.m_Blocked <= 0.01f) return 0.0f;
 
-	//straight above or below is a floor, level with the listener a wall
-	const float upright = std::fmin(1.0f, std::fabs(place[1] + kLow - listener[1]) / distance);
-	const float decibels = heard.m_Blocked * (kWall + (kFloor - kWall) * upright);
+	const float decibels = Decibels(listener, place, distance, heard.m_Blocked);
 	const float quieter = (1.0f - own) * (1.0f - std::pow(10.0f, -decibels / (20.0f * kPower)));
 	if (fresh && g_trace) rt_log("goldeneye: sound %08X at %.1f %.1f %.1f, %.1f away, is %.0f%% behind the level: %.1f dB off, %.3f on the game's %.3f", hash, place[0], place[1], place[2], distance, heard.m_Blocked * 100.0f, decibels, quieter, own);
 	return quieter;
@@ -165,6 +179,21 @@ void Update(PPCContext& c)
 
 bool occlusion() { return g_on; }
 void set_occlusion(bool on) { g_on = on; }
+
+float occlusion_gain(const PPCContext& c, const float place[3], float low, float high)
+{
+	if (!g_on || !in_play() || !multiplayer_game() || local_in_cutscene()) return 1.0f;
+	const uint32_t listeners = ld32(kListeners);
+	if (!guest_ptr(listeners)) return 1.0f;
+	float listener[3] = {};
+	const float distance = Nearest(listeners, place, listener);
+	if (distance < kOwn) return 1.0f;
+	const float blocked = g_force ? 1.0f : Traced(c, listener, place, low, high);
+	if (blocked <= 0.0f) return 1.0f;
+	const float decibels = Decibels(listener, place, distance, blocked);
+	if (g_trace) rt_log("goldeneye: a .wav at %.1f %.1f %.1f, %.1f away, is %.0f%% behind the level: %.1f dB off", place[0], place[1], place[2], distance, blocked * 100.0f, decibels);
+	return std::pow(10.0f, -decibels / 20.0f);
+}
 
 void install_occlusion()
 {

@@ -351,8 +351,9 @@ shot of the weapon in place of its base's sounds (`port/sound/customsound.cpp`, 
   to 800577A0. From there a custom weapon's are left out and the file plays once.
 - **the mix**: the file is mixed on the host after the game's mix (wiikit `audio_set_mixer`), at
   0.08 of full scale (the game's own shots peak at about 2400 of 32768), full within 2.5 m of the
-  listener, fading out by 100 m, panned by the listener's +0x34 axis. The game's volume options
-  don't reach it, nor do the occlusion and the height filter.
+  listener, fading out by 100 m, panned by the listener's +0x34 axis. Occlusion does reach it
+  (`occlusion_gain`, the same traces and decibels as the game's sounds, taken off once at the
+  start of the shot); the game's volume options and the height filter don't.
 
 ## How a reload is put together
 
