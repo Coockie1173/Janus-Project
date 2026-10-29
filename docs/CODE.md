@@ -846,9 +846,15 @@ added up and taking them as one step. Free again when nothing is pushed, it is c
 and ceilings, or 15 steps in a row got half their way. `BodyUpdateTraced` is the
 `GE_TRACEPOS` variant.
 
-### `engine/native.cpp`
+### `engine/native/`
 
-Ten of Eurocom's hand-written paired-single routines written as plain float code in the same
+Fifteen of Eurocom's hand-written paired-single routines written as plain float code in the same
+order of operations, a file a kind: `clip.cpp` (box clip codes, box in a rectangle), `skin.cpp`,
+`vector.cpp` (plane and ray, point in a triangle, vec4 transform and sub, segment closest),
+`matrix.cpp` (the renderer's matrix flush, Euler angles, a node's matrix), `collision.cpp`
+(a triangle's plane, ray against a mesh with its plane cache), `edges.cpp` (the edge query every
+guard asks each frame; its own check, since its records come from the game's allocator).
+`native.h` has what they share, `native.cpp` the table, the check and the hooks. Same
 order of operations (`madd` fuses the multiply-adds the console fuses; `FP_CONTRACT OFF` for
 the rest). `Quant` is a quantised element as `psq_l` reads and `psq_st` writes it through a
 GQR. The table `g_routines` lists each with where it writes; `GE_NATIVE=check` runs the

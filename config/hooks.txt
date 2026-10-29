@@ -22,7 +22,7 @@ ge_sprint_update       # the sprint's three readers of the action button: the sp
 ge_sprint_end
 PlayerSprint
 ge_action_update       # the vault and the climb are asked for at its end: the sprint key counts there too
-ge_box_clip_codes      # the engine's paired-single math, replaced by host code (port/engine/native.cpp)
+ge_box_clip_codes      # the engine's paired-single math, replaced by host code (port/engine/native/)
 ge_skin1
 ge_skin2
 ge_plane_ray

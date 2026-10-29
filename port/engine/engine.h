@@ -19,7 +19,7 @@ void set_fps_limit(uint32_t fps);
 bool vsync(); //frames wait for the screen's refresh
 void set_vsync(bool on);
 
-//native.cpp
+//native/: the engine's hot math on the host
 void install_native();
 
 //files.cpp
