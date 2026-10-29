@@ -304,7 +304,8 @@ void draw() {
     bool meter = stamina(sprint);
     float speed = 0;
     bool hop = bunnyhop_speed(speed);
-    if (!overlay_open() && !g_show_state && !skipping_cutscene() && fade <= 0 && !settings_toast() && !cheats && !meter && !hop && !speedrun_in_game()) return;
+    bool flash = flash_showing();
+    if (!flash && !overlay_open() && !g_show_state && !skipping_cutscene() && fade <= 0 && !settings_toast() && !cheats && !meter && !hop && !speedrun_in_game()) return;
     //with only the state shown the cursor stays hidden over the picture
     ImGuiIO& io = ImGui::GetIO();
     if (overlay_open()) io.ConfigFlags &= ~ImGuiConfigFlags_NoMouseCursorChange;
@@ -312,6 +313,7 @@ void draw() {
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
+    if (flash) flash_draw();
     if (fade > 0) cutscene_black(fade);
     if (meter) stamina_bar(sprint);
     if (hop && fade <= 0) speedometer(speed);

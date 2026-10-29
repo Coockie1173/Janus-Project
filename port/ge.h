@@ -4,7 +4,7 @@
 //engine/        the frame rate, the hot math on the host, fixes for any frame rate, the heap
 //sound/         clicks, occlusion, height, the port's own .wav sounds
 //input/         mouse look, the menus' cursor, prompts with the bound key, weapon slots
-//gameplay/      fov, cutscenes, qte, movies, tweaks, autosave, the tank, 007 Custom
+//gameplay/      fov, cutscenes, qte, movies, tweaks, autosave, the tank, 007 Custom, bloom, flashes, grain
 //cheats/        god mode and the rest, noclip, stamina, collision and trigger views, gecko codes
 //fun/           bunnyhopping, the weapon randomizer
 //mods/          modpacks of loose .edb files, the Mods and Level Select menus, pictures, custom weapons

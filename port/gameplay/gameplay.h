@@ -1,4 +1,4 @@
-//how the game plays: fov, cutscenes and movies, small tweaks, autosave, the tank, 007 Custom
+//how the game plays: fov, cutscenes and movies, small tweaks, autosave, the tank, 007 Custom, the picture's effects
 #pragma once
 #include "guest.h"
 
@@ -91,6 +91,20 @@ const char* tank_action_hint(int action);
 const char* tank_source_label(int source);
 int tank_source(int action); //the button that does it, a number of the sources
 void set_tank_source(int action, int source);
+
+//screen.cpp
+void install_screen();
+bool screen_draw(PPCContext& c, PPCFunc draw); //from the mesh draw's hook: true when it drew the entry or left it out
+bool no_bloom(); //the bloom pass isn't drawn
+void set_no_bloom(bool on);
+bool invert_flash(); //a flash grenade's white-out is the picture of the moment it went off, with white edges
+void set_invert_flash(bool on);
+float film_grain(); //the film grain's strength, 0 none to 1 the game's
+void set_film_grain(float amount);
+#ifdef GE_IMGUI
+bool flash_showing(); //on the renderer's thread: the inverted flash is drawn this frame
+void flash_draw(); //inside the overlay's frame, first
+#endif
 
 //autosave.cpp
 void install_autosave();

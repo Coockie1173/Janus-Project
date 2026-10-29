@@ -58,7 +58,8 @@ void save_launch_settings() {
     std::snprintf(ads_sens_text, sizeof ads_sens_text, "%.2f", ads_sens());
     char shake_text[16], tank_text[32];
     std::snprintf(shake_text, sizeof shake_text, "%g", shake_scale());
-    char turbo_text[16];
+    char turbo_text[16], grain_text[16];
+    std::snprintf(grain_text, sizeof grain_text, "%g", film_grain());
     std::snprintf(turbo_text, sizeof turbo_text, "%g", turbo());
     std::snprintf(tank_text, sizeof tank_text, "%d,%d,%d", tank_source(0), tank_source(1), tank_source(2));
     static const char* modes[] = {"auto", "direct", "stick"};
@@ -68,6 +69,7 @@ void save_launch_settings() {
         {"LAUNCH_ADSFOV", ads_fov_text}, {"LAUNCH_ADSSENS", ads_sens_text}, {"LAUNCH_AIMLOCK", aim_lock() ? "1" : "0"},
         {"LAUNCH_MOUSEEVERYWHERE", mouse_everywhere() ? "1" : "0"},
         {"LAUNCH_SKIPLIST", skip_list()}, {"LAUNCH_SKIPMOVIES", skip_movies() ? "1" : "0"}, {"LAUNCH_NOTUTORIALS", no_tutorials() ? "1" : "0"}, {"LAUNCH_NOCOLOURFILTER", no_colour_filter() ? "1" : "0"},
+        {"LAUNCH_NOBLOOM", no_bloom() ? "1" : "0"}, {"LAUNCH_INVERTFLASH", invert_flash() ? "1" : "0"}, {"LAUNCH_GRAIN", grain_text},
         {"LAUNCH_LEVELTIMER", level_timer() ? "1" : "0"}, {"LAUNCH_AUTOQTE", auto_qte() ? "1" : "0"}, {"LAUNCH_AUTOSTART", auto_start() ? "1" : "0"}, {"LAUNCH_AUTOSAVE", autosave() ? "1" : "0"}, {"LAUNCH_EXTRASMENU", extras_menu() ? "1" : "0"}, {"LAUNCH_UNLOCKALL", unlock_all() ? "1" : "0"}, {"LAUNCH_ONLINEUNLOCKS", online_unlocks() ? "1" : "0"}, {"LAUNCH_STAMINAMETER", stamina_meter() ? "1" : "0"},
         {"LAUNCH_VSYNC", vsync() ? "1" : "0"}, {"LAUNCH_PING", show_ping() ? "1" : "0"}, {"LAUNCH_OCCLUSION", occlusion() ? "1" : "0"}, {"LAUNCH_SOUNDHEIGHT", sound_height() ? "1" : "0"},
         {"LAUNCH_HUD", hud() ? "1" : "0"}, {"LAUNCH_SHAKE", shake_text}, {"LAUNCH_TANKBUTTONS", tank_text},

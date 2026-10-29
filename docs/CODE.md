@@ -561,6 +561,18 @@ filter; its own x and y scale can be anything, Tank and Solar size theirs there)
 stretched by `tan(view / 2) / tan(24.5)` for that draw. With Disable Colour Filter
 (`no_colour_filter`) the filter is left out, at any angle: `IsColourFilter` knows it by the mesh
 (entry `+0x10`), flags `0x1004` and a box a unit wide from 0.397 behind to 0.48 or more ahead.
+`screen_draw` (screen.cpp) sees every entry first.
+
+### `gameplay/screen.cpp`
+
+`Bloom` (hook on `ge_bloom`) leaves the bloom pass out with Disable Bloom. `screen_draw(c, draw)`,
+from `DrawDelayed`: the film grain's hud quad (`HudQuad`: flags `0x40000000`, box 1.40376 wide,
+28 ahead) is drawn with its alpha (entry `+0x3F`) times `film_grain()`, not at all at 0; with
+Inverted Flashes the flash's white quad (box 1.17912 wide, 28.2 ahead) isn't drawn, its alpha and
+the frame go to `g_flash`, `g_flash_frame`. On the renderer's thread `flash_showing()` (the quad
+left out this frame or the last two, in play) and `flash_draw()`: the window copied once into a
+texture at the flash's first frame (`glCopyTexImage2D` from the default framebuffer), drawn on
+ImGui's background list at the quad's alpha with a white glow along the edges.
 
 ### `cheats/gecko.cpp`
 
@@ -1027,7 +1039,7 @@ Options (the launcher sets these from its settings):
 | `GE_MOUSE=S` | mouse sensitivity, 0 leaves the mouse free |
 | `GE_MOUSE_MODE=auto\|direct\|stick` | how the mouse turns the view |
 | `GE_MOUSE_INVERT=1`, `GE_ADS_SENS=S`, `GE_AIM_LOCK=1` | |
-| `GE_SKIP_LIST=ids`, `GE_SKIP_MOVIES=1`, `GE_AUTO_QTE=1`, `GE_AUTO_START=1`, `GE_NO_TUTORIALS=1`, `GE_NO_COLOUR_FILTER=1`, `GE_UNLOCK_ALL=1`, `GE_ONLINE_UNLOCKS=0`, `GE_EXTRAS_MENU=1` | enhancements |
+| `GE_SKIP_LIST=ids`, `GE_SKIP_MOVIES=1`, `GE_AUTO_QTE=1`, `GE_AUTO_START=1`, `GE_NO_TUTORIALS=1`, `GE_NO_COLOUR_FILTER=1`, `GE_NO_BLOOM=1`, `GE_INVERT_FLASH=1`, `GE_GRAIN=F`, `GE_UNLOCK_ALL=1`, `GE_ONLINE_UNLOCKS=0`, `GE_EXTRAS_MENU=1` | enhancements |
 | `GE_LEVEL_TIMER=0`, `GE_AUTOSAVE=0` | on by default |
 | `GE_CUSTOM=H,D,R,P[,K]`, `GE_CUSTOM_ON=1` | 007 Custom's sliders (enemy health, damage, reaction speed, hit protection; K 0: no headshots that kill), and every mission played with them |
 | `GE_MOUSE_EVERYWHERE=1`, `GE_NOCLIP=1`, `GE_STAMINA=1`, `GE_COLLISION=1`, `GE_TRIGGERS=1`, `GE_TRIGGERS_XRAY=1`, `GE_TRIGGER_TYPES=off,+13` | cheats |

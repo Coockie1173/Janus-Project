@@ -215,6 +215,11 @@ void BuildSettings()
 	AddToggle(kEnhancements, "autosave", "Save At Checkpoints", "On: reaching a checkpoint saves the game, as Save and Quit does. After a crash Continue Game starts there.", autosave, set_autosave);
 	AddToggle(kEnhancements, "no_tutorials", "Disable Tutorials", "On: the pop-up boxes that explain the controls are never shown, in any mission, training included.", no_tutorials, set_no_tutorials);
 	AddToggle(kEnhancements, "no_colour_filter", "Disable Colour Filter", "On: the tint most levels lay over the picture (Dam's grey-blue, Facility's blue-green...) isn't drawn.", no_colour_filter, set_no_colour_filter);
+	AddToggle(kEnhancements, "no_bloom", "Disable Bloom", "On: the glow round lamps, screens and bright lights isn't drawn.", no_bloom, set_no_bloom);
+	AddToggle(kEnhancements, "invert_flash", "Inverted Flashes", "On: a flash grenade freezes the picture of the moment it went off, with white edges, instead of whiting out the screen. It fades back as fast as the white would.", invert_flash, set_invert_flash);
+	Setting& grain = AddRange(kEnhancements, "film_grain", "Film Grain", "How much grain lies over the picture. 100% is the game's own.",
+		film_grain, [](float v) { set_film_grain(v); g_dirty = true; }, 0, 1, 0.05f, 2);
+	grain.show = [](float v) { return v > 0 ? std::to_string((int)std::lround(v * 100)) + "%" : std::string("Off"); };
 	AddToggle(kEnhancements, "unlock_all", "Unlock Everything", "On: every mission and every difficulty can be picked. A save made with it on may keep them.", unlock_all, set_unlock_all);
 	AddToggle(kEnhancements, "online_unlocks", "Online Unlocks", "On: online, every weapon, attachment, gadget and game mode is open at any level, but for the Proximity Mine.", online_unlocks, set_online_unlocks);
 	AddToggle(kEnhancements, "occlusion", "Sound Occlusion", "On: in multiplayer a sound behind a wall is quieter, one behind a floor more so, so someone a floor up doesn't sound next to you. Off: the game's own, distance only.", occlusion, set_occlusion);

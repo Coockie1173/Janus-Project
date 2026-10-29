@@ -162,3 +162,4 @@ ge_node_point          # a point of a node by its hash: traced with GE_TRACEWEAP
 ge_player_blend        # a client draws a player towards the host's copy: our own one keeps its place with client-owned players (port/net/owned.cpp)
 PlayerLand             # the player in the air or landing: online with client-owned players a joined console's own landings are its own (port/net/owned.cpp)
 ge_player_state_apply  # another's state (player state, crouch, sprint, the gun) put on a controller: a joined console's own waits a second for it (port/net/owned.cpp)
+ge_bloom               # the bloom pass: none with Disable Bloom (port/gameplay/screen.cpp)
