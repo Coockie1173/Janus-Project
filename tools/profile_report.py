@@ -9,6 +9,8 @@ functions (f_XXXXXXXX, orig_XXXXXXXX) are shown with their guest names.
 --last N keeps only the last N samples (the end of the run: the scene reached).
 --inclusive: the game thread's functions by the time spent in them and in what
 they call (from FILE.stacks, the call stack at each sample).
+--under ADDR [--depth N]: the game thread's samples inside the guest function ADDR,
+split by the path of N calls it made towards them (where its inclusive time goes).
 """
 import argparse, bisect, collections, os, struct, subprocess
 
@@ -20,6 +22,8 @@ ap.add_argument("--exe", default=os.path.join(ROOT, "build/out/wiiboot"))
 ap.add_argument("--last", type=int, default=0)
 ap.add_argument("--top", type=int, default=40)
 ap.add_argument("--inclusive", action="store_true")
+ap.add_argument("--under", metavar="ADDR")
+ap.add_argument("--depth", type=int, default=1)
 a = ap.parse_args()
 
 syms, base = [], None
@@ -71,7 +75,7 @@ for tid, n in threads.most_common(4):
     for name, k in hist.most_common(a.top):
         print(f"{100 * k / n:6.2f}%  {name}")
 
-if a.inclusive:
+if a.inclusive or a.under:
     DEPTH = 40
     raw = open(a.samples + ".stacks", "rb").read()
     st = struct.unpack("<%dQ" % (len(raw) // 8), raw)
@@ -87,17 +91,26 @@ if a.inclusive:
     #the game's thread is the one running recompiled code, not always the busiest one
     game = collections.Counter(t for t, o in pairs if name_of(o).startswith(("f_", "orig_")))
     tid = (game or threads).most_common(1)[0][0]
-    inc, n = collections.Counter(), 0
+    inc, below, n, m = collections.Counter(), collections.Counter(), 0, 0
     for (t, off), chain in zip(pairs, stacks):
         if t != tid:
             continue
         n += 1
-        names = set()
-        for k, pc in enumerate(chain):
-            if exe_lo <= pc < exe_hi:
-                names.add(name_of(pc - exe_lo - (1 if k else 0))) #a return address: the call before it
-        for x in names:
+        #a return address: the call before it
+        names = [name_of(pc - exe_lo - (1 if k else 0)) if exe_lo <= pc < exe_hi else "?" for k, pc in enumerate(chain)]
+        for x in set(names) - {"?"}:
             inc[x] += 1
+        if a.under:
+            at = [k for k, x in enumerate(names) if x.split(" ")[0][-8:].upper() == a.under.upper()]
+            if at:
+                m += 1
+                k = at[-1] #the outermost, for a function that recurses
+                below[" > ".join(reversed(names[max(0, k - a.depth):k])) or "(itself)"] += 1
+    if a.under:
+        print(f"\nthread {tid}: {100 * m / n:.2f}% under {a.under}, by what it called ({a.depth} deep)")
+        for path, k in below.most_common(a.top):
+            print(f"{100 * k / n:6.2f}%  {path}")
+        raise SystemExit
     print(f"\nthread {tid}, inclusive: a function and what it calls ({DEPTH} frames deep at most)")
     for name, k in inc.most_common(a.top):
         print(f"{100 * k / n:6.2f}%  {name}")
