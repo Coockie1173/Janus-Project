@@ -94,7 +94,7 @@ void set_tank_source(int action, int source);
 
 //screen.cpp
 void install_screen();
-bool screen_draw(PPCContext& c, PPCFunc draw); //from the mesh draw's hook: true when it drew the entry or left it out
+bool screen_draw(PPCContext& c); //from the mesh draw's hook: true when the entry is left out
 bool no_bloom(); //the bloom pass isn't drawn
 void set_no_bloom(bool on);
 bool invert_flash(); //a flash grenade's white-out is the picture of the moment it went off, with white edges

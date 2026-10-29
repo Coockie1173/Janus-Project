@@ -140,7 +140,8 @@ struct Row {
     std::function<void(int)> choose;
 };
 struct Page { std::string title; std::vector<Row> rows; };
-enum { kRoot, kScreen, kControls, kBindings, kEnhancements, kCheats, kForFun, kHotkeys, kHotkeyEdit, kLevels, kMaps, kSkips, kBhop, kTriggers, kSpeedrun, kPageCount };
+enum { kRoot, kScreen, kControls, kBindings, kEnhancements, kCheats, kForFun, kHotkeys, kHotkeyEdit, kLevels, kMaps, kSkips, kBhop, kTriggers, kSpeedrun,
+    kGameplay, kVisuals, kAudio, kUnlocks, kStartup, kPageCount }; //the last five: Enhancements' pages
 inline std::vector<Page> g_pages;
 //pages other files add (settings_page, settings_toggle), behind the ones here
 struct AddedPage { std::string title, about; };

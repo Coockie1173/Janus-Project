@@ -71,7 +71,8 @@ void back() {
     else if (g_listening >= 0) g_listening = -1;
     else if (g_page == kRoot) open(false);
     else if (g_page == kHotkeyEdit) go(kHotkeys, std::max(0, g_edit));
-    else if (g_page == kSkips) go(kEnhancements, 0);
+    else if (g_page == kSkips) go(kGameplay, 0);
+    else if (g_page >= kGameplay && g_page <= kStartup) go(kEnhancements, g_page - kGameplay);
     else if (g_page == kBhop) go(kForFun, BhopRow());
     else if (g_page == kTriggers) go(kCheats, TriggerRow());
     else go(kRoot, g_root_row);

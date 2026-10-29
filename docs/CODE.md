@@ -565,10 +565,10 @@ stretched by `tan(view / 2) / tan(24.5)` for that draw. With Disable Colour Filt
 
 ### `gameplay/screen.cpp`
 
-`Bloom` (hook on `ge_bloom`) leaves the bloom pass out with Disable Bloom. `screen_draw(c, draw)`,
-from `DrawDelayed`: the film grain's hud quad (`HudQuad`: flags `0x40000000`, box 1.40376 wide,
-28 ahead) is drawn with its alpha (entry `+0x3F`) times `film_grain()`, not at all at 0; with
-Inverted Flashes the flash's white quad (box 1.17912 wide, 28.2 ahead) isn't drawn, its alpha and
+`Bloom` (hook on `ge_bloom`) leaves the bloom pass out with Disable Bloom. `GrainPass` (hook on
+`ge_grain_pass`) leaves the grain out at 0 and below 1 has `ScreenQuad` (hook on `ge_screen_quad`)
+scale the white of the grain's quad (r3) by `film_grain()`: the grain is drawn added, that colour
+times the texture times an alpha of 2. `screen_draw(c)`, from `DrawDelayed`: with Inverted Flashes the flash's white quad (box 1.17912 wide, 28.2 ahead) isn't drawn, its alpha and
 the frame go to `g_flash`, `g_flash_frame`. On the renderer's thread `flash_showing()` (the quad
 left out this frame or the last two, in play) and `flash_draw()`: the window copied once into a
 texture at the flash's first frame (`glCopyTexImage2D` from the default framebuffer), drawn on

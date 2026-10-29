@@ -12,8 +12,13 @@
 //  (the viewport's +0x24 is the game's afterimage of the flash, ge_post_effects' fn_802B5330:
 //  each frame the last capture is laid over the scene at that strength and captured again.
 //  it stays either way)
-//Film Grain: the grain is a hud quad too (a box 1.40376 wide, 28 ahead), a noise texture whose
-//  place the game moves every frame, drawn at alpha 0x82. the slider scales that alpha
+//Film Grain: the grain is ge_grain_pass (802C4A50), a pass of ge_post_effects: a 128x128 noise
+//  texture laid over the viewport at a place from the game's random numbers, so it moves every
+//  frame. its quad goes through ge_screen_quad (802C04E0, the colour in r3) white with an alpha of
+//  255 times f5 (0.01: 2) and is drawn added (blend 2): the colour times the texture times that
+//  alpha. the alpha has three steps at most, so the slider scales the white instead (the channel's
+//  colour register, which ge_material_colour sets white in the pass, isn't what's drawn: scaled,
+//  nothing changed)
 //
 //kept in the settings file (LAUNCH_NOBLOOM, LAUNCH_INVERTFLASH, LAUNCH_GRAIN)
 //GE_NO_BLOOM=1, GE_INVERT_FLASH=1, GE_GRAIN=0.5 the same from the environment
@@ -35,13 +40,34 @@ namespace
 
 const uint32_t kEntryDrawMtx = 0x4, kEntryMesh = 0x10, kEntryColour = 0x3C;
 const uint32_t kMeshFlags = 0x4, kMeshBoxMax = 0x20, kMeshOnHud = 0x40000000;
-const float kFlashWide = 1.17912f, kFlashAhead = -28.2f, kGrainWide = 1.40376f, kGrainAhead = -28.0f;
+const float kFlashWide = 1.17912f, kFlashAhead = -28.2f;
 
-PPCFunc orig_bloom = nullptr;
+PPCFunc orig_bloom = nullptr, orig_grain_pass = nullptr, orig_screen_quad = nullptr;
 std::atomic<bool> g_no_bloom{false}, g_invert_flash{false};
 std::atomic<float> g_grain{1.0f};
 std::atomic<float> g_flash{0}; //the white's alpha, 0 to 1, while it is left out
 std::atomic<uint32_t> g_flash_frame{0}; //the game's frame it was last left out in
+bool g_in_grain = false; //ge_grain_pass is running, on the game's thread
+
+void GrainPass(PPCContext& c)
+{
+    float grain = g_grain;
+    if (grain <= 0) return;
+    g_in_grain = grain < 1;
+    orig_grain_pass(c);
+    g_in_grain = false;
+}
+
+//(colour RGBA in r3, f1..f8 the corners and the texture's place)
+void ScreenQuad(PPCContext& c)
+{
+    if (g_in_grain) {
+        uint32_t rgba = c.r[3], scaled = rgba & 0xFF;
+        for (int shift = 8; shift < 32; shift += 8) scaled |= (uint32_t)std::lround((rgba >> shift & 0xFF) * (double)g_grain) << shift;
+        c.r[3] = scaled;
+    }
+    orig_screen_quad(c);
+}
 
 void Bloom(PPCContext& c)
 {
@@ -113,22 +139,11 @@ void Freeze(int w, int h)
 
 } //namespace
 
-//from the mesh draw's hook (fov.cpp): true when it drew the entry itself, or left it out
-bool screen_draw(PPCContext& c, PPCFunc draw)
+//from the mesh draw's hook (fov.cpp): true when the entry is left out
+bool screen_draw(PPCContext& c)
 {
     uint32_t entry = c.r[3];
     if (!guest_ptr(entry)) return false;
-    float grain = g_grain;
-    if (grain < 1 && HudQuad(entry, kGrainWide, kGrainAhead)) {
-        uint8_t alpha = ld8(entry + kEntryColour + 3);
-        int now = (int)std::lround(alpha * grain);
-        if (now > 0) {
-            st8(entry + kEntryColour + 3, (uint8_t)now);
-            draw(c);
-            st8(entry + kEntryColour + 3, alpha);
-        }
-        return true;
-    }
     if (g_invert_flash && !local_in_cutscene() && HudQuad(entry, kFlashWide, kFlashAhead)) {
         g_flash = ld8(entry + kEntryColour + 3) / 255.0f;
         g_flash_frame = ld32(kFrameCount);
@@ -187,6 +202,9 @@ void install_screen()
     saved = saved_setting("GE_GRAIN", "LAUNCH_GRAIN");
     if (!saved.empty()) set_film_grain((float)std::atof(saved.c_str()));
     orig_bloom = ppc_hook("ge_bloom", Bloom);
+    orig_grain_pass = ppc_hook("ge_grain_pass", GrainPass);
+    orig_screen_quad = ppc_hook("ge_screen_quad", ScreenQuad);
+    if (!orig_grain_pass || !orig_screen_quad) rt_log("goldeneye: the grain's pass is not hooked in this build, Film Grain does nothing");
     if (!orig_bloom) rt_log("goldeneye: ge_bloom is not hooked in this build, Disable Bloom does nothing");
 }
 

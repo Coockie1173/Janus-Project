@@ -368,7 +368,19 @@ void build_pages() {
     g_pages[kMaps].title = "Multiplayer Maps";
     g_pages[kSkips].title = "Skip Cutscenes";
 
-    g_pages[kEnhancements].rows.push_back({"Skip Cutscenes (Experimental)", "Choose which cutscenes are skipped: each mission's intro, the one in its middle and its ending.", {}, {}, [] { go(kSkips); }});
+    //Enhancements is a page of pages
+    const struct { int page; const char* title; const char* about; } kEnhancementPages[] = {
+        {kGameplay, "Gameplay", "Skipping cutscenes and movies, quick time events, checkpoints, tutorials, the level timer."},
+        {kVisuals, "Visuals", "The colour filter, the bloom, flash grenades and the film grain."},
+        {kAudio, "Audio", "How sounds behind walls and on other floors are heard in multiplayer."},
+        {kUnlocks, "Unlocks", "Missions, difficulties, online items and the unused extras menu."},
+        {kStartup, "Startup", "What happens when the game starts: going online, the screens before the menu, crash reports."},
+    };
+    for (const auto& e : kEnhancementPages) {
+        g_pages[kEnhancements].rows.push_back({e.title, e.about, {}, {}, [page = e.page] { go(page); }});
+        g_pages[e.page].title = e.title;
+    }
+    g_pages[kGameplay].rows.push_back({"Skip Cutscenes (Experimental)", "Choose which cutscenes are skipped: each mission's intro, the one in its middle and its ending.", {}, {}, [] { go(kSkips); }});
     BuildSettings();
     for (size_t i = 0; i < g_settings.size(); ++i) g_pages[g_settings[i].page].rows.push_back(SettingRow((int)i));
 	for (size_t i = 0; i < g_addedKeys.size(); ++i)

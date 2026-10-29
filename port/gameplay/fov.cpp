@@ -160,7 +160,7 @@ bool OutOfPicture(uint32_t entry) {
 
 void DrawDelayed(PPCContext& c) {
     if (pictures_hiding() && OutOfPicture(c.r[3])) return;
-    if (screen_draw(c, orig_draw_delayed)) return;
+    if (screen_draw(c)) return;
     uint32_t settings = ld32(kViewSettingsPtr), entry = c.r[3];
     float angle = guest_ptr(settings) ? ldf(settings + 0x328) : 0;
     bool wide = angle > kGameFov && angle <= kFovMax, hidden = g_no_colour_filter;

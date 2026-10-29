@@ -208,31 +208,31 @@ void BuildSettings()
 			tankSources, [i] { return tank_source(i); }, [i](int v) { set_tank_source(i, v); g_dirty = true; });
 	}
 
-	AddToggle(kEnhancements, "skip_movies", "Skip Movies", "On: briefings, the movies between missions and the logos are skipped.", skip_movies, set_skip_movies);
-	AddToggle(kEnhancements, "level_timer", "Level Timer", "On: the hud shows the time played in the level.", level_timer, set_level_timer);
-	AddToggle(kEnhancements, "auto_qte", "Auto Quick Time Events", "On: quick time events press their own buttons.", auto_qte, set_auto_qte);
-	AddToggle(kEnhancements, "auto_start", "Auto Start Mission", "On: a loaded mission starts by itself, without Continue being pressed.", auto_start, set_auto_start);
-	AddToggle(kEnhancements, "autosave", "Save At Checkpoints", "On: reaching a checkpoint saves the game, as Save and Quit does. After a crash Continue Game starts there.", autosave, set_autosave);
-	AddToggle(kEnhancements, "no_tutorials", "Disable Tutorials", "On: the pop-up boxes that explain the controls are never shown, in any mission, training included.", no_tutorials, set_no_tutorials);
-	AddToggle(kEnhancements, "no_colour_filter", "Disable Colour Filter", "On: the tint most levels lay over the picture (Dam's grey-blue, Facility's blue-green...) isn't drawn.", no_colour_filter, set_no_colour_filter);
-	AddToggle(kEnhancements, "no_bloom", "Disable Bloom", "On: the glow round lamps, screens and bright lights isn't drawn.", no_bloom, set_no_bloom);
-	AddToggle(kEnhancements, "invert_flash", "Inverted Flashes", "On: a flash grenade freezes the picture of the moment it went off, with white edges, instead of whiting out the screen. It fades back as fast as the white would.", invert_flash, set_invert_flash);
-	Setting& grain = AddRange(kEnhancements, "film_grain", "Film Grain", "How much grain lies over the picture. 100% is the game's own.",
+	AddToggle(kGameplay, "skip_movies", "Skip Movies", "On: briefings, the movies between missions and the logos are skipped.", skip_movies, set_skip_movies);
+	AddToggle(kGameplay, "level_timer", "Level Timer", "On: the hud shows the time played in the level.", level_timer, set_level_timer);
+	AddToggle(kGameplay, "auto_qte", "Auto Quick Time Events", "On: quick time events press their own buttons.", auto_qte, set_auto_qte);
+	AddToggle(kGameplay, "auto_start", "Auto Start Mission", "On: a loaded mission starts by itself, without Continue being pressed.", auto_start, set_auto_start);
+	AddToggle(kGameplay, "autosave", "Save At Checkpoints", "On: reaching a checkpoint saves the game, as Save and Quit does. After a crash Continue Game starts there.", autosave, set_autosave);
+	AddToggle(kGameplay, "no_tutorials", "Disable Tutorials", "On: the pop-up boxes that explain the controls are never shown, in any mission, training included.", no_tutorials, set_no_tutorials);
+	AddToggle(kVisuals, "no_colour_filter", "Disable Colour Filter", "On: the tint most levels lay over the picture (Dam's grey-blue, Facility's blue-green...) isn't drawn.", no_colour_filter, set_no_colour_filter);
+	AddToggle(kVisuals, "no_bloom", "Disable Bloom", "On: the glow round lamps, screens and bright lights isn't drawn.", no_bloom, set_no_bloom);
+	AddToggle(kVisuals, "invert_flash", "Inverted Flashes", "On: a flash grenade freezes the picture of the moment it went off, with white edges, instead of whiting out the screen. It fades back as fast as the white would.", invert_flash, set_invert_flash);
+	Setting& grain = AddRange(kVisuals, "film_grain", "Film Grain", "How much grain lies over the picture. 100% is the game's own.",
 		film_grain, [](float v) { set_film_grain(v); g_dirty = true; }, 0, 1, 0.05f, 2);
 	grain.show = [](float v) { return v > 0 ? std::to_string((int)std::lround(v * 100)) + "%" : std::string("Off"); };
-	AddToggle(kEnhancements, "unlock_all", "Unlock Everything", "On: every mission and every difficulty can be picked. A save made with it on may keep them.", unlock_all, set_unlock_all);
-	AddToggle(kEnhancements, "online_unlocks", "Online Unlocks", "On: online, every weapon, attachment, gadget and game mode is open at any level, but for the Proximity Mine.", online_unlocks, set_online_unlocks);
-	AddToggle(kEnhancements, "occlusion", "Sound Occlusion", "On: in multiplayer a sound behind a wall is quieter, one behind a floor more so, so someone a floor up doesn't sound next to you. Off: the game's own, distance only.", occlusion, set_occlusion);
-	AddToggle(kEnhancements, "sound_height", "Sound Height", "On: in multiplayer a sound from the floor above or below you is muffled, so you can hear that someone isn't on your floor. Off: the game's own, left and right only.", sound_height, set_sound_height);
-	AddToggle(kEnhancements, "online", "Online", "On: the game finds the community server that stands in for Nintendo's (config/hosts.txt). Off: it stays offline. From the next start on.",
+	AddToggle(kUnlocks, "unlock_all", "Unlock Everything", "On: every mission and every difficulty can be picked. A save made with it on may keep them.", unlock_all, set_unlock_all);
+	AddToggle(kUnlocks, "online_unlocks", "Online Unlocks", "On: online, every weapon, attachment, gadget and game mode is open at any level, but for the Proximity Mine.", online_unlocks, set_online_unlocks);
+	AddToggle(kAudio, "occlusion", "Sound Occlusion", "On: in multiplayer a sound behind a wall is quieter, one behind a floor more so, so someone a floor up doesn't sound next to you. Off: the game's own, distance only.", occlusion, set_occlusion);
+	AddToggle(kAudio, "sound_height", "Sound Height", "On: in multiplayer a sound from the floor above or below you is muffled, so you can hear that someone isn't on your floor. Off: the game's own, left and right only.", sound_height, set_sound_height);
+	AddToggle(kStartup, "online", "Online", "On: the game finds the community server that stands in for Nintendo's (config/hosts.txt). Off: it stays offline. From the next start on.",
 		[] { return next_start().online; }, [](bool v) { next_start().online = v; });
-	AddToggle(kEnhancements, "fast_start", "Quicker Start", "On: the screens before the main menu are hurried through. From the next start on.",
+	AddToggle(kStartup, "fast_start", "Quicker Start", "On: the screens before the main menu are hurried through. From the next start on.",
 		[] { return next_start().fast_start; }, [](bool v) { next_start().fast_start = v; });
 #ifndef _WIN32
-	AddToggle(kEnhancements, "crash_dumps", "Crash Dumps", "On: a crash or a stall writes a report into crashes/, to send along with a bug report. From the next start on.",
+	AddToggle(kStartup, "crash_dumps", "Crash Dumps", "On: a crash or a stall writes a report into crashes/, to send along with a bug report. From the next start on.",
 		[] { return next_start().crash_dumps; }, [](bool v) { next_start().crash_dumps = v; });
 #endif
-	AddToggle(kEnhancements, "extras_menu", "Unused Extras Menu", "On: Extras also lists Mission Select, Character Viewer, Movies and the Calibration Menu.", extras_menu, set_extras_menu);
+	AddToggle(kUnlocks, "extras_menu", "Unused Extras Menu", "On: Extras also lists Mission Select, Character Viewer, Movies and the Calibration Menu.", extras_menu, set_extras_menu);
 
 	AddToggle(kCheats, "mouse_everywhere", "Always Enable Mouse", "On: the mouse turns the view where the game locks it: cutscenes, melee, climbing, death.", mouse_everywhere, set_mouse_everywhere);
 	AddToggle(kCheats, "god_mode", "God Mode", "On: nothing hurts you in the campaign. A fall out of the level or a failed mission still ends it.", god_mode, set_god_mode);
