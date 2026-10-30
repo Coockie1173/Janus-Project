@@ -45,12 +45,12 @@
 //kTuck standing up, nothing gained by doing it over and over. it doesn't stop the speed: a landing
 //crouched slides on half-life's friction like any other, and crouched the air accelerates at kDuck
 //
-//Hovering (off by default): fn_801066C0 puts the fall speed at 0. the game calls it for a crouch, for
+//Hovering (on by default): fn_801066C0 puts the fall speed at 0. the game calls it for a crouch, for
 //the move state's setter (a reload, a weapon cycle) and as the fall starts, which is the hover
 //kFreeDrop down. off, in the air those three keep the fall speed (the hook's others are climbs
 //and the like, which want it gone)
 //
-//Ledge Hops (off by default): half-life's feet are a box, ours the bottom of a capsule, so a landing
+//Ledge Hops (on by default): half-life's feet are a box, ours the bottom of a capsule, so a landing
 //on a thin ledge or the rim of one meets its edge, not its top. ge_contacts_solve drops a floor's
 //contact that isn't flat on (806F1DA4) and only the wall under it pushes, up and off, with no floor
 //flag. so a floor's contact with the push going up (kLedgeUp, a capsule's side passing a ledge
@@ -112,7 +112,7 @@
 //
 //GE_BUNNYHOP=1 start with it on, else what the menu saved
 //the speed goes in the log twice a second, and what walls take (GE_BHOP_LOG=0 not)
-//GE_BHOP_PRESTRAFE=0 without pre-strafing, GE_BHOP_CROUCH=1 (a GE_HL_CROUCH build), GE_BHOP_HOVER=1 and GE_BHOP_LEDGE=1 with those, GE_BHOP_SPEED, GE_BHOP_HEIGHT, GE_BHOP_AIRCAP, GE_BHOP_AIRACCEL, GE_BHOP_WISH, GE_BHOP_MAX, GE_BHOP_GRAVITY,
+//GE_BHOP_PRESTRAFE=0 without pre-strafing, GE_BHOP_CROUCH=1 (a GE_HL_CROUCH build), GE_BHOP_HOVER=0 and GE_BHOP_LEDGE=0 without those, GE_BHOP_SPEED, GE_BHOP_HEIGHT, GE_BHOP_AIRCAP, GE_BHOP_AIRACCEL, GE_BHOP_WISH, GE_BHOP_MAX, GE_BHOP_GRAVITY,
 //GE_BHOP_FALL, GE_BHOP_DROP, GE_BHOP_ACCEL, GE_BHOP_FRICTION over what the menu saved
 #include "ge.h"
 #include <algorithm>
@@ -158,7 +158,7 @@ BhopValue g_values[kBhopValueCount]{
 //what play goes by this frame: the menu's offline, the host's in a modded network game
 struct Rules
 {
-	bool on = false, prestrafe = true, hover = false, ledge = false;
+	bool on = false, prestrafe = true, hover = true, ledge = true;
 #ifdef GE_HL_CROUCH
 	bool crouch = false;
 #endif
@@ -199,7 +199,7 @@ Rules g_host; //as the host last sent them
 bool g_hostKnown = false;
 
 std::atomic<bool> g_bunnyhop{false}; //the menu's, ours
-std::atomic<bool> g_prestrafe{true}, g_hover{false}, g_ledge{false};
+std::atomic<bool> g_prestrafe{true}, g_hover{true}, g_ledge{true};
 #ifdef GE_HL_CROUCH
 std::atomic<bool> g_crouch{false};
 #endif
@@ -855,7 +855,7 @@ float bhop_value_now(int which) { return bhop_locked() ? g_now.v[which] : g_valu
 bool bhop_custom_now()
 {
 	if (!g_onNow || bhop_map_locked()) return false; //the level's own rules are the rules
-	if (!g_now.prestrafe || g_now.hover || g_now.ledge) return true;
+	if (!g_now.prestrafe || !g_now.hover || !g_now.ledge) return true;
 #ifdef GE_HL_CROUCH
 	if (g_now.crouch) return true;
 #endif
@@ -1220,8 +1220,10 @@ void install_bunnyhop()
 #ifdef GE_HL_CROUCH
 	g_crouch = std::atoi(saved_setting("GE_BHOP_CROUCH", "LAUNCH_BHOP_CROUCH").c_str()) != 0;
 #endif
-	g_hover = std::atoi(saved_setting("GE_BHOP_HOVER", "LAUNCH_BHOP_HOVER").c_str()) != 0;
-	g_ledge = std::atoi(saved_setting("GE_BHOP_LEDGE", "LAUNCH_BHOP_LEDGE").c_str()) != 0;
+	const std::string hover{ saved_setting("GE_BHOP_HOVER", "LAUNCH_BHOP_HOVER") };
+	if (!hover.empty()) g_hover = std::atoi(hover.c_str()) != 0;
+	const std::string ledge{ saved_setting("GE_BHOP_LEDGE", "LAUNCH_BHOP_LEDGE") };
+	if (!ledge.empty()) g_ledge = std::atoi(ledge.c_str()) != 0;
 	g_trace = std::getenv("GE_TRACE") != nullptr;
 	if (const char* e = std::getenv("GE_BHOP_LOG")) g_log = std::atoi(e) != 0;
 	for (BhopValue& v : g_values)
