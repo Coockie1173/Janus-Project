@@ -867,6 +867,13 @@ bool bhop_custom_now()
 void bhop_defaults()
 {
 	for (BhopValue& v : g_values) v.value = v.initial;
+	const Rules rules{};
+	g_prestrafe = rules.prestrafe;
+	g_hover = rules.hover;
+	g_ledge = rules.ledge;
+#ifdef GE_HL_CROUCH
+	g_crouch = rules.crouch;
+#endif
 }
 
 bool bunnyhop_speed(float& speed)

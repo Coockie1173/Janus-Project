@@ -44,7 +44,7 @@ bool bunnyhop_speed(float& speed); //the speedometer's, false with it off or nob
 enum { kBhopSpeed, kBhopHeight, kBhopGravity, kBhopAirCap, kBhopAirAccel, kBhopWish, kBhopMax, kBhopFall, kBhopDrop, kBhopGroundAccel, kBhopFriction, kBhopValueCount };
 struct BhopValue { const char* label; const char* hint; const char* env; const char* launch; float value, lo, hi, by; int decimals; float initial = 0; };
 BhopValue& bhop_value(int which); //its tunables, by the enum above
-void bhop_defaults(); //every tunable back to its own
+void bhop_defaults(); //every tunable and rule back to its own
 bool bhop_prestrafe(); //half-life's ground move on the floor, so turning while strafing gains speed there too
 void set_bhop_prestrafe(bool on);
 #ifdef GE_HL_CROUCH
