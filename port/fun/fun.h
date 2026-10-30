@@ -24,6 +24,8 @@ void set_bunnyhop(bool on);
 void bunnyhop_look(PPCContext& c, uint32_t controller); //after ge_look_apply, the body's step is ours
 void bunnyhop_apply(uint32_t controller); //after a controller's update: the local one's offline, every one's online
 void bunnyhop_command(uint32_t command); //a command of this console's was filled: the jump key goes in
+uint32_t bunnyhop_crouch(uint32_t controller); //before ge_action_update: half-life's crouch, what the buttons were
+void bunnyhop_crouch_done(uint32_t controller, uint32_t kept); //after it
 uint32_t bunnyhop_input(uint32_t controller, uint32_t command); //before ge_input_copy: the key is the controller's
 void bunnyhop_input_done(uint32_t command, uint32_t kept); //after it, with what bunnyhop_input gave
 void bunnyhop_write(PPCContext& c, uint32_t stream, bool rules); //the host's rules behind its own player's state

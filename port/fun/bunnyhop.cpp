@@ -37,6 +37,14 @@
 //ge_action_update's vault and climb, still gets the game's). the run is kBaseSpeed instead:
 //ge_move_speed's 4.2 standing up (806E947C), the sprint's is 6.6, aimed and crouched stay the game's
 //
+//crouch is half-life's: crouched with the key held, stood up without it, when there's room. it goes
+//through the game's own (fn_8010FF60), so it comes no faster than the game's 0.25 s (+0xC88) and
+//each one still puts the fall speed at 0 (fn_801066C0), that float is kept on purpose. in the air
+//it's at once and it's the legs: the crouched capsule is 0.62 shorter with its feet in the same
+//place, half-life's hull shrinks to the middle, so the body goes up kTuck crouching and down
+//kTuck standing up, nothing gained by doing it over and over. it doesn't stop the speed: a landing
+//crouched slides on half-life's friction like any other, and crouched the air accelerates at kDuck
+//
 //ladders are half-life's: the game's own (walked into from the foot, ge_ladder_foot, or backed off
 //the top, ge_move_grab's 0x100) are never taken. a ladder is its pieces, polygons with flags 0x1000
 //(see eurochef's goldeneye_wii.md), and the player is on one while a piece is within kLadderReach
@@ -109,6 +117,10 @@ const uint32_t kBody = 0x158, kBodyStep = 0xBC, kBodyFloor = 0xA, kBodyHit = 0xA
 const uint32_t kFallen = 0xE90;
 const uint32_t kMoveStick = 0x500, kTimeStep = 0x578, kPlayerState = 0x704;
 const uint32_t kSprinting = 0xE59, kCrouched = 0xC54, kSlowed = 0xD00;
+const uint32_t kCrouchBlend = 0xC80; //the view's way down, 1 crouched
+const uint32_t kActPressed = 0x534, kActHeld = 0x538, kActCrouch = 0x20; //ge_action_update's buttons, see the top
+const uint32_t kActions = 0x805D4020, kActionSize = 0x1C, kActionNone = 0x46500001;
+const uint32_t kCrouchOurs = 1, kCrouchPressed = 2, kCrouchHeld = 4; //what bunnyhop_crouch keeps
 const uint32_t kAskStart = 0x8010D9B0, kAskGoOn = 0x8010DA8C; //ge_sprint_update's calls of ge_sprint_allowed
 const float kGameRun = 4.2f; //806E947C
 const uint32_t kView = 0x16C, kViewPitch = 0x768; //the entity's view, its pitch (down is positive)
@@ -149,6 +161,8 @@ float& kFriction = g_now.v[kBhopFriction];
 const float kStopSpeed = 2.0f; //under this friction takes as if it were this, half-life's stopspeed of its run
 const float kGain = 0.1f; //the floor's speed is ours this much over the game's walk
 const float kDeadZone = 0.2f;
+const float kDuck = 0.333f; //of the stick's speed crouched, half-life's
+const float kTuck = 0.31f; //half of what the crouched capsule is shorter (1.65 and 1.03), the feet stay where they are in both
 const float kClimb = 0.625f, kPushOff = 0.84f; //of the base speed: half-life's climb and jump off a ladder, of its run
 const float kLadderReach = 0.6f; //a ladder's piece this far in front of the player has them
 const float kLadderAt[2]{ 0.3f, 1.1f }; //the points above the feet it's looked for at
@@ -217,6 +231,7 @@ struct Hopper
 	float fallen = 0; //the deadly fall as we left it
 	float floorY = 0, topY = 0; //where the player left the floor, and the highest since
 	bool ladder = false; //on one, see the top
+	bool crouched = false, inAir = false; //as last frame left them
 };
 const int kHoppers = 16;
 Hopper g_hoppers[kHoppers];
@@ -652,7 +667,7 @@ void CommandRead(PPCContext& c)
 //it's faster: true then, the hopper's vel is the speed
 bool PreStrafe(Hopper& h, uint32_t ctrl, float gameX, float gameZ, float wishX, float wishZ, float stick, float dt, bool groundOn)
 {
-	if (!g_now.prestrafe || ld8(ctrl + kSprinting) || ld8(ctrl + kCrouched) || ld8(ctrl + kSlowed)) return false;
+	if (!g_now.prestrafe || ld8(ctrl + kSprinting) || ld8(ctrl + kSlowed)) return false;
 	float v[2]{ gameX, gameZ };
 	if (h.active) v[0] = h.vel[0], v[1] = h.vel[1];
 	else if (groundOn) v[0] = h.ground[0], v[1] = h.ground[1];
@@ -737,6 +752,29 @@ void bunnyhop_apply(uint32_t ctrl)
 }
 void bunnyhop_buttons(const ClassicState& s) { g_jump = (s.extra & kExtraJump) != 0; }
 
+//before ge_action_update: crouched with the key held, stood up without it. while the two differ
+//the game gets a press of its crouch, so it takes its own wait and looks for room itself. what the
+//buttons were, for bunnyhop_crouch_done
+uint32_t bunnyhop_crouch(uint32_t ctrl)
+{
+	if (!Hops(ctrl)) return 0;
+	for (uint32_t a = kActions; a < kActions + 4 * kActionSize; a += kActionSize)
+	{
+		if (ld32(a) != kActionNone && (ld32(a + 0x10) & kActCrouch)) return 0; //the key does that now
+	}
+	const uint32_t pressed{ ld32(ctrl + kActPressed) }, held{ ld32(ctrl + kActHeld) };
+	const bool press{ ((held & kActCrouch) != 0) != (ld8(ctrl + kCrouched) != 0) };
+	st32(ctrl + kActPressed, press ? pressed | kActCrouch : pressed & ~kActCrouch);
+	st32(ctrl + kActHeld, press ? held | kActCrouch : held);
+	return kCrouchOurs | (pressed & kActCrouch ? kCrouchPressed : 0) | (held & kActCrouch ? kCrouchHeld : 0);
+}
+void bunnyhop_crouch_done(uint32_t ctrl, uint32_t kept)
+{
+	if (!kept) return;
+	st32(ctrl + kActPressed, (ld32(ctrl + kActPressed) & ~kActCrouch) | (kept & kCrouchPressed ? kActCrouch : 0));
+	st32(ctrl + kActHeld, (ld32(ctrl + kActHeld) & ~kActCrouch) | (kept & kCrouchHeld ? kActCrouch : 0));
+}
+
 //a command of this console's is filled: the key goes in
 void bunnyhop_command(uint32_t cmd)
 {
@@ -812,6 +850,8 @@ void bunnyhop_look(PPCContext& c, uint32_t ctrl)
 	Hopper& h = *hp;
 	const bool groundOn{ h.groundOn };
 	h.groundOn = false;
+	const bool crouched{ ld8(ctrl + kCrouched) != 0 }, crouchChanged{ crouched != h.crouched };
+	h.crouched = crouched;
 	if (!Free(ld32(ctrl + kPlayerState)))
 	{
 		h.active = false;
@@ -836,7 +876,14 @@ void bunnyhop_look(PPCContext& c, uint32_t ctrl)
 		g_speed = std::hypot(gameX, gameZ);
 		g_speedFrame = ld32(kFrameCount);
 	}
-	const float posY{ ldf(entity + kPos + 4) };
+	float posY{ ldf(entity + kPos + 4) };
+	if (crouchChanged && h.inAir && !h.ladder && std::isfinite(posY)) //half-life's: in the air it's at once, the legs and not the head
+	{
+		posY += crouched ? kTuck : -kTuck;
+		stf(entity + kPos + 4, posY);
+		stf(ctrl + kCrouchBlend, crouched ? 1.0f : 0.0f);
+	}
+	h.inAir = !floor;
 	if (std::isfinite(posY))
 	{
 		if (floor || !h.active) h.floorY = h.topY = posY;
@@ -935,6 +982,7 @@ void bunnyhop_look(PPCContext& c, uint32_t ctrl)
 			h.active = true;
 			const float gravity{ ldf(body + kBodyGravity) };
 			if (std::isfinite(gravity) && gravity > 0) stf(body + kBodyFallSpeed, std::sqrt(2.0f * gravity * kHopHeight));
+			h.inAir = true;
 		}
 	}
 	else
@@ -952,7 +1000,7 @@ void bunnyhop_look(PPCContext& c, uint32_t ctrl)
 		}
 		if (stick >= kDeadZone)
 		{
-			const float wishSpeed{ kWishSpeed * stick };
+			const float wishSpeed{ kWishSpeed * stick * (crouched ? kDuck : 1.0f) };
 			const float add{ std::min(wishSpeed, kAirCap) - (h.vel[0] * wishX + h.vel[1] * wishZ) };
 			if (add > 0)
 			{

@@ -63,7 +63,7 @@ template <int I> void sprint_read(PPCContext& c) {
 
 const uint32_t kActions = 0x805D4020, kActionSize = 0x1C, kActionNone = 0x46500001;
 PPCFunc orig_action_update = nullptr;
-void action_update(PPCContext& c) {
+void sprint_action(PPCContext& c) {
     uint32_t ctrl = c.r[3];
     if (ctrl != g_local_ctrl || ld32(kFrameCount) - g_local_frame >= 4 || joined_game() || !g_sprint_held) { orig_action_update(c); return; }
     bool forward = false, hold = false; //an action on b with the stick forward is on offer, or one that's "hold b"
@@ -85,6 +85,12 @@ void action_update(PPCContext& c) {
     orig_action_update(c);
     st32(ctrl + kActPressed, (ld32(ctrl + kActPressed) & ~kActSprint) | (pressed & kActSprint));
     st32(ctrl + kActHeld, (ld32(ctrl + kActHeld) & ~kActSprint) | (held & kActSprint));
+}
+
+void action_update(PPCContext& c) {
+    const uint32_t ctrl{c.r[3]}, crouch{bunnyhop_crouch(ctrl)};
+    sprint_action(c);
+    bunnyhop_crouch_done(ctrl, crouch);
 }
 
 //the wheel changes weapon: a notch up presses D-pad right (next), a notch down D-pad left
