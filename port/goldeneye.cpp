@@ -138,6 +138,7 @@ void install() {
     install_owned();
     install_randomizer();
     install_bunnyhop();
+    install_teleport();
     install_collision();
     install_triggers();
     install_autosave();

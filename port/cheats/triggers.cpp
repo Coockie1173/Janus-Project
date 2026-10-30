@@ -598,6 +598,8 @@ void LoadTypes(const std::string& text)
 	}
 }
 
+void trigger_asked(uint32_t trigger, bool inside) { Asked(trigger, inside, inside); }
+
 std::vector<std::string> trigger_labels()
 {
 	std::lock_guard<std::mutex> lock(g_labels_lock);

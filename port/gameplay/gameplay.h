@@ -5,6 +5,10 @@
 namespace ge
 {
 
+//teleport.cpp
+void install_teleport();
+void teleport_apply(PPCContext& c, uint32_t controller); //after a controller's update, see bunnyhop_apply
+
 //custom.cpp
 void install_custom();
 const int kCustomSliders = 4; //enemy health, enemy damage, enemy reaction speed, hit protection

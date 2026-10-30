@@ -706,6 +706,17 @@ Nothing is hooked when `GE_PORTAL_NEAR=0` and there is no log.
 `Keep(writes, on, written)` remembers what the game had and puts it back when the option is
 turned off. `tweaks_apply()` runs both once a frame.
 
+### `gameplay/teleport.cpp`
+
+Teleports, from eurochef's `teleport_<name>` volumes: the generic trigger asleep, with a shape, `TELE` in data 1, data 5 to 7 where it goes and data 8 the yaw.
+
+| Function | What it does |
+|---|---|
+| `Find()` | the level's teleports, when the level or the number of triggers changes |
+| `Inside(c, trigger, entity)` | the game's shape test (`fn_80024450`) on the entity's position |
+| `Go(ctrl, entity, body, trigger)` | puts the player there and zeroes the step, the fall speed, the velocity and the fall |
+| `teleport_apply(c, ctrl)` | after a controller's update, next to `bunnyhop_apply`, for a player in a state they move themselves in. It keeps no state, so online every console's stepping agrees |
+
 ### `gameplay/custom.cpp`
 
 007 Custom: a mission as 007 Classic with the guards set by four sliders. A mission's row of

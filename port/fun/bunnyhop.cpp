@@ -849,6 +849,16 @@ bool bunnyhop_speed(float& speed)
 }
 void set_bunnyhop(bool on) { g_bunnyhop = on; }
 
+void bunnyhop_stop(uint32_t ctrl, float y)
+{
+	Hopper* h = Of(ctrl);
+	if (!h) return;
+	h->active = false;
+	h->vel[0] = h->vel[1] = h->ground[0] = h->ground[1] = 0.0f;
+	h->fallen = 0.0f;
+	h->floorY = h->topY = y;
+}
+
 //after a controller's update: the local one's offline, any one's online
 void bunnyhop_apply(uint32_t ctrl)
 {

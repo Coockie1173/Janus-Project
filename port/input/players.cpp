@@ -224,9 +224,13 @@ void controller_update(PPCContext& c) {
         aim_lock_frame(ctrl);
         noclip_apply(ctrl);
         bunnyhop_apply(ctrl);
+        teleport_apply(c, ctrl);
         cheats_apply(c, ctrl);
         stamina_apply(ctrl);
-    } else if (network_game() && guest_ptr(player) && !is_tank(ctrl)) bunnyhop_apply(ctrl); //online everyone hops
+    } else if (network_game() && guest_ptr(player) && !is_tank(ctrl)) { //online everyone hops
+        bunnyhop_apply(ctrl);
+        teleport_apply(c, ctrl);
+    }
     //the cheat, in a state whose update never got to ge_look_apply: turn the player's yaw directly
     if (forced && ctrl == g_look_ctrl && g_look_yaw != 0) {
         float yaw = ldf(player + 0xDC);

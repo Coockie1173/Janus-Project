@@ -23,6 +23,7 @@ bool bunnyhop(); //for fun, the player hops by itself and strafing in the air ad
 void set_bunnyhop(bool on);
 void bunnyhop_look(PPCContext& c, uint32_t controller); //after ge_look_apply, the body's step is ours
 void bunnyhop_apply(uint32_t controller); //after a controller's update: the local one's offline, every one's online
+void bunnyhop_stop(uint32_t controller, float y); //it was teleported to this height: no speed, and the fall starts there
 void bunnyhop_command(uint32_t command); //a command of this console's was filled: the jump key goes in
 uint32_t bunnyhop_crouch(uint32_t controller); //before ge_action_update: half-life's crouch, what the buttons were
 void bunnyhop_crouch_done(uint32_t controller, uint32_t kept); //after it
