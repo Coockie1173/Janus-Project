@@ -80,6 +80,7 @@ void save_launch_settings() {
         {"LAUNCH_WEAPONRANDOMIZER", weapon_randomizer() ? "1" : "0"},
         {"LAUNCH_NOATTACHMENTLIMIT", no_attachment_limit() ? "1" : "0"}, {"LAUNCH_BUNNYHOP", bunnyhop() ? "1" : "0"},
         {"LAUNCH_BHOP_PRESTRAFE", bhop_prestrafe() ? "1" : "0"},
+        {"LAUNCH_BHOP_CROUCH", bhop_crouch() ? "1" : "0"}, {"LAUNCH_BHOP_HOVER", bhop_hover() ? "1" : "0"},
         {"LAUNCH_TRIGGERVIEW", trigger_view() ? "1" : "0"}, {"LAUNCH_TRIGGERXRAY", trigger_xray() ? "1" : "0"}, {"LAUNCH_TRIGGERTYPES", trigger_types_saved()}};
     for (int i = 0; i < kBhopValueCount; ++i) {
         char text[24];

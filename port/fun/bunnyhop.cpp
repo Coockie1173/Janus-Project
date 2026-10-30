@@ -37,14 +37,15 @@
 //ge_action_update's vault and climb, still gets the game's). the run is kBaseSpeed instead:
 //ge_move_speed's 4.2 standing up (806E947C), the sprint's is 6.6, aimed and crouched stay the game's
 //
-//crouch is half-life's: crouched with the key held, stood up without it, when there's room. it goes
-//through the game's own (fn_8010FF60), so it comes no faster than the game's 0.25 s (+0xC88) and
-//each one still puts the fall speed at 0 (fn_801066C0), that float is kept on purpose. in the air
-//it's at once and it's the legs: the crouched capsule is 0.62 shorter with its feet in the same
+//Half-Life Crouch (off by default, then crouch is the game's): crouched with the key held, stood up
+//without it, when there's room. it goes through the game's own (fn_8010FF60), so it comes no
+//faster than the game's 0.25 s (+0xC88). in the air it's at once and it's the legs: the crouched capsule is 0.62 shorter with its feet in the same
 //place, half-life's hull shrinks to the middle, so the body goes up kTuck crouching and down
 //kTuck standing up, nothing gained by doing it over and over. it doesn't stop the speed: a landing
 //crouched slides on half-life's friction like any other, and crouched the air accelerates at kDuck
 //
+//Hovering (off by default): fn_801066C0 puts the fall speed at 0. the game calls it for a crouch, for
+//the move state's setter (a reload, a weapon cycle) and as the fall starts, which is the hover
 //ladders are half-life's: the game's own (walked into from the foot, ge_ladder_foot, or backed off
 //the top, ge_move_grab's 0x100) are never taken. a ladder is its pieces, polygons with flags 0x1000
 //(see eurochef's goldeneye_wii.md), and the player is on one while a piece is within kLadderReach
@@ -99,7 +100,7 @@
 //
 //GE_BUNNYHOP=1 start with it on, else what the menu saved
 //the speed goes in the log twice a second, and what walls take (GE_BHOP_LOG=0 not)
-//GE_BHOP_PRESTRAFE=0 without pre-strafing, GE_BHOP_SPEED, GE_BHOP_HEIGHT, GE_BHOP_AIRCAP, GE_BHOP_AIRACCEL, GE_BHOP_WISH, GE_BHOP_MAX, GE_BHOP_GRAVITY,
+//GE_BHOP_PRESTRAFE=0 without pre-strafing, GE_BHOP_CROUCH=1 and GE_BHOP_HOVER=1 with those, GE_BHOP_SPEED, GE_BHOP_HEIGHT, GE_BHOP_AIRCAP, GE_BHOP_AIRACCEL, GE_BHOP_WISH, GE_BHOP_MAX, GE_BHOP_GRAVITY,
 //GE_BHOP_FALL, GE_BHOP_DROP, GE_BHOP_ACCEL, GE_BHOP_FRICTION over what the menu saved
 #include "ge.h"
 #include <algorithm>
@@ -143,7 +144,7 @@ BhopValue g_values[kBhopValueCount]{
 //what play goes by this frame: the menu's offline, the host's in a modded network game
 struct Rules
 {
-	bool on = false, prestrafe = true;
+	bool on = false, prestrafe = true, crouch = false, hover = false;
 	float v[kBhopValueCount]{};
 };
 Rules g_now;
@@ -178,13 +179,15 @@ Rules g_host; //as the host last sent them
 bool g_hostKnown = false;
 
 std::atomic<bool> g_bunnyhop{false}; //the menu's, ours
-std::atomic<bool> g_prestrafe{true};
+std::atomic<bool> g_prestrafe{true}, g_crouch{false}, g_hover{false};
 std::atomic<bool> g_onNow{false}, g_locked{false}; //for the menu's and the renderer's threads
 std::atomic<bool> g_jump{false}; //as the pad was last read
 std::atomic<float> g_speed{0}; //the speedometer's, read by the renderer's thread
 std::atomic<uint32_t> g_speedFrame{~0u};
 bool g_trace = false;
 bool g_log = true; //the speed in the log, twice a second
+PPCFunc orig_body_still = nullptr;
+const uint32_t kStillCrouch = 0x80110128, kStillFall = 0x80121360, kStillMove = 0x8010D69C; //its callers that hover, see the top
 PPCFunc orig_fall_start = nullptr, orig_move_grab = nullptr, orig_sprint_allowed = nullptr, orig_move_speed = nullptr;
 PPCFunc orig_command_write = nullptr, orig_command_read = nullptr;
 PPCFunc orig_ladder_foot = nullptr, search_near = nullptr, search_all = nullptr;
@@ -286,6 +289,8 @@ Rules Own(bool steps)
 	Rules r;
 	r.on = g_bunnyhop;
 	r.prestrafe = g_prestrafe;
+	r.crouch = g_crouch;
+	r.hover = g_hover;
 	for (int i = 0; i < kBhopValueCount; ++i) r.v[i] = steps ? AtStep(i, StepOf(i, g_values[i].value)) : g_values[i].value;
 	return r;
 }
@@ -421,6 +426,12 @@ void FallStart(PPCContext& c)
 	if (std::isfinite(y) && h->topY > y) stf(ctrl + kFallen, h->topY - y); //LongerFall takes its share of it
 }
 
+//(controller) the fall speed at 0, unless Hovering is off and it's one that hovers
+void BodyStill(PPCContext& c)
+	const bool hovers{ c.lr == kStillCrouch || c.lr == kStillFall || c.lr == kStillMove };
+	Hopper* h = hovers ? Hops(ctrl) : nullptr;
+	const bool keep{ guest_ptr(body) && h && !g_now.hover && h->inAir && !h->ladder };
+	orig_body_still(c);
 void MoveGrab(PPCContext& c)
 {
 	const uint32_t ctrl{ c.r[3] };
@@ -667,7 +678,7 @@ void CommandRead(PPCContext& c)
 //it's faster: true then, the hopper's vel is the speed
 bool PreStrafe(Hopper& h, uint32_t ctrl, float gameX, float gameZ, float wishX, float wishZ, float stick, float dt, bool groundOn)
 {
-	if (!g_now.prestrafe || ld8(ctrl + kSprinting) || ld8(ctrl + kSlowed)) return false;
+	if (!g_now.prestrafe || ld8(ctrl + kSprinting) || (ld8(ctrl + kCrouched) && !g_now.crouch) || ld8(ctrl + kSlowed)) return false;
 	float v[2]{ gameX, gameZ };
 	if (h.active) v[0] = h.vel[0], v[1] = h.vel[1];
 	else if (groundOn) v[0] = h.ground[0], v[1] = h.ground[1];
@@ -706,13 +717,19 @@ bool bhop_locked() { return g_locked; }
 bool bhop_prestrafe() { return g_prestrafe; }
 bool bhop_prestrafe_now() { return g_locked ? g_now.prestrafe : (bool)g_prestrafe; }
 void set_bhop_prestrafe(bool on) { g_prestrafe = on; }
+bool bhop_crouch() { return g_crouch; }
+bool bhop_crouch_now() { return bhop_locked() ? g_now.crouch : (bool)g_crouch; }
+void set_bhop_crouch(bool on) { g_crouch = on; }
+bool bhop_hover() { return g_hover; }
+bool bhop_hover_now() { return bhop_locked() ? g_now.hover : (bool)g_hover; }
+void set_bhop_hover(bool on) { g_hover = on; }
 BhopValue& bhop_value(int which) { return g_values[which]; }
 float bhop_value_now(int which) { return g_locked ? g_now.v[which] : g_values[which].value; }
 
 bool bhop_custom_now()
 {
 	if (!g_onNow) return false;
-	if (!g_now.prestrafe) return true;
+	if (!g_now.prestrafe || g_now.crouch || g_now.hover) return true;
 	for (int i = 0; i < kBhopValueCount; ++i)
 		if (std::fabs(g_now.v[i] - g_values[i].initial) > g_values[i].by * 0.5f) return true; //the host's come in steps
 	return false;
@@ -757,7 +774,7 @@ void bunnyhop_buttons(const ClassicState& s) { g_jump = (s.extra & kExtraJump) !
 //buttons were, for bunnyhop_crouch_done
 uint32_t bunnyhop_crouch(uint32_t ctrl)
 {
-	if (!Hops(ctrl)) return 0;
+	if (!Hops(ctrl) || !g_now.crouch) return 0;
 	for (uint32_t a = kActions; a < kActions + 4 * kActionSize; a += kActionSize)
 	{
 		if (ld32(a) != kActionNone && (ld32(a + 0x10) & kActCrouch)) return 0; //the key does that now
@@ -815,6 +832,8 @@ void bunnyhop_write(PPCContext& c, uint32_t stream, bool rules)
 	if (!rules) return;
 	net_write_number(c, stream, g_now.on ? 1 : 0, 1);
 	net_write_number(c, stream, g_now.prestrafe ? 1 : 0, 1);
+	net_write_number(c, stream, g_now.crouch ? 1 : 0, 1);
+	net_write_number(c, stream, g_now.hover ? 1 : 0, 1);
 	for (int i = 0; i < kBhopValueCount; ++i) net_write_number(c, stream, StepOf(i, g_now.v[i]), StepOf(i, g_values[i].hi));
 }
 
@@ -825,6 +844,8 @@ void bunnyhop_read(PPCContext& c, uint32_t stream)
 		Rules r;
 		r.on = net_read_number(c, stream, 1, 0) != 0;
 		r.prestrafe = net_read_number(c, stream, 1, 0) != 0;
+		r.crouch = net_read_number(c, stream, 1, 0) != 0;
+		r.hover = net_read_number(c, stream, 1, 0) != 0;
 		for (int i = 0; i < kBhopValueCount; ++i) r.v[i] = AtStep(i, net_read_number(c, stream, StepOf(i, g_values[i].hi), StepOf(i, g_values[i].initial)));
 		const bool news{ !g_hostKnown || r.on != g_host.on };
 		g_host = r;
@@ -877,7 +898,7 @@ void bunnyhop_look(PPCContext& c, uint32_t ctrl)
 		g_speedFrame = ld32(kFrameCount);
 	}
 	float posY{ ldf(entity + kPos + 4) };
-	if (crouchChanged && h.inAir && !h.ladder && std::isfinite(posY)) //half-life's: in the air it's at once, the legs and not the head
+	if (g_now.crouch && crouchChanged && h.inAir && !h.ladder && std::isfinite(posY)) //half-life's: in the air it's at once, the legs and not the head
 	{
 		posY += crouched ? kTuck : -kTuck;
 		stf(entity + kPos + 4, posY);
@@ -1000,7 +1021,7 @@ void bunnyhop_look(PPCContext& c, uint32_t ctrl)
 		}
 		if (stick >= kDeadZone)
 		{
-			const float wishSpeed{ kWishSpeed * stick * (crouched ? kDuck : 1.0f) };
+			const float wishSpeed{ kWishSpeed * stick * (crouched && g_now.crouch ? kDuck : 1.0f) };
 			const float add{ std::min(wishSpeed, kAirCap) - (h.vel[0] * wishX + h.vel[1] * wishZ) };
 			if (add > 0)
 			{
@@ -1028,6 +1049,8 @@ void install_bunnyhop()
 	g_bunnyhop = std::atoi(saved_setting("GE_BUNNYHOP", "LAUNCH_BUNNYHOP").c_str()) != 0;
 	const std::string prestrafe{ saved_setting("GE_BHOP_PRESTRAFE", "LAUNCH_BHOP_PRESTRAFE") };
 	if (!prestrafe.empty()) g_prestrafe = std::atoi(prestrafe.c_str()) != 0;
+	g_crouch = std::atoi(saved_setting("GE_BHOP_CROUCH", "LAUNCH_BHOP_CROUCH").c_str()) != 0;
+	g_hover = std::atoi(saved_setting("GE_BHOP_HOVER", "LAUNCH_BHOP_HOVER").c_str()) != 0;
 	g_trace = std::getenv("GE_TRACE") != nullptr;
 	if (const char* e = std::getenv("GE_BHOP_LOG")) g_log = std::atoi(e) != 0;
 	for (BhopValue& v : g_values)
@@ -1037,6 +1060,8 @@ void install_bunnyhop()
 		if (!saved.empty()) v.value = std::clamp((float)std::atof(saved.c_str()), v.lo, v.hi);
 	}
 	orig_fall_start = ppc_hook("ge_fall_start", FallStart);
+	orig_body_still = ppc_hook("ge_body_still", BodyStill);
+	if (!orig_body_still) rt_die("goldeneye: ge_body_still is not hooked in this build");
 	orig_move_grab = ppc_hook("ge_move_grab", MoveGrab);
 	orig_ladder_foot = ppc_hook("ge_ladder_foot", LadderFoot);
 	search_near = ppc_lookup(kSearchNear);

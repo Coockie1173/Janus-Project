@@ -43,5 +43,11 @@ BhopValue& bhop_value(int which); //its tunables, by the enum above
 void bhop_defaults(); //every tunable back to its own
 bool bhop_prestrafe(); //half-life's ground move on the floor, so turning while strafing gains speed there too
 void set_bhop_prestrafe(bool on);
+bool bhop_crouch(); //half-life's crouch: held, in the air the legs come up
+bool bhop_crouch_now();
+void set_bhop_crouch(bool on);
+bool bhop_hover(); //a crouch or a fall's start in the air stops the fall, as in the game
+bool bhop_hover_now();
+void set_bhop_hover(bool on);
 
 } //namespace ge
