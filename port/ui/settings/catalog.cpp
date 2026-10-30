@@ -274,6 +274,8 @@ void BuildSettings()
 		bhop_crouch_now, [](bool on) { if (!bhop_locked()) set_bhop_crouch(on); });
 	AddToggle(kBhop, "bhop_hover", "Hovering", "On: as in the game, crouching in the air and the start of a long fall stop your fall for a moment. Off: you keep falling through them.",
 		bhop_hover_now, [](bool on) { if (!bhop_locked()) set_bhop_hover(on); });
+	AddToggle(kBhop, "bhop_ledge", "Ledge Hops", "On: landing on the edge of a small ledge with Jump held hops again, as Half-Life's square feet would, instead of sliding off it. Surf ramps still surf.",
+		bhop_ledge_now, [](bool on) { if (!bhop_locked()) set_bhop_ledge(on); });
 	for (int i = 0; i < kBhopValueCount; ++i)
 	{
 		const BhopValue& v = bhop_value(i);

@@ -50,5 +50,8 @@ void set_bhop_crouch(bool on);
 bool bhop_hover(); //a crouch or a fall's start in the air stops the fall, as in the game
 bool bhop_hover_now();
 void set_bhop_hover(bool on);
+bool bhop_ledge(); //falling onto a ledge's edge with the key held hops, where it would slide off
+bool bhop_ledge_now();
+void set_bhop_ledge(bool on);
 
 } //namespace ge

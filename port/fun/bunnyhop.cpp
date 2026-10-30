@@ -49,6 +49,14 @@
 //kFreeDrop down. off, in the air those three keep the fall speed (the hook's others are climbs
 //and the like, which want it gone)
 //
+//Ledge Hops (off by default): half-life's feet are a box, ours the bottom of a capsule, so a landing
+//on a thin ledge or the rim of one meets its edge, not its top. ge_contacts_solve drops a floor's
+//contact that isn't flat on (806F1DA4) and only the wall under it pushes, up and off, with no floor
+//flag. so a floor's contact with the push going up (kLedgeUp, a capsule's side passing a ledge
+//has it level) is seen before the solve, and falling with the key held that's a floor for the
+//hop: it's not clipped as a ramp, and like a ramp the fall starts over. real surf ramps aren't
+//floors, so they have no such contact
+//
 //ladders are half-life's: the game's own (walked into from the foot, ge_ladder_foot, or backed off
 //the top, ge_move_grab's 0x100) are never taken. a ladder is its pieces, polygons with flags 0x1000
 //(see eurochef's goldeneye_wii.md), and the player is on one while a piece is within kLadderReach
@@ -103,7 +111,7 @@
 //
 //GE_BUNNYHOP=1 start with it on, else what the menu saved
 //the speed goes in the log twice a second, and what walls take (GE_BHOP_LOG=0 not)
-//GE_BHOP_PRESTRAFE=0 without pre-strafing, GE_BHOP_CROUCH=1 and GE_BHOP_HOVER=1 with those, GE_BHOP_SPEED, GE_BHOP_HEIGHT, GE_BHOP_AIRCAP, GE_BHOP_AIRACCEL, GE_BHOP_WISH, GE_BHOP_MAX, GE_BHOP_GRAVITY,
+//GE_BHOP_PRESTRAFE=0 without pre-strafing, GE_BHOP_CROUCH=1, GE_BHOP_HOVER=1 and GE_BHOP_LEDGE=1 with those, GE_BHOP_SPEED, GE_BHOP_HEIGHT, GE_BHOP_AIRCAP, GE_BHOP_AIRACCEL, GE_BHOP_WISH, GE_BHOP_MAX, GE_BHOP_GRAVITY,
 //GE_BHOP_FALL, GE_BHOP_DROP, GE_BHOP_ACCEL, GE_BHOP_FRICTION over what the menu saved
 #include "ge.h"
 #include <algorithm>
@@ -147,7 +155,7 @@ BhopValue g_values[kBhopValueCount]{
 //what play goes by this frame: the menu's offline, the host's in a modded network game
 struct Rules
 {
-	bool on = false, prestrafe = true, crouch = false, hover = false;
+	bool on = false, prestrafe = true, crouch = false, hover = false, ledge = false;
 	float v[kBhopValueCount]{};
 };
 Rules g_now;
@@ -172,6 +180,7 @@ const float kLadderReach = 0.6f; //a ladder's piece this far in front of the pla
 const float kLadderAt[2]{ 0.3f, 1.1f }; //the points above the feet it's looked for at
 const float kWalkable = 0.7f; //a normal this far up is a floor, half-life's
 const float kRamp = 0.05f; //and this far up a ramp, not a wall
+const float kLedgeUp = 0.1f; //a floor's edge pushing this far up is under the player
 const uint32_t kExtraJump = 1u << 5;
 const uint32_t kCmdExtra = 0x3C, kCmdOurs = 0x80000000, kCmdJump = 0x40000000; //see the top
 
@@ -182,12 +191,12 @@ Rules g_host; //as the host last sent them
 bool g_hostKnown = false;
 
 std::atomic<bool> g_bunnyhop{false}; //the menu's, ours
-std::atomic<bool> g_prestrafe{true}, g_crouch{false}, g_hover{false};
+std::atomic<bool> g_prestrafe{true}, g_crouch{false}, g_hover{false}, g_ledge{false};
 std::atomic<bool> g_onNow{false}, g_locked{false}; //for the menu's and the renderer's threads
 
 //a level can have its own rules (eurochef's bhop... nodes): a trigger the game never runs, the
 //generic one (type 3) asleep (game flag 1), with kPresetMark in data 1. data 2 has bit 0 for
-//bunnyhopping on and bit 1 for pre-strafing, data 5 to 15 the tunables as floats in the enum's order,
+//bunnyhopping on, bit 1 for pre-strafing, 2 Half-Life Crouch, 3 Hovering and 4 Ledge Hops, data 5 to 15 the tunables as floats in the enum's order,
 //a value that isn't there being its default (the ones after the mark that the type's maker
 //leaves alone: it changes data 0 and 4). what's in the menu isn't touched, so the player's own
 //are back as soon as the level is left. while there the menu shows them, locked, a host plays by
@@ -216,6 +225,9 @@ void FindMapRules()
 		const uint32_t flags = ld32(t + kTriggerData + kPresetFlagsSlot * 4), given = ld32(t + kTriggerValues);
 		g_mapRules.on = flags & 1;
 		g_mapRules.prestrafe = flags & 2;
+		g_mapRules.crouch = flags & 4;
+		g_mapRules.hover = flags & 8;
+		g_mapRules.ledge = flags & 16;
 		std::string said;
 		for (int v = 0; v < kBhopValueCount; ++v)
 		{
@@ -238,7 +250,9 @@ bool g_log = true; //the speed in the log, twice a second
 PPCFunc orig_body_still = nullptr;
 const uint32_t kStillCrouch = 0x80110128, kStillFall = 0x80121360, kStillMove = 0x8010D69C; //its callers that hover, see the top
 PPCFunc orig_fall_start = nullptr, orig_move_grab = nullptr, orig_sprint_allowed = nullptr, orig_move_speed = nullptr;
-PPCFunc orig_command_write = nullptr, orig_command_read = nullptr;
+PPCFunc orig_command_write = nullptr, orig_command_read = nullptr, orig_contacts_solve = nullptr;
+const uint32_t kScoopContacts = 0x70, kScoopCount = 0x74, kContactSize = 0x50, kContactFrom = 0x10, kContactTo = 0x20, kContactDepth = 0x40, kContactFlags = 0x4E;
+const uint32_t kContactLive = 1, kContactFloor = 2, kContactIgnored = 8;
 PPCFunc orig_ladder_foot = nullptr, search_near = nullptr, search_all = nullptr;
 const uint32_t kSearchNear = 0x8027D6F0, kSearchAll = 0x8032E5E0; //what ge_ladder_foot asks the world
 PPCFunc orig_tank_level = nullptr, orig_player_skin = nullptr;
@@ -283,6 +297,7 @@ struct Hopper
 	float floorY = 0, topY = 0; //where the player left the floor, and the highest since
 	bool ladder = false; //on one, see the top
 	bool crouched = false, inAir = false; //as last frame left them
+	bool ledge = false; //a floor's edge under it since the last look, see the top
 };
 const int kHoppers = 16;
 Hopper g_hoppers[kHoppers];
@@ -339,6 +354,7 @@ Rules Own(bool steps)
 	r.prestrafe = g_prestrafe;
 	r.crouch = g_crouch;
 	r.hover = g_hover;
+	r.ledge = g_ledge;
 	for (int i = 0; i < kBhopValueCount; ++i) r.v[i] = steps ? AtStep(i, StepOf(i, g_values[i].value)) : g_values[i].value;
 	return r;
 }
@@ -487,6 +503,29 @@ void BodyStill(PPCContext& c)
 	const float fall{ keep ? ldf(body + kBodyFallSpeed) : 0.0f };
 	orig_body_still(c);
 	if (keep) stf(body + kBodyFallSpeed, fall);
+}
+
+//a floor's edge under the player, before the solve drops it: see the top
+void ContactsSolve(PPCContext& c)
+{
+	const uint32_t scoop{ c.r[3] }, body{ c.r[4] };
+	const uint32_t entity{ g_now.on && g_now.ledge && guest_ptr(body) ? ld32(body + 4) : 0 };
+	for (Hopper& h : g_hoppers)
+	{
+		if (!entity || h.entity != entity || !h.jump || h.ledge) continue;
+		const uint32_t contacts{ ld32(scoop + kScoopContacts) }, count{ ld32(scoop + kScoopCount) };
+		for (uint32_t i = 0; i < count && guest_ptr(contacts); ++i)
+		{
+			const uint32_t contact{ contacts + i * kContactSize };
+			if ((ld8(contact + kContactFlags) & (kContactLive | kContactFloor | kContactIgnored)) != (kContactLive | kContactFloor) || !(ldf(contact + kContactDepth) > 0)) continue;
+			float push[3];
+			for (uint32_t k = 0; k < 3; ++k) push[k] = ldf(contact + kContactTo + k * 4) - ldf(contact + kContactFrom + k * 4);
+			if (ldf(contact) * push[0] + ldf(contact + 4) * push[1] + ldf(contact + 8) * push[2] < 0) push[1] = -push[1];
+			const float length{ std::sqrt(push[0] * push[0] + push[1] * push[1] + push[2] * push[2]) };
+			if (length > 1e-5f && push[1] / length > kLedgeUp) h.ledge = true;
+		}
+	}
+	orig_contacts_solve(c);
 }
 
 void MoveGrab(PPCContext& c)
@@ -782,13 +821,16 @@ void set_bhop_crouch(bool on) { g_crouch = on; }
 bool bhop_hover() { return g_hover; }
 bool bhop_hover_now() { return bhop_locked() ? g_now.hover : (bool)g_hover; }
 void set_bhop_hover(bool on) { g_hover = on; }
+bool bhop_ledge() { return g_ledge; }
+bool bhop_ledge_now() { return bhop_locked() ? g_now.ledge : (bool)g_ledge; }
+void set_bhop_ledge(bool on) { g_ledge = on; }
 BhopValue& bhop_value(int which) { return g_values[which]; }
 float bhop_value_now(int which) { return bhop_locked() ? g_now.v[which] : g_values[which].value; }
 
 bool bhop_custom_now()
 {
 	if (!g_onNow || bhop_map_locked()) return false; //the level's own rules are the rules
-	if (!g_now.prestrafe || g_now.crouch || g_now.hover) return true;
+	if (!g_now.prestrafe || g_now.crouch || g_now.hover || g_now.ledge) return true;
 	for (int i = 0; i < kBhopValueCount; ++i)
 		if (std::fabs(g_now.v[i] - g_values[i].initial) > g_values[i].by * 0.5f) return true; //the host's come in steps
 	return false;
@@ -893,6 +935,7 @@ void bunnyhop_write(PPCContext& c, uint32_t stream, bool rules)
 	net_write_number(c, stream, g_now.prestrafe ? 1 : 0, 1);
 	net_write_number(c, stream, g_now.crouch ? 1 : 0, 1);
 	net_write_number(c, stream, g_now.hover ? 1 : 0, 1);
+	net_write_number(c, stream, g_now.ledge ? 1 : 0, 1);
 	for (int i = 0; i < kBhopValueCount; ++i) net_write_number(c, stream, StepOf(i, g_now.v[i]), StepOf(i, g_values[i].hi));
 }
 
@@ -905,6 +948,7 @@ void bunnyhop_read(PPCContext& c, uint32_t stream)
 		r.prestrafe = net_read_number(c, stream, 1, 0) != 0;
 		r.crouch = net_read_number(c, stream, 1, 0) != 0;
 		r.hover = net_read_number(c, stream, 1, 0) != 0;
+		r.ledge = net_read_number(c, stream, 1, 0) != 0;
 		for (int i = 0; i < kBhopValueCount; ++i) r.v[i] = AtStep(i, net_read_number(c, stream, StepOf(i, g_values[i].hi), StepOf(i, g_values[i].initial)));
 		const bool news{ !g_hostKnown || r.on != g_host.on };
 		g_host = r;
@@ -928,8 +972,9 @@ void bunnyhop_look(PPCContext& c, uint32_t ctrl)
 	}
 	if (!hp) return;
 	Hopper& h = *hp;
-	const bool groundOn{ h.groundOn };
+	const bool groundOn{ h.groundOn }, ledge{ h.ledge };
 	h.groundOn = false;
+	h.ledge = false;
 	const bool crouched{ ld8(ctrl + kCrouched) != 0 }, crouchChanged{ crouched != h.crouched };
 	h.crouched = crouched;
 	if (!Free(ld32(ctrl + kPlayerState)))
@@ -950,7 +995,9 @@ void bunnyhop_look(PPCContext& c, uint32_t ctrl)
 		h.active = false;
 		return;
 	}
-	const bool floor{ (ld16(body + kBodyFloor) & 1) != 0 };
+	const bool onFloor{ (ld16(body + kBodyFloor) & 1) != 0 };
+	const bool onLedge{ !onFloor && ledge && h.jump && !h.ladder && ldf(body + kBodyFallSpeed) <= 0 };
+	const bool floor{ onFloor || onLedge };
 	if (local)
 	{
 		g_speed = std::hypot(gameX, gameZ);
@@ -1012,7 +1059,7 @@ void bunnyhop_look(PPCContext& c, uint32_t ctrl)
 	//ClipVelocity: the push out of it (+0xEC) is its normal, and the speed is ours across and the
 	//body's fall speed up. a ramp too steep to stand on turns the speed across into speed up it,
 	//and gravity pulls along it: surfing
-	if (h.active && (ld16(body + kBodyFloor) & kBodyHit) != 0)
+	if (h.active && !onLedge && (ld16(body + kBodyFloor) & kBodyHit) != 0)
 	{
 		float n[3]{ ldf(body + kBodyPush), ldf(body + kBodyPush + 4), ldf(body + kBodyPush + 8) };
 		const float push{ std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]) };
@@ -1063,6 +1110,12 @@ void bunnyhop_look(PPCContext& c, uint32_t ctrl)
 			const float gravity{ ldf(body + kBodyGravity) };
 			if (std::isfinite(gravity) && gravity > 0) stf(body + kBodyFallSpeed, std::sqrt(2.0f * gravity * kHopHeight));
 			h.inAir = true;
+			if (onLedge)
+			{
+				if ((g_trace || g_log) && local) rt_log("goldeneye: bunnyhop: a hop off a ledge at %.2f %.2f %.2f", ldf(entity + kPos), posY, ldf(entity + kPos + 8));
+				if (ld32(ctrl + kPlayerState) == kStateFalling) stf(ctrl + kFallen, 0.0f);
+				h.fallen = 0;
+			}
 		}
 	}
 	else
@@ -1110,6 +1163,7 @@ void install_bunnyhop()
 	if (!prestrafe.empty()) g_prestrafe = std::atoi(prestrafe.c_str()) != 0;
 	g_crouch = std::atoi(saved_setting("GE_BHOP_CROUCH", "LAUNCH_BHOP_CROUCH").c_str()) != 0;
 	g_hover = std::atoi(saved_setting("GE_BHOP_HOVER", "LAUNCH_BHOP_HOVER").c_str()) != 0;
+	g_ledge = std::atoi(saved_setting("GE_BHOP_LEDGE", "LAUNCH_BHOP_LEDGE").c_str()) != 0;
 	g_trace = std::getenv("GE_TRACE") != nullptr;
 	if (const char* e = std::getenv("GE_BHOP_LOG")) g_log = std::atoi(e) != 0;
 	for (BhopValue& v : g_values)
@@ -1121,6 +1175,8 @@ void install_bunnyhop()
 	orig_fall_start = ppc_hook("ge_fall_start", FallStart);
 	orig_body_still = ppc_hook("ge_body_still", BodyStill);
 	if (!orig_body_still) rt_die("goldeneye: ge_body_still is not hooked in this build");
+	orig_contacts_solve = ppc_hook("ge_contacts_solve", ContactsSolve);
+	if (!orig_contacts_solve) rt_die("goldeneye: ge_contacts_solve is not hooked in this build");
 	orig_move_grab = ppc_hook("ge_move_grab", MoveGrab);
 	orig_ladder_foot = ppc_hook("ge_ladder_foot", LadderFoot);
 	search_near = ppc_lookup(kSearchNear);
