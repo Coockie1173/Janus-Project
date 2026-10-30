@@ -88,9 +88,13 @@ void sprint_action(PPCContext& c) {
 }
 
 void action_update(PPCContext& c) {
+#ifdef GE_HL_CROUCH
     const uint32_t ctrl{c.r[3]}, crouch{bunnyhop_crouch(ctrl)};
     sprint_action(c);
     bunnyhop_crouch_done(ctrl, crouch);
+#else
+    sprint_action(c);
+#endif
 }
 
 //the wheel changes weapon: a notch up presses D-pad right (next), a notch down D-pad left

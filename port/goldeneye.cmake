@@ -23,6 +23,10 @@ if(EXISTS ${GE_PORT}/debug/dev.cpp)
   target_sources(wiiboot PRIVATE ${GE_PORT}/debug/dev.cpp)
   target_compile_definitions(wiiboot PRIVATE GE_DEV=1)
 endif()
+# half-life's crouch while bunnyhopping (make HL_CROUCH=ON), left out by default
+if(GE_HL_CROUCH)
+  target_compile_definitions(wiiboot PRIVATE GE_HL_CROUCH=1)
+endif()
 # files found wherever the game is started from
 target_compile_definitions(wiiboot PRIVATE
     GE_ROOT="${GE_HOME}"

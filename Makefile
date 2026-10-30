@@ -7,6 +7,7 @@
 #   make deps       build SDL3 into build/deps if the system has no SDL3 dev files
 #   make win        the Windows build, cross-compiled and zipped: build/Janus-Project-win64.zip
 #   make linux      the Linux build to hand out, zipped: build/Janus-Project-linux64.zip
+#   make HL_CROUCH=ON   with Half-Life's crouch while bunnyhopping
 #   make clean      remove generated code and objects (keeps build/deps)
 #
 # The disc's contents are expected in ./game (sys/main.dol, files/, ...).
@@ -26,6 +27,8 @@ RECOMP_CXX ?= clang++
 # guest's big-endian loads in one instruction), not this machine's alone;
 # ARCH= for an older one
 ARCH      ?= -march=x86-64-v3
+# ON builds Half-Life's crouch into bunnyhopping (its toggle in the menu comes with it)
+HL_CROUCH ?= OFF
 # profile-guided optimisation, when a profile has been made (make pgo): about a tenth faster
 PGO       := $(wildcard $(BUILD)/pgo/ge.profdata)
 PGO_USE   := $(if $(PGO),-fprofile-instr-use=$(abspath $(PGO)) -Wno-profile-instr-unprofiled -Wno-profile-instr-out-of-date)
@@ -94,7 +97,7 @@ build: wiikit-patch recomp deps
 	    -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS_RELEASE="$(OPT)" \
 	    -DCMAKE_PREFIX_PATH=$(SDL3_DIR) -DCMAKE_BUILD_RPATH=$(SDL3_DIR)/lib \
 	    -DGE_FONTS=$(if $(FONTS),$(abspath $(FONTS))) \
-	    -DWIIKIT_EXTRA=$(abspath port/goldeneye.cmake) > $(BUILD)/cmake.log 2>&1 || { tail -20 $(BUILD)/cmake.log; exit 1; }
+	    -DGE_HL_CROUCH=$(HL_CROUCH) -DWIIKIT_EXTRA=$(abspath port/goldeneye.cmake) > $(BUILD)/cmake.log 2>&1 || { tail -20 $(BUILD)/cmake.log; exit 1; }
 	ninja -C $(OUT) wiiboot
 
 # Windows, 64-bit: cross-compiled with llvm-mingw (fetched into build/deps), run from its own
@@ -109,7 +112,7 @@ win: wiikit-patch recomp deps
 	    -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS_RELEASE="$(OPT_BASE)" -DCMAKE_EXE_LINKER_FLAGS=-static \
 	    -DCMAKE_PREFIX_PATH=$(abspath $(BUILD)/deps/sdl3-win) -DGE_PORTABLE=ON \
 	    -DOPENSSL_ROOT_DIR=$(abspath $(BUILD)/deps/openssl-win) -DOPENSSL_USE_STATIC_LIBS=ON \
-	    -DWIIKIT_EXTRA=$(abspath port/goldeneye.cmake) > $(BUILD)/cmake-win.log 2>&1 || { tail -20 $(BUILD)/cmake-win.log; exit 1; }
+	    -DGE_HL_CROUCH=$(HL_CROUCH) -DWIIKIT_EXTRA=$(abspath port/goldeneye.cmake) > $(BUILD)/cmake-win.log 2>&1 || { tail -20 $(BUILD)/cmake-win.log; exit 1; }
 	ninja -C $(WIN_OUT) wiiboot
 	sh tools/package_win.sh $(FONTS)
 
@@ -123,7 +126,7 @@ linux: wiikit-patch recomp deps
 	    -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS_RELEASE="$(OPT)" \
 	    -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc -Wl,-rpath,'\$$ORIGIN/lib'" \
 	    -DCMAKE_PREFIX_PATH=$(SDL3_DIR) -DCMAKE_SKIP_RPATH=ON -DGE_PORTABLE=ON \
-	    -DWIIKIT_EXTRA=$(abspath port/goldeneye.cmake) > $(BUILD)/cmake-linux.log 2>&1 || { tail -20 $(BUILD)/cmake-linux.log; exit 1; }
+	    -DGE_HL_CROUCH=$(HL_CROUCH) -DWIIKIT_EXTRA=$(abspath port/goldeneye.cmake) > $(BUILD)/cmake-linux.log 2>&1 || { tail -20 $(BUILD)/cmake-linux.log; exit 1; }
 	ninja -C $(LINUX_OUT) wiiboot
 	sh tools/package_linux.sh $(FONTS)
 

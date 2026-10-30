@@ -25,8 +25,10 @@ void bunnyhop_look(PPCContext& c, uint32_t controller); //after ge_look_apply, t
 void bunnyhop_apply(uint32_t controller); //after a controller's update: the local one's offline, every one's online
 void bunnyhop_stop(uint32_t controller, float y); //it was teleported to this height: no speed, and the fall starts there
 void bunnyhop_command(uint32_t command); //a command of this console's was filled: the jump key goes in
+#ifdef GE_HL_CROUCH
 uint32_t bunnyhop_crouch(uint32_t controller); //before ge_action_update: half-life's crouch, what the buttons were
 void bunnyhop_crouch_done(uint32_t controller, uint32_t kept); //after it
+#endif
 uint32_t bunnyhop_input(uint32_t controller, uint32_t command); //before ge_input_copy: the key is the controller's
 void bunnyhop_input_done(uint32_t command, uint32_t kept); //after it, with what bunnyhop_input gave
 void bunnyhop_write(PPCContext& c, uint32_t stream, bool rules); //the host's rules behind its own player's state
@@ -45,9 +47,11 @@ BhopValue& bhop_value(int which); //its tunables, by the enum above
 void bhop_defaults(); //every tunable back to its own
 bool bhop_prestrafe(); //half-life's ground move on the floor, so turning while strafing gains speed there too
 void set_bhop_prestrafe(bool on);
+#ifdef GE_HL_CROUCH
 bool bhop_crouch(); //half-life's crouch: held, in the air the legs come up
 bool bhop_crouch_now();
 void set_bhop_crouch(bool on);
+#endif
 bool bhop_hover(); //a crouch or a fall's start in the air stops the fall, as in the game
 bool bhop_hover_now();
 void set_bhop_hover(bool on);

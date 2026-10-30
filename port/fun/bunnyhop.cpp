@@ -37,7 +37,8 @@
 //ge_action_update's vault and climb, still gets the game's). the run is kBaseSpeed instead:
 //ge_move_speed's 4.2 standing up (806E947C), the sprint's is 6.6, aimed and crouched stay the game's
 //
-//Half-Life Crouch (off by default, then crouch is the game's): crouched with the key held, stood up
+//Half-Life Crouch (only built with GE_HL_CROUCH, make HL_CROUCH=ON, and off by default even then,
+//the crouch is the game's): crouched with the key held, stood up
 //without it, when there's room. it goes through the game's own (fn_8010FF60), so it comes no
 //faster than the game's 0.25 s (+0xC88). in the air it's at once and it's the legs: the crouched capsule is 0.62 shorter with its feet in the same
 //place, half-life's hull shrinks to the middle, so the body goes up kTuck crouching and down
@@ -111,7 +112,7 @@
 //
 //GE_BUNNYHOP=1 start with it on, else what the menu saved
 //the speed goes in the log twice a second, and what walls take (GE_BHOP_LOG=0 not)
-//GE_BHOP_PRESTRAFE=0 without pre-strafing, GE_BHOP_CROUCH=1, GE_BHOP_HOVER=1 and GE_BHOP_LEDGE=1 with those, GE_BHOP_SPEED, GE_BHOP_HEIGHT, GE_BHOP_AIRCAP, GE_BHOP_AIRACCEL, GE_BHOP_WISH, GE_BHOP_MAX, GE_BHOP_GRAVITY,
+//GE_BHOP_PRESTRAFE=0 without pre-strafing, GE_BHOP_CROUCH=1 (a GE_HL_CROUCH build), GE_BHOP_HOVER=1 and GE_BHOP_LEDGE=1 with those, GE_BHOP_SPEED, GE_BHOP_HEIGHT, GE_BHOP_AIRCAP, GE_BHOP_AIRACCEL, GE_BHOP_WISH, GE_BHOP_MAX, GE_BHOP_GRAVITY,
 //GE_BHOP_FALL, GE_BHOP_DROP, GE_BHOP_ACCEL, GE_BHOP_FRICTION over what the menu saved
 #include "ge.h"
 #include <algorithm>
@@ -129,10 +130,12 @@ const uint32_t kBody = 0x158, kBodyStep = 0xBC, kBodyFloor = 0xA, kBodyHit = 0xA
 const uint32_t kFallen = 0xE90;
 const uint32_t kMoveStick = 0x500, kTimeStep = 0x578, kPlayerState = 0x704;
 const uint32_t kSprinting = 0xE59, kCrouched = 0xC54, kSlowed = 0xD00;
+#ifdef GE_HL_CROUCH
 const uint32_t kCrouchBlend = 0xC80; //the view's way down, 1 crouched
 const uint32_t kActPressed = 0x534, kActHeld = 0x538, kActCrouch = 0x20; //ge_action_update's buttons, see the top
 const uint32_t kActions = 0x805D4020, kActionSize = 0x1C, kActionNone = 0x46500001;
 const uint32_t kCrouchOurs = 1, kCrouchPressed = 2, kCrouchHeld = 4; //what bunnyhop_crouch keeps
+#endif
 const uint32_t kAskStart = 0x8010D9B0, kAskGoOn = 0x8010DA8C; //ge_sprint_update's calls of ge_sprint_allowed
 const float kGameRun = 4.2f; //806E947C
 const uint32_t kView = 0x16C, kViewPitch = 0x768; //the entity's view, its pitch (down is positive)
@@ -155,7 +158,10 @@ BhopValue g_values[kBhopValueCount]{
 //what play goes by this frame: the menu's offline, the host's in a modded network game
 struct Rules
 {
-	bool on = false, prestrafe = true, crouch = false, hover = false, ledge = false;
+	bool on = false, prestrafe = true, hover = false, ledge = false;
+#ifdef GE_HL_CROUCH
+	bool crouch = false;
+#endif
 	float v[kBhopValueCount]{};
 };
 Rules g_now;
@@ -173,8 +179,10 @@ float& kFriction = g_now.v[kBhopFriction];
 const float kStopSpeed = 2.0f; //under this friction takes as if it were this, half-life's stopspeed of its run
 const float kGain = 0.1f; //the floor's speed is ours this much over the game's walk
 const float kDeadZone = 0.2f;
+#ifdef GE_HL_CROUCH
 const float kDuck = 0.333f; //of the stick's speed crouched, half-life's
 const float kTuck = 0.31f; //half of what the crouched capsule is shorter (1.65 and 1.03), the feet stay where they are in both
+#endif
 const float kClimb = 0.625f, kPushOff = 0.84f; //of the base speed: half-life's climb and jump off a ladder, of its run
 const float kLadderReach = 0.6f; //a ladder's piece this far in front of the player has them
 const float kLadderAt[2]{ 0.3f, 1.1f }; //the points above the feet it's looked for at
@@ -191,7 +199,10 @@ Rules g_host; //as the host last sent them
 bool g_hostKnown = false;
 
 std::atomic<bool> g_bunnyhop{false}; //the menu's, ours
-std::atomic<bool> g_prestrafe{true}, g_crouch{false}, g_hover{false}, g_ledge{false};
+std::atomic<bool> g_prestrafe{true}, g_hover{false}, g_ledge{false};
+#ifdef GE_HL_CROUCH
+std::atomic<bool> g_crouch{false};
+#endif
 std::atomic<bool> g_onNow{false}, g_locked{false}; //for the menu's and the renderer's threads
 
 //a level can have its own rules (eurochef's bhop... nodes): a trigger the game never runs, the
@@ -225,7 +236,9 @@ void FindMapRules()
 		const uint32_t flags = ld32(t + kTriggerData + kPresetFlagsSlot * 4), given = ld32(t + kTriggerValues);
 		g_mapRules.on = flags & 1;
 		g_mapRules.prestrafe = flags & 2;
+#ifdef GE_HL_CROUCH
 		g_mapRules.crouch = flags & 4;
+#endif
 		g_mapRules.hover = flags & 8;
 		g_mapRules.ledge = flags & 16;
 		std::string said;
@@ -296,7 +309,10 @@ struct Hopper
 	float fallen = 0; //the deadly fall as we left it
 	float floorY = 0, topY = 0; //where the player left the floor, and the highest since
 	bool ladder = false; //on one, see the top
-	bool crouched = false, inAir = false; //as last frame left them
+	bool inAir = false; //as last frame left it
+#ifdef GE_HL_CROUCH
+	bool crouched = false; //the same
+#endif
 	bool ledge = false; //a floor's edge under it since the last look, see the top
 };
 const int kHoppers = 16;
@@ -352,7 +368,9 @@ Rules Own(bool steps)
 	Rules r;
 	r.on = g_bunnyhop;
 	r.prestrafe = g_prestrafe;
+#ifdef GE_HL_CROUCH
 	r.crouch = g_crouch;
+#endif
 	r.hover = g_hover;
 	r.ledge = g_ledge;
 	for (int i = 0; i < kBhopValueCount; ++i) r.v[i] = steps ? AtStep(i, StepOf(i, g_values[i].value)) : g_values[i].value;
@@ -774,7 +792,12 @@ void CommandRead(PPCContext& c)
 //it's faster: true then, the hopper's vel is the speed
 bool PreStrafe(Hopper& h, uint32_t ctrl, float gameX, float gameZ, float wishX, float wishZ, float stick, float dt, bool groundOn)
 {
-	if (!g_now.prestrafe || ld8(ctrl + kSprinting) || (ld8(ctrl + kCrouched) && !g_now.crouch) || ld8(ctrl + kSlowed)) return false;
+	if (!g_now.prestrafe || ld8(ctrl + kSprinting) || ld8(ctrl + kSlowed)) return false;
+#ifdef GE_HL_CROUCH
+	if (ld8(ctrl + kCrouched) && !g_now.crouch) return false;
+#else
+	if (ld8(ctrl + kCrouched)) return false;
+#endif
 	float v[2]{ gameX, gameZ };
 	if (h.active) v[0] = h.vel[0], v[1] = h.vel[1];
 	else if (groundOn) v[0] = h.ground[0], v[1] = h.ground[1];
@@ -815,9 +838,11 @@ bool bhop_locked() { return g_mode == kJoined ? (bool)g_locked : bhop_map_locked
 bool bhop_prestrafe() { return g_prestrafe; }
 bool bhop_prestrafe_now() { return bhop_locked() ? g_now.prestrafe : (bool)g_prestrafe; }
 void set_bhop_prestrafe(bool on) { g_prestrafe = on; }
+#ifdef GE_HL_CROUCH
 bool bhop_crouch() { return g_crouch; }
 bool bhop_crouch_now() { return bhop_locked() ? g_now.crouch : (bool)g_crouch; }
 void set_bhop_crouch(bool on) { g_crouch = on; }
+#endif
 bool bhop_hover() { return g_hover; }
 bool bhop_hover_now() { return bhop_locked() ? g_now.hover : (bool)g_hover; }
 void set_bhop_hover(bool on) { g_hover = on; }
@@ -830,7 +855,10 @@ float bhop_value_now(int which) { return bhop_locked() ? g_now.v[which] : g_valu
 bool bhop_custom_now()
 {
 	if (!g_onNow || bhop_map_locked()) return false; //the level's own rules are the rules
-	if (!g_now.prestrafe || g_now.crouch || g_now.hover || g_now.ledge) return true;
+	if (!g_now.prestrafe || g_now.hover || g_now.ledge) return true;
+#ifdef GE_HL_CROUCH
+	if (g_now.crouch) return true;
+#endif
 	for (int i = 0; i < kBhopValueCount; ++i)
 		if (std::fabs(g_now.v[i] - g_values[i].initial) > g_values[i].by * 0.5f) return true; //the host's come in steps
 	return false;
@@ -880,6 +908,7 @@ void bunnyhop_apply(uint32_t ctrl)
 }
 void bunnyhop_buttons(const ClassicState& s) { g_jump = (s.extra & kExtraJump) != 0; }
 
+#ifdef GE_HL_CROUCH
 //before ge_action_update: crouched with the key held, stood up without it. while the two differ
 //the game gets a press of its crouch, so it takes its own wait and looks for room itself. what the
 //buttons were, for bunnyhop_crouch_done
@@ -902,6 +931,7 @@ void bunnyhop_crouch_done(uint32_t ctrl, uint32_t kept)
 	st32(ctrl + kActPressed, (ld32(ctrl + kActPressed) & ~kActCrouch) | (kept & kCrouchPressed ? kActCrouch : 0));
 	st32(ctrl + kActHeld, (ld32(ctrl + kActHeld) & ~kActCrouch) | (kept & kCrouchHeld ? kActCrouch : 0));
 }
+#endif
 
 //a command of this console's is filled: the key goes in
 void bunnyhop_command(uint32_t cmd)
@@ -943,7 +973,11 @@ void bunnyhop_write(PPCContext& c, uint32_t stream, bool rules)
 	if (!rules) return;
 	net_write_number(c, stream, g_now.on ? 1 : 0, 1);
 	net_write_number(c, stream, g_now.prestrafe ? 1 : 0, 1);
+#ifdef GE_HL_CROUCH
 	net_write_number(c, stream, g_now.crouch ? 1 : 0, 1);
+#else
+	net_write_number(c, stream, 0, 1); //the bit stays: a build with it and one without still read each other
+#endif
 	net_write_number(c, stream, g_now.hover ? 1 : 0, 1);
 	net_write_number(c, stream, g_now.ledge ? 1 : 0, 1);
 	for (int i = 0; i < kBhopValueCount; ++i) net_write_number(c, stream, StepOf(i, g_now.v[i]), StepOf(i, g_values[i].hi));
@@ -956,7 +990,11 @@ void bunnyhop_read(PPCContext& c, uint32_t stream)
 		Rules r;
 		r.on = net_read_number(c, stream, 1, 0) != 0;
 		r.prestrafe = net_read_number(c, stream, 1, 0) != 0;
+#ifdef GE_HL_CROUCH
 		r.crouch = net_read_number(c, stream, 1, 0) != 0;
+#else
+		net_read_number(c, stream, 1, 0);
+#endif
 		r.hover = net_read_number(c, stream, 1, 0) != 0;
 		r.ledge = net_read_number(c, stream, 1, 0) != 0;
 		for (int i = 0; i < kBhopValueCount; ++i) r.v[i] = AtStep(i, net_read_number(c, stream, StepOf(i, g_values[i].hi), StepOf(i, g_values[i].initial)));
@@ -985,8 +1023,10 @@ void bunnyhop_look(PPCContext& c, uint32_t ctrl)
 	const bool groundOn{ h.groundOn }, ledge{ h.ledge };
 	h.groundOn = false;
 	h.ledge = false;
+#ifdef GE_HL_CROUCH
 	const bool crouched{ ld8(ctrl + kCrouched) != 0 }, crouchChanged{ crouched != h.crouched };
 	h.crouched = crouched;
+#endif
 	if (!Free(ld32(ctrl + kPlayerState)))
 	{
 		h.active = false;
@@ -1014,12 +1054,14 @@ void bunnyhop_look(PPCContext& c, uint32_t ctrl)
 		g_speedFrame = ld32(kFrameCount);
 	}
 	float posY{ ldf(entity + kPos + 4) };
+#ifdef GE_HL_CROUCH
 	if (g_now.crouch && crouchChanged && h.inAir && !h.ladder && std::isfinite(posY)) //half-life's: in the air it's at once, the legs and not the head
 	{
 		posY += crouched ? kTuck : -kTuck;
 		stf(entity + kPos + 4, posY);
 		stf(ctrl + kCrouchBlend, crouched ? 1.0f : 0.0f);
 	}
+#endif
 	h.inAir = !floor;
 	if (std::isfinite(posY))
 	{
@@ -1143,7 +1185,11 @@ void bunnyhop_look(PPCContext& c, uint32_t ctrl)
 		}
 		if (stick >= kDeadZone)
 		{
+#ifdef GE_HL_CROUCH
 			const float wishSpeed{ kWishSpeed * stick * (crouched && g_now.crouch ? kDuck : 1.0f) };
+#else
+			const float wishSpeed{ kWishSpeed * stick };
+#endif
 			const float add{ std::min(wishSpeed, kAirCap) - (h.vel[0] * wishX + h.vel[1] * wishZ) };
 			if (add > 0)
 			{
@@ -1171,7 +1217,9 @@ void install_bunnyhop()
 	g_bunnyhop = std::atoi(saved_setting("GE_BUNNYHOP", "LAUNCH_BUNNYHOP").c_str()) != 0;
 	const std::string prestrafe{ saved_setting("GE_BHOP_PRESTRAFE", "LAUNCH_BHOP_PRESTRAFE") };
 	if (!prestrafe.empty()) g_prestrafe = std::atoi(prestrafe.c_str()) != 0;
+#ifdef GE_HL_CROUCH
 	g_crouch = std::atoi(saved_setting("GE_BHOP_CROUCH", "LAUNCH_BHOP_CROUCH").c_str()) != 0;
+#endif
 	g_hover = std::atoi(saved_setting("GE_BHOP_HOVER", "LAUNCH_BHOP_HOVER").c_str()) != 0;
 	g_ledge = std::atoi(saved_setting("GE_BHOP_LEDGE", "LAUNCH_BHOP_LEDGE").c_str()) != 0;
 	g_trace = std::getenv("GE_TRACE") != nullptr;

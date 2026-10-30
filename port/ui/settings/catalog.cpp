@@ -270,8 +270,10 @@ void BuildSettings()
 		[] { return bhop_locked() ? bunnyhop_now() : bunnyhop(); }, [](bool on) { if (!bhop_locked()) set_bunnyhop(on); });
 	AddToggle(kBhop, "bhop_prestrafe", "Pre-strafing", "On: the floor moves as in Half-Life too, so strafing while turning gains speed before the first hop, and a landing slides instead of stopping dead. Ground Accelerate and Friction set how much.",
 		bhop_prestrafe_now, [](bool on) { if (!bhop_locked()) set_bhop_prestrafe(on); });
+#ifdef GE_HL_CROUCH
 	AddToggle(kBhop, "bhop_crouch", "Half-Life Crouch", "On: you crouch while the key is held and stand when it's let go. In the air it's instant and pulls your legs up, and landing crouched slides instead of stopping dead. It's never faster than the game's own crouch.",
 		bhop_crouch_now, [](bool on) { if (!bhop_locked()) set_bhop_crouch(on); });
+#endif
 	AddToggle(kBhop, "bhop_hover", "Hovering", "On: as in the game, crouching in the air and the start of a long fall stop your fall for a moment. Off: you keep falling through them.",
 		bhop_hover_now, [](bool on) { if (!bhop_locked()) set_bhop_hover(on); });
 	AddToggle(kBhop, "bhop_ledge", "Ledge Hops", "On: landing on the edge of a small ledge with Jump held hops again, as Half-Life's square feet would, instead of sliding off it. Surf ramps still surf.",
