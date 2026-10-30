@@ -828,6 +828,13 @@ them with the game's own clip matrix in place of what the game draws in 3D.
 | `WorldDraw` | hook: takes the clip matrix as the player's world draw begins |
 | `collision_tick()` | the viewer goes off with the option or the level |
 
+### Mission Complete on a mod level (`mods/mods.cpp`)
+
+`MissionPage` (hook on `ge_mission_page`, `8025A8F0`): the page reads the last level's (`805D1808`) row
+in the level table without a check. For that one call the Conflict stand-in's row gets the mod's
+name (texts `43FFFF00`, `43FFFF01` that `TextFind` hands out) and `805D1808` is that row's level, both put
+back after. Nothing else sees a row, single player still plays without one.
+
 ### `cheats/triggers.cpp`
 
 The trigger viewer (a cheat). The triggers that go off when someone walks into them are drawn

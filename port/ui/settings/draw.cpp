@@ -96,7 +96,7 @@ void draw_frame(ImDrawList* dl, const Layout& L, const Page& page) {
     dl->AddRectFilledMultiColor(ImVec2(L.x(620), L.y(96)), ImVec2(L.x(820), L.y(118)), blue0, kBlue, kBlue, blue0);
     dl->AddRectFilled(ImVec2(L.x(820), L.y(96)), ImVec2(L.w, L.y(118)), kBlue);
     dl->AddRectFilled(ImVec2(L.x(322), L.y(123)), ImVec2(L.w, L.y(126)), kCream);
-    text(dl, ImVec2(L.x(323), L.y(78)), 40 * u, kCream, g_page == kBhop && bhop_locked() ? page.title + " (Host's)" : page.title);
+    text(dl, ImVec2(L.x(323), L.y(78)), 40 * u, kCream, g_page == kBhop && bhop_locked() ? page.title + (bhop_map_locked() ? " (Map's)" : " (Host's)") : page.title);
 
     //the foot, what the row under the cursor is for and the keys
     for (float y : {545.0f, 668.0f}) {

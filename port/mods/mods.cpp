@@ -268,7 +268,7 @@ const uint32_t kCurrentLevel = 0x805D1804, kTeamKind = 0x805E8D40, kModeTeamKind
 const uint32_t kTextJanus = 0x43001486, kTextMi6 = 0x43001487, kTextZukovsky = 0x43001489;
 const uint32_t kTextHead = 0x10, kTextChars = 0x4, kTextEnd = 0x8, kTextWord = 0xC, kNameLength = 31;
 const uint32_t kKindSets[][2] = { { 0x4D000032, 1 }, { 0x4D000033, 1 }, { 0x4D00002F, 2 } };
-uint32_t g_name_text[2] = {}; //a text row and its characters for each team's name, the game's memory
+uint32_t g_name_text[4] = {}; //a text row and its characters for each team's name and a level's two, the game's memory
 bool g_named[2] = {}; //the loaded mod level names that team itself
 uint32_t g_kind_level = 0, g_kind = 0; //the mod level a multiplayer game is in, and its second team's number
 const char* const kCastKeys[4] = { "team0", "team1", "hero0", "hero1" };
@@ -436,9 +436,67 @@ void TeamModeReset(PPCContext& c)
 	st32(kTeamKind, g_kind);
 }
 
+//the Mission Complete page (ge_mission_page, every time it fills itself) looks the level that just
+//ended up in the level table with no check: its name at +8 and +0xC and in Time Trial the time to
+//beat at +0x1C and +0x20, a crash at 0000000C for a mod level. the row is wanted by nothing else
+//there, so for that one call the stand-in's row has the mod's name and the page is told it's that
+//level. the stand-in isn't a mission, so no best time of a real mission turns up on the page
+const uint32_t kLastLevel = 0x805D1808, kRowName = 0x8, kRowPlace = 0xC, kRowTimeA = 0x1C, kRowTimeB = 0x20;
+const uint32_t kTextLevel = 0x43FFFF00; //no texts of the game's, for TextFind: this one and the next
+const char* const kPlaceName = "Custom Level";
+PPCFunc orig_mission_page = nullptr;
+
+void MissionPage(PPCContext& c)
+{
+	const uint32_t levels = kCurrentLevel, last = ld32(kLastLevel);
+	const uint32_t row = RowOf(ld32(levels + kLevelRows), ld32(levels + kLevelRowCount), kLevelRowSize, kStandIn);
+	const auto& files = mod_files();
+	const auto level = std::find_if(files.begin(), files.end(), [&](const ModLevel& m) { return m.hash == last; });
+	if (!row || level == files.end() || RowOf(ld32(levels + kLevelRows), ld32(levels + kLevelRowCount), kLevelRowSize, last))
+	{
+		orig_mission_page(c);
+		return;
+	}
+	for (int i = 2; i < 4; ++i)
+	{
+		if (g_name_text[i] || !level_alloc) continue;
+		PPCContext call = c;
+		call.r[1] = c.r[1] - 0x40;
+		st32(call.r[1], c.r[1]);
+		call.r[3] = kTextHead + (kNameLength + 1) * 2; call.r[4] = 0;
+		level_alloc(call);
+		g_name_text[i] = guest_ptr(call.r[3]) ? call.r[3] : 0;
+	}
+	const bool named = g_name_text[2] && g_name_text[3];
+	if (named)
+	{
+		SetName(2, mod_shown_name(level->name));
+		SetName(3, kPlaceName);
+	}
+	const uint32_t kept[4] = { ld32(row + kRowName), ld32(row + kRowPlace), ld32(row + kRowTimeA), ld32(row + kRowTimeB) };
+	st32(row + kRowName, named ? kTextLevel : 0);
+	st32(row + kRowPlace, named ? kTextLevel + 1 : 0);
+	st32(row + kRowTimeA, 0);
+	st32(row + kRowTimeB, 0);
+	st32(kLastLevel, kStandIn);
+	orig_mission_page(c);
+	st32(kLastLevel, last);
+	st32(row + kRowName, kept[0]);
+	st32(row + kRowPlace, kept[1]);
+	st32(row + kRowTimeA, kept[2]);
+	st32(row + kRowTimeB, kept[3]);
+}
+
 void TextFind(PPCContext& c)
 {
 	const uint32_t hash = c.r[4];
+	if ((hash == kTextLevel || hash == kTextLevel + 1) && g_name_text[2 + hash - kTextLevel])
+	{
+		const uint32_t text = g_name_text[2 + hash - kTextLevel];
+		st32(text, hash);
+		c.r[3] = text;
+		return;
+	}
 	const int team = hash == kTextMi6 ? 0 : 1;
 	if (hash < kTextJanus || hash > kTextZukovsky || !g_named[team] || ld32(kCurrentLevel) != g_kind_level) { orig_text_find(c); return; }
 	st32(g_name_text[team], hash);
@@ -794,6 +852,7 @@ void install_mods()
 	if (!orig_level_set) rt_die("goldeneye: ge_level_set is not hooked in this build");
 	orig_team_mode_reset = ppc_hook("ge_team_mode_reset", TeamModeReset);
 	orig_text_find = ppc_hook("ge_text_find", TextFind);
+	orig_mission_page = ppc_hook("ge_mission_page", MissionPage);
 	level_alloc = ppc_lookup(kGameAlloc);
 	is_multiplayer = ppc_lookup(kIsMultiplayer);
 	orig_spawn_setup = ppc_hook("ge_spawn_points_setup", SpawnPointsSetup);

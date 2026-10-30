@@ -32,6 +32,7 @@ void bunnyhop_write(PPCContext& c, uint32_t stream, bool rules); //the host's ru
 void bunnyhop_read(PPCContext& c, uint32_t stream);
 bool bunnyhop_now(); //on for this game: the menu's, the host's online
 bool bhop_locked(); //a joined modded network game: the host's settings are the ones played by
+bool bhop_map_locked(); //the level has a preset of its own: bhop_locked() is true, for the level's time
 bool bhop_prestrafe_now();
 bool bhop_custom_now(); //on for this game and a rule isn't its default: the level timer flashes grey
 float bhop_value_now(int which);

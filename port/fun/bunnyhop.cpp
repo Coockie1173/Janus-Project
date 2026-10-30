@@ -46,6 +46,9 @@
 //
 //Hovering (off by default): fn_801066C0 puts the fall speed at 0. the game calls it for a crouch, for
 //the move state's setter (a reload, a weapon cycle) and as the fall starts, which is the hover
+//kFreeDrop down. off, in the air those three keep the fall speed (the hook's others are climbs
+//and the like, which want it gone)
+//
 //ladders are half-life's: the game's own (walked into from the foot, ge_ladder_foot, or backed off
 //the top, ge_move_grab's 0x100) are never taken. a ladder is its pieces, polygons with flags 0x1000
 //(see eurochef's goldeneye_wii.md), and the player is on one while a piece is within kLadderReach
@@ -181,6 +184,52 @@ bool g_hostKnown = false;
 std::atomic<bool> g_bunnyhop{false}; //the menu's, ours
 std::atomic<bool> g_prestrafe{true}, g_crouch{false}, g_hover{false};
 std::atomic<bool> g_onNow{false}, g_locked{false}; //for the menu's and the renderer's threads
+
+//a level can have its own rules (eurochef's bhop... nodes): a trigger the game never runs, the
+//generic one (type 3) asleep (game flag 1), with kPresetMark in data 1. data 2 has bit 0 for
+//bunnyhopping on and bit 1 for pre-strafing, data 5 to 15 the tunables as floats in the enum's order,
+//a value that isn't there being its default (the ones after the mark that the type's maker
+//leaves alone: it changes data 0 and 4). what's in the menu isn't touched, so the player's own
+//are back as soon as the level is left. while there the menu shows them, locked, a host plays by
+//them and sends them as its own, and a joiner has them from the host as ever
+const uint32_t kWorld = 0x805F4CCC, kTriggerCount = 0xE0, kTriggers = 0xE4, kTriggerType = 0x58;
+const uint32_t kTriggerValues = 0x64, kTriggerData = 0x98, kGenericTrigger = 3, kPresetMark = 0x42484F50; //BHOP
+const uint32_t kCurrentLevel = 0x805D1804;
+const int kPresetMarkSlot = 1, kPresetFlagsSlot = 2, kPresetFirstValue = 5;
+Rules g_mapRules;
+std::atomic<uint32_t> g_mapLevel{0}; //the level g_mapRules are for, 0 with none
+uint32_t g_mapLooked = 0, g_mapCount = 0;
+
+//when the level or the number of triggers changes
+void FindMapRules()
+{
+	const uint32_t level = ld32(kCurrentLevel), count = ld32(kWorld + kTriggerCount), list = ld32(kWorld + kTriggers);
+	if (level == g_mapLooked && count == g_mapCount) return;
+	g_mapLooked = level;
+	g_mapCount = count;
+	const uint32_t before = g_mapLevel;
+	g_mapLevel = 0;
+	for (uint32_t i = 0; i < count && count < 0x4000 && guest_ptr(list); ++i)
+	{
+		const uint32_t t = ld32(list + i * 4);
+		if (!guest_ptr(t) || ld32(t + kTriggerType) != kGenericTrigger || ld32(t + kTriggerData + kPresetMarkSlot * 4) != kPresetMark) continue;
+		const uint32_t flags = ld32(t + kTriggerData + kPresetFlagsSlot * 4), given = ld32(t + kTriggerValues);
+		g_mapRules.on = flags & 1;
+		g_mapRules.prestrafe = flags & 2;
+		std::string said;
+		for (int v = 0; v < kBhopValueCount; ++v)
+		{
+			const int slot = kPresetFirstValue + v;
+			const float value = (given >> slot & 1) ? ldf(t + kTriggerData + slot * 4) : g_values[v].initial;
+			g_mapRules.v[v] = std::clamp(value, g_values[v].lo, g_values[v].hi);
+			said += " " + std::to_string(g_mapRules.v[v]);
+		}
+		g_mapLevel = level;
+		rt_log("goldeneye: bunnyhop: level %08X has its own rules, %s, pre-strafing %s:%s", level, g_mapRules.on ? "on" : "off", g_mapRules.prestrafe ? "on" : "off", said.c_str());
+		break;
+	}
+	if (before && !g_mapLevel) rt_log("goldeneye: bunnyhop: back to the player's rules");
+}
 std::atomic<bool> g_jump{false}; //as the pad was last read
 std::atomic<float> g_speed{0}; //the speedometer's, read by the renderer's thread
 std::atomic<uint32_t> g_speedFrame{~0u};
@@ -213,8 +262,7 @@ Way g_way;
 uint32_t g_wayFrame = ~0u;
 const auto kWayGap = std::chrono::seconds(1); //the game's own link comes the frame after
 const uint32_t kTriggerAt = 0x30;
-const uint32_t kWorld = 0x805F4CCC, kTriggerCount = 0xE0, kTriggers = 0xE4;
-const uint32_t kTriggerType = 0x58, kTriggerFlags = 0x68, kAsleep = 1, kMarkerObjective = 0x9C;
+const uint32_t kTriggerFlags = 0x68, kAsleep = 1, kMarkerObjective = 0x9C;
 const uint32_t kObjectiveMarker = 0x3F;
 
 //a player's hop: offline the local one's, online every one stepped here
@@ -301,13 +349,14 @@ void Refresh()
 	const uint32_t frame = ld32(kFrameCount);
 	if (frame == g_rulesFrame) return;
 	g_rulesFrame = frame;
+	FindMapRules();
 	Mode mode = kOffline;
 	if (network_game()) mode = !modded_lobby() ? kOff : joined_game() ? kJoined : kHosting;
 	else g_hostKnown = false;
 	switch (mode)
 	{
-	case kOffline: g_now = Own(false); break;
-	case kHosting: g_now = Own(true); break;
+	case kOffline: g_now = g_mapLevel ? g_mapRules : Own(false); break;
+	case kHosting: g_now = g_mapLevel ? g_mapRules : Own(true); break;
 	case kJoined: g_now = g_hostKnown ? g_host : Rules{}; break;
 	case kOff: g_now.on = false; break;
 	}
@@ -320,7 +369,7 @@ void Refresh()
 	}
 	g_mode = mode;
 	g_onNow = g_now.on;
-	g_locked = mode == kJoined;
+	g_locked = mode == kJoined || (mode != kOff && g_mapLevel);
 	if (!g_now.on || !guest_ptr(ld32(kPlayerPtr)))
 	{
 		for (Hopper& h : g_hoppers)
@@ -428,10 +477,18 @@ void FallStart(PPCContext& c)
 
 //(controller) the fall speed at 0, unless Hovering is off and it's one that hovers
 void BodyStill(PPCContext& c)
+{
+	const uint32_t ctrl{ c.r[3] };
 	const bool hovers{ c.lr == kStillCrouch || c.lr == kStillFall || c.lr == kStillMove };
 	Hopper* h = hovers ? Hops(ctrl) : nullptr;
+	const uint32_t entity{ h ? ld32(ctrl + kEntity) : 0 };
+	const uint32_t body{ guest_ptr(entity) ? ld32(entity + kBody) : 0 };
 	const bool keep{ guest_ptr(body) && h && !g_now.hover && h->inAir && !h->ladder };
+	const float fall{ keep ? ldf(body + kBodyFallSpeed) : 0.0f };
 	orig_body_still(c);
+	if (keep) stf(body + kBodyFallSpeed, fall);
+}
+
 void MoveGrab(PPCContext& c)
 {
 	const uint32_t ctrl{ c.r[3] };
@@ -713,9 +770,11 @@ bool PreStrafe(Hopper& h, uint32_t ctrl, float gameX, float gameZ, float wishX, 
 
 bool bunnyhop() { return g_bunnyhop; }
 bool bunnyhop_now() { return g_onNow; }
-bool bhop_locked() { return g_locked; }
+//out of play nothing calls Refresh, so a level left is seen here
+bool bhop_map_locked() { const uint32_t level = g_mapLevel; return level && level == ld32(kCurrentLevel) && (g_mode == kOffline || g_mode == kHosting); }
+bool bhop_locked() { return g_mode == kJoined ? (bool)g_locked : bhop_map_locked(); }
 bool bhop_prestrafe() { return g_prestrafe; }
-bool bhop_prestrafe_now() { return g_locked ? g_now.prestrafe : (bool)g_prestrafe; }
+bool bhop_prestrafe_now() { return bhop_locked() ? g_now.prestrafe : (bool)g_prestrafe; }
 void set_bhop_prestrafe(bool on) { g_prestrafe = on; }
 bool bhop_crouch() { return g_crouch; }
 bool bhop_crouch_now() { return bhop_locked() ? g_now.crouch : (bool)g_crouch; }
@@ -724,11 +783,11 @@ bool bhop_hover() { return g_hover; }
 bool bhop_hover_now() { return bhop_locked() ? g_now.hover : (bool)g_hover; }
 void set_bhop_hover(bool on) { g_hover = on; }
 BhopValue& bhop_value(int which) { return g_values[which]; }
-float bhop_value_now(int which) { return g_locked ? g_now.v[which] : g_values[which].value; }
+float bhop_value_now(int which) { return bhop_locked() ? g_now.v[which] : g_values[which].value; }
 
 bool bhop_custom_now()
 {
-	if (!g_onNow) return false;
+	if (!g_onNow || bhop_map_locked()) return false; //the level's own rules are the rules
 	if (!g_now.prestrafe || g_now.crouch || g_now.hover) return true;
 	for (int i = 0; i < kBhopValueCount; ++i)
 		if (std::fabs(g_now.v[i] - g_values[i].initial) > g_values[i].by * 0.5f) return true; //the host's come in steps

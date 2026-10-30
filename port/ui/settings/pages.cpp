@@ -402,7 +402,7 @@ void build_pages() {
 	auto& hop = g_pages[kBhop].rows; //the jump right under its toggle
 	hop.insert(hop.begin() + std::min<size_t>(1, hop.size()), BindingRow((int)std::size(kActions) - 1));
 	hop.push_back({"Settings", "Online through Connect to WFC Modded the host's are everyone's: a host sends its own, and in a game someone else hosts they're shown here and can't be changed. Yours are back after the game.",
-		[] { return std::string(bhop_locked() ? "The host's, locked" : "Yours"); }, {}, {}});
+		[] { return std::string(bhop_map_locked() ? "The map's, locked" : bhop_locked() ? "The host's, locked" : "Yours"); }, {}, {}});
 	hop.push_back({"Defaults", "Every value above back to its own. The switch and the jump key stay as they are.", {}, {}, []
 	{
 		if (bhop_locked()) return;
@@ -421,7 +421,7 @@ void build_pages() {
 	const auto limit = std::find_if(fun.begin(), fun.end(), [](const Row& r) { return r.label == "No Attachment Limit (Experimental)"; });
 	fun.insert(limit, {"Bunnyhopping", "Half-Life's bunnyhopping and air strafing: its switch, the jump key and how it feels.", []
 	{
-		if (bhop_locked()) return std::string(bunnyhop_now() ? "On (host)" : "Off (host)");
+		if (bhop_locked()) return std::string(bunnyhop_now() ? (bhop_map_locked() ? "On (map)" : "On (host)") : (bhop_map_locked() ? "Off (map)" : "Off (host)"));
 		return std::string(bunnyhop() ? "On" : "Off");
 	}, {}, [] { go(kBhop); }});
 
