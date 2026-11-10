@@ -216,7 +216,8 @@ void BuildSettings()
 	AddToggle(kGameplay, "no_tutorials", "Disable Tutorials", "On: the pop-up boxes that explain the controls are never shown, in any mission, training included.", no_tutorials, set_no_tutorials);
 	AddToggle(kVisuals, "no_colour_filter", "Disable Colour Filter", "On: the tint most levels lay over the picture (Dam's grey-blue, Facility's blue-green...) isn't drawn.", no_colour_filter, set_no_colour_filter);
 	AddToggle(kVisuals, "no_bloom", "Disable Bloom", "On: the glow round lamps, screens and bright lights isn't drawn.", no_bloom, set_no_bloom);
-	AddToggle(kVisuals, "no_dof", "Disable Depth of Field", "On: levels that blur what's far away (Jungle) keep the whole picture sharp.", no_dof, set_no_dof);
+	AddChoice(kVisuals, "depth_of_field", "Depth of Field", "How levels that blur what's far away (Jungle) draw it. Console is the game's own, blocky round anything near. High Quality blurs at full resolution.",
+		{"Off", "Console", "High Quality"}, depth_of_field, [](int v) { set_depth_of_field(v); g_dirty = true; });
 	AddToggle(kVisuals, "invert_flash", "Inverted Flashes", "On: a flash grenade freezes the picture of the moment it went off, with white edges, instead of whiting out the screen. It fades back as fast as the white would.", invert_flash, set_invert_flash);
 	Setting& grain = AddRange(kVisuals, "film_grain", "Film Grain", "How much grain lies over the picture. 100% is the game's own.",
 		film_grain, [](float v) { set_film_grain(v); g_dirty = true; }, 0, 1, 0.05f, 2);
