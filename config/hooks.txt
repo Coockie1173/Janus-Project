@@ -166,5 +166,6 @@ ge_player_blend        # a client draws a player towards the host's copy: our ow
 PlayerLand             # the player in the air or landing: online with client-owned players a joined console's own landings are its own (port/net/owned.cpp)
 ge_player_state_apply  # another's state (player state, crouch, sprint, the gun) put on a controller: a joined console's own waits a second for it (port/net/owned.cpp)
 ge_bloom               # the bloom pass: none with Disable Bloom (port/gameplay/screen.cpp)
+ge_dof                 # the depth of field pass: none with Disable Depth of Field (port/gameplay/screen.cpp)
 ge_grain_pass          # the film grain's pass: left out by the Film Grain slider at 0 (port/gameplay/screen.cpp)
 ge_screen_quad         # a screen quad of the passes: the grain's colour scaled by the Film Grain slider (port/gameplay/screen.cpp)

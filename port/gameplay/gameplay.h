@@ -101,6 +101,8 @@ void install_screen();
 bool screen_draw(PPCContext& c); //from the mesh draw's hook: true when the entry is left out
 bool no_bloom(); //the bloom pass isn't drawn
 void set_no_bloom(bool on);
+bool no_dof(); //the depth of field pass isn't drawn
+void set_no_dof(bool on);
 bool invert_flash(); //a flash grenade's white-out is the picture of the moment it went off, with white edges
 void set_invert_flash(bool on);
 float film_grain(); //the film grain's strength, 0 none to 1 the game's

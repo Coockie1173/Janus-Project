@@ -3,6 +3,9 @@
 //Disable Bloom: ge_bloom (802B4F00) is the bloom pass, run by ge_post_effects (802C31D0) after a
 //  viewport's scene: the picture copied at half size, blurred four sizes down and added back
 //  over it. left out, nothing else changes (it's what the byte 806E9D6C off does)
+//Disable Depth of Field: ge_dof (802B61C0), a pass of ge_post_effects on levels that have it
+//  (Jungle): the depth turned into a mask through fog, the picture blurred at a quarter size and
+//  laid over where the mask says. left out, the picture stays sharp at every distance
 //Inverted Flashes: a flash grenade whites the screen with a hud quad (draw_delayed: flags
 //  0x40000000, a box 1.17912 by 0.840768, drawn 28.2 ahead of the eye) whose colour is the
 //  entry's +0x3C, white with an alpha that goes 85, 170, 255 in three frames and then down by
@@ -20,8 +23,8 @@
 //  colour register, which ge_material_colour sets white in the pass, isn't what's drawn: scaled,
 //  nothing changed)
 //
-//kept in the settings file (LAUNCH_NOBLOOM, LAUNCH_INVERTFLASH, LAUNCH_GRAIN)
-//GE_NO_BLOOM=1, GE_INVERT_FLASH=1, GE_GRAIN=0.5 the same from the environment
+//kept in the settings file (LAUNCH_NOBLOOM, LAUNCH_NODOF, LAUNCH_INVERTFLASH, LAUNCH_GRAIN)
+//GE_NO_BLOOM=1, GE_NO_DOF=1, GE_INVERT_FLASH=1, GE_GRAIN=0.5 the same from the environment
 #include "ge.h"
 #include <algorithm>
 #include <atomic>
@@ -42,8 +45,8 @@ const uint32_t kEntryDrawMtx = 0x4, kEntryMesh = 0x10, kEntryColour = 0x3C;
 const uint32_t kMeshFlags = 0x4, kMeshBoxMax = 0x20, kMeshOnHud = 0x40000000;
 const float kFlashWide = 1.17912f, kFlashAhead = -28.2f;
 
-PPCFunc orig_bloom = nullptr, orig_grain_pass = nullptr, orig_screen_quad = nullptr;
-std::atomic<bool> g_no_bloom{false}, g_invert_flash{false};
+PPCFunc orig_bloom = nullptr, orig_dof = nullptr, orig_grain_pass = nullptr, orig_screen_quad = nullptr;
+std::atomic<bool> g_no_bloom{false}, g_no_dof{false}, g_invert_flash{false};
 std::atomic<float> g_grain{1.0f};
 std::atomic<float> g_flash{0}; //the white's alpha, 0 to 1, while it is left out
 std::atomic<uint32_t> g_flash_frame{0}; //the game's frame it was last left out in
@@ -73,6 +76,12 @@ void Bloom(PPCContext& c)
 {
     if (g_no_bloom) return;
     orig_bloom(c);
+}
+
+void Dof(PPCContext& c)
+{
+    if (g_no_dof) return;
+    orig_dof(c);
 }
 
 //a hud quad that wide, that far ahead of the eye
@@ -188,6 +197,8 @@ void flash_draw()
 
 bool no_bloom() { return g_no_bloom; }
 void set_no_bloom(bool on) { g_no_bloom = on; }
+bool no_dof() { return g_no_dof; }
+void set_no_dof(bool on) { g_no_dof = on; }
 bool invert_flash() { return g_invert_flash; }
 void set_invert_flash(bool on) { g_invert_flash = on; }
 float film_grain() { return g_grain; }
@@ -197,14 +208,18 @@ void install_screen()
 {
     std::string saved = saved_setting("GE_NO_BLOOM", "LAUNCH_NOBLOOM");
     if (!saved.empty()) g_no_bloom = std::atoi(saved.c_str()) != 0;
+    saved = saved_setting("GE_NO_DOF", "LAUNCH_NODOF");
+    if (!saved.empty()) g_no_dof = std::atoi(saved.c_str()) != 0;
     saved = saved_setting("GE_INVERT_FLASH", "LAUNCH_INVERTFLASH");
     if (!saved.empty()) g_invert_flash = std::atoi(saved.c_str()) != 0;
     saved = saved_setting("GE_GRAIN", "LAUNCH_GRAIN");
     if (!saved.empty()) set_film_grain((float)std::atof(saved.c_str()));
     orig_bloom = ppc_hook("ge_bloom", Bloom);
+    orig_dof = ppc_hook("ge_dof", Dof);
     orig_grain_pass = ppc_hook("ge_grain_pass", GrainPass);
     orig_screen_quad = ppc_hook("ge_screen_quad", ScreenQuad);
     if (!orig_grain_pass || !orig_screen_quad) rt_log("goldeneye: the grain's pass is not hooked in this build, Film Grain does nothing");
+    if (!orig_dof) rt_log("goldeneye: ge_dof is not hooked in this build, Disable Depth of Field does nothing");
     if (!orig_bloom) rt_log("goldeneye: ge_bloom is not hooked in this build, Disable Bloom does nothing");
 }
 

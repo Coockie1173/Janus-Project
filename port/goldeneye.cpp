@@ -28,7 +28,7 @@
 //GE_NO_TUTORIALS=1 no tutorial boxes
 //GE_ONLINE_UNLOCKS=0 the loadouts' items and the game modes open at their levels
 //GE_NO_COLOUR_FILTER=1 a level's colour filter over the picture isn't drawn
-//GE_NO_BLOOM=1 no bloom, GE_INVERT_FLASH=1 a flash grenade freezes the picture instead of whiting it out, GE_GRAIN=0.5 half the film grain (port/gameplay/screen.cpp)
+//GE_NO_BLOOM=1 no bloom, GE_NO_DOF=1 no depth of field, GE_INVERT_FLASH=1 a flash grenade freezes the picture instead of whiting it out, GE_GRAIN=0.5 half the film grain (port/gameplay/screen.cpp)
 //GE_AUTOSAVE=0 a checkpoint doesn't save the game
 //GE_EXTRAS_MENU=1 the menu's unused extras page
 //GE_UNLOCK_ALL=1 every mission and difficulty unlocked

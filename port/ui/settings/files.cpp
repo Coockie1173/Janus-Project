@@ -69,7 +69,7 @@ void save_launch_settings() {
         {"LAUNCH_ADSFOV", ads_fov_text}, {"LAUNCH_ADSSENS", ads_sens_text}, {"LAUNCH_AIMLOCK", aim_lock() ? "1" : "0"},
         {"LAUNCH_MOUSEEVERYWHERE", mouse_everywhere() ? "1" : "0"},
         {"LAUNCH_SKIPLIST", skip_list()}, {"LAUNCH_SKIPMOVIES", skip_movies() ? "1" : "0"}, {"LAUNCH_NOTUTORIALS", no_tutorials() ? "1" : "0"}, {"LAUNCH_NOCOLOURFILTER", no_colour_filter() ? "1" : "0"},
-        {"LAUNCH_NOBLOOM", no_bloom() ? "1" : "0"}, {"LAUNCH_INVERTFLASH", invert_flash() ? "1" : "0"}, {"LAUNCH_GRAIN", grain_text},
+        {"LAUNCH_NOBLOOM", no_bloom() ? "1" : "0"}, {"LAUNCH_NODOF", no_dof() ? "1" : "0"}, {"LAUNCH_INVERTFLASH", invert_flash() ? "1" : "0"}, {"LAUNCH_GRAIN", grain_text},
         {"LAUNCH_LEVELTIMER", level_timer() ? "1" : "0"}, {"LAUNCH_AUTOQTE", auto_qte() ? "1" : "0"}, {"LAUNCH_AUTOSTART", auto_start() ? "1" : "0"}, {"LAUNCH_AUTOSAVE", autosave() ? "1" : "0"}, {"LAUNCH_EXTRASMENU", extras_menu() ? "1" : "0"}, {"LAUNCH_UNLOCKALL", unlock_all() ? "1" : "0"}, {"LAUNCH_ONLINEUNLOCKS", online_unlocks() ? "1" : "0"}, {"LAUNCH_STAMINAMETER", stamina_meter() ? "1" : "0"},
         {"LAUNCH_VSYNC", vsync() ? "1" : "0"}, {"LAUNCH_PING", show_ping() ? "1" : "0"}, {"LAUNCH_OCCLUSION", occlusion() ? "1" : "0"}, {"LAUNCH_SOUNDHEIGHT", sound_height() ? "1" : "0"},
         {"LAUNCH_HUD", hud() ? "1" : "0"}, {"LAUNCH_SHAKE", shake_text}, {"LAUNCH_TANKBUTTONS", tank_text},
