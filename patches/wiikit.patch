@@ -4465,7 +4465,7 @@ index 8a4e097..8b1b1a8 100644
  void ppc_mmio_write(uint32_t addr, uint32_t, int) { rt_die("mmio write %08X", addr); }
  uint64_t ppc_timebase() { return 0; }
 diff --git a/runtime/video.cpp b/runtime/video.cpp
-index 5726093..bfe7f51 100644
+index 5726093..cd8c03d 100644
 --- a/runtime/video.cpp
 +++ b/runtime/video.cpp
 @@ -67,7 +67,8 @@ ClassicState classic[4];
@@ -4601,7 +4601,7 @@ index 5726093..bfe7f51 100644
  void APIENTRY gl_debug(GLenum, GLenum type, GLuint, GLenum severity, GLsizei, const GLchar* msg, const void*) {
      if (severity == GL_DEBUG_SEVERITY_NOTIFICATION) return;
      rt_log("gl: %s%s", type == GL_DEBUG_TYPE_ERROR ? "error: " : "", msg);
-@@ -295,11 +368,101 @@ void main() {
+@@ -295,11 +368,114 @@ void main() {
  )";
  
  // ---- register side effects ----------------------------------------------------------------------
@@ -4644,6 +4644,19 @@ index 5726093..bfe7f51 100644
 +    glDisable(GL_SCISSOR_TEST);
 +    glBlitNamedFramebuffer(ms_fbo, efb_fbo, 0, 0, EFB_W * S, EFB_H * S, 0, 0, EFB_W * S, EFB_H * S,
 +                           GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT, GL_NEAREST);
++}
++
++// An EFB copy reads only its rectangle, and only the colour or only the depth: that much is
++// resolved (the rest stays behind, ms_dirty stays set). A whole resolve of colour and depth for
++// each of a frame's copies (Dam makes 23) kept the renderer busy enough to make frames uneven.
++void efb_resolve_rect(int x, int y, int w, int h, bool depth) {
++    if (ms_samples <= 1 || !ms_dirty) return;
++    gl_state_stale = true;
++    glDisable(GL_SCISSOR_TEST);
++    x = std::clamp(x, 0, EFB_W), y = std::clamp(y, 0, EFB_H);
++    int x1 = std::min(x + w, (int)EFB_W), y1 = std::min(y + h, (int)EFB_H);
++    glBlitNamedFramebuffer(ms_fbo, efb_fbo, x * S, y * S, x1 * S, y1 * S, x * S, y * S, x1 * S, y1 * S,
++                           depth ? GL_DEPTH_BUFFER_BIT : GL_COLOR_BUFFER_BIT, GL_NEAREST);
 +}
 +
 +void ms_release() {
@@ -4704,7 +4717,7 @@ index 5726093..bfe7f51 100644
      glEnable(GL_SCISSOR_TEST);
      glScissor(x * S, y * S, w * S, h * S);
      glColorMask(cu, cu, cu, au || !has_alpha);
-@@ -318,6 +481,7 @@ long efb_dump_every = std::getenv("WIIKIT_EFBDUMP_EVERY") ? std::atol(std::geten
+@@ -318,6 +494,7 @@ long efb_dump_every = std::getenv("WIIKIT_EFBDUMP_EVERY") ? std::atol(std::geten
  bool efb_dumping() { return (long)cnt.frames == efb_dump_frame; }
  void efb_dump(const char* tag) {
      static int k = 0;
@@ -4712,7 +4725,7 @@ index 5726093..bfe7f51 100644
      std::vector<uint8_t> px((size_t)EFB_W * S * EFB_H * S * 4);   // top row first, as the EFB is kept
      glGetTextureImage(efb_col, 0, GL_RGBA, GL_UNSIGNED_BYTE, (GLsizei)px.size(), px.data());
      char name[160];
-@@ -325,7 +489,13 @@ void efb_dump(const char* tag) {
+@@ -325,9 +502,15 @@ void efb_dump(const char* tag) {
      write_png(name, EFB_W * S, EFB_H * S, px.data());
  }
  
@@ -4720,13 +4733,15 @@ index 5726093..bfe7f51 100644
 +long efb_copies_this_frame = 0;                      // (for the per-draw dumps)
  void efb_copy(uint32_t v) {
 +    dbg_copy(false);
-+    efb_resolve();
 +    gl_state_stale = true;
 +    if (v >> 14 & 1) efb_copies_this_frame = 0; else ++efb_copies_this_frame;
      int x = (int)(bp[0x49] & 0x3FF), y = (int)(bp[0x49] >> 10 & 0x3FF);
      int w = (int)(bp[0x4A] & 0x3FF) + 1, h = (int)(bp[0x4A] >> 10 & 0x3FF) + 1;
++    efb_resolve_rect(x, y, w, h, !(v >> 14 & 1) && (bp[0x43] & 7) == 3);
      uint32_t dest = (bp[0x4B] & 0xFFFFFF) << 5;
-@@ -336,21 +506,28 @@ void efb_copy(uint32_t v) {
+     glDisable(GL_SCISSOR_TEST);
+     if (efb_dumping()) {
+@@ -336,21 +519,28 @@ void efb_copy(uint32_t v) {
          efb_dump(tag);
      }
      if (v >> 14 & 1) {                                           // to the XFB
@@ -4763,7 +4778,7 @@ index 5726093..bfe7f51 100644
          glViewport(0, 0, tw * S, th * S);
          glDisable(GL_BLEND);
          glDisable(GL_COLOR_LOGIC_OP);
-@@ -365,11 +542,12 @@ void efb_copy(uint32_t v) {
+@@ -365,11 +555,12 @@ void efb_copy(uint32_t v) {
          glBindTextureUnit(1, efb_dep);
          glBindSampler(0, 0);
          glBindSampler(1, 0);
@@ -4778,7 +4793,7 @@ index 5726093..bfe7f51 100644
  }
  
  void bp_set(uint32_t v) {
-@@ -462,9 +640,12 @@ void set_ps_uniforms() {
+@@ -462,9 +653,12 @@ void set_ps_uniforms() {
          rt_log("%s", t.c_str());
      }
      if (ps_valid && !std::memcmp(&u, &ps_last, sizeof u)) return;
@@ -4792,7 +4807,7 @@ index 5726093..bfe7f51 100644
  }
  
  void bind_textures() {
-@@ -475,113 +656,574 @@ void bind_textures() {
+@@ -475,113 +669,574 @@ void bind_textures() {
      for (int m = 0; m < 8; ++m) {
          if (!(used >> m & 1)) continue;
          GLuint name = 0;
@@ -4942,7 +4957,10 @@ index 5726093..bfe7f51 100644
 +        draw_state = ds;
 +        gl_state_stale = false;
 +    }
-+
+ 
+-    int offx = s10(bp[0x59]) * 2, offy = s10(bp[0x59] >> 10) * 2;
+-    float wd = std::fabs(fx(0x101A)), ht = std::fabs(fx(0x101B));
+-    glViewportIndexedf(0, (fx(0x101D) - wd - (float)offx) * (float)S, (fx(0x101E) - ht - (float)offy) * (float)S,
 +    // room for all the blocks in this quarter of the ring, or on to the next
 +    const size_t q = ubo_off / UBO_QUARTER;
 +    if ((ubo_off + 8192) / UBO_QUARTER != q) {
@@ -5242,10 +5260,7 @@ index 5726093..bfe7f51 100644
 +    glNamedBufferData(dbg_vbo, (GLsizeiptr)n * 16, vtx, GL_STATIC_DRAW);
 +    dbg_count = n;
 +}
- 
--    int offx = s10(bp[0x59]) * 2, offy = s10(bp[0x59] >> 10) * 2;
--    float wd = std::fabs(fx(0x101A)), ht = std::fabs(fx(0x101B));
--    glViewportIndexedf(0, (fx(0x101D) - wd - (float)offx) * (float)S, (fx(0x101E) - ht - (float)offy) * (float)S,
++
 +void dbg_overlay(const uint8_t* vtx, uint32_t n) {
 +    if (!dbgo_vbo) {
 +        glCreateBuffers(1, &dbgo_vbo);
@@ -5371,39 +5386,39 @@ index 5726093..bfe7f51 100644
 -        static const GLenum lo[16] = {GL_CLEAR, GL_AND, GL_AND_REVERSE, GL_COPY, GL_AND_INVERTED, GL_NOOP,
 -                                      GL_XOR, GL_OR, GL_NOR, GL_EQUIV, GL_INVERT, GL_OR_REVERSE,
 -                                      GL_COPY_INVERTED, GL_OR_INVERTED, GL_NAND, GL_SET};
--        glDisable(GL_BLEND);
--        glEnable(GL_COLOR_LOGIC_OP);
--        glLogicOp(lo[cm >> 12 & 15]);
--    } else {
 +        glDepthFunc(scene ? GL_GEQUAL : GL_LEQUAL);
 +        glProgramUniform1f(dbgo_prog, dbgo_fade_loc, 1.0f);
 +        glDrawArrays(GL_TRIANGLES, 0, (GLsizei)dbgo_count);
          glDisable(GL_BLEND);
+-        glEnable(GL_COLOR_LOGIC_OP);
+-        glLogicOp(lo[cm >> 12 & 15]);
+-    } else {
+-        glDisable(GL_BLEND);
 -        glDisable(GL_COLOR_LOGIC_OP);
 +        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
++    }
++    if (scene) {
++        glDepthMask(GL_TRUE);
++        glClearDepth(1.0);
++        glClear(GL_DEPTH_BUFFER_BIT);
      }
 -    // GX's front faces are clockwise on screen: counter-clockwise for GL,
 -    // whose y runs the other way over the same rows
 -    if (tri && cull) { glEnable(GL_CULL_FACE); glCullFace(cull == 1 ? GL_BACK : GL_FRONT); }
 -    else glDisable(GL_CULL_FACE);
-+    if (scene) {
-+        glDepthMask(GL_TRUE);
-+        glClearDepth(1.0);
-+        glClear(GL_DEPTH_BUFFER_BIT);
-+    }
 +}
- 
--    if (xf_lo < xf_hi) {
--        glNamedBufferSubData(xf_ubo, xf_lo * 4, (xf_hi - xf_lo) * 4, &xf[xf_lo]);
--        xf_lo = 0x1058;
--        xf_hi = 0;
++
 +// An EFB copy: the scene is in what is copied; a copy that clears takes it out again.
 +void dbg_copy(bool clears) {
 +    if (clears) dbg_drawn = false;
 +    else if (dbg_waiting) dbg_draw();
 +    else dbg_drawn = false;                          // what is drawn in 3D after a copy is another pass
 +}
-+
+ 
+-    if (xf_lo < xf_hi) {
+-        glNamedBufferSubData(xf_ubo, xf_lo * 4, (xf_hi - xf_lo) * 4, &xf[xf_lo]);
+-        xf_lo = 0x1058;
+-        xf_hi = 0;
 +// True: the draw about to be made is one the debug scene stands in for.
 +bool dbg_hides() {
 +    if (!dbg_on) return false;
@@ -5446,7 +5461,7 @@ index 5726093..bfe7f51 100644
          uint32_t pm = v0.mtx[0] * 4u;
          float pos[3];
          for (int r = 0; r < 3; ++r)
-@@ -598,62 +1240,70 @@ void draw(uint8_t prim, uint8_t vflags, const uint8_t* pieces, uint32_t npieces)
+@@ -598,62 +1253,70 @@ void draw(uint8_t prim, uint8_t vflags, const uint8_t* pieces, uint32_t npieces)
                       xf[0x1026], fx(0x1020), fx(0x1021), fx(0x1022), fx(0x1023), fx(0x1024), fx(0x1025),
                       v0.mtx[0], v0.pos[0], v0.pos[1], v0.pos[2], pos[0], pos[1], pos[2], c[0] / c[3], c[1] / c[3], c[3],
                       (bp[0x00] >> 10 & 15) + 1, xf[0x1009] & 3);
@@ -5554,7 +5569,7 @@ index 5726093..bfe7f51 100644
  }
  
  // ---- the record -----------------------------------------------------------------------------------
-@@ -662,6 +1312,8 @@ template <class T> T rd(const uint8_t*& p) { T v; std::memcpy(&v, p, sizeof v);
+@@ -662,6 +1325,8 @@ template <class T> T rd(const uint8_t*& p) { T v; std::memcpy(&v, p, sizeof v);
  // The EFB at its native size: the pixel at each native position's top-left
  // sample of the scaled EFB (rows from the top, as the EFB copies read it).
  void efb_readback() {
@@ -5563,7 +5578,7 @@ index 5726093..bfe7f51 100644
      int W = EFB_W * S, H = EFB_H * S;
      std::vector<uint8_t> px((size_t)W * H * 4);
      std::vector<float> dz((size_t)W * H);
-@@ -703,6 +1355,9 @@ void copy_readback(uint32_t addr) {
+@@ -703,6 +1368,9 @@ void copy_readback(uint32_t addr) {
  }
  
  void exec(const std::vector<uint8_t>& data) {
@@ -5573,7 +5588,7 @@ index 5726093..bfe7f51 100644
      const uint8_t* p = data.data();
      const uint8_t* end = p + data.size();
      while (p < end) {
-@@ -712,24 +1367,42 @@ void exec(const std::vector<uint8_t>& data) {
+@@ -712,24 +1380,42 @@ void exec(const std::vector<uint8_t>& data) {
              uint16_t a = rd<uint16_t>(p), n = rd<uint16_t>(p);
              std::memcpy(&xf[a], p, 4u * n);
              p += 4u * n;
@@ -5619,7 +5634,7 @@ index 5726093..bfe7f51 100644
              Tex& t = texs[id];
              ensure_tex(t, w, h, levels);
              for (int l = 0; l < levels; ++l) {
-@@ -742,7 +1415,55 @@ void exec(const std::vector<uint8_t>& data) {
+@@ -742,7 +1428,55 @@ void exec(const std::vector<uint8_t>& data) {
          }
          case VC_TEXBIND: { uint8_t m = rd<uint8_t>(p); map_src[m] = rd<uint32_t>(p); break; }
          case VC_TEXEFB: { uint8_t m = rd<uint8_t>(p); map_src[m] = 1ull << 32 | rd<uint32_t>(p); break; }
@@ -5676,7 +5691,7 @@ index 5726093..bfe7f51 100644
          case VC_DRAWDONE: gx_draw_done_reached(); break;
          default: rt_die("video: bad record byte %02X", p[-1]);
          }
-@@ -811,13 +1532,17 @@ namespace {
+@@ -811,13 +1545,17 @@ namespace {
  // Where the picture sits in a window of w x h (pixels or window units): the
  // TV's screen, 4:3 or 16:9 as SYSCONF says, as large as the window allows and
  // centred; of its 480 lines (NTSC) VI scans the XFB out over its active ones,
@@ -5696,7 +5711,7 @@ index 5726093..bfe7f51 100644
      return {(w - sw) / 2, (h - ph) / 2, sw, ph};
  }
  
-@@ -839,10 +1564,13 @@ enum : uint32_t { CL_UP = 0x0001, CL_LEFT = 0x0002, CL_ZR = 0x0004, CL_X = 0x000
+@@ -839,10 +1577,13 @@ enum : uint32_t { CL_UP = 0x0001, CL_LEFT = 0x0002, CL_ZR = 0x0004, CL_X = 0x000
                    CL_Y = 0x0020, CL_B = 0x0040, CL_ZL = 0x0080, CL_R = 0x0200, CL_PLUS = 0x0400,
                    CL_HOME = 0x0800, CL_MINUS = 0x1000, CL_L = 0x2000, CL_DOWN = 0x4000, CL_RIGHT = 0x8000 };
  constexpr uint32_t kStick = 1u << 16;               // L up, down, left, right, then R's: kStick << 0..7
@@ -5710,7 +5725,7 @@ index 5726093..bfe7f51 100644
  
  const char* DEFAULT_KEYS =
      "# wiiboot's keys: each Wii Remote button, then the keys and mouse buttons that press it.\n"
-@@ -869,6 +1597,8 @@ const char* DEFAULT_KEYS =
+@@ -869,6 +1610,8 @@ const char* DEFAULT_KEYS =
      "# takes the keys, the mouse and the first pad at once (Input = Pad or Keyboard: only one of them;\n"
      "# wiiboot --input says the same).\n"
      "# The pad: its triggers are ZL and ZR, its shoulders L and R, Start +, Back -, its guide button Home.\n"
@@ -5719,7 +5734,7 @@ index 5726093..bfe7f51 100644
      "# Face Buttons = Position: the right one is A, the bottom one B, the top one X, the left one Y (the\n"
      "# Classic's own layout); Label: the button labelled A (Cross) is A, B (Circle) B, X (Square) X, Y (Triangle) Y.\n"
      "# Dead Zone: how far the pad's sticks move before they count, of their travel.\n"
-@@ -897,7 +1627,9 @@ const char* DEFAULT_KEYS =
+@@ -897,7 +1640,9 @@ const char* DEFAULT_KEYS =
      "Right Stick Up    =\n"
      "Right Stick Down  =\n"
      "Right Stick Left  =\n"
@@ -5730,7 +5745,7 @@ index 5726093..bfe7f51 100644
  
  std::string trim(const std::string& t) {
      size_t a = t.find_first_not_of(" \t\r"), b = t.find_last_not_of(" \t\r");
-@@ -923,7 +1655,11 @@ bool parse_keys(const std::string& text, const std::string& path, bool remote, b
+@@ -923,7 +1668,11 @@ bool parse_keys(const std::string& text, const std::string& path, bool remote, b
                                       {"Left Stick Up", kStick << 0}, {"Left Stick Down", kStick << 1},
                                       {"Left Stick Left", kStick << 2}, {"Left Stick Right", kStick << 3},
                                       {"Right Stick Up", kStick << 4}, {"Right Stick Down", kStick << 5},
@@ -5743,7 +5758,7 @@ index 5726093..bfe7f51 100644
      static const Btn mice[] = {{"Mouse Left", SDL_BUTTON_LMASK}, {"Mouse Right", SDL_BUTTON_RMASK},
                                 {"Mouse Middle", SDL_BUTTON_MMASK}, {"Mouse X1", SDL_BUTTON_X1MASK},
                                 {"Mouse X2", SDL_BUTTON_X2MASK}};
-@@ -980,7 +1716,7 @@ bool parse_keys(const std::string& text, const std::string& path, bool remote, b
+@@ -980,7 +1729,7 @@ bool parse_keys(const std::string& text, const std::string& path, bool remote, b
          }
          if (!b) {
              if (in_classic) rt_log("video: %s:%d: not a Classic Controller button (A B X Y L R ZL ZR Plus Minus Home Up Down Left Right, "
@@ -5752,7 +5767,7 @@ index 5726093..bfe7f51 100644
              else rt_log("video: %s:%d: not a Remote button (A B Up Down Left Right Plus Minus 1 2 Shake Raise; the Nunchuk's "
                          "C Z Stick Up/Down/Left/Right Walk)", path.c_str(), line);
              continue;
-@@ -1006,7 +1742,9 @@ bool parse_keys(const std::string& text, const std::string& path, bool remote, b
+@@ -1006,7 +1755,9 @@ bool parse_keys(const std::string& text, const std::string& path, bool remote, b
      return has_classic;
  }
  
@@ -5762,7 +5777,7 @@ index 5726093..bfe7f51 100644
      std::string text;
      if (FILE* f = std::fopen(path.c_str(), "rb")) {
          char buf[4096];
-@@ -1079,6 +1817,8 @@ ClassicState classic_from_pad(SDL_Gamepad* g) {
+@@ -1079,6 +1830,8 @@ ClassicState classic_from_pad(SDL_Gamepad* g) {
          {SDL_GAMEPAD_BUTTON_START, CL_PLUS}, {SDL_GAMEPAD_BUTTON_BACK, CL_MINUS}, {SDL_GAMEPAD_BUTTON_GUIDE, CL_HOME}};
      for (auto& f : fixed)
          if (SDL_GetGamepadButton(g, f.b)) s.buttons |= f.bit;
@@ -5771,7 +5786,7 @@ index 5726093..bfe7f51 100644
      // the face buttons: by position, the Classic's own layout (A right, B
      // bottom, X top, Y left), or by the pad's labels
      static const struct { SDL_GamepadButton b; uint32_t pos; } face[] = {
-@@ -1112,6 +1852,7 @@ ClassicState classic_from_pad(SDL_Gamepad* g) {
+@@ -1112,6 +1865,7 @@ ClassicState classic_from_pad(SDL_Gamepad* g) {
  void merge(ClassicState& a, const ClassicState& b) {
      a.connected |= b.connected;
      a.buttons |= b.buttons;
@@ -5779,7 +5794,7 @@ index 5726093..bfe7f51 100644
      if (std::hypot(b.lx, b.ly) > std::hypot(a.lx, a.ly)) { a.lx = b.lx; a.ly = b.ly; }
      if (std::hypot(b.rx, b.ry) > std::hypot(a.rx, a.ry)) { a.rx = b.rx; a.ry = b.ry; }
      a.lt = std::max(a.lt, b.lt);
-@@ -1186,7 +1927,7 @@ void update_pad() {
+@@ -1186,7 +1940,7 @@ void update_pad() {
      p.buttons &= ~(kRaisePlus | kRaiseMinus | kWalk | (kStick * 0xF));
      int ww = 0, wh = 0;
      SDL_GetWindowSize(win, &ww, &wh);                        // mouse coordinates are in window units
@@ -5788,7 +5803,7 @@ index 5726093..bfe7f51 100644
          // -1..1 spans the picture as present() shows it, so that the game's
          // cursor lands under the mouse
          Rect r = picture_rect((float)ww, (float)wh);
-@@ -1196,8 +1937,8 @@ void update_pad() {
+@@ -1196,8 +1950,8 @@ void update_pad() {
      }
      // over the picture the game draws its own cursor, as on the Wii
      static bool hidden = false;
@@ -5799,7 +5814,7 @@ index 5726093..bfe7f51 100644
          if (hidden) SDL_HideCursor(); else SDL_ShowCursor();
      }
      // WIIKIT_PAD="45:A 50.5:@0.2,-0.1 51:A": at each time (seconds from
-@@ -1248,6 +1989,7 @@ void update_pad() {
+@@ -1248,6 +2002,7 @@ void update_pad() {
          ClassicState& k = c[0];
          k.connected = true;
          k.buttons = cl & 0xFFFF;
@@ -5807,7 +5822,7 @@ index 5726093..bfe7f51 100644
          auto dir = [&](int i) { return cl & (kStick << i) ? 1.0f : 0.0f; };
          k.lx = dir(3) - dir(2);
          k.ly = dir(0) - dir(1);
-@@ -1261,12 +2003,19 @@ void update_pad() {
+@@ -1261,12 +2016,19 @@ void update_pad() {
      for (int i = 0; i < 4; ++i)
          if (chan_pad[i] && !(i == 0 && mode == INPUT_MODE_KEYBOARD)) merge(c[i], classic_from_pad(chan_pad[i]));
      update_rumble();
@@ -5827,7 +5842,7 @@ index 5726093..bfe7f51 100644
      ++cnt.presents;
      int ww = 0, wh = 0;
      SDL_GetWindowSizeInPixels(win, &ww, &wh);
-@@ -1275,22 +2024,119 @@ void present() {
+@@ -1275,22 +2037,119 @@ void present() {
      glColorMask(1, 1, 1, 1);
      glClearColor(0, 0, 0, 1);
      glClear(GL_COLOR_BUFFER_BIT);
@@ -5955,7 +5970,7 @@ index 5726093..bfe7f51 100644
          char name[64];
          std::snprintf(name, sizeof name, "/frame_%06llu.png", (unsigned long long)cnt.presents);
          write_png(std::string(opt.dump_dir) + name, ww, wh, flip.data());
-@@ -1317,7 +2163,6 @@ void setup() {
+@@ -1317,7 +2176,6 @@ void setup() {
      glNamedFramebufferTexture(efb_fbo, GL_DEPTH_ATTACHMENT, efb_dep, 0);
      if (glCheckNamedFramebufferStatus(efb_fbo, GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
          rt_die("video: the EFB framebuffer is incomplete");
@@ -5963,7 +5978,7 @@ index 5726093..bfe7f51 100644
      glBindFramebuffer(GL_FRAMEBUFFER, efb_fbo);
      glClearColor(0, 0, 0, 1);
      glClearDepth(1.0);
-@@ -1327,45 +2172,25 @@ void setup() {
+@@ -1327,45 +2185,25 @@ void setup() {
      const GLbitfield map = GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT;
      glNamedBufferStorage(vbo, VBO_CAP, nullptr, map);
      vbo_ptr = static_cast<uint8_t*>(glMapNamedBufferRange(vbo, 0, VBO_CAP, map));
@@ -6026,7 +6041,7 @@ index 5726093..bfe7f51 100644
  
      copy_prog = link(FULLSCREEN_VS, COPY_FS);
      if (!copy_prog) rt_die("video: the EFB copy program does not build");
-@@ -1377,6 +2202,7 @@ void setup() {
+@@ -1377,6 +2215,7 @@ void setup() {
  
  // ---- the game's side ------------------------------------------------------------------------------
  bool video_enabled() { return opt.enabled; }
@@ -6034,7 +6049,7 @@ index 5726093..bfe7f51 100644
  void video_configure(const VideoOptions& o) { opt = o; S = std::max(1, o.scale); }
  
  VideoPerf g_vperf;
-@@ -1462,6 +2288,41 @@ std::atomic<bool> want_relative{false};
+@@ -1462,6 +2301,41 @@ std::atomic<bool> want_relative{false};
  std::mutex motion_mx;
  float motion_x = 0, motion_y = 0;
  void video_set_relative_mouse(bool on) { want_relative = on; }
@@ -6076,7 +6091,7 @@ index 5726093..bfe7f51 100644
  void video_take_mouse_motion(float& dx, float& dy) {
      std::lock_guard<std::mutex> lk(motion_mx);
      dx = motion_x; dy = motion_y;
-@@ -1473,12 +2334,27 @@ PadState video_pad() {
+@@ -1473,12 +2347,27 @@ PadState video_pad() {
      return pad;
  }
  ClassicState video_classic(int chan) {
@@ -6104,7 +6119,7 @@ index 5726093..bfe7f51 100644
  void video_retrace() {
      retraces.fetch_add(1);
      if (wake) SDL_SignalSemaphore(wake);
-@@ -1499,13 +2375,21 @@ void video_run(const char* title) {
+@@ -1499,13 +2388,21 @@ void video_run(const char* title) {
      int w0 = opt.window_w ? opt.window_w : (opt.widescreen ? 1280 : 960), h0 = opt.window_h ? opt.window_h : 720;
      SDL_WindowFlags wflags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE;
      if (opt.fullscreen) wflags |= SDL_WINDOW_FULLSCREEN;
@@ -6126,7 +6141,7 @@ index 5726093..bfe7f51 100644
      rt_log("video: %s, %s", (const char*)glGetString(GL_RENDERER), (const char*)glGetString(GL_VERSION));
      if (debug) {
          glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
-@@ -1529,11 +2413,15 @@ void video_run(const char* title) {
+@@ -1529,11 +2426,15 @@ void video_run(const char* title) {
      uint64_t frames_then = 0;
      uint32_t seen = retraces.load();
      std::string base_title = title;
@@ -6142,7 +6157,7 @@ index 5726093..bfe7f51 100644
              if (e.type == SDL_EVENT_GAMEPAD_ADDED) pad_added(e.gdevice.which);
              if (e.type == SDL_EVENT_GAMEPAD_REMOVED) pad_removed(e.gdevice.which);
              // F11 or Alt+Enter: fullscreen and back
-@@ -1560,6 +2448,15 @@ void video_run(const char* title) {
+@@ -1560,6 +2461,15 @@ void video_run(const char* title) {
              }
          }
          auto now = Clock::now();
@@ -6158,7 +6173,7 @@ index 5726093..bfe7f51 100644
          if (opt.quit_after > 0 && std::chrono::duration<double>(now - t0).count() > opt.quit_after) quit = true;
          if (quit) {
              rt_log("video: %llu frames, %llu presents, %llu draws, %llu programs (%llu linked, %llu from the shader cache)",
-@@ -1574,6 +2471,18 @@ void video_run(const char* title) {
+@@ -1574,6 +2484,18 @@ void video_run(const char* title) {
          {
              bool rel = want_relative && (SDL_GetWindowFlags(win) & SDL_WINDOW_INPUT_FOCUS);
              if (rel != SDL_GetWindowRelativeMouseMode(win)) SDL_SetWindowRelativeMouseMode(win, rel);
@@ -6177,7 +6192,7 @@ index 5726093..bfe7f51 100644
              float dx = 0, dy = 0;
              SDL_GetRelativeMouseState(&dx, &dy);
              if (rel) {
-@@ -1592,7 +2501,14 @@ void video_run(const char* title) {
+@@ -1592,7 +2514,14 @@ void video_run(const char* title) {
                  double vtx = ms(g_vperf.vtx), tex = ms(g_vperf.tex), wait = ms(g_vperf.wait), draw = ms(g_vperf.draw),
                         pres = ms(g_vperf.present);
                  rt_log("perf: %.1f fps; frame %.1f ms; game thread: vertices %.1f, textures %.1f, waiting for the renderer %.1f; "
@@ -6193,7 +6208,7 @@ index 5726093..bfe7f51 100644
              }
              frames_then = cnt.frames;
              t_title = now;
-@@ -1608,6 +2524,8 @@ void video_run(const char* title) {
+@@ -1608,6 +2537,8 @@ void video_run(const char* title) {
              }
              if (c.readback) { if (c.copy) copy_readback(c.copy); else efb_readback(); busy = true; continue; }
              auto te = Clock::now();
@@ -6202,7 +6217,7 @@ index 5726093..bfe7f51 100644
              exec(c.data);
              if (g_vperf_on) g_vperf.draw += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - te).count();
              {
-@@ -1621,8 +2539,25 @@ void video_run(const char* title) {
+@@ -1621,8 +2552,25 @@ void video_run(const char* title) {
              if (retraces.load() != seen) break;
          }
          uint32_t r = retraces.load();
