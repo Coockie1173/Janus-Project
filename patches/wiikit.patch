@@ -989,7 +989,7 @@ index 3d2da4e..24964ed 100644
      X(PFNGLTEXTUREPARAMETERIPROC, glTextureParameteri)                                              \
      X(PFNGLBINDTEXTUREUNITPROC, glBindTextureUnit)                                                  \
 diff --git a/runtime/gx.cpp b/runtime/gx.cpp
-index a6b37f2..ba6052b 100644
+index a6b37f2..3170df7 100644
 --- a/runtime/gx.cpp
 +++ b/runtime/gx.cpp
 @@ -21,10 +21,19 @@
@@ -2100,7 +2100,7 @@ index a6b37f2..ba6052b 100644
          TRACE("CP %02X %08X\n", p[1], cp[p[1]]);
          return 6;
      case 0x10: {
-@@ -556,54 +1312,28 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
+@@ -556,54 +1312,27 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
      if (op >= 0x80 && op < 0xC0) {
          if (n < 3) return 0;
          uint32_t count = (uint32_t)p[1] << 8 | p[2];
@@ -2115,12 +2115,8 @@ index a6b37f2..ba6052b 100644
          TRACE("DRAW %02X fmt %d n %u%s\n", op & 0xF8, op & 7, count, in_dl ? " (dl)" : "");
 -        if (video && count) {
 -            if (bp[0xF1] >> 21 & 7) warn_once("fog (not drawn), type", bp[0xF1] >> 21 & 7);
-+        if (video && count && !skip_frames()) {
-             if (bp[0xF4] >> 2 & 3) warn_once("Z texture (not drawn), op", bp[0xF4] >> 2 & 3);
-+            const uint8_t fl = pl.flags;
-+            const size_t bytes = (size_t)count * pl.stride;
-+            uint8_t* out = draw_begin(op & 0xF8, fl, count, bytes);
-             if (g_vperf_on) {
+-            if (bp[0xF4] >> 2 & 3) warn_once("Z texture (not drawn), op", bp[0xF4] >> 2 & 3);
+-            if (g_vperf_on) {
 -                auto t0 = std::chrono::steady_clock::now();
 -                sync_textures();
 -                g_vperf.tex += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count();
@@ -2140,7 +2136,11 @@ index a6b37f2..ba6052b 100644
 -            put<uint32_t>(count);
 -            GVtx* out = reinterpret_cast<GVtx*>(grow(count * sizeof(GVtx)));
 -            uint8_t fl;
--            if (g_vperf_on) {
++        if (video && count && !skip_frames()) {
++            const uint8_t fl = pl.flags;
++            const size_t bytes = (size_t)count * pl.stride;
++            uint8_t* out = draw_begin(op & 0xF8, fl, count, bytes);
+             if (g_vperf_on) {
 -                auto t0 = std::chrono::steady_clock::now();
 -                fl = decode_vertices(f, p + 3, count, out);
 -                g_vperf.vtx += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count();
@@ -2169,7 +2169,7 @@ index a6b37f2..ba6052b 100644
          }
          return len;
      }
-@@ -614,8 +1344,17 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
+@@ -614,8 +1343,17 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
  
  void feed(const uint8_t* b, int n) {
      if (desync) return;
@@ -2188,7 +2188,7 @@ index a6b37f2..ba6052b 100644
      while (off < stream.size()) {
          size_t k = parse(stream.data() + off, stream.size() - off, false);
          if (!k) { --st.cmds; break; }
-@@ -624,6 +1363,86 @@ void feed(const uint8_t* b, int n) {
+@@ -624,6 +1362,86 @@ void feed(const uint8_t* b, int n) {
      stream.erase(stream.begin(), stream.begin() + (ptrdiff_t)off);
  }
  
@@ -2275,7 +2275,7 @@ index a6b37f2..ba6052b 100644
  }  // namespace
  
  void gx_trace_next_frame() { trace_next = true; }
-@@ -633,6 +1452,7 @@ void gx_trace_next_frame() { trace_next = true; }
+@@ -633,6 +1451,7 @@ void gx_trace_next_frame() { trace_next = true; }
  // record so far is handed over, and the renderer reads the EFB back once it
  // has drawn it; peeks read that copy until anything more is recorded.
  uint32_t gx_efb_peek(uint32_t a) {
@@ -2283,7 +2283,7 @@ index a6b37f2..ba6052b 100644
      static std::mutex mx;
      static std::vector<uint32_t> argb, z;
      static uint64_t at = UINT64_MAX;
-@@ -698,6 +1518,7 @@ static void encode_tex(uint32_t fmt, int w, int h, const uint8_t* rgba, uint8_t*
+@@ -698,6 +1517,7 @@ static void encode_tex(uint32_t fmt, int w, int h, const uint8_t* rgba, uint8_t*
  }
  
  bool gx_copy_to_ram(uint32_t addr) {
@@ -2291,7 +2291,7 @@ index a6b37f2..ba6052b 100644
      CopyRec rec_copy;
      bool known = false;
      hw_run_locked([&] {
-@@ -714,13 +1535,21 @@ bool gx_copy_to_ram(uint32_t addr) {
+@@ -714,13 +1534,21 @@ bool gx_copy_to_ram(uint32_t addr) {
      hw_run_locked([&] {
          std::memcpy(host(virt(addr)), out.data(), out.size());
          auto c = copies.find(addr);                          // the GPU's copy still stands for these bytes
@@ -2314,7 +2314,7 @@ index a6b37f2..ba6052b 100644
      g_efb_peek = gx_efb_peek;
  }
  
-@@ -729,19 +1558,61 @@ void gx_init() {
+@@ -729,19 +1557,61 @@ void gx_init() {
  // AI's, which start each audio frame's mix, above all. So does this wait.
  // A handler may switch guest threads, and another thread may hand the
  // record over in the meantime.
@@ -2378,7 +2378,7 @@ index a6b37f2..ba6052b 100644
  
  // The write-gather pipe: CPU stores to 0xCC008000 collect in a 32-byte
  // buffer, and reach the FIFO in memory as 32-byte bursts, as on the console
-@@ -760,7 +1631,7 @@ static void gp_run() {
+@@ -760,7 +1630,7 @@ static void gp_run() {
      if (!(cp_reg16[1] & 1)) return;
      size_t k = 0;
      while (k < held.size() && !(bp_enabled() && held[k].addr == bp_addr())) {
@@ -2387,7 +2387,7 @@ index a6b37f2..ba6052b 100644
          ++k;
      }
      held.erase(held.begin(), held.begin() + (ptrdiff_t)k);
-@@ -768,15 +1639,20 @@ static void gp_run() {
+@@ -768,15 +1638,20 @@ static void gp_run() {
  
  void gx_pipe_burst(const uint8_t* b, int n) {
      uint32_t at = pi_wptr_addr();
@@ -2415,7 +2415,7 @@ index a6b37f2..ba6052b 100644
      Burst h{at, {}};
      std::memcpy(h.b, b, 32);
      held.push_back(h);
-@@ -840,14 +1716,17 @@ uint32_t gx_pe_read(uint32_t off, int) {
+@@ -840,14 +1715,17 @@ uint32_t gx_pe_read(uint32_t off, int) {
  void gx_pe_write(uint32_t off, uint32_t v, int) {
      if (off == 0x0A) {
          uint16_t clear = (uint16_t)(v & 0xC);            // status bits: write 1 to clear
@@ -2436,7 +2436,7 @@ index a6b37f2..ba6052b 100644
      if (bp_reached() && (cp_reg16[1] & 0x20)) c |= 0x800;   // CP breakpoint
      if ((cp_reg16[1] & 0x04) && cp_overflow()) c |= 0x800;   // CP overflow: the FIFO is full
      if ((cp_reg16[1] & 0x08) && cp_underflow()) c |= 0x800;  // CP underflow: drained again
-@@ -855,10 +1734,19 @@ uint32_t gx_irq() {
+@@ -855,10 +1733,19 @@ uint32_t gx_irq() {
  }
  
  void gx_report() {
@@ -2457,10 +2457,18 @@ index a6b37f2..ba6052b 100644
 +               (unsigned long long)(dl_stat.copied >> 20), arena_gen - 1, (unsigned long long)(hashed_bytes >> 20), (unsigned long long)mem_watch_faults());
  }
 diff --git a/runtime/gxshader.cpp b/runtime/gxshader.cpp
-index 7943c4d..8edd2e1 100644
+index 7943c4d..4e5b980 100644
 --- a/runtime/gxshader.cpp
 +++ b/runtime/gxshader.cpp
-@@ -30,10 +30,21 @@ void w(std::string& s, const char* f, ...) {
+@@ -15,6 +15,7 @@
+ #include "video.h"
+ #include <cstdarg>
+ #include <cstdio>
++#include <cstdlib>
+ #include <string>
+ 
+ namespace {
+@@ -30,10 +31,21 @@ void w(std::string& s, const char* f, ...) {
  
  // ---- vertex shader ----------------------------------------------------------------------------
  const char* VS_HEAD = R"(#version 450 core
@@ -2486,7 +2494,7 @@ index 7943c4d..8edd2e1 100644
  layout(location = 0) in vec3 a_pos;
  layout(location = 1) in vec3 a_nrm;
  layout(location = 2) in vec3 a_bin;
-@@ -170,14 +181,29 @@ std::string vertex_shader(const uint32_t* xf, uint8_t vflags) {
+@@ -170,14 +182,29 @@ std::string vertex_shader(const uint32_t* xf, uint8_t vflags) {
  
  // ---- fragment shader --------------------------------------------------------------------------
  const char* FS_HEAD = R"(#version 450 core
@@ -2506,7 +2514,7 @@ index 7943c4d..8edd2e1 100644
 +    ivec4 indscale[4];    // indirect stage: coordinate shift s, t
 +    ivec4 indmtx[6];      // indirect matrices, two rows each: (a, b, c, shift)
 +    vec4 fogf;            // fog A, C, range centre x, viewport half width
-+    ivec4 fogi;           // fog B magnitude, B shift, colour RGB8
++    ivec4 fogi;           // fog B magnitude, B shift, colour RGB8; Z texture bias
 +    vec4 fogk[3];         // fog range adjustment k[0..9]
  };
 +layout(std430, binding = 1) readonly buffer PSRing { PSData ps_ring[]; };
@@ -2523,18 +2531,32 @@ index 7943c4d..8edd2e1 100644
  layout(binding = 0) uniform sampler2D s0;
  layout(binding = 1) uniform sampler2D s1;
  layout(binding = 2) uniform sampler2D s2;
-@@ -272,6 +298,35 @@ const char* acmp(uint32_t c) {
+@@ -272,6 +299,49 @@ const char* acmp(uint32_t c) {
      return t[c & 7];
  }
  
++// A Z texture: the last stage's texel, as a 24-bit depth plus a bias, adds to
++// or replaces the pixel's depth (Dolphin's weights per format). Depth of field
++// passes draw a quad textured with a copy of the depth and fog it by that.
++void ztexture(std::string& s, const uint32_t* bp) {
++    uint32_t op = bp[0xF5] >> 2 & 3, type = bp[0xF5] & 3;
++    static const char* wt[4] = {"ivec4(0, 0, 0, 1)", "ivec4(0, 1, 0, 256)", "ivec4(65536, 256, 1, 0)", "ivec4(0)"};
++    s += "    int zs = clamp(int(gl_FragCoord.z * 16777216.0), 0, 16777215);\n";
++    if (op == 1 || op == 2)
++        w(s, "    zs = (idot(%s.xyz, tex.rgb) + %s.w * tex.a + u_fogi.w%s) & 0xFFFFFF;\n", wt[type], wt[type], op == 1 ? " + zs" : "");
++    s += "    gl_FragDepth = float(zs) / 16777216.0;\n";
++}
++
 +// Fog, after the alpha test, as the hardware (and Dolphin) does it: the eye
 +// depth ze from the 24-bit screen z, perspective A / (B - (z >> shift)) or
 +// orthographic A * z, optionally widened towards the screen's sides, then
 +// clamp(ze - C) through the chosen curve, blended in steps of 1/256.
 +void fog(std::string& s, const uint32_t* bp) {
 +    uint32_t fsel = bp[0xF1] >> 21 & 7, proj = bp[0xF1] >> 20 & 1;
-+    if (!fsel) return;
-+    s += "    {\n        int zs = clamp(int(gl_FragCoord.z * 16777216.0), 0, 16777215);\n";
++    static const bool off = std::getenv("WIIKIT_NOFOG") != nullptr;    // for comparing
++    if (!fsel || off) return;
++    s += "    {\n";
++    if (!(bp[0xF5] >> 2 & 3)) s += "        int zs = clamp(int(gl_FragCoord.z * 16777216.0), 0, 16777215);\n";
 +    if (!proj) s += "        float ze = u_fogf.x * 16777216.0 / float(u_fogi.x - (zs >> u_fogi.y));\n";
 +    else s += "        float ze = u_fogf.x * float(zs) / 16777216.0;\n";
 +    if (bp[0xE8] >> 10 & 1)
@@ -2559,7 +2581,15 @@ index 7943c4d..8edd2e1 100644
  std::string fragment_shader(const uint32_t* bp) {
      std::string s = FS_HEAD;
      uint32_t gen = bp[0x00], ntev = (gen >> 10 & 15) + 1, nind = gen >> 16 & 7, ntg = gen & 15;
-@@ -359,6 +414,7 @@ std::string fragment_shader(const uint32_t* bp) {
+@@ -349,6 +419,7 @@ std::string fragment_shader(const uint32_t* bp) {
+         combiner(s, aenv, true, "ra");
+         w(s, "        %s.rgb = rc;\n        %s.a = ra;\n    }\n", REG[cenv >> 22 & 3], REG[aenv >> 22 & 3]);
+     }
++    if (bp[0xF5] >> 2 & 3) ztexture(s, bp);
+     s += "    ivec4 fin = prev & 255;\n";
+     uint32_t at = bp[0xF3], c0 = at >> 16 & 7, c1 = at >> 19 & 7, logic = at >> 22 & 3;
+     if (!(c0 == 7 && c1 == 7 && logic != 2)) {
+@@ -359,6 +430,7 @@ std::string fragment_shader(const uint32_t* bp) {
          static const char* lg[4] = {"&&", "||", "!=", "=="};
          w(s, "    if (!((%s) %s (%s))) discard;\n", t0, lg[logic], t1);
      }
@@ -2567,11 +2597,11 @@ index 7943c4d..8edd2e1 100644
      s += "    o_blend = vec4(fin) / 255.0;\n    o_col = o_blend;\n";
      if (bp[0x42] >> 8 & 1) s += "    o_col.a = float(u_alpha.z) / 255.0;\n";
      s += "}\n";
-@@ -383,6 +439,7 @@ std::string gx_shader_key(const uint32_t* bp, const uint32_t* xf, uint8_t vflags
+@@ -383,6 +455,7 @@ std::string gx_shader_key(const uint32_t* bp, const uint32_t* xf, uint8_t vflags
      add(bp[0xF3] >> 16);
      add(bp[0x27]);
      add(bp[0x42] >> 8 & 1);
-+    add((bp[0xF1] >> 20 & 15) | (bp[0xE8] >> 10 & 1) << 4);    // fog curve, projection, range adjustment
++    add((bp[0xF1] >> 20 & 15) | (bp[0xE8] >> 10 & 1) << 4 | (bp[0xF5] & 15) << 8);   // fog, Z texture
      return k;
  }
  
@@ -4523,7 +4553,7 @@ index 8a4e097..8b1b1a8 100644
  void ppc_mmio_write(uint32_t addr, uint32_t, int) { rt_die("mmio write %08X", addr); }
  uint64_t ppc_timebase() { return 0; }
 diff --git a/runtime/video.cpp b/runtime/video.cpp
-index 5726093..abdde21 100644
+index 5726093..4222039 100644
 --- a/runtime/video.cpp
 +++ b/runtime/video.cpp
 @@ -67,19 +67,51 @@ ClassicState classic[4];
@@ -4540,7 +4570,7 @@ index 5726093..abdde21 100644
      float texdim[8][4];
      int32_t indscale[4][4], indmtx[6][4];
 +    float fogf[4];                                 // A, C, range centre and viewport half width (EFB pixels at scale)
-+    int32_t fogi[4];                               // B magnitude, B shift, colour (RGB8)
++    int32_t fogi[4];                               // B magnitude, B shift, colour (RGB8), Z texture bias
 +    float fogk[3][4];                              // range adjustment k[0..9]
  };
  
@@ -4858,10 +4888,11 @@ index 5726093..abdde21 100644
  }
  
  void bp_set(uint32_t v) {
-@@ -451,6 +645,23 @@ void set_ps_uniforms() {
+@@ -451,6 +645,24 @@ void set_ps_uniforms() {
          std::memcpy(u.indmtx[2 * m], r0, sizeof r0);
          std::memcpy(u.indmtx[2 * m + 1], r1, sizeof r1);
      }
++    u.fogi[3] = (int32_t)(bp[0xF4] & 0xFFFFFF);
 +    if (bp[0xF1] >> 21 & 7) {                      // fog: A and C are floats with 11 bits of mantissa
 +        auto f20 = [](uint32_t v) {
 +            uint32_t b = (v >> 19 & 1) << 31 | (v >> 11 & 255) << 23 | (v & 0x7FF) << 12;
@@ -4882,7 +4913,7 @@ index 5726093..abdde21 100644
      if (dump_ps) {
          dump_ps = false;
          std::string t = "video: program " + std::to_string(cnt.programs - 1) + " uniforms:";
-@@ -462,9 +673,12 @@ void set_ps_uniforms() {
+@@ -462,9 +674,12 @@ void set_ps_uniforms() {
          rt_log("%s", t.c_str());
      }
      if (ps_valid && !std::memcmp(&u, &ps_last, sizeof u)) return;
@@ -4896,7 +4927,7 @@ index 5726093..abdde21 100644
  }
  
  void bind_textures() {
-@@ -475,113 +689,574 @@ void bind_textures() {
+@@ -475,113 +690,574 @@ void bind_textures() {
      for (int m = 0; m < 8; ++m) {
          if (!(used >> m & 1)) continue;
          GLuint name = 0;
@@ -5550,7 +5581,13 @@ index 5726093..abdde21 100644
          uint32_t pm = v0.mtx[0] * 4u;
          float pos[3];
          for (int r = 0; r < 3; ++r)
-@@ -598,62 +1273,70 @@ void draw(uint8_t prim, uint8_t vflags, const uint8_t* pieces, uint32_t npieces)
+@@ -593,67 +1269,75 @@ void draw(uint8_t prim, uint8_t vflags, const uint8_t* pieces, uint32_t npieces)
+                c[2] = fx(0x1024) * pos[2] + fx(0x1025); c[3] = 1; }
+         std::fprintf(lf, "%ld prim %02X n %u zm %X cm %X pix %X at %X ztex %X fog %X | vp %g %g %g %g %g %g | proj%u %g %g %g %g %g %g | "
+                      "mtx %u obj %g %g %g eye %g %g %g ndc %g %g w %g | tev %u chans %u\n",
+-                     (long)cnt.draws, prim, n, bp[0x40], bp[0x41], bp[0x43], bp[0xF3], bp[0xF4], bp[0xF1],
++                     (long)cnt.draws, prim, n, bp[0x40], bp[0x41], bp[0x43], bp[0xF3], bp[0xF5], bp[0xF1],
+                      fx(0x101A), fx(0x101B), fx(0x101C), fx(0x101D), fx(0x101E), fx(0x101F),
                       xf[0x1026], fx(0x1020), fx(0x1021), fx(0x1022), fx(0x1023), fx(0x1024), fx(0x1025),
                       v0.mtx[0], v0.pos[0], v0.pos[1], v0.pos[2], pos[0], pos[1], pos[2], c[0] / c[3], c[1] / c[3], c[3],
                       (bp[0x00] >> 10 & 15) + 1, xf[0x1009] & 3);
@@ -5658,7 +5695,7 @@ index 5726093..abdde21 100644
  }
  
  // ---- the record -----------------------------------------------------------------------------------
-@@ -662,6 +1345,8 @@ template <class T> T rd(const uint8_t*& p) { T v; std::memcpy(&v, p, sizeof v);
+@@ -662,6 +1346,8 @@ template <class T> T rd(const uint8_t*& p) { T v; std::memcpy(&v, p, sizeof v);
  // The EFB at its native size: the pixel at each native position's top-left
  // sample of the scaled EFB (rows from the top, as the EFB copies read it).
  void efb_readback() {
@@ -5667,7 +5704,7 @@ index 5726093..abdde21 100644
      int W = EFB_W * S, H = EFB_H * S;
      std::vector<uint8_t> px((size_t)W * H * 4);
      std::vector<float> dz((size_t)W * H);
-@@ -703,6 +1388,9 @@ void copy_readback(uint32_t addr) {
+@@ -703,6 +1389,9 @@ void copy_readback(uint32_t addr) {
  }
  
  void exec(const std::vector<uint8_t>& data) {
@@ -5677,7 +5714,7 @@ index 5726093..abdde21 100644
      const uint8_t* p = data.data();
      const uint8_t* end = p + data.size();
      while (p < end) {
-@@ -712,24 +1400,42 @@ void exec(const std::vector<uint8_t>& data) {
+@@ -712,24 +1401,42 @@ void exec(const std::vector<uint8_t>& data) {
              uint16_t a = rd<uint16_t>(p), n = rd<uint16_t>(p);
              std::memcpy(&xf[a], p, 4u * n);
              p += 4u * n;
@@ -5723,7 +5760,7 @@ index 5726093..abdde21 100644
              Tex& t = texs[id];
              ensure_tex(t, w, h, levels);
              for (int l = 0; l < levels; ++l) {
-@@ -742,7 +1448,55 @@ void exec(const std::vector<uint8_t>& data) {
+@@ -742,7 +1449,55 @@ void exec(const std::vector<uint8_t>& data) {
          }
          case VC_TEXBIND: { uint8_t m = rd<uint8_t>(p); map_src[m] = rd<uint32_t>(p); break; }
          case VC_TEXEFB: { uint8_t m = rd<uint8_t>(p); map_src[m] = 1ull << 32 | rd<uint32_t>(p); break; }
@@ -5780,7 +5817,7 @@ index 5726093..abdde21 100644
          case VC_DRAWDONE: gx_draw_done_reached(); break;
          default: rt_die("video: bad record byte %02X", p[-1]);
          }
-@@ -811,13 +1565,17 @@ namespace {
+@@ -811,13 +1566,17 @@ namespace {
  // Where the picture sits in a window of w x h (pixels or window units): the
  // TV's screen, 4:3 or 16:9 as SYSCONF says, as large as the window allows and
  // centred; of its 480 lines (NTSC) VI scans the XFB out over its active ones,
@@ -5800,7 +5837,7 @@ index 5726093..abdde21 100644
      return {(w - sw) / 2, (h - ph) / 2, sw, ph};
  }
  
-@@ -839,10 +1597,13 @@ enum : uint32_t { CL_UP = 0x0001, CL_LEFT = 0x0002, CL_ZR = 0x0004, CL_X = 0x000
+@@ -839,10 +1598,13 @@ enum : uint32_t { CL_UP = 0x0001, CL_LEFT = 0x0002, CL_ZR = 0x0004, CL_X = 0x000
                    CL_Y = 0x0020, CL_B = 0x0040, CL_ZL = 0x0080, CL_R = 0x0200, CL_PLUS = 0x0400,
                    CL_HOME = 0x0800, CL_MINUS = 0x1000, CL_L = 0x2000, CL_DOWN = 0x4000, CL_RIGHT = 0x8000 };
  constexpr uint32_t kStick = 1u << 16;               // L up, down, left, right, then R's: kStick << 0..7
@@ -5814,7 +5851,7 @@ index 5726093..abdde21 100644
  
  const char* DEFAULT_KEYS =
      "# wiiboot's keys: each Wii Remote button, then the keys and mouse buttons that press it.\n"
-@@ -869,6 +1630,8 @@ const char* DEFAULT_KEYS =
+@@ -869,6 +1631,8 @@ const char* DEFAULT_KEYS =
      "# takes the keys, the mouse and the first pad at once (Input = Pad or Keyboard: only one of them;\n"
      "# wiiboot --input says the same).\n"
      "# The pad: its triggers are ZL and ZR, its shoulders L and R, Start +, Back -, its guide button Home.\n"
@@ -5823,7 +5860,7 @@ index 5726093..abdde21 100644
      "# Face Buttons = Position: the right one is A, the bottom one B, the top one X, the left one Y (the\n"
      "# Classic's own layout); Label: the button labelled A (Cross) is A, B (Circle) B, X (Square) X, Y (Triangle) Y.\n"
      "# Dead Zone: how far the pad's sticks move before they count, of their travel.\n"
-@@ -897,7 +1660,9 @@ const char* DEFAULT_KEYS =
+@@ -897,7 +1661,9 @@ const char* DEFAULT_KEYS =
      "Right Stick Up    =\n"
      "Right Stick Down  =\n"
      "Right Stick Left  =\n"
@@ -5834,7 +5871,7 @@ index 5726093..abdde21 100644
  
  std::string trim(const std::string& t) {
      size_t a = t.find_first_not_of(" \t\r"), b = t.find_last_not_of(" \t\r");
-@@ -923,7 +1688,11 @@ bool parse_keys(const std::string& text, const std::string& path, bool remote, b
+@@ -923,7 +1689,11 @@ bool parse_keys(const std::string& text, const std::string& path, bool remote, b
                                       {"Left Stick Up", kStick << 0}, {"Left Stick Down", kStick << 1},
                                       {"Left Stick Left", kStick << 2}, {"Left Stick Right", kStick << 3},
                                       {"Right Stick Up", kStick << 4}, {"Right Stick Down", kStick << 5},
@@ -5847,7 +5884,7 @@ index 5726093..abdde21 100644
      static const Btn mice[] = {{"Mouse Left", SDL_BUTTON_LMASK}, {"Mouse Right", SDL_BUTTON_RMASK},
                                 {"Mouse Middle", SDL_BUTTON_MMASK}, {"Mouse X1", SDL_BUTTON_X1MASK},
                                 {"Mouse X2", SDL_BUTTON_X2MASK}};
-@@ -980,7 +1749,7 @@ bool parse_keys(const std::string& text, const std::string& path, bool remote, b
+@@ -980,7 +1750,7 @@ bool parse_keys(const std::string& text, const std::string& path, bool remote, b
          }
          if (!b) {
              if (in_classic) rt_log("video: %s:%d: not a Classic Controller button (A B X Y L R ZL ZR Plus Minus Home Up Down Left Right, "
@@ -5856,7 +5893,7 @@ index 5726093..abdde21 100644
              else rt_log("video: %s:%d: not a Remote button (A B Up Down Left Right Plus Minus 1 2 Shake Raise; the Nunchuk's "
                          "C Z Stick Up/Down/Left/Right Walk)", path.c_str(), line);
              continue;
-@@ -1006,7 +1775,9 @@ bool parse_keys(const std::string& text, const std::string& path, bool remote, b
+@@ -1006,7 +1776,9 @@ bool parse_keys(const std::string& text, const std::string& path, bool remote, b
      return has_classic;
  }
  
@@ -5866,7 +5903,7 @@ index 5726093..abdde21 100644
      std::string text;
      if (FILE* f = std::fopen(path.c_str(), "rb")) {
          char buf[4096];
-@@ -1079,6 +1850,8 @@ ClassicState classic_from_pad(SDL_Gamepad* g) {
+@@ -1079,6 +1851,8 @@ ClassicState classic_from_pad(SDL_Gamepad* g) {
          {SDL_GAMEPAD_BUTTON_START, CL_PLUS}, {SDL_GAMEPAD_BUTTON_BACK, CL_MINUS}, {SDL_GAMEPAD_BUTTON_GUIDE, CL_HOME}};
      for (auto& f : fixed)
          if (SDL_GetGamepadButton(g, f.b)) s.buttons |= f.bit;
@@ -5875,7 +5912,7 @@ index 5726093..abdde21 100644
      // the face buttons: by position, the Classic's own layout (A right, B
      // bottom, X top, Y left), or by the pad's labels
      static const struct { SDL_GamepadButton b; uint32_t pos; } face[] = {
-@@ -1112,6 +1885,7 @@ ClassicState classic_from_pad(SDL_Gamepad* g) {
+@@ -1112,6 +1886,7 @@ ClassicState classic_from_pad(SDL_Gamepad* g) {
  void merge(ClassicState& a, const ClassicState& b) {
      a.connected |= b.connected;
      a.buttons |= b.buttons;
@@ -5883,7 +5920,7 @@ index 5726093..abdde21 100644
      if (std::hypot(b.lx, b.ly) > std::hypot(a.lx, a.ly)) { a.lx = b.lx; a.ly = b.ly; }
      if (std::hypot(b.rx, b.ry) > std::hypot(a.rx, a.ry)) { a.rx = b.rx; a.ry = b.ry; }
      a.lt = std::max(a.lt, b.lt);
-@@ -1186,7 +1960,7 @@ void update_pad() {
+@@ -1186,7 +1961,7 @@ void update_pad() {
      p.buttons &= ~(kRaisePlus | kRaiseMinus | kWalk | (kStick * 0xF));
      int ww = 0, wh = 0;
      SDL_GetWindowSize(win, &ww, &wh);                        // mouse coordinates are in window units
@@ -5892,7 +5929,7 @@ index 5726093..abdde21 100644
          // -1..1 spans the picture as present() shows it, so that the game's
          // cursor lands under the mouse
          Rect r = picture_rect((float)ww, (float)wh);
-@@ -1196,8 +1970,8 @@ void update_pad() {
+@@ -1196,8 +1971,8 @@ void update_pad() {
      }
      // over the picture the game draws its own cursor, as on the Wii
      static bool hidden = false;
@@ -5903,7 +5940,7 @@ index 5726093..abdde21 100644
          if (hidden) SDL_HideCursor(); else SDL_ShowCursor();
      }
      // WIIKIT_PAD="45:A 50.5:@0.2,-0.1 51:A": at each time (seconds from
-@@ -1248,6 +2022,7 @@ void update_pad() {
+@@ -1248,6 +2023,7 @@ void update_pad() {
          ClassicState& k = c[0];
          k.connected = true;
          k.buttons = cl & 0xFFFF;
@@ -5911,7 +5948,7 @@ index 5726093..abdde21 100644
          auto dir = [&](int i) { return cl & (kStick << i) ? 1.0f : 0.0f; };
          k.lx = dir(3) - dir(2);
          k.ly = dir(0) - dir(1);
-@@ -1261,12 +2036,19 @@ void update_pad() {
+@@ -1261,12 +2037,19 @@ void update_pad() {
      for (int i = 0; i < 4; ++i)
          if (chan_pad[i] && !(i == 0 && mode == INPUT_MODE_KEYBOARD)) merge(c[i], classic_from_pad(chan_pad[i]));
      update_rumble();
@@ -5931,7 +5968,7 @@ index 5726093..abdde21 100644
      ++cnt.presents;
      int ww = 0, wh = 0;
      SDL_GetWindowSizeInPixels(win, &ww, &wh);
-@@ -1275,22 +2057,119 @@ void present() {
+@@ -1275,22 +2058,119 @@ void present() {
      glColorMask(1, 1, 1, 1);
      glClearColor(0, 0, 0, 1);
      glClear(GL_COLOR_BUFFER_BIT);
@@ -6059,7 +6096,7 @@ index 5726093..abdde21 100644
          char name[64];
          std::snprintf(name, sizeof name, "/frame_%06llu.png", (unsigned long long)cnt.presents);
          write_png(std::string(opt.dump_dir) + name, ww, wh, flip.data());
-@@ -1317,7 +2196,6 @@ void setup() {
+@@ -1317,7 +2197,6 @@ void setup() {
      glNamedFramebufferTexture(efb_fbo, GL_DEPTH_ATTACHMENT, efb_dep, 0);
      if (glCheckNamedFramebufferStatus(efb_fbo, GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
          rt_die("video: the EFB framebuffer is incomplete");
@@ -6067,7 +6104,7 @@ index 5726093..abdde21 100644
      glBindFramebuffer(GL_FRAMEBUFFER, efb_fbo);
      glClearColor(0, 0, 0, 1);
      glClearDepth(1.0);
-@@ -1327,45 +2205,25 @@ void setup() {
+@@ -1327,45 +2206,25 @@ void setup() {
      const GLbitfield map = GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT;
      glNamedBufferStorage(vbo, VBO_CAP, nullptr, map);
      vbo_ptr = static_cast<uint8_t*>(glMapNamedBufferRange(vbo, 0, VBO_CAP, map));
@@ -6130,7 +6167,7 @@ index 5726093..abdde21 100644
  
      copy_prog = link(FULLSCREEN_VS, COPY_FS);
      if (!copy_prog) rt_die("video: the EFB copy program does not build");
-@@ -1377,6 +2235,7 @@ void setup() {
+@@ -1377,6 +2236,7 @@ void setup() {
  
  // ---- the game's side ------------------------------------------------------------------------------
  bool video_enabled() { return opt.enabled; }
@@ -6138,7 +6175,7 @@ index 5726093..abdde21 100644
  void video_configure(const VideoOptions& o) { opt = o; S = std::max(1, o.scale); }
  
  VideoPerf g_vperf;
-@@ -1462,6 +2321,41 @@ std::atomic<bool> want_relative{false};
+@@ -1462,6 +2322,41 @@ std::atomic<bool> want_relative{false};
  std::mutex motion_mx;
  float motion_x = 0, motion_y = 0;
  void video_set_relative_mouse(bool on) { want_relative = on; }
@@ -6180,7 +6217,7 @@ index 5726093..abdde21 100644
  void video_take_mouse_motion(float& dx, float& dy) {
      std::lock_guard<std::mutex> lk(motion_mx);
      dx = motion_x; dy = motion_y;
-@@ -1473,12 +2367,27 @@ PadState video_pad() {
+@@ -1473,12 +2368,27 @@ PadState video_pad() {
      return pad;
  }
  ClassicState video_classic(int chan) {
@@ -6208,7 +6245,7 @@ index 5726093..abdde21 100644
  void video_retrace() {
      retraces.fetch_add(1);
      if (wake) SDL_SignalSemaphore(wake);
-@@ -1499,13 +2408,21 @@ void video_run(const char* title) {
+@@ -1499,13 +2409,21 @@ void video_run(const char* title) {
      int w0 = opt.window_w ? opt.window_w : (opt.widescreen ? 1280 : 960), h0 = opt.window_h ? opt.window_h : 720;
      SDL_WindowFlags wflags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE;
      if (opt.fullscreen) wflags |= SDL_WINDOW_FULLSCREEN;
@@ -6230,7 +6267,7 @@ index 5726093..abdde21 100644
      rt_log("video: %s, %s", (const char*)glGetString(GL_RENDERER), (const char*)glGetString(GL_VERSION));
      if (debug) {
          glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
-@@ -1529,11 +2446,15 @@ void video_run(const char* title) {
+@@ -1529,11 +2447,15 @@ void video_run(const char* title) {
      uint64_t frames_then = 0;
      uint32_t seen = retraces.load();
      std::string base_title = title;
@@ -6246,7 +6283,7 @@ index 5726093..abdde21 100644
              if (e.type == SDL_EVENT_GAMEPAD_ADDED) pad_added(e.gdevice.which);
              if (e.type == SDL_EVENT_GAMEPAD_REMOVED) pad_removed(e.gdevice.which);
              // F11 or Alt+Enter: fullscreen and back
-@@ -1560,6 +2481,15 @@ void video_run(const char* title) {
+@@ -1560,6 +2482,15 @@ void video_run(const char* title) {
              }
          }
          auto now = Clock::now();
@@ -6262,7 +6299,7 @@ index 5726093..abdde21 100644
          if (opt.quit_after > 0 && std::chrono::duration<double>(now - t0).count() > opt.quit_after) quit = true;
          if (quit) {
              rt_log("video: %llu frames, %llu presents, %llu draws, %llu programs (%llu linked, %llu from the shader cache)",
-@@ -1574,6 +2504,18 @@ void video_run(const char* title) {
+@@ -1574,6 +2505,18 @@ void video_run(const char* title) {
          {
              bool rel = want_relative && (SDL_GetWindowFlags(win) & SDL_WINDOW_INPUT_FOCUS);
              if (rel != SDL_GetWindowRelativeMouseMode(win)) SDL_SetWindowRelativeMouseMode(win, rel);
@@ -6281,7 +6318,7 @@ index 5726093..abdde21 100644
              float dx = 0, dy = 0;
              SDL_GetRelativeMouseState(&dx, &dy);
              if (rel) {
-@@ -1592,7 +2534,14 @@ void video_run(const char* title) {
+@@ -1592,7 +2535,14 @@ void video_run(const char* title) {
                  double vtx = ms(g_vperf.vtx), tex = ms(g_vperf.tex), wait = ms(g_vperf.wait), draw = ms(g_vperf.draw),
                         pres = ms(g_vperf.present);
                  rt_log("perf: %.1f fps; frame %.1f ms; game thread: vertices %.1f, textures %.1f, waiting for the renderer %.1f; "
@@ -6297,7 +6334,7 @@ index 5726093..abdde21 100644
              }
              frames_then = cnt.frames;
              t_title = now;
-@@ -1608,6 +2557,8 @@ void video_run(const char* title) {
+@@ -1608,6 +2558,8 @@ void video_run(const char* title) {
              }
              if (c.readback) { if (c.copy) copy_readback(c.copy); else efb_readback(); busy = true; continue; }
              auto te = Clock::now();
@@ -6306,7 +6343,7 @@ index 5726093..abdde21 100644
              exec(c.data);
              if (g_vperf_on) g_vperf.draw += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - te).count();
              {
-@@ -1621,8 +2572,25 @@ void video_run(const char* title) {
+@@ -1621,8 +2573,25 @@ void video_run(const char* title) {
              if (retraces.load() != seen) break;
          }
          uint32_t r = retraces.load();
