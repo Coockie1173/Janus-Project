@@ -89,7 +89,6 @@ MenuWrite g_unlock_writes[] = {
 
 std::atomic<bool> g_level_timer{true};
 std::atomic<bool> g_hud{true};
-const uint32_t kLevelFlagsPtr = 0x805D5474, kLevelFlags = 0x198, kFlagNoHud = 4;
 const uint32_t kHudTutorialUp = 0x2523; //a byte of the hud, a tutorial box is shown
 const uint32_t kTextSize = 0x58, kTextColour = 0x24; //a hud text, its colour (RGBA)
 const uint32_t kTimerText = 0x1810; //the hud's text of the level timer
@@ -165,9 +164,11 @@ void HudDraw(PPCContext& c)
 	st32(kMaxTimeChallenge, limit);
 }
 
+//the hud's draws are left out for the call. not the game's own cutscene flag: with it the update
+//clears the shown bits of the crosshair, radar, ammunition... and only a level's load sets them again
 void HudUpdate(PPCContext& c)
 {
-	uint32_t hud = c.r[3], level = ld32(kLevelFlagsPtr);
+	uint32_t hud = c.r[3];
 	if (g_hud || !guest_ptr(hud) || ld8(hud + kHudTutorialUp) || cutscene_input_waiting())
 	{
 		g_hud_was_hidden = false;
@@ -175,12 +176,9 @@ void HudUpdate(PPCContext& c)
 		return;
 	}
 	g_hud_was_hidden = true;
-	bool set = guest_ptr(level) && !(ld32(level + kLevelFlags) & kFlagNoHud);
-	if (set) st32(level + kLevelFlags, ld32(level + kLevelFlags) | kFlagNoHud);
 	g_hud_hidden = true;
 	HudDraw(c);
 	g_hud_hidden = false;
-	if (set && ld32(kLevelFlagsPtr) == level) st32(level + kLevelFlags, ld32(level + kLevelFlags) & ~kFlagNoHud);
 }
 
 void HudElementDraw(PPCContext& c)
