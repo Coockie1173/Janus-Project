@@ -41,6 +41,24 @@ void guest_sleep(PPCContext& c, uint64_t ticks) {
     c.r[4] = r4;
 }
 
+//waits for the audio to mix the blocks a jump of the clock made due
+void mix_due(PPCContext& c) {
+    for (int i = 0; i < 20000 && hw_ai_behind(); ++i) guest_sleep(c, tb_hz() / 20000);
+}
+
+//the game's file system pumped once (fn_8037F6A0 with it, what the frame's update and the
+//loading loops call): it finishes the disc reads that are done and starts the next one
+const uint32_t kFilePump = 0x8037F6A0, kFileSystem = 0x806473CC;
+PPCFunc file_pump = nullptr;
+void pump_files(PPCContext& c) {
+    if (!file_pump) return;
+    guest_sleep(c, tb_hz() / 20000); //a read the jump finished gets its interrupt first
+    PPCContext saved = c;
+    c.r[3] = kFileSystem;
+    file_pump(c);
+    c = saved;
+}
+
 //picks up the current rate (the settings menu can change it in play) between two frames
 //up to 60 we show frames at VI's retrace, above that VI stays as it is since the SDK
 //and the game time things by retraces: frames get shown as they're drawn, and the game's
@@ -118,11 +136,22 @@ void frame_tick(PPCContext& c) {
         uint32_t top = engine_top_rate();
         stf(kFpsNow, ease > 0 ? std::min(ease, (float)top) : g_skip_rate.load());
         //the sound first: the blocks the last jump made due get mixed before the next one
-        for (int i = 0; i < 20000 && hw_ai_behind(); ++i) guest_sleep(c, tb_hz() / 20000);
+        mix_due(c);
         uint64_t next = (uint64_t)ld32(kNextFrame) << 32 | ld32(kNextFrame + 4), now = os_tb_now();
         uint64_t shown = ease > 0 ? tb_hz() / top : 0;
-        if (next > now + shown && next - now < tb_hz() * 2)
-            rt_advance(std::chrono::nanoseconds((next - now - shown) * 4000 / g_bus_mhz + 1000));
+        if (next > now + shown && next - now < tb_hz() * 2) {
+            //the jump goes in pieces of a console frame with the file system pumped after each:
+            //it starts one disc read a pump, once a frame, and three a second can't feed the
+            //music's streams, they fell behind under the skip and played fast to catch up after
+            uint64_t left = next - now - shown, piece = tb_hz() / kGameFps;
+            while (left > 0) {
+                uint64_t by = std::min(left, piece);
+                rt_advance(std::chrono::nanoseconds(by * 4000 / g_bus_mhz + 1000));
+                left -= by;
+                mix_due(c);
+                if (left > 0) pump_files(c);
+            }
+        }
     }
     static const char* hitch = std::getenv("GE_HITCH"); //"t,t,...", a 60 ms stall at those times to test with
     if (hitch && f != 0) {
@@ -182,6 +211,7 @@ void install_fps() {
     //the game holds 60 everywhere and not much more in its heavy levels
     g_fps_log = std::getenv("GE_TRACE") != nullptr;
     sleep_ticks = ppc_lookup(kOSSleepTicks);
+    file_pump = ppc_lookup(kFilePump);
     orig_vi_wait = ppc_hook("VIWaitForRetrace", vi_wait);
     if (!orig_vi_wait) rt_die("goldeneye: VIWaitForRetrace is not hooked in this build");
     if (const char* r = std::getenv("GE_SKIP_RATE")) g_skip_rate = std::clamp((float)std::atof(r), 1.0f, 30.0f);
