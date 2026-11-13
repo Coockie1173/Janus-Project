@@ -645,7 +645,14 @@ void speedrun_draw()
 	}
 	g_box0 = ImVec2(x, y);
 	g_box1 = ImVec2(x + w, y + h);
-	DrawBox(ImGui::GetForegroundDrawList(), x, y, u);
+	ImDrawList* dl = ImGui::GetForegroundDrawList();
+	int from = dl->VtxBuffer.Size;
+	DrawBox(dl, x, y, u);
+	float a = g_dragging ? 1.0f : m_Opacity / 100; //held it's all there, to see where it goes
+	if (a < 1)
+	{
+		for (int i = from; i < dl->VtxBuffer.Size; ++i) dl->VtxBuffer[i].col = Fade(dl->VtxBuffer[i].col, a);
+	}
 }
 #endif
 

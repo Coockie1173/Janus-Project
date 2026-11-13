@@ -14,6 +14,8 @@ bool speedrun_window(); //it's in a window of its own
 void set_speedrun_window(bool on);
 bool speedrun_quit_reset(); //Save and Quit resets the run
 void set_speedrun_quit_reset(bool on);
+float speedrun_opacity(); //the box over the game, in percent
+void set_speedrun_opacity(float percent);
 void speedrun_menu_save(); //autosave.cpp: the game's menu saved the game, not a checkpoint
 void speedrun_reset(); //the run so far is dropped, the best times stay
 std::string speedrun_said(); //what the last import or export came to, for a few seconds

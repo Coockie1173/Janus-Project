@@ -65,6 +65,8 @@ inline float m_X{ -1 }, m_Y{ 0.06f }; //the box's top left corner in the game's 
 inline bool m_Popped{ false }; //in a window of its own
 inline int m_WinX{ INT_MIN }, m_WinY{ INT_MIN }, m_WinW{ 0 }, m_WinH{ 0 }; //that window, on the desktop
 inline bool m_QuitReset{ false };
+const float kMinOpacity = 10;
+inline float m_Opacity{ 100 }; //how see-through the box is over the game, in percent
 inline bool m_MenuSaved{ false }; //the menu saved the game in this level
 inline int m_Attempts{ 0 };
 inline float m_Pb[kSplits]; //the time at the end of each split in the personal best, -1 none
@@ -76,6 +78,7 @@ inline bool m_Running{ false }, m_Finished{ false }, m_NewPb{ false };
 inline int m_Index{ 0 }; //the split being run
 inline uint32_t m_LastLevel{ 0 };
 inline float m_LastTime{ 0 };
+inline Clock::time_point m_LastClock{};
 inline bool m_Loaded{ false };
 inline std::string m_Said; //what an import or export came to
 inline Clock::time_point m_SaidUntil{};

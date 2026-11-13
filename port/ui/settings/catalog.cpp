@@ -251,6 +251,8 @@ void BuildSettings()
 	AddToggle(kTriggers, "trigger_xray", "Through Walls", "On: the parts of a trigger behind the level's walls and floors are drawn too, fainter, so every trigger in the level shows. Off: only what is in sight.", trigger_xray, set_trigger_xray);
 
 	AddToggle(kSpeedrun, "speedrun_timer", "Show Timer", "On: the splits are on screen. Drag them with the mouse while the cursor is free (menus, a pause, this menu); let go outside the game's window and they get their own.", speedrun_timer, set_speedrun_timer);
+	AddRange(kSpeedrun, "speedrun_opacity", "Timer Opacity", "How solid the splits are over the game, in percent. Lower lets the game show through. Their own window is always solid.",
+		speedrun_opacity, [](float v) { set_speedrun_opacity(v); g_dirty = true; }, 10, 100, 5, 0);
 	AddToggle(kSpeedrun, "speedrun_window", "Own Window", "On: the timer is in a window of its own, to put next to the game or capture on its own. Closing that window puts it back in the game's.", speedrun_window, set_speedrun_window);
 	AddAction(kSpeedrun, "speedrun_reset", "Reset Run", "Drops the run so far. Your personal best and best segments stay. Can be a hotkey (Hotkeys > Add Hotkey).", []
 	{

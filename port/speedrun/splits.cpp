@@ -8,9 +8,10 @@
 //with Reset On Save And Quit a save the menu made (ge_save_write, not a checkpoint's) followed by
 //a change to the front end that isn't a split resets the run
 //
-//what's counted is the level timer (805C963C) going up while there is a player and the game
-//isn't paused: every attempt of a level, the deaths and the cutscenes, never the menus or the
-//loads. a checkpoint's reload sets the timer back, that drop isn't counted either way
+//what's counted is the level timer (805C963C) going up while there is a player: every attempt of
+//a level, the deaths and the cutscenes, never the menus or the loads. the pause menu counts too,
+//by the clock, as the level timer stands still under it. a checkpoint's reload sets the timer
+//back, that drop isn't counted either way
 //
 //like LiveSplit: the personal best's time at the end of each split, the best segment of each,
 //the difference to the personal best as a split ends (green ahead, red behind, gold for a best
@@ -110,6 +111,7 @@ int ReadOwn(std::istream& f, bool splitsOnly)
 		else if (key == "at") in >> m_X >> m_Y;
 		else if (key == "window") in >> m_Popped >> m_WinX >> m_WinY >> m_WinW >> m_WinH;
 		else if (key == "quit_reset") in >> m_QuitReset;
+		else if (key == "opacity") in >> m_Opacity;
 	}
 	return read;
 }
@@ -136,6 +138,7 @@ void Save()
 	f << "at " << m_X << " " << m_Y << "\n";
 	f << "window " << (m_Popped ? 1 : 0) << " " << m_WinX << " " << m_WinY << " " << m_WinW << " " << m_WinH << "\n";
 	f << "quit_reset " << (m_QuitReset ? 1 : 0) << "\n";
+	f << "opacity " << m_Opacity << "\n";
 	f << "attempts " << m_Attempts << "\n";
 	char text[96];
 	for (int i = 0; i < kSplits; ++i)
@@ -203,16 +206,19 @@ void speedrun_frame()
 {
 	float t = ldf(kLevelTimer);
 	uint32_t level = ld32(kCurrentLevel);
+	auto now = Clock::now();
 	std::lock_guard<std::mutex> hold(g_lock);
 	EnsureLoaded();
 	bool campaign = (level & kLevelKind) == kCampaignLevel;
-	if (m_Running && campaign && level == m_LastLevel && guest_ptr(ld32(kPlayerPtr)) && ld8(kPaused) == 0)
+	if (m_Running && campaign && level == m_LastLevel && guest_ptr(ld32(kPlayerPtr)))
 	{
-		float step = t >= m_LastTime ? t - m_LastTime : 0;
+		//paused the level timer stands still, the clock goes on
+		float step = ld8(kPaused) != 0 ? std::chrono::duration<float>(now - m_LastClock).count() : t >= m_LastTime ? t - m_LastTime : 0;
 		if (step < kMaxStep) m_Segment[m_Index] += step;
 	}
 	m_LastLevel = level;
 	m_LastTime = t;
+	m_LastClock = now;
 }
 
 void speedrun_level_change(uint32_t from, uint32_t to, uint32_t entrance, bool next)
@@ -281,6 +287,23 @@ void set_speedrun_quit_reset(bool on)
 	EnsureLoaded();
 	if (m_QuitReset == on) return;
 	m_QuitReset = on;
+	Save();
+}
+
+float speedrun_opacity()
+{
+	std::lock_guard<std::mutex> hold(g_lock);
+	EnsureLoaded();
+	return m_Opacity;
+}
+
+void set_speedrun_opacity(float percent)
+{
+	std::lock_guard<std::mutex> hold(g_lock);
+	EnsureLoaded();
+	percent = std::clamp(percent, kMinOpacity, 100.0f);
+	if (m_Opacity == percent) return;
+	m_Opacity = percent;
 	Save();
 }
 
