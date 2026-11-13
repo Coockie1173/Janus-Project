@@ -86,7 +86,7 @@ void save_launch_settings() {
 #endif
         {"LAUNCH_BHOP_HOVER", bhop_hover() ? "1" : "0"},
         {"LAUNCH_BHOP_LEDGE", bhop_ledge() ? "1" : "0"},
-        {"LAUNCH_TRIGGERVIEW", trigger_view() ? "1" : "0"}, {"LAUNCH_TRIGGERXRAY", trigger_xray() ? "1" : "0"}, {"LAUNCH_TRIGGERLOADS", trigger_loads() ? "1" : "0"}, {"LAUNCH_TRIGGERTYPES", trigger_types_saved()}};
+        {"LAUNCH_TRIGGERVIEW", trigger_view() ? "1" : "0"}, {"LAUNCH_TRIGGERXRAY", trigger_xray() ? "1" : "0"}, {"LAUNCH_TRIGGERLOADS", trigger_loads() ? "1" : "0"}, {"LAUNCH_TRIGGEROPACITY", std::to_string((int)trigger_opacity())}, {"LAUNCH_TRIGGERTYPES", trigger_types_saved()}};
     for (int i = 0; i < kBhopValueCount; ++i) {
         char text[24];
         std::snprintf(text, sizeof text, "%g", bhop_value(i).value);

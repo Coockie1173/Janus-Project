@@ -4383,7 +4383,7 @@ index 99351d5..f6af62d 100644
      if (!w) ps_quant(type, scale, ea + sz, c.ps1[s], &sz);
  }
 diff --git a/runtime/rt.h b/runtime/rt.h
-index 75fec5e..60f6c94 100644
+index 75fec5e..a24fa76 100644
 --- a/runtime/rt.h
 +++ b/runtime/rt.h
 @@ -6,6 +6,7 @@
@@ -4447,7 +4447,7 @@ index 75fec5e..60f6c94 100644
  void os_watch(int seconds);                       // report the running thread periodically
  void os_profile();                                // WIIKIT_PROFILE: sample the guest code (=render: the renderer), list the hot functions
  
-@@ -74,7 +103,34 @@ void gx_submit_pending();                         // after a burst, outside g_hw
+@@ -74,7 +103,35 @@ void gx_submit_pending();                         // after a burst, outside g_hw
  // game that reads the copy on the CPU (the renderer otherwise keeps copies
  // on the host GPU only). False if no copy was made to addr (physical).
  bool gx_copy_to_ram(uint32_t addr);
@@ -4478,11 +4478,12 @@ index 75fec5e..60f6c94 100644
 +// overlay, 4 the overlay's hidden parts as well (fainter), 0 none.
 +void gx_debug_mesh(const void* vertices, uint32_t count);
 +void gx_debug_overlay(const void* vertices, uint32_t count);
++void gx_debug_overlay_opacity(float opacity);       // 0..1, the overlay drawn that much, its edges too
 +void gx_debug_view(uint8_t views, const float* clip);
  void hw_run_locked(const std::function<void()>& fn);   // run fn holding the hardware lock
  
  // ---- the hardware (hw.cpp) -----------------------------------------------------------
-@@ -106,6 +162,9 @@ void wpad_set_classic_filter(WpadClassicFilter f);
+@@ -106,6 +163,9 @@ void wpad_set_classic_filter(WpadClassicFilter f);
  void wpad_filter_classic(int chan, ClassicState& s);  // the port's filter, if it has one
  
  // ---- audio (ax.cpp, audio.cpp) --------------------------------------------------------
@@ -4492,7 +4493,7 @@ index 75fec5e..60f6c94 100644
  void ax_command_list(uint32_t addr);               // the AX micro-code: mix one frame
  uint8_t aram_read(uint32_t addr);                  // the GameCube's ARAM (hw.cpp), where its AX reads samples
  bool ax_load_coefs(const char* dir);               // dsp_coef.bin: the polyphase resampler's table
-@@ -113,6 +172,11 @@ void audio_init(bool enabled);                     // the host's audio device (S
+@@ -113,6 +173,11 @@ void audio_init(bool enabled);                     // the host's audio device (S
  // A block the AI DMA starts playing: frames of big-endian 16-bit stereo,
  // right then left, as the Wii's AI reads them.
  void audio_play(const uint8_t* be_rl, uint32_t frames, uint32_t rate);
@@ -4504,7 +4505,7 @@ index 75fec5e..60f6c94 100644
  
  // ---- SYSCONF (sysconf.cpp) -----------------------------------------------------------
  // Writes the NAND's /shared2/sys/SYSCONF if it has none, sets what the
-@@ -123,6 +187,10 @@ extern bool g_sysconf_eurgb60;                     // IPL.E60, after sysconf_pre
+@@ -123,6 +188,10 @@ extern bool g_sysconf_eurgb60;                     // IPL.E60, after sysconf_pre
  
  // ---- IOS (ios.cpp) ------------------------------------------------------------------
  void ios_init(const char* disc_root, const char* nand_root);
@@ -4554,7 +4555,7 @@ index 8a4e097..8b1b1a8 100644
  void ppc_mmio_write(uint32_t addr, uint32_t, int) { rt_die("mmio write %08X", addr); }
  uint64_t ppc_timebase() { return 0; }
 diff --git a/runtime/video.cpp b/runtime/video.cpp
-index 5726093..7a4940f 100644
+index 5726093..abfde4b 100644
 --- a/runtime/video.cpp
 +++ b/runtime/video.cpp
 @@ -67,19 +67,51 @@ ClassicState classic[4];
@@ -5067,7 +5068,7 @@ index 5726093..7a4940f 100644
  }
  
  void bind_textures() {
-@@ -475,113 +822,574 @@ void bind_textures() {
+@@ -475,113 +822,575 @@ void bind_textures() {
      for (int m = 0; m < 8; ++m) {
          if (!(used >> m & 1)) continue;
          GLuint name = 0;
@@ -5495,6 +5496,7 @@ index 5726093..7a4940f 100644
 +GLuint dbgo_prog = 0, dbgo_vao = 0, dbgo_vbo = 0;
 +GLint dbgo_clip_loc = -1, dbgo_z_loc = -1, dbgo_vpz_loc = -1, dbgo_fade_loc = -1;
 +uint32_t dbgo_count = 0;
++std::atomic<float> dbgo_opacity{1.0f};               // the port's overlay as a whole, edges too (gx_debug_overlay_opacity)
 +uint8_t dbg_on = 0;                                  // 1 the scene, 2 the overlay, 4 its hidden parts too
 +bool dbg_waiting = false, dbg_drawn = false;
 +bool dbgo_drawn = false;                             // the overlay, alone, was drawn this frame
@@ -5639,7 +5641,7 @@ index 5726093..7a4940f 100644
 +        // what is hidden first, faint (when asked for), then what is in sight
 +        if (dbg_on & 4) {
 +            glDepthFunc(scene ? GL_LESS : GL_GREATER);
-+            glProgramUniform1f(dbgo_prog, dbgo_fade_loc, 0.3f);
++            glProgramUniform1f(dbgo_prog, dbgo_fade_loc, 0.3f * dbgo_opacity.load());
 +            glDrawArrays(GL_TRIANGLES, 0, (GLsizei)dbgo_count);
          }
 -    } else if (cm >> 1 & 1) {
@@ -5647,7 +5649,7 @@ index 5726093..7a4940f 100644
 -                                      GL_XOR, GL_OR, GL_NOR, GL_EQUIV, GL_INVERT, GL_OR_REVERSE,
 -                                      GL_COPY_INVERTED, GL_OR_INVERTED, GL_NAND, GL_SET};
 +        glDepthFunc(scene ? GL_GEQUAL : GL_LEQUAL);
-+        glProgramUniform1f(dbgo_prog, dbgo_fade_loc, 1.0f);
++        glProgramUniform1f(dbgo_prog, dbgo_fade_loc, dbgo_opacity.load());
 +        glDrawArrays(GL_TRIANGLES, 0, (GLsizei)dbgo_count);
          glDisable(GL_BLEND);
 -        glEnable(GL_COLOR_LOGIC_OP);
@@ -5721,7 +5723,7 @@ index 5726093..7a4940f 100644
          uint32_t pm = v0.mtx[0] * 4u;
          float pos[3];
          for (int r = 0; r < 3; ++r)
-@@ -593,67 +1401,75 @@ void draw(uint8_t prim, uint8_t vflags, const uint8_t* pieces, uint32_t npieces)
+@@ -593,67 +1402,75 @@ void draw(uint8_t prim, uint8_t vflags, const uint8_t* pieces, uint32_t npieces)
                 c[2] = fx(0x1024) * pos[2] + fx(0x1025); c[3] = 1; }
          std::fprintf(lf, "%ld prim %02X n %u zm %X cm %X pix %X at %X ztex %X fog %X | vp %g %g %g %g %g %g | proj%u %g %g %g %g %g %g | "
                       "mtx %u obj %g %g %g eye %g %g %g ndc %g %g w %g | tev %u chans %u\n",
@@ -5835,7 +5837,7 @@ index 5726093..7a4940f 100644
  }
  
  // ---- the record -----------------------------------------------------------------------------------
-@@ -662,6 +1478,8 @@ template <class T> T rd(const uint8_t*& p) { T v; std::memcpy(&v, p, sizeof v);
+@@ -662,6 +1479,8 @@ template <class T> T rd(const uint8_t*& p) { T v; std::memcpy(&v, p, sizeof v);
  // The EFB at its native size: the pixel at each native position's top-left
  // sample of the scaled EFB (rows from the top, as the EFB copies read it).
  void efb_readback() {
@@ -5844,7 +5846,7 @@ index 5726093..7a4940f 100644
      int W = EFB_W * S, H = EFB_H * S;
      std::vector<uint8_t> px((size_t)W * H * 4);
      std::vector<float> dz((size_t)W * H);
-@@ -703,6 +1521,9 @@ void copy_readback(uint32_t addr) {
+@@ -703,6 +1522,9 @@ void copy_readback(uint32_t addr) {
  }
  
  void exec(const std::vector<uint8_t>& data) {
@@ -5854,7 +5856,7 @@ index 5726093..7a4940f 100644
      const uint8_t* p = data.data();
      const uint8_t* end = p + data.size();
      while (p < end) {
-@@ -712,24 +1533,42 @@ void exec(const std::vector<uint8_t>& data) {
+@@ -712,24 +1534,42 @@ void exec(const std::vector<uint8_t>& data) {
              uint16_t a = rd<uint16_t>(p), n = rd<uint16_t>(p);
              std::memcpy(&xf[a], p, 4u * n);
              p += 4u * n;
@@ -5900,7 +5902,7 @@ index 5726093..7a4940f 100644
              Tex& t = texs[id];
              ensure_tex(t, w, h, levels);
              for (int l = 0; l < levels; ++l) {
-@@ -742,7 +1581,55 @@ void exec(const std::vector<uint8_t>& data) {
+@@ -742,7 +1582,55 @@ void exec(const std::vector<uint8_t>& data) {
          }
          case VC_TEXBIND: { uint8_t m = rd<uint8_t>(p); map_src[m] = rd<uint32_t>(p); break; }
          case VC_TEXEFB: { uint8_t m = rd<uint8_t>(p); map_src[m] = 1ull << 32 | rd<uint32_t>(p); break; }
@@ -5957,7 +5959,7 @@ index 5726093..7a4940f 100644
          case VC_DRAWDONE: gx_draw_done_reached(); break;
          default: rt_die("video: bad record byte %02X", p[-1]);
          }
-@@ -811,13 +1698,17 @@ namespace {
+@@ -811,13 +1699,17 @@ namespace {
  // Where the picture sits in a window of w x h (pixels or window units): the
  // TV's screen, 4:3 or 16:9 as SYSCONF says, as large as the window allows and
  // centred; of its 480 lines (NTSC) VI scans the XFB out over its active ones,
@@ -5977,7 +5979,7 @@ index 5726093..7a4940f 100644
      return {(w - sw) / 2, (h - ph) / 2, sw, ph};
  }
  
-@@ -839,10 +1730,13 @@ enum : uint32_t { CL_UP = 0x0001, CL_LEFT = 0x0002, CL_ZR = 0x0004, CL_X = 0x000
+@@ -839,10 +1731,13 @@ enum : uint32_t { CL_UP = 0x0001, CL_LEFT = 0x0002, CL_ZR = 0x0004, CL_X = 0x000
                    CL_Y = 0x0020, CL_B = 0x0040, CL_ZL = 0x0080, CL_R = 0x0200, CL_PLUS = 0x0400,
                    CL_HOME = 0x0800, CL_MINUS = 0x1000, CL_L = 0x2000, CL_DOWN = 0x4000, CL_RIGHT = 0x8000 };
  constexpr uint32_t kStick = 1u << 16;               // L up, down, left, right, then R's: kStick << 0..7
@@ -5991,7 +5993,7 @@ index 5726093..7a4940f 100644
  
  const char* DEFAULT_KEYS =
      "# wiiboot's keys: each Wii Remote button, then the keys and mouse buttons that press it.\n"
-@@ -869,6 +1763,8 @@ const char* DEFAULT_KEYS =
+@@ -869,6 +1764,8 @@ const char* DEFAULT_KEYS =
      "# takes the keys, the mouse and the first pad at once (Input = Pad or Keyboard: only one of them;\n"
      "# wiiboot --input says the same).\n"
      "# The pad: its triggers are ZL and ZR, its shoulders L and R, Start +, Back -, its guide button Home.\n"
@@ -6000,7 +6002,7 @@ index 5726093..7a4940f 100644
      "# Face Buttons = Position: the right one is A, the bottom one B, the top one X, the left one Y (the\n"
      "# Classic's own layout); Label: the button labelled A (Cross) is A, B (Circle) B, X (Square) X, Y (Triangle) Y.\n"
      "# Dead Zone: how far the pad's sticks move before they count, of their travel.\n"
-@@ -897,7 +1793,9 @@ const char* DEFAULT_KEYS =
+@@ -897,7 +1794,9 @@ const char* DEFAULT_KEYS =
      "Right Stick Up    =\n"
      "Right Stick Down  =\n"
      "Right Stick Left  =\n"
@@ -6011,7 +6013,7 @@ index 5726093..7a4940f 100644
  
  std::string trim(const std::string& t) {
      size_t a = t.find_first_not_of(" \t\r"), b = t.find_last_not_of(" \t\r");
-@@ -923,7 +1821,11 @@ bool parse_keys(const std::string& text, const std::string& path, bool remote, b
+@@ -923,7 +1822,11 @@ bool parse_keys(const std::string& text, const std::string& path, bool remote, b
                                       {"Left Stick Up", kStick << 0}, {"Left Stick Down", kStick << 1},
                                       {"Left Stick Left", kStick << 2}, {"Left Stick Right", kStick << 3},
                                       {"Right Stick Up", kStick << 4}, {"Right Stick Down", kStick << 5},
@@ -6024,7 +6026,7 @@ index 5726093..7a4940f 100644
      static const Btn mice[] = {{"Mouse Left", SDL_BUTTON_LMASK}, {"Mouse Right", SDL_BUTTON_RMASK},
                                 {"Mouse Middle", SDL_BUTTON_MMASK}, {"Mouse X1", SDL_BUTTON_X1MASK},
                                 {"Mouse X2", SDL_BUTTON_X2MASK}};
-@@ -980,7 +1882,7 @@ bool parse_keys(const std::string& text, const std::string& path, bool remote, b
+@@ -980,7 +1883,7 @@ bool parse_keys(const std::string& text, const std::string& path, bool remote, b
          }
          if (!b) {
              if (in_classic) rt_log("video: %s:%d: not a Classic Controller button (A B X Y L R ZL ZR Plus Minus Home Up Down Left Right, "
@@ -6033,7 +6035,7 @@ index 5726093..7a4940f 100644
              else rt_log("video: %s:%d: not a Remote button (A B Up Down Left Right Plus Minus 1 2 Shake Raise; the Nunchuk's "
                          "C Z Stick Up/Down/Left/Right Walk)", path.c_str(), line);
              continue;
-@@ -1006,7 +1908,9 @@ bool parse_keys(const std::string& text, const std::string& path, bool remote, b
+@@ -1006,7 +1909,9 @@ bool parse_keys(const std::string& text, const std::string& path, bool remote, b
      return has_classic;
  }
  
@@ -6043,7 +6045,7 @@ index 5726093..7a4940f 100644
      std::string text;
      if (FILE* f = std::fopen(path.c_str(), "rb")) {
          char buf[4096];
-@@ -1079,6 +1983,8 @@ ClassicState classic_from_pad(SDL_Gamepad* g) {
+@@ -1079,6 +1984,8 @@ ClassicState classic_from_pad(SDL_Gamepad* g) {
          {SDL_GAMEPAD_BUTTON_START, CL_PLUS}, {SDL_GAMEPAD_BUTTON_BACK, CL_MINUS}, {SDL_GAMEPAD_BUTTON_GUIDE, CL_HOME}};
      for (auto& f : fixed)
          if (SDL_GetGamepadButton(g, f.b)) s.buttons |= f.bit;
@@ -6052,7 +6054,7 @@ index 5726093..7a4940f 100644
      // the face buttons: by position, the Classic's own layout (A right, B
      // bottom, X top, Y left), or by the pad's labels
      static const struct { SDL_GamepadButton b; uint32_t pos; } face[] = {
-@@ -1112,6 +2018,7 @@ ClassicState classic_from_pad(SDL_Gamepad* g) {
+@@ -1112,6 +2019,7 @@ ClassicState classic_from_pad(SDL_Gamepad* g) {
  void merge(ClassicState& a, const ClassicState& b) {
      a.connected |= b.connected;
      a.buttons |= b.buttons;
@@ -6060,7 +6062,7 @@ index 5726093..7a4940f 100644
      if (std::hypot(b.lx, b.ly) > std::hypot(a.lx, a.ly)) { a.lx = b.lx; a.ly = b.ly; }
      if (std::hypot(b.rx, b.ry) > std::hypot(a.rx, a.ry)) { a.rx = b.rx; a.ry = b.ry; }
      a.lt = std::max(a.lt, b.lt);
-@@ -1186,7 +2093,7 @@ void update_pad() {
+@@ -1186,7 +2094,7 @@ void update_pad() {
      p.buttons &= ~(kRaisePlus | kRaiseMinus | kWalk | (kStick * 0xF));
      int ww = 0, wh = 0;
      SDL_GetWindowSize(win, &ww, &wh);                        // mouse coordinates are in window units
@@ -6069,7 +6071,7 @@ index 5726093..7a4940f 100644
          // -1..1 spans the picture as present() shows it, so that the game's
          // cursor lands under the mouse
          Rect r = picture_rect((float)ww, (float)wh);
-@@ -1196,8 +2103,8 @@ void update_pad() {
+@@ -1196,8 +2104,8 @@ void update_pad() {
      }
      // over the picture the game draws its own cursor, as on the Wii
      static bool hidden = false;
@@ -6080,7 +6082,7 @@ index 5726093..7a4940f 100644
          if (hidden) SDL_HideCursor(); else SDL_ShowCursor();
      }
      // WIIKIT_PAD="45:A 50.5:@0.2,-0.1 51:A": at each time (seconds from
-@@ -1248,6 +2155,7 @@ void update_pad() {
+@@ -1248,6 +2156,7 @@ void update_pad() {
          ClassicState& k = c[0];
          k.connected = true;
          k.buttons = cl & 0xFFFF;
@@ -6088,7 +6090,7 @@ index 5726093..7a4940f 100644
          auto dir = [&](int i) { return cl & (kStick << i) ? 1.0f : 0.0f; };
          k.lx = dir(3) - dir(2);
          k.ly = dir(0) - dir(1);
-@@ -1261,12 +2169,19 @@ void update_pad() {
+@@ -1261,12 +2170,19 @@ void update_pad() {
      for (int i = 0; i < 4; ++i)
          if (chan_pad[i] && !(i == 0 && mode == INPUT_MODE_KEYBOARD)) merge(c[i], classic_from_pad(chan_pad[i]));
      update_rumble();
@@ -6108,7 +6110,7 @@ index 5726093..7a4940f 100644
      ++cnt.presents;
      int ww = 0, wh = 0;
      SDL_GetWindowSizeInPixels(win, &ww, &wh);
-@@ -1275,22 +2190,119 @@ void present() {
+@@ -1275,22 +2191,119 @@ void present() {
      glColorMask(1, 1, 1, 1);
      glClearColor(0, 0, 0, 1);
      glClear(GL_COLOR_BUFFER_BIT);
@@ -6236,7 +6238,7 @@ index 5726093..7a4940f 100644
          char name[64];
          std::snprintf(name, sizeof name, "/frame_%06llu.png", (unsigned long long)cnt.presents);
          write_png(std::string(opt.dump_dir) + name, ww, wh, flip.data());
-@@ -1317,7 +2329,6 @@ void setup() {
+@@ -1317,7 +2330,6 @@ void setup() {
      glNamedFramebufferTexture(efb_fbo, GL_DEPTH_ATTACHMENT, efb_dep, 0);
      if (glCheckNamedFramebufferStatus(efb_fbo, GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
          rt_die("video: the EFB framebuffer is incomplete");
@@ -6244,7 +6246,7 @@ index 5726093..7a4940f 100644
      glBindFramebuffer(GL_FRAMEBUFFER, efb_fbo);
      glClearColor(0, 0, 0, 1);
      glClearDepth(1.0);
-@@ -1327,45 +2338,25 @@ void setup() {
+@@ -1327,45 +2339,25 @@ void setup() {
      const GLbitfield map = GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT;
      glNamedBufferStorage(vbo, VBO_CAP, nullptr, map);
      vbo_ptr = static_cast<uint8_t*>(glMapNamedBufferRange(vbo, 0, VBO_CAP, map));
@@ -6307,7 +6309,7 @@ index 5726093..7a4940f 100644
  
      copy_prog = link(FULLSCREEN_VS, COPY_FS);
      if (!copy_prog) rt_die("video: the EFB copy program does not build");
-@@ -1377,6 +2368,7 @@ void setup() {
+@@ -1377,6 +2369,7 @@ void setup() {
  
  // ---- the game's side ------------------------------------------------------------------------------
  bool video_enabled() { return opt.enabled; }
@@ -6315,7 +6317,7 @@ index 5726093..7a4940f 100644
  void video_configure(const VideoOptions& o) { opt = o; S = std::max(1, o.scale); }
  
  VideoPerf g_vperf;
-@@ -1462,6 +2454,45 @@ std::atomic<bool> want_relative{false};
+@@ -1462,6 +2455,46 @@ std::atomic<bool> want_relative{false};
  std::mutex motion_mx;
  float motion_x = 0, motion_y = 0;
  void video_set_relative_mouse(bool on) { want_relative = on; }
@@ -6326,6 +6328,7 @@ index 5726093..7a4940f 100644
 +    x = cursor_x; y = cursor_y; left = cursor_left;
 +    return cursor_there;
 +}
++void gx_debug_overlay_opacity(float opacity) { dbgo_opacity = std::clamp(opacity, 0.0f, 1.0f); }
 +void video_picture_rect(float w, float h, float rect[4]) {
 +    Rect r = picture_rect(w, h);
 +    rect[0] = r.x; rect[1] = r.y; rect[2] = r.w; rect[3] = r.h;
@@ -6361,7 +6364,7 @@ index 5726093..7a4940f 100644
  void video_take_mouse_motion(float& dx, float& dy) {
      std::lock_guard<std::mutex> lk(motion_mx);
      dx = motion_x; dy = motion_y;
-@@ -1473,12 +2504,27 @@ PadState video_pad() {
+@@ -1473,12 +2506,27 @@ PadState video_pad() {
      return pad;
  }
  ClassicState video_classic(int chan) {
@@ -6389,7 +6392,7 @@ index 5726093..7a4940f 100644
  void video_retrace() {
      retraces.fetch_add(1);
      if (wake) SDL_SignalSemaphore(wake);
-@@ -1499,13 +2545,21 @@ void video_run(const char* title) {
+@@ -1499,13 +2547,21 @@ void video_run(const char* title) {
      int w0 = opt.window_w ? opt.window_w : (opt.widescreen ? 1280 : 960), h0 = opt.window_h ? opt.window_h : 720;
      SDL_WindowFlags wflags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE;
      if (opt.fullscreen) wflags |= SDL_WINDOW_FULLSCREEN;
@@ -6411,7 +6414,7 @@ index 5726093..7a4940f 100644
      rt_log("video: %s, %s", (const char*)glGetString(GL_RENDERER), (const char*)glGetString(GL_VERSION));
      if (debug) {
          glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
-@@ -1529,11 +2583,15 @@ void video_run(const char* title) {
+@@ -1529,11 +2585,15 @@ void video_run(const char* title) {
      uint64_t frames_then = 0;
      uint32_t seen = retraces.load();
      std::string base_title = title;
@@ -6427,7 +6430,7 @@ index 5726093..7a4940f 100644
              if (e.type == SDL_EVENT_GAMEPAD_ADDED) pad_added(e.gdevice.which);
              if (e.type == SDL_EVENT_GAMEPAD_REMOVED) pad_removed(e.gdevice.which);
              // F11 or Alt+Enter: fullscreen and back
-@@ -1560,6 +2618,15 @@ void video_run(const char* title) {
+@@ -1560,6 +2620,15 @@ void video_run(const char* title) {
              }
          }
          auto now = Clock::now();
@@ -6443,7 +6446,7 @@ index 5726093..7a4940f 100644
          if (opt.quit_after > 0 && std::chrono::duration<double>(now - t0).count() > opt.quit_after) quit = true;
          if (quit) {
              rt_log("video: %llu frames, %llu presents, %llu draws, %llu programs (%llu linked, %llu from the shader cache)",
-@@ -1574,6 +2641,18 @@ void video_run(const char* title) {
+@@ -1574,6 +2643,18 @@ void video_run(const char* title) {
          {
              bool rel = want_relative && (SDL_GetWindowFlags(win) & SDL_WINDOW_INPUT_FOCUS);
              if (rel != SDL_GetWindowRelativeMouseMode(win)) SDL_SetWindowRelativeMouseMode(win, rel);
@@ -6462,7 +6465,7 @@ index 5726093..7a4940f 100644
              float dx = 0, dy = 0;
              SDL_GetRelativeMouseState(&dx, &dy);
              if (rel) {
-@@ -1592,7 +2671,14 @@ void video_run(const char* title) {
+@@ -1592,7 +2673,14 @@ void video_run(const char* title) {
                  double vtx = ms(g_vperf.vtx), tex = ms(g_vperf.tex), wait = ms(g_vperf.wait), draw = ms(g_vperf.draw),
                         pres = ms(g_vperf.present);
                  rt_log("perf: %.1f fps; frame %.1f ms; game thread: vertices %.1f, textures %.1f, waiting for the renderer %.1f; "
@@ -6478,7 +6481,7 @@ index 5726093..7a4940f 100644
              }
              frames_then = cnt.frames;
              t_title = now;
-@@ -1608,6 +2694,8 @@ void video_run(const char* title) {
+@@ -1608,6 +2696,8 @@ void video_run(const char* title) {
              }
              if (c.readback) { if (c.copy) copy_readback(c.copy); else efb_readback(); busy = true; continue; }
              auto te = Clock::now();
@@ -6487,7 +6490,7 @@ index 5726093..7a4940f 100644
              exec(c.data);
              if (g_vperf_on) g_vperf.draw += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - te).count();
              {
-@@ -1621,8 +2709,25 @@ void video_run(const char* title) {
+@@ -1621,8 +2711,25 @@ void video_run(const char* title) {
              if (retraces.load() != seen) break;
          }
          uint32_t r = retraces.load();

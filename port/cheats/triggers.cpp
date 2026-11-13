@@ -68,6 +68,9 @@
 //0x5320xxxx at +0x9C); 0x54 loads and unloads up to seven files when the player crosses its
 //plane (fn_80034AB0)
 //
+//Opacity (trigger_opacity, LAUNCH_TRIGGEROPACITY, GE_TRIGGERS_OPACITY=PERCENT): how solid the shapes and
+//lines are, 10 to 100 (gx_debug_overlay_opacity scales the whole overlay, its edges too)
+//
 //Show Loading (trigger_loads, LAUNCH_TRIGGERLOADS, GE_TRIGGERS_LOADS=1, off by default): the
 //loading types (0x1D, 0x1E, 0x54, see Loads) are drawn even without a shape (their range), the
 //file they load named over them (Filelist.bin's names, file_name) and in the explanation
@@ -143,7 +146,8 @@ std::mutex g_labels_lock;
 std::vector<std::string> g_labels; //what the player is in or looks at, for the overlay
 std::vector<TriggerTag> g_tags; //names over triggers
 std::atomic<bool> g_xray{false};
-std::atomic<bool> g_loads{false}; //the loading triggers drawn and their files told
+std::atomic<bool> g_loads{false};
+std::atomic<float> g_opacity{100.0f}; //the shapes, in percent (the runtime scales the overlay, edges too) //the loading triggers drawn and their files told
 
 //the menu's choices (its thread) and the types seen (the game's), under one lock
 std::mutex g_types_lock;
@@ -975,6 +979,12 @@ const char* trigger_type_name(uint32_t type)
 
 bool trigger_xray() { return g_xray; }
 bool trigger_loads() { return g_loads; }
+float trigger_opacity() { return g_opacity; }
+void set_trigger_opacity(float percent)
+{
+	g_opacity = std::clamp(percent, 10.0f, 100.0f);
+	gx_debug_overlay_opacity(g_opacity / 100.0f);
+}
 void set_trigger_loads(bool on) { g_loads = on; }
 void set_trigger_xray(bool on) { g_xray = on; }
 
@@ -1066,6 +1076,7 @@ void install_triggers()
 	if (!orig_test_near || !orig_test_point || !orig_test_body) rt_die("goldeneye: the trigger tests are not hooked in this build");
 	g_view = std::atoi(saved_setting("GE_TRIGGERS", "LAUNCH_TRIGGERVIEW").c_str()) != 0;
 	g_xray = std::atoi(saved_setting("GE_TRIGGERS_XRAY", "LAUNCH_TRIGGERXRAY").c_str()) != 0;
+	if (std::string o = saved_setting("GE_TRIGGERS_OPACITY", "LAUNCH_TRIGGEROPACITY"); !o.empty()) set_trigger_opacity((float)std::atof(o.c_str()));
 	g_loads = std::atoi(saved_setting("GE_TRIGGERS_LOADS", "LAUNCH_TRIGGERLOADS").c_str()) != 0;
 	LoadTypes(saved_setting("GE_TRIGGER_TYPES", "LAUNCH_TRIGGERTYPES"));
 	g_trace = std::getenv("GE_TRACE") != nullptr;

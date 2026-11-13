@@ -249,6 +249,8 @@ void BuildSettings()
 	AddToggle(kCheats, "collision_view", "Collision Viewer", "On: the level's collision is drawn in place of the world. Floors are green, walls grey, ceilings red, props orange.", collision_view, set_collision_view);
 	AddToggle(kTriggers, "trigger_view", "Trigger Viewer", "On: the triggers that go off when you walk into them are drawn over the world in the shape the game tests, a colour for each type. Yellow while someone is in one, grey once the game stopped checking it. The near ones have their number over them. The one you are in, or look at, is explained top left: what sets it off and what it does, with a line to each trigger it acts on (green enable, red disable).", trigger_view, set_trigger_view);
 	AddToggle(kTriggers, "trigger_xray", "Through Walls", "On: the parts of a trigger behind the level's walls and floors are drawn too, fainter, so every trigger in the level shows. Off: only what is in sight.", trigger_xray, set_trigger_xray);
+	AddRange(kTriggers, "trigger_opacity", "Opacity", "How solid the triggers' shapes and lines are, in percent. Lower lets the level show through.",
+		trigger_opacity, [](float v) { set_trigger_opacity(v); g_dirty = true; }, 10, 100, 5, 0);
 	AddToggle(kTriggers, "trigger_loads", "Show Loading", "On: the triggers that load and unload parts of the level are drawn too, the files they load named over them and in the trigger's explanation. Off: only those with a shape, without the files.", trigger_loads, set_trigger_loads);
 
 	AddToggle(kSpeedrun, "speedrun_timer", "Show Timer", "On: the splits are on screen. Drag them with the mouse while the cursor is free (menus, a pause, this menu); let go outside the game's window and they get their own.", speedrun_timer, set_speedrun_timer);

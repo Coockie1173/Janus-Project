@@ -63,6 +63,8 @@ bool trigger_xray(); //what is behind the level's walls is drawn too, fainter
 void set_trigger_xray(bool on);
 bool trigger_loads(); //the triggers that load and unload files are drawn too, with what they load
 void set_trigger_loads(bool on);
+float trigger_opacity(); //how solid the shapes are, in percent
+void set_trigger_opacity(float percent);
 struct TriggerType { uint32_t type, count, shaped; }; //a type the game asked about in the level: how many, how many with a shape
 std::vector<TriggerType> trigger_types(); //by type
 uint32_t trigger_types_version(); //changes with the list
