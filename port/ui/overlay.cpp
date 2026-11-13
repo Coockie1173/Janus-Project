@@ -119,19 +119,33 @@ void cheats_label() {
     dl->AddText(font, size, at, IM_COL32(255, 196, 64, 255), text);
 }
 
-//the trigger viewer (triggers.cpp): the triggers the player is in, top left
-void trigger_list(const std::vector<std::string>& lines) {
+//the trigger viewer (triggers.cpp): the trigger the player is in or looks at and what it does,
+//top left (a line starting with a tab is a detail, white under the yellow name), and the names
+//over the triggers near by
+void trigger_list(const std::vector<std::string>& lines, const std::vector<TriggerTag>& tags) {
     ImFont* font = ImGui::GetFont();
     ImVec2 screen = ImGui::GetIO().DisplaySize;
     float u = std::min(screen.y / 720, screen.x / 960);
-    float size = font->FontSize * std::max(u, 1.0f), pad = 5 * u;
-    ImVec2 at(14 * u + pad, 14 * u + pad);
+    float size = font->FontSize * 1.15f * std::max(u, 1.0f), pad = 4 * u;
     ImDrawList* dl = ImGui::GetBackgroundDrawList();
+    float picture[4];
+    video_picture_rect(screen.x, screen.y, picture);
+    for (const TriggerTag& t : tags) {
+        ImVec2 box = font->CalcTextSizeA(size, FLT_MAX, 0, t.text.c_str());
+        ImVec2 at(std::floor(picture[0] + (t.x * 0.5f + 0.5f) * picture[2] - box.x / 2), std::floor(picture[1] + (0.5f - t.y * 0.5f) * picture[3] - box.y / 2));
+        dl->AddRectFilled(ImVec2(at.x - pad, at.y - pad / 2), ImVec2(at.x + box.x + pad, at.y + box.y + pad / 2), IM_COL32(0, 0, 0, 140), 3);
+        dl->AddText(font, size, at, IM_COL32(t.rgb & 0xFF, t.rgb >> 8 & 0xFF, t.rgb >> 16 & 0xFF, 255), t.text.c_str());
+    }
+    float line_h = font->CalcTextSizeA(size, FLT_MAX, 0, "A").y;
+    float wide = 0;
+    for (const std::string& line : lines) wide = std::max(wide, font->CalcTextSizeA(size, FLT_MAX, 0, line.c_str() + (line[0] == '\t')).x);
+    ImVec2 at(14 * u + pad, 14 * u + pad);
+    if (!lines.empty())
+        dl->AddRectFilled(ImVec2(at.x - pad, at.y - pad), ImVec2(at.x + wide + pad, at.y + lines.size() * (line_h + pad) + pad), IM_COL32(0, 0, 0, 160), 3);
     for (const std::string& line : lines) {
-        ImVec2 box = font->CalcTextSizeA(size, FLT_MAX, 0, line.c_str());
-        dl->AddRectFilled(ImVec2(at.x - pad, at.y - pad), ImVec2(at.x + box.x + pad, at.y + box.y + pad), IM_COL32(0, 0, 0, 150), 3);
-        dl->AddText(font, size, at, IM_COL32(255, 220, 60, 255), line.c_str());
-        at.y += box.y + 3 * pad;
+        bool detail = !line.empty() && line[0] == '\t';
+        dl->AddText(font, size, at, detail ? IM_COL32(235, 235, 235, 255) : IM_COL32(255, 220, 60, 255), line.c_str() + detail);
+        at.y += line_h + pad;
     }
 }
 
@@ -318,7 +332,7 @@ void draw() {
     if (meter) stamina_bar(sprint);
     if (hop && fade <= 0) speedometer(speed);
     if (cheats) cheats_label();
-    if (trigger_view() && fade <= 0) trigger_list(trigger_labels());
+    if (trigger_view() && fade <= 0) trigger_list(trigger_labels(), trigger_tags());
     if (g_show_state) player_state();
     if (skipping_cutscene()) skipping_label();
     if (g_open) watches();

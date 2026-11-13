@@ -652,6 +652,11 @@ void WorldDraw(PPCContext& c)
 } //namespace
 
 bool collision_view() { return g_view; }
+bool player_clip(float* m)
+{
+	std::memcpy(m, g_clip, sizeof g_clip);
+	return m[15] != 0 || m[11] != 0;
+}
 void set_collision_view(bool on) { g_view = on; }
 
 //every tick of the game's loop: the viewer goes off with the option or the level

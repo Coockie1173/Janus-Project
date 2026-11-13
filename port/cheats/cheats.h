@@ -52,8 +52,11 @@ void collision_tick(); //every tick of the game's loop
 void install_triggers();
 bool trigger_view(); //cheat, the triggers that go off by being walked into are drawn over the world
 void set_trigger_view(bool on);
+bool player_clip(float* m); //collision.cpp: the clip matrix of the player's view as last drawn (16 floats, a row vector times it), false before one was
 void triggers_update(PPCContext& c); //collision.cpp, the player's view is about to be drawn
-std::vector<std::string> trigger_labels(); //the triggers the player is in, a line each
+std::vector<std::string> trigger_labels(); //the trigger the player is in or looks at and what it does, a line each (a tab first: a detail)
+struct TriggerTag { float x, y; uint32_t rgb; std::string text; }; //a name over a trigger: where on the picture (-1 to 1, up), its colour (0xBBGGRR)
+std::vector<TriggerTag> trigger_tags();
 const char* trigger_type_name(uint32_t type); //what the type does, nullptr when not known
 void trigger_asked(uint32_t trigger, bool inside); //a test of the port's own: the viewer draws it as any other
 bool trigger_xray(); //what is behind the level's walls is drawn too, fainter
