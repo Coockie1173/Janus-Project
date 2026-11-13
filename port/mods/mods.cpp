@@ -47,6 +47,7 @@
 #include <map>
 #include <memory>
 #include <set>
+#include <unordered_map>
 #include <vector>
 
 namespace ge
@@ -184,6 +185,7 @@ void OnLoad(PPCContext& c)
 }
 
 std::vector<ModLevel> g_disc_levels;
+std::unordered_map<uint32_t, std::string> g_file_names; //the disc's files by hash, without their folders
 
 struct Pack
 {
@@ -612,6 +614,11 @@ const char* const kModeFolders[kModeCount] = { "conflict", "team_conflict", "gol
 const std::vector<ModLevel>& mod_levels() { return modpack_levels(g_active); }
 const std::vector<ModLevel>& mod_files() { return modpack_files(g_active); }
 const std::vector<ModLevel>& disc_levels() { return g_disc_levels; }
+std::string file_name(uint32_t hash)
+{
+	auto it = g_file_names.find(hash);
+	return it == g_file_names.end() ? std::string() : it->second;
+}
 const std::string& mods_folder() { return modpack_folder(g_active); }
 
 int modpack_count() { return (int)g_packs.size(); }
@@ -869,6 +876,11 @@ void install_mods()
 		std::vector<uint8_t> bin(listSize);
 		disc_read(listAt, bin.data(), bin.size());
 		if (!ReadList(bin, rows, buildType, lists)) rows.clear();
+	}
+	for (const Row& row : rows)
+	{
+		const size_t cut = row.name.find_last_of("\\/");
+		g_file_names[row.hash] = cut == std::string::npos ? row.name : row.name.substr(cut + 1);
 	}
 	for (const Row& row : rows)
 	{

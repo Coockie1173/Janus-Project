@@ -52,6 +52,7 @@ void pictures_file(uint32_t hash, uint32_t file); //a file (the game's object fo
 //weapons/weapons.cpp
 void install_custom_weapons(); //after install_mods and before install_mods_menu (its version has them): the weapons of every pack's weapons/
 void custom_weapons_frame(PPCContext& c); //once a frame, on the game's thread
+std::string file_name(uint32_t hash); //the disc's file of that hash ("mt_dam.edb"), empty when there is none
 uint32_t custom_weapon_text(uint32_t hash); //the characters of a custom weapon's name or about, 0 for any other
 bool custom_weapon(uint32_t id); //the inventory id is one of the custom weapons'
 int custom_weapon_count(); //the installed pack's custom weapons, by their number

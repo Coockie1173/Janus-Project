@@ -68,6 +68,10 @@
 //0x5320xxxx at +0x9C); 0x54 loads and unloads up to seven files when the player crosses its
 //plane (fn_80034AB0)
 //
+//Show Loading (trigger_loads, LAUNCH_TRIGGERLOADS, GE_TRIGGERS_LOADS=1, off by default): the
+//loading types (0x1D, 0x1E, 0x54, see Loads) are drawn even without a shape (their range), the
+//file they load named over them (Filelist.bin's names, file_name) and in the explanation
+//
 //the menu's Trigger Viewer page turns each type on and off (the ones the game asked about so
 //far in the level are listed), and whether what is behind the level's walls is drawn too
 //
@@ -139,6 +143,7 @@ std::mutex g_labels_lock;
 std::vector<std::string> g_labels; //what the player is in or looks at, for the overlay
 std::vector<TriggerTag> g_tags; //names over triggers
 std::atomic<bool> g_xray{false};
+std::atomic<bool> g_loads{false}; //the loading triggers drawn and their files told
 
 //the menu's choices (its thread) and the types seen (the game's), under one lock
 std::mutex g_types_lock;
@@ -152,6 +157,9 @@ bool Shown(uint32_t type) //with the lock held
 	auto it = g_type_shown.find(type);
 	return it == g_type_shown.end() ? g_types_shown : it->second;
 }
+
+//the types that load and unload parts of the level as you come near or cross them
+bool Loader(uint32_t type) { return type == 0x1D || type == 0x1E || type == 0x54; }
 
 PPCFunc orig_test_near = nullptr, orig_test_point = nullptr, orig_test_body = nullptr;
 
@@ -176,7 +184,7 @@ void TestNear(PPCContext& c)
 	uint32_t trigger = c.r[3];
 	orig_test_near(c);
 	bool inside = (c.r[3] & 0xFF) != 0;
-	if (ld32(trigger + kDataFlags) & kHasShape) Asked(trigger, inside, inside);
+	if ((ld32(trigger + kDataFlags) & kHasShape) || (g_loads && Loader(ld32(trigger + kType)))) Asked(trigger, inside, inside);
 }
 
 void TestPoint(PPCContext& c)
@@ -568,6 +576,68 @@ void Script(uint32_t trigger, uint32_t script, std::vector<std::string>& lines, 
 	if (left) std::snprintf(b, sizeof b, "\t  and %zu other command%s (checks, sums, the game's own)", left, left == 1 ? "" : "s"), lines.push_back(b);
 }
 
+//a file by its hash, as Filelist.bin names it
+std::string FileLabel(uint32_t hash)
+{
+	std::string name = file_name(hash);
+	if (name.empty())
+	{
+		char b[24];
+		std::snprintf(b, sizeof b, "file %08X", hash);
+		return b;
+	}
+	return name;
+}
+
+//a part of a file (0x0800xxxx): the whole file when there is none
+bool Part(uint32_t part) { return (part >> 16) == 0x800 && (part & 0xFFFF); }
+
+//what a loading trigger loads (Describe and the tags). from their updates:
+//0x1D fn_800329C0/fn_80032A30: while the player's point is near, loads data 1's file, only its
+//  parts in data 3 to 14 (0x0800xxxx) when it names some (fn_800E3A90), the whole file else
+//0x1E fn_80032BE0/fn_80032C40: when the player is near, data 2 bit 0 clear loads data 1's parts
+//  (as 0x1D), set unloads the whole file (fn_800E3E80)
+//0x54 fn_80034AB0: up to seven pairs from data 1 (file, part), +0x118 the side of its plane the
+//  player was on (-1 not yet; the side is the player's point against the yaw +0x44). crossing to
+//  side 1 unloads them (a part with fn_800E3F90, a whole file with fn_800E3E80), crossing back to
+//  0 asks for them again (fn_800E3420, the loader's queue at 805D36A4 +0x12C)
+//0x3E: data 0's file's map (data 1 0x05000000) comes in while the level runs
+void Loads(uint32_t trigger, std::vector<std::string>& lines, std::string* first)
+{
+	uint32_t type = ld32(trigger + kType);
+	auto data = [trigger](int i) { return ld32(trigger + 0x98 + i * 4); };
+	auto parts = [&](int from, int count)
+	{
+		std::string text;
+		for (int i = from; i < from + count; ++i)
+			if (Part(data(i))) text += (text.empty() ? " (part " : ", ") + std::to_string(data(i) & 0xFFFF);
+		return text.empty() ? text : text + ")";
+	};
+	if (type == 0x1D || type == 0x1E)
+	{
+		bool unload = type == 0x1E && (data(2) & 1);
+		if (first) *first = FileLabel(data(1));
+		lines.push_back(std::string("\t") + (type == 0x1D ? "while you are near, loads " : unload ? "when you come near, unloads " : "when you come near, loads ") + FileLabel(data(1)) + (unload ? "" : parts(3, 12)));
+	}
+	else if (type == 0x54)
+	{
+		int side = (int32_t)ld32(trigger + 0x118);
+		lines.push_back(std::string("\tloads these on one side of it, unloads them on the other") + (side == 0 ? "  (you are on the loading side)" : side == 1 ? "  (you are on the unloading side)" : ""));
+		for (int i = 0; i < 7; ++i)
+		{
+			uint32_t file = data(1 + i * 2), part = data(2 + i * 2);
+			if (!(file & 0xFFFF)) continue;
+			if (first && first->empty()) *first = FileLabel(file);
+			lines.push_back("\t  " + FileLabel(file) + (Part(part) ? " part " + std::to_string(part & 0xFFFF) : std::string(" (all of it)")));
+		}
+	}
+	else if (type == 0x3E)
+	{
+		if (first) *first = FileLabel(data(0));
+		lines.push_back("\tloads the map of " + FileLabel(data(0)));
+	}
+}
+
 //one line on what a type does, for those that aren't the generic trigger
 const char* TypeDoes(uint32_t type)
 {
@@ -598,6 +668,13 @@ void Describe(uint32_t trigger, std::vector<std::string>& lines, std::vector<Arr
 		std::snprintf(b, sizeof b, "\tgoes off when %s it%s%s", whom, (who & 0x100) ? " (with their body)" : "", (state & 1) ? "  (has gone off)" : "");
 		lines.push_back(b);
 		if (uint32_t flag = ld32(trigger + kSetsFlag)) std::snprintf(b, sizeof b, "\tthen sets flag %04X", flag & 0xFFFF), lines.push_back(b);
+	}
+	else if (Loader(type) && g_loads) Loads(trigger, lines, nullptr);
+	else if (type == 0x0C)
+	{
+		char e[16];
+		std::snprintf(e, sizeof e, "%u", ld32(trigger + 0xA0));
+		lines.push_back("\tends the level, goes to " + FileLabel(ld32(trigger + 0x9C)) + " entrance " + e);
 	}
 	else if (const char* does = TypeDoes(type)) lines.push_back(std::string("\t") + does);
 	if (flags & 1) lines.push_back("\tdisabled: nothing happens until something sends it \"enable\"");
@@ -688,7 +765,14 @@ void Look(const std::vector<Drawn>& sights, std::vector<std::string>& labels)
 		if (&d == focus || far(d.centre) > kLabelRange || !Project(m, d.centre, x, y)) continue;
 		uint8_t color[4];
 		TypeColour(d.type, color);
-		tags.push_back({x, y, Rgb(color), "#" + std::to_string(d.index) + " " + TypeLabel(d.type)});
+		std::string text = "#" + std::to_string(d.index) + " " + TypeLabel(d.type), file;
+		if (g_loads && Loader(d.type))
+		{
+			std::vector<std::string> unused;
+			Loads(d.trigger, unused, &file);
+			if (!file.empty()) text += ": " + file;
+		}
+		tags.push_back({x, y, Rgb(color), text});
 	}
 	for (const Drawn& d : sights)
 		if (d.player && &d != focus && d.reach <= kHuge) labels.push_back("in #" + std::to_string(d.index) + " " + TypeLabel(d.type));
@@ -760,6 +844,7 @@ void Gather(PPCContext& c)
 		const Seen& s = seen->second;
 		bool inside = now - s.insideFrame <= 1, recent = now - s.frame <= kRecent;
 		uint32_t type = ld32(trigger + kType);
+		if (!g_loads && Loader(type) && !(ld32(trigger + kDataFlags) & kHasShape)) continue;
 		TriggerType& listed = types[type];
 		listed.type = type;
 		++listed.count;
@@ -889,6 +974,8 @@ const char* trigger_type_name(uint32_t type)
 }
 
 bool trigger_xray() { return g_xray; }
+bool trigger_loads() { return g_loads; }
+void set_trigger_loads(bool on) { g_loads = on; }
 void set_trigger_xray(bool on) { g_xray = on; }
 
 std::vector<TriggerType> trigger_types()
@@ -979,6 +1066,7 @@ void install_triggers()
 	if (!orig_test_near || !orig_test_point || !orig_test_body) rt_die("goldeneye: the trigger tests are not hooked in this build");
 	g_view = std::atoi(saved_setting("GE_TRIGGERS", "LAUNCH_TRIGGERVIEW").c_str()) != 0;
 	g_xray = std::atoi(saved_setting("GE_TRIGGERS_XRAY", "LAUNCH_TRIGGERXRAY").c_str()) != 0;
+	g_loads = std::atoi(saved_setting("GE_TRIGGERS_LOADS", "LAUNCH_TRIGGERLOADS").c_str()) != 0;
 	LoadTypes(saved_setting("GE_TRIGGER_TYPES", "LAUNCH_TRIGGERTYPES"));
 	g_trace = std::getenv("GE_TRACE") != nullptr;
 }
