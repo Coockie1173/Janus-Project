@@ -244,8 +244,9 @@ Texts that still talk about the controller.
       the sliders take the mouse, and a switch turns instant kill headshots off (the switch not seen in a fight yet)
 - [x] 007 mode: a slider for enemy accuracy (the game has no value for it by difficulty): Enemy Accuracy, 0 to 200%,
       the spread of a guard's shots is twice as wide at 0 and gone at 200 (the guards' accuracy seen bent in Solar)
-- [x] Invisible enemies: F1 > Cheats > Invisible Enemies, enemies aren't drawn, their shots are (needs checking
-      in play: every thing of the draw list hidden is seen gone, a guard in play is drawn from it, not seen hidden on a picture)
+- [x] Invisible enemies: F1 > Cheats > Invisible Enemies, enemies aren't drawn, their shots are; the radar still
+      shows them (a Dam guard 10 m away gone from the picture, cutscene characters stay)
 - [x] Invisible player (enemies never see you): F1 > Cheats > Invisible Player, the game's own "can be seen" byte held off
-      and the stimuli about you left out (needs checking: in the one replay tried you shoot, and the guards still came)
+      and the stimuli about you left out (flown up to Dam's guards: off, 100 sightings and shots; on, none); a shot
+      that lands near them still brings them
 - [ ] Fly mode (noclip that doesn't go through walls)

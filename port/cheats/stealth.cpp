@@ -117,6 +117,8 @@ void stealth_apply(uint32_t controller)
 	static bool held = false;
 	const uint32_t thing = ld32(controller + 4), handler = guest_ptr(thing) ? ld32(thing + kThingHandler) : 0;
 	if (!guest_ptr(handler)) { held = false; return; }
+	static uint32_t said = 0;
+	if (g_trace && said != thing && (said = thing)) rt_log("stealth: the player's thing %08X at %.2f %.2f %.2f", thing, ldf(thing + 0xF8), ldf(thing + 0xFC), ldf(thing + 0x100));
 	const bool hide = g_player && Campaign();
 	if (hide) st8(handler + kVisible, 0);
 	else if (held) st8(handler + kVisible, 1);
@@ -143,7 +145,8 @@ void stealth_things(uint32_t world, bool before)
 			if (!Enemy(ld32(thing + kThingHandler))) continue;
 			const uint32_t now = ld16(thing + kThingFlags) << 8 | (ld8(thing + 0x169) & ~2u);
 			if (said[thing] != now && (said[thing] = now))
-				rt_log("stealth: enemy %08X (class %08X) flags %04X, hidden by %u, level time %.2f", thing, ClassOf(ld32(thing + kThingHandler)), ld16(thing + kThingFlags), ld8(thing + 0x168), ldf(0x805C963C));
+				rt_log("stealth: enemy %08X (class %08X) flags %04X, hidden by %u, at %.2f %.2f %.2f, level time %.2f", thing, ClassOf(ld32(thing + kThingHandler)), ld16(thing + kThingFlags), ld8(thing + 0x168),
+					ldf(thing + 0xF8), ldf(thing + 0xFC), ldf(thing + 0x100), ldf(0x805C963C));
 		}
 	}
 	if (!g_enemies || !Campaign() || !guest_ptr(world) || !guest_ptr(ld32(world + 0xA0))) return;
