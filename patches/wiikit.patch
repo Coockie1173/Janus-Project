@@ -1,5 +1,5 @@
 diff --git a/recomp/__main__.py b/recomp/__main__.py
-index db1b158..25fb179 100644
+index db1b158..5d952c5 100644
 --- a/recomp/__main__.py
 +++ b/recomp/__main__.py
 @@ -22,6 +22,7 @@ boundaries and the hook names. The generated code needs wiikit/runtime/ppc.h.
@@ -10,7 +10,7 @@ index db1b158..25fb179 100644
  import time
  
  from .. import cw
-@@ -154,7 +155,51 @@ def hook_names(img, files, log=print):
+@@ -154,7 +155,52 @@ def hook_names(img, files, log=print):
      return hooks, syms
  
  
@@ -18,17 +18,18 @@ index db1b158..25fb179 100644
 +_CMP_RE = re.compile(r"^cr_cmp_([su])\(c, (\d), (.*), ([^,]*)\);$")
 +_RC_RE = re.compile(r" ?\bcr0_rc\(c, ([^;]*)\);")
 +_CR_READ = re.compile(r"c\.cr\[(\d+)\]")
-+_CR_TESTS = ("x < y", "x > y", "x == y", "c.xer_so")
++_CR_TESTS = ("{x} < {y}", "{x} > {y}", "{x} == {y}", "c.xer_so")
 +
 +
-+def _cr_stores(fld, live, check):
++def _cr_stores(fld, live, check, x, y):
 +    """The stores of a compare's bits that are read again (crlive.py); with check, a bit
 +    taken for dead gets a value no CR bit has, and a read of it stops the game."""
 +    out = []
 +    for k in range(4):
 +        bit = 4 * fld + k
 +        if live >> bit & 1:
-+            out.append(f"c.cr[{bit}] = {_CR_TESTS[k]};")
++            test = ("0", "0", "1", "c.xer_so")[k] if x == y else _CR_TESTS[k].format(x=x, y=y)
++            out.append(f"c.cr[{bit}] = {test};")
 +        elif check:
 +            out.append(f"c.cr[{bit}] = 2;")
 +    return " ".join(out)
@@ -40,13 +41,13 @@ index db1b158..25fb179 100644
 +    for line in code:
 +        m = _CMP_RE.match(line)
 +        if m and (live >> 4 * int(m.group(2)) & 0xF) != 0xF:
-+            t = "int32_t" if m.group(1) == "s" else "uint32_t"
-+            stores = _cr_stores(int(m.group(2)), live, check)
-+            line = f"{{ const {t} x = {m.group(3)}, y = {m.group(4)}; (void)x; (void)y; {stores} }}" if stores else ";"
++            # the operands are registers and numbers: reading them twice is the same
++            stores = _cr_stores(int(m.group(2)), live, check, m.group(3), m.group(4))
++            line = stores or ";"
 +        elif (live & 0xF) != 0xF and "cr0_rc(" in line:
 +            def rc(m):
-+                stores = _cr_stores(0, live, check)
-+                return f" {{ const int32_t x = (int32_t)({m.group(1)}), y = 0; (void)x; (void)y; {stores} }}" if stores else ""
++                stores = _cr_stores(0, live, check, f"(int32_t){m.group(1)}", "0")
++                return f" {stores}" if stores else ""
 +            line = _RC_RE.sub(rc, line)
 +        if check:
 +            if ins.op in ("bc", "bclr", "bcctr"):
@@ -63,12 +64,12 @@ index db1b158..25fb179 100644
      t0 = time.time()
      prog = Program(img, log=log)
      entries = set(prog.entries)
-@@ -177,21 +222,43 @@ def generate(img, out, per_file=8000, comments=True, hook_files=(), modules=(),
+@@ -177,21 +223,43 @@ def generate(img, out, per_file=8000, comments=True, hook_files=(), modules=(),
          files.append(name)
          buf, count, idx = [], 0, idx + 1
  
 +    # an access through r1, r2 or r13 is to RAM (ppc.h: ld32r...)
-+    _RAM = re.compile(r"\b((?:ld|st)(?:8|16|32))\(\(c\.r\[(1|2|13)\] \+")
++    _RAM = re.compile(r"\b((?:ld|st)(?:8|16|32|64|fs)|psq_load|psq_store)\(((?:c, \d+, )?)\(c\.r\[(1|2|13)\] ([+-]) 0x")
 +    # every instruction's C++ first: the CR bits a compare must store are those read
 +    # again, here or in another function (crlive.py), and that is read off the code
 +    emitted = {}
@@ -88,7 +89,7 @@ index db1b158..25fb179 100644
              except E.Unsupported as ex:
                  unsupported[str(ex)] = unsupported.get(str(ex), 0) + 1
                  code = [f'ppc_unimplemented(c, 0x{a:08X}u, "{ex}");']
-+            code = [_RAM.sub(r"\1r((c.r[\2] +", x) for x in code]
++            code = [_RAM.sub(r"\1r(\2(c.r[\3] \4 0x", x) for x in code]
 +            if any("c.r[1] = " in x for x in code):     # the stack pointer: see PPC_COMMIT
 +                code = code + ["PPC_COMMIT(c.r[1]);"]
 +            rows.append(code)
@@ -113,7 +114,7 @@ index db1b158..25fb179 100644
              note = f"  // {a:08X} {_text(ins, a)}" if comments else ""
              lines.append("    " + code[0] + note)
              lines.extend("    " + x for x in code[1:])
-@@ -211,7 +278,7 @@ def generate(img, out, per_file=8000, comments=True, hook_files=(), modules=(),
+@@ -211,7 +279,7 @@ def generate(img, out, per_file=8000, comments=True, hook_files=(), modules=(),
          f.write("#pragma once\n#include \"ppc.h\"\n\n")
          f.write("extern uint32_t g_rso_base[];   // where each RSO module is loaded (rso.cpp)\n\n")
          for e in prog.entries:
@@ -122,7 +123,7 @@ index db1b158..25fb179 100644
      with Out(os.path.join(out, "table.cpp")) as f:
          f.write('#include "funcs.h"\n#include <cstddef>\n\n')
          f.write("extern const PPCFuncEntry g_ppc_funcs[] = {\n")
-@@ -223,9 +290,9 @@ def generate(img, out, per_file=8000, comments=True, hook_files=(), modules=(),
+@@ -223,9 +291,9 @@ def generate(img, out, per_file=8000, comments=True, hook_files=(), modules=(),
          f.write(HOOKS_HEAD)
          for a, name in sorted(hooks.items()):
              f.write(f"// {name}\n"
@@ -134,7 +135,7 @@ index db1b158..25fb179 100644
                      f"else orig_{a:08X}(c); }}\n\n")
          f.write("extern const PPCHook g_ppc_hooks[] = {\n")
          for a, name in sorted(hooks.items()):
-@@ -315,6 +382,10 @@ def main():
+@@ -315,6 +383,10 @@ def main():
      ap.add_argument("--symbols", metavar="TSV",
                      help="names for a stripped executable (addr, ..., name); its functions "
                           "are found by discovery (recomp/discover.py)")
@@ -145,7 +146,7 @@ index db1b158..25fb179 100644
      a = ap.parse_args()
      img = Image(a.image)
      modules, module_names = [], {}
-@@ -328,7 +399,8 @@ def main():
+@@ -328,7 +400,8 @@ def main():
              names.setdefault(v, n)
          symbolise(img, names)
      generate(img, a.out, a.per_file, not a.no_comments,
@@ -441,6 +442,275 @@ index 0000000..bb49877
 +                v = ALL                                  # (a branch writes no CR: never asked)
 +            res[a] = v
 +        return res
+diff --git a/recomp/emit.py b/recomp/emit.py
+index e7189b8..2ffec1e 100644
+--- a/recomp/emit.py
++++ b/recomp/emit.py
+@@ -8,6 +8,9 @@ initialisation.
+ """
+ 
+ 
++import re
++
++
+ class Unsupported(Exception):
+     pass
+ 
+@@ -68,17 +71,48 @@ def _ra0(n):                              # rA|0
+     return f"c.r[{n}]" if n else "0u"
+ 
+ 
++def _plus(x, v):
++    """x + v, a negative v written as a subtraction (the same in 32-bit unsigned)."""
++    if isinstance(v, Expr):
++        return f"{x} + {_h(v)}"
++    v = (v & 0xFFFFFFFF) - ((v & 0x80000000) << 1)
++    if v == 0:
++        return x
++    return f"{x} - {_h(-v)}" if v < 0 else f"{x} + {_h(v)}"
++
++
++def _sx(v):
++    """A signed 32-bit constant, as C++ int32_t."""
++    if isinstance(v, Expr):
++        return f"(int32_t){_h(v)}"
++    v = (v & 0xFFFFFFFF) - ((v & 0x80000000) << 1)
++    return "INT32_MIN" if v == -0x80000000 else str(v)
++
++
+ def _ea_d(f):
+     d = f["d"]
+     if f["A"] == 0:
+         return _h(d)
+-    return _r(f["A"]) if d == 0 else f"({_r(f['A'])} + {_h(d)})"
++    return _r(f["A"]) if d == 0 else f"({_plus(_r(f['A']), d)})"
+ 
+ 
+ def _ea_x(f):
+     return f"{_r(f['B'])}" if f["A"] == 0 else f"({_r(f['A'])} + {_r(f['B'])})"
+ 
+ 
++def _subst(expr, names):
++    """expr with each of its operand names (a, b0...) replaced by its C++."""
++    return re.sub(r"\b(" + "|".join(names) + r")\b", lambda m: names[m.group(1)], expr)
++
++
++def _if(pre, cond, act):
++    """A conditional statement; act is one or more statements."""
++    if not cond:
++        return f"{pre}{act}"
++    one = act.count(";") == 1 or (act.startswith("{") and act.endswith("}"))
++    return f"{pre}if ({cond}) {act}" if one else f"{pre}if ({cond}) {{ {act} }}"
++
++
+ _LOAD = {"lwz": "ld32({ea})", "lbz": "ld8({ea})", "lhz": "ld16({ea})",
+          "lha": "(uint32_t)(int32_t)(int16_t)ld16({ea})"}
+ _STORE = {"stw": "st32({ea}, {v})", "stb": "st8({ea}, (uint8_t){v})", "sth": "st16({ea}, (uint16_t){v})"}
+@@ -95,6 +129,11 @@ _ADDS = {"addc": ("a", "b", "0"), "adde": ("a", "b", "c.xer_ca"), "addze": ("a",
+          "addme": ("a", "0xFFFFFFFFu", "c.xer_ca"), "subfc": ("~a", "b", "1"),
+          "subfe": ("~a", "b", "c.xer_ca"), "subfze": ("~a", "0u", "c.xer_ca"),
+          "subfme": ("~a", "0xFFFFFFFFu", "c.xer_ca")}
++# without OE: one expression over a (rA) and b (rB)
++_ARITH = {"add": "a + b", "subf": "b - a", "neg": "0u - a", "mullw": "a * b",
++          "mulhw": "(uint32_t)(((int64_t)(int32_t)a * (int32_t)b) >> 32)",
++          "mulhwu": "(uint32_t)(((uint64_t)a * b) >> 32)", "divw": "divw(a, b)",
++          "divwu": "divwu(a, b)"}
+ _CROPS = {"crand": "a & b", "crandc": "a & !b", "cror": "a | b", "crorc": "a | !b",
+           "crxor": "a ^ b", "crnor": "!(a | b)", "crnand": "!(a & b)", "creqv": "!(a ^ b)"}
+ _FP2 = {"fadd": "a + b", "fsub": "a - b", "fdiv": "a / b", "fmul": "a * cc",
+@@ -120,6 +159,10 @@ _PS = {"ps_add": ("a0 + b0", "a1 + b1"), "ps_sub": ("a0 - b0", "a1 - b1"),
+ _PSMOVE = {"ps_merge00": ("a0", "b0"), "ps_merge01": ("a0", "b1"), "ps_merge10": ("a1", "b0"),
+            "ps_merge11": ("a1", "b1"), "ps_mr": ("b0", "b1"), "ps_neg": ("-b0", "-b1"),
+            "ps_abs": ("std::fabs(b0)", "std::fabs(b1)"), "ps_nabs": ("-std::fabs(b0)", "-std::fabs(b1)")}
++# float loads and stores at ea (lfs fills both halves of a paired single)
++_FMEM = {"lfs": "fp_set(c, {D}, ldfs(ea));", "lfd": "c.f[{D}] = as_f64(ld64(ea));",
++         "stfs": "stfs(ea, c.f[{D}]);", "stfd": "st64(ea, as_u64(c.f[{D}]));",
++         "stfiw": "st32(ea, (uint32_t)as_u64(c.f[{D}]));"}
+ _NOP = {"sync", "isync", "eieio", "tlbsync", "tlbie", "dcbst", "dcbf", "dcbt", "dcbtst",
+         "dcbi", "icbi"}
+ 
+@@ -164,31 +207,32 @@ def emit(ins, addr, fn):
+             act = f"c.lr = {_h(nxt)};" if t == nxt else f"c.lr = {_h(nxt)}; {fn.call(t)}"
+         else:
+             act = fn.jump(t, addr)
+-        return [f"{{ {pre}if ({cond}) {{ {act} }} }}" if cond else f"{{ {pre}{act} }}"]
++        return [_if(pre, cond, act)]
+     if op == "bclr":
+         pre, cond = _bc_cond(f["BO"], f["BI"])
+         if f["LK"]:
+             act = f"{{ uint32_t t = c.lr; c.lr = {_h(nxt)}; ppc_call_indirect(c, t); }}"
+         else:
+             act = "return;"
+-        return [f"{{ {pre}if ({cond}) {act} }}" if cond else f"{{ {pre}{act} }}"]
++        return [_if(pre, cond, act)]
+     if op == "bcctr":
+         pre, cond = _bc_cond(f["BO"], f["BI"])
+         if f["LK"]:
+-            act = f"{{ c.lr = {_h(nxt)}; ppc_call_indirect(c, c.ctr); }}"
++            act = f"c.lr = {_h(nxt)}; ppc_call_indirect(c, c.ctr);"
+         elif not cond and addr in fn.tables:
+             cases = " ".join(f"case {_h(t)}: goto L_{t:08X};" for t in sorted(set(fn.tables[addr])))
+             ctr = fn.code_address("c.ctr") if hasattr(fn, "code_address") else "c.ctr"
+             return [f"switch ({ctr}) {{ {cases} default: ppc_call_indirect(c, c.ctr); return; }}"]
+         else:
+-            act = "{ ppc_call_indirect(c, c.ctr); return; }"
+-        return [f"{{ {pre}if ({cond}) {act} }}" if cond else f"{{ {pre}{act} }}"]
++            act = "ppc_call_indirect(c, c.ctr); return;"
++        return [_if(pre, cond, act)]
+ 
+     # ---- integer, immediate -----------------------------------------------------------
+-    if op == "addi":
+-        return [f"c.r[{f['D']}] = {_ra0(f['A'])} + {_h(f['simm'])};"]
+-    if op == "addis":
+-        return [f"c.r[{f['D']}] = {_ra0(f['A'])} + {_h(f['simm'] << 16)};"]
++    if op in ("addi", "addis"):
++        v = f["simm"] << 16 if op == "addis" else f["simm"]
++        if f["A"] == 0:                   # li, lis
++            return [f"c.r[{f['D']}] = {_h(v)};"]
++        return [f"c.r[{f['D']}] = {_plus(_r(f['A']), v)};"]
+     if op in ("addic", "addic."):
+         s = f"c.r[{f['D']}] = add_ca(c, c.r[{f['A']}], {_h(f['simm'])}, 0);"
+         return [s + (f" cr0_rc(c, c.r[{f['D']}]);" if op == "addic." else "")]
+@@ -202,9 +246,10 @@ def emit(ins, addr, fn):
+         s = f"c.r[{f['A']}] = c.r[{f['S']}] {o} {_h(imm)};"
+         return [s + (f" cr0_rc(c, c.r[{f['A']}]);" if op.endswith(".") else "")]
+     if op in ("cmpi", "cmpli", "cmp", "cmpl"):
+-        b = _h(f["imm"]) if "imm" in f else f"c.r[{f['B']}]"
+         if op in ("cmpi", "cmp"):
+-            return [f"cr_cmp_s(c, {f['crfD']}, (int32_t)c.r[{f['A']}], (int32_t){b});"]
++            b = _sx(f["imm"]) if "imm" in f else f"(int32_t)c.r[{f['B']}]"
++            return [f"cr_cmp_s(c, {f['crfD']}, (int32_t)c.r[{f['A']}], {b});"]
++        b = _h(f["imm"]) if "imm" in f else f"c.r[{f['B']}]"
+         return [f"cr_cmp_u(c, {f['crfD']}, c.r[{f['A']}], {b});"]
+     if op in ("twi", "tw"):
+         b = _h(f["simm"]) if op == "twi" else f"c.r[{f['B']}]"
+@@ -224,6 +269,14 @@ def emit(ins, addr, fn):
+         return [s + (f" cr0_rc(c, c.r[{f['A']}]);" if rc else "")]
+ 
+     # ---- integer, register ------------------------------------------------------------
++    if op in _ARITH and not f.get("OE"):
++        D = f["D"]
++        e = _subst(_ARITH[op], {"a": f"c.r[{f['A']}]", "b": f"c.r[{f.get('B', 0)}]"})
++        return [f"c.r[{D}] = {e};" + (f" cr0_rc(c, c.r[{D}]);" if rc else "")]
++    if op in _ADDS and not f.get("OE"):
++        x, y, cin = (_subst(v, {"a": f"c.r[{f['A']}]", "b": f"c.r[{f.get('B', 0)}]"}) for v in _ADDS[op])
++        D = f["D"]
++        return [f"c.r[{D}] = add_ca(c, {x}, {y}, {cin});" + (f" cr0_rc(c, c.r[{D}]);" if rc else "")]
+     if op in ("add", "subf", "neg", "mullw", "mulhw", "mulhwu", "divw", "divwu") or op in _ADDS:
+         D, A, B = f["D"], f["A"], f["B"]
+         body = f"uint32_t a = c.r[{A}], b = c.r[{B}]; uint32_t r;"
+@@ -262,6 +315,8 @@ def emit(ins, addr, fn):
+         if rc:
+             body += " cr0_rc(c, r);"
+         return ["{ " + body + " }"]
++    if op == "or" and f["S"] == f["B"]:   # mr
++        return [f"c.r[{f['A']}] = c.r[{f['S']}];" + (f" cr0_rc(c, c.r[{f['A']}]);" if rc else "")]
+     if op in _LOGIC:
+         e = _LOGIC[op].format(s=f"c.r[{f['S']}]", b=f"c.r[{f['B']}]")
+         return [f"c.r[{f['A']}] = {e};" + (f" cr0_rc(c, c.r[{f['A']}]);" if rc else "")]
+@@ -284,30 +339,28 @@ def emit(ins, addr, fn):
+             return [_STORE[base].format(ea=_ea_d(f), v=v) + ";"]
+         return [f"{{ uint32_t ea = {_ea_d(f)}; {_STORE[base].format(ea='ea', v=v)}; c.r[{f['A']}] = ea; }}"]
+     if op in ("lfs", "lfsu", "lfd", "lfdu", "stfs", "stfsu", "stfd", "stfdu"):
+-        upd = op.endswith("u")
+         k = op.rstrip("u")
+-        stmt = {"lfs": "{ double v = (double)as_f32(ld32(ea)); c.f[D] = v; c.ps1[D] = v; }",
+-                "lfd": "c.f[D] = as_f64(ld64(ea));",
+-                "stfs": "st32(ea, as_u32((float)c.f[D]));",
+-                "stfd": "st64(ea, as_u64(c.f[D]));"}[k].replace("[D]", f"[{f['D']}]")
+-        return [f"{{ uint32_t ea = {_ea_d(f)}; {stmt}" + (f" c.r[{f['A']}] = ea;" if upd else "") + " }"]
++        stmt = _FMEM[k].replace("{D}", str(f["D"]))
++        if not op.endswith("u"):
++            return [stmt.replace("(ea", "(" + _ea_d(f), 1)]
++        return [f"{{ uint32_t ea = {_ea_d(f)}; {stmt} c.r[{f['A']}] = ea; }}"]
+     if op in ("lfsx", "lfsux", "lfdx", "lfdux", "stfsx", "stfsux", "stfdx", "stfdux", "stfiwx"):
+-        upd = op.endswith("ux")
+         k = op.replace("ux", "x")
+-        stmt = {"lfsx": "{ double v = (double)as_f32(ld32(ea)); c.f[D] = v; c.ps1[D] = v; }",
+-                "lfdx": "c.f[D] = as_f64(ld64(ea));",
+-                "stfsx": "st32(ea, as_u32((float)c.f[D]));",
+-                "stfdx": "st64(ea, as_u64(c.f[D]));",
+-                "stfiwx": "st32(ea, (uint32_t)as_u64(c.f[D]));"}[k].replace("[D]", f"[{f['D']}]")
+-        return [f"{{ uint32_t ea = {_ea_x(f)}; {stmt}" + (f" c.r[{f['A']}] = ea;" if upd else "") + " }"]
++        stmt = _FMEM[k.rstrip("x")].replace("{D}", str(f["D"]))
++        if not op.endswith("ux"):
++            return [stmt.replace("(ea", "(" + _ea_x(f), 1)]
++        return [f"{{ uint32_t ea = {_ea_x(f)}; {stmt} c.r[{f['A']}] = ea; }}"]
+     if op in _LOADX or (op.endswith("ux") and op.replace("ux", "x") in _LOADX):
+         k = op.replace("ux", "x")
+-        upd = f" c.r[{f['A']}] = ea;" if op.endswith("ux") else ""
+-        return [f"{{ uint32_t ea = {_ea_x(f)}; c.r[{f['D']}] = {_LOADX[k]};{upd} }}"]
++        if not op.endswith("ux"):
++            return [f"c.r[{f['D']}] = {_LOADX[k].replace('(ea)', '(' + _ea_x(f) + ')')};"]
++        return [f"{{ uint32_t ea = {_ea_x(f)}; c.r[{f['D']}] = {_LOADX[k]}; c.r[{f['A']}] = ea; }}"]
+     if op in _STOREX or (op.endswith("ux") and op.replace("ux", "x") in _STOREX):
+         k = op.replace("ux", "x")
+-        upd = f" c.r[{f['A']}] = ea;" if op.endswith("ux") else ""
+-        return [f"{{ uint32_t ea = {_ea_x(f)}; {_STOREX[k].format(v=f'c.r[{f['D']}]')};{upd} }}"]
++        st = _STOREX[k].format(v=f"c.r[{f['D']}]")
++        if not op.endswith("ux"):
++            return [st.replace("(ea,", "(" + _ea_x(f) + ",", 1) + ";"]
++        return [f"{{ uint32_t ea = {_ea_x(f)}; {st}; c.r[{f['A']}] = ea; }}"]
+     if op in ("lmw", "stmw"):
+         out = [f"{{ uint32_t ea = {_ea_d(f)};"]
+         for k, rr in enumerate(range(f["D"], 32)):
+@@ -388,15 +441,12 @@ def emit(ins, addr, fn):
+     # ---- floating point ---------------------------------------------------------------
+     if op in _FP2 or op in _FPS or op in _FPMOVE:
+         D = f["D"]
+-        load = f"double a = c.f[{f.get('A', 0)}], b = c.f[{f.get('B', 0)}], cc = c.f[{f.get('C', 0)}]; (void)a; (void)cc;"
+-        if op in _FP2:
+-            s = f"c.f[{D}] = {_FP2[op]};"
+-        elif op in _FPS:
+-            s = f"fp_single(c, {D}, {_FPS[op]});"
++        names = {"a": f"c.f[{f.get('A', 0)}]", "b": f"c.f[{f.get('B', 0)}]", "cc": f"c.f[{f.get('C', 0)}]"}
++        if op in _FPS:
++            s = f"fp_single(c, {D}, {_subst(_FPS[op], names)});"
+         else:
+-            load = f"double b = c.f[{f['B']}];"
+-            s = f"c.f[{D}] = {_FPMOVE[op]};"
+-        return ["{ " + load + " " + s + (" cr1_rc(c);" if rc else "") + " }"]
++            s = f"c.f[{D}] = {_subst(_FP2.get(op) or _FPMOVE[op], names)};"
++        return [s + (" cr1_rc(c);" if rc else "")]
+     if op in ("fcmpu", "fcmpo"):
+         return [f"fcmp(c, {f['crfD']}, c.f[{f['A']}], c.f[{f['B']}]);"]
+     if op in ("fctiw", "fctiwz"):
+@@ -418,23 +468,23 @@ def emit(ins, addr, fn):
+ 
+     # ---- paired singles -------------------------------------------------------------
+     if op in _PS or op in _PSMOVE:
+-        A, B, C, D = f.get("A", 0), f.get("B", 0), f.get("C", 0), f["D"]
+-        load = (f"double a0 = c.f[{A}], a1 = c.ps1[{A}], b0 = c.f[{B}], b1 = c.ps1[{B}], "
+-                f"c0 = c.f[{C}], c1 = c.ps1[{C}]; (void)a0; (void)a1; (void)b0; (void)b1; (void)c0; (void)c1;")
+-        if op in _PS:
+-            e0, e1 = _PS[op]
+-            s = f"ps_set(c, {D}, {e0}, {e1});"
+-        else:
+-            e0, e1 = _PSMOVE[op]
+-            s = f"c.f[{D}] = {e0}; c.ps1[{D}] = {e1};"
+-        return ["{ " + load + " " + s + (" cr1_rc(c);" if rc else "") + " }"]
++        D = f["D"]
++        names = {}
++        for k in "ABC":
++            n = f.get(k, 0)
++            names[k.lower() + "0"], names[k.lower() + "1"] = f"c.f[{n}]", f"c.ps1[{n}]"
++        # both halves are worked out before either is written (rD may be an operand)
++        e0, e1 = (_subst(e, names) for e in (_PS.get(op) or _PSMOVE[op]))
++        s = f"{'ps_set' if op in _PS else 'ps_put'}(c, {D}, {e0}, {e1});"
++        return [s + (" cr1_rc(c);" if rc else "")]
+     if op in ("ps_cmpu0", "ps_cmpo0", "ps_cmpu1", "ps_cmpo1"):
+         arr = "c.f" if op.endswith("0") else "c.ps1"
+         return [f"fcmp(c, {f['crfD']}, {arr}[{f['A']}], {arr}[{f['B']}]);"]
+     if op in ("psq_l", "psq_lu", "psq_st", "psq_stu"):
+         fn_ = "psq_load" if op.startswith("psq_l") else "psq_store"
+-        upd = f" c.r[{f['A']}] = ea;" if op.endswith("u") else ""
+-        return [f"{{ uint32_t ea = {_ea_d(f)}; {fn_}(c, {f['D']}, ea, {f['W']}, {f['I']});{upd} }}"]
++        if not op.endswith("u"):
++            return [f"{fn_}(c, {f['D']}, {_ea_d(f)}, {f['W']}, {f['I']});"]
++        return [f"{{ uint32_t ea = {_ea_d(f)}; {fn_}(c, {f['D']}, ea, {f['W']}, {f['I']}); c.r[{f['A']}] = ea; }}"]
+     if op in ("psq_lx", "psq_lux", "psq_stx", "psq_stux"):
+         fn_ = "psq_load" if op.startswith("psq_l") else "psq_store"
+         upd = f" c.r[{f['A']}] = ea;" if op.endswith("ux") else ""
 diff --git a/runtime/audio.cpp b/runtime/audio.cpp
 index 4050960..df1800f 100644
 --- a/runtime/audio.cpp
@@ -4184,24 +4454,27 @@ index aa1274e..3d497c6 100644
  void watch_main(int seconds) {
      for (;;) {
 diff --git a/runtime/ppc.h b/runtime/ppc.h
-index 99351d5..f6af62d 100644
+index 99351d5..62849f6 100644
 --- a/runtime/ppc.h
 +++ b/runtime/ppc.h
-@@ -23,11 +23,13 @@
+@@ -22,12 +22,16 @@
+ #include <stdlib.h>
  #define PPC_BSWAP16 _byteswap_ushort
  #define PPC_BSWAP32 _byteswap_ulong
++#define PPC_BSWAP64 _byteswap_uint64
  #define PPC_UNLIKELY(x) (x)
 +#define PPC_LIKELY(x) (x)
  #define PPC_NOINLINE __declspec(noinline)
  #else
  #define PPC_BSWAP16 __builtin_bswap16
  #define PPC_BSWAP32 __builtin_bswap32
++#define PPC_BSWAP64 __builtin_bswap64
  #define PPC_UNLIKELY(x) __builtin_expect(!!(x), 0)
 +#define PPC_LIKELY(x) __builtin_expect(!!(x), 1)
  #define PPC_NOINLINE __attribute__((noinline))
  #endif
  
-@@ -45,6 +47,17 @@ struct PPCContext {
+@@ -45,6 +49,17 @@ struct PPCContext {
      uint32_t reserve;   // lwarx reservation address
  };
  
@@ -4219,7 +4492,7 @@ index 99351d5..f6af62d 100644
  typedef void (*PPCFunc)(PPCContext&);
  
  // The generated tables: address -> function, replaceable functions, named data.
-@@ -57,10 +70,11 @@ struct RsoModule { const char* name; uint32_t vbase; uint32_t size; };
+@@ -57,10 +72,11 @@ struct RsoModule { const char* name; uint32_t vbase; uint32_t size; };
  
  // ---- services provided by the runtime ------------------------------------------------
  extern uint8_t* g_mem;
@@ -4235,7 +4508,7 @@ index 99351d5..f6af62d 100644
  uint32_t ppc_mmio_read(uint32_t addr, int size);
  void     ppc_mmio_write(uint32_t addr, uint32_t value, int size);
  uint32_t ppc_io_read(uint32_t addr, int size);              // any address >= 0xC0000000
-@@ -69,8 +83,8 @@ uint64_t ppc_timebase();
+@@ -69,8 +85,8 @@ uint64_t ppc_timebase();
  void     ppc_mttb(int upper, uint32_t v);
  void     ppc_mtdec(uint32_t v);
  uint32_t ppc_mfdec();
@@ -4246,7 +4519,7 @@ index 99351d5..f6af62d 100644
  uint32_t ppc_lc_dma(uint32_t dma_u, uint32_t dma_l);        // mtspr DMA_L: the locked cache's DMA; returns DMA_L
  void     ppc_wpar_write(uint32_t wpar);                     // mtspr WPAR: the gather buffer's partial burst dropped
  extern uint32_t g_ppc_spr[1024];                            // the processor's own SPRs (HID0/1/2/4, WPAR, DMA)
-@@ -85,14 +99,20 @@ uint32_t ppc_symbol(const char* name);                      // 0 if not in the l
+@@ -85,14 +101,20 @@ uint32_t ppc_symbol(const char* name);                      // 0 if not in the l
  // backward branch and whenever it sets MSR[EE]; the runtime then delivers
  // whatever is pending, if MSR[EE] allows, through the guest's own handlers.
  extern std::atomic<uint32_t> g_ppc_pending;
@@ -4270,7 +4543,7 @@ index 99351d5..f6af62d 100644
      if (v & 0x8000u) PPC_POLL(c);
  }
  
-@@ -100,39 +120,58 @@ static inline void ppc_mtmsr(PPCContext& c, uint32_t v) {
+@@ -100,39 +122,62 @@ static inline void ppc_mtmsr(PPCContext& c, uint32_t v) {
  // Below 0xC0000000 the guest address indexes host memory directly (MEM1 at
  // 0x80000000, MEM2 at 0x90000000). Above it, ppc_io_*: the uncached mirrors
  // (0xC0000000, 0xD0000000), the hardware (0xCC000000-0xCDFFFFFF: GX FIFO
@@ -4306,7 +4579,9 @@ index 99351d5..f6af62d 100644
 +    uint32_t v; std::memcpy(&v, PPC_MEM(a), 4); return PPC_BSWAP32(v);
  }
  static inline uint64_t ld64(uint32_t a) {
-     return ((uint64_t)ld32(a) << 32) | ld32(a + 4);
+-    return ((uint64_t)ld32(a) << 32) | ld32(a + 4);
++    if (PPC_UNLIKELY(PPC_IS_IO(a))) return ((uint64_t)ppc_io_read(a, 4) << 32) | ppc_io_read(a + 4, 4);
++    uint64_t v; std::memcpy(&v, PPC_MEM(a), 8); return PPC_BSWAP64(v);
  }
  static inline void st8(uint32_t a, uint8_t v) {
      if (PPC_UNLIKELY(PPC_IS_IO(a))) { ppc_io_write(a, v, 1); return; }
@@ -4324,8 +4599,11 @@ index 99351d5..f6af62d 100644
 +    v = PPC_BSWAP32(v); std::memcpy(PPC_MEM(a), &v, 4);
  }
  static inline void st64(uint32_t a, uint64_t v) {
-     st32(a, (uint32_t)(v >> 32)); st32(a + 4, (uint32_t)v);
- }
+-    st32(a, (uint32_t)(v >> 32)); st32(a + 4, (uint32_t)v);
+-}
++    if (PPC_UNLIKELY(PPC_IS_IO(a))) { ppc_io_write(a, (uint32_t)(v >> 32), 4); ppc_io_write(a + 4, (uint32_t)v, 4); return; }
++    v = PPC_BSWAP64(v); std::memcpy(PPC_MEM(a), &v, 8);
++}
 +// Through the stack pointer or a small-data base (r1, r2, r13) an access is
 +// always to RAM: the recompiler uses these, without the hardware check.
 +static inline uint8_t ld8r(uint32_t a) { return *PPC_MEM(a); }
@@ -4334,10 +4612,24 @@ index 99351d5..f6af62d 100644
 +static inline void st8r(uint32_t a, uint8_t v) { *PPC_MEM(a) = v; }
 +static inline void st16r(uint32_t a, uint16_t v) { v = PPC_BSWAP16(v); std::memcpy(PPC_MEM(a), &v, 2); }
 +static inline void st32r(uint32_t a, uint32_t v) { v = PPC_BSWAP32(v); std::memcpy(PPC_MEM(a), &v, 4); }
++static inline uint64_t ld64r(uint32_t a) { uint64_t v; std::memcpy(&v, PPC_MEM(a), 8); return PPC_BSWAP64(v); }
++static inline void st64r(uint32_t a, uint64_t v) { v = PPC_BSWAP64(v); std::memcpy(PPC_MEM(a), &v, 8); }
  static inline void ppc_dcbz(uint32_t ea) {
      ea &= ~31u;
      for (int i = 0; i < 32; i += 4) st32(ea + i, 0);
-@@ -165,6 +204,8 @@ static inline void cr_cmp_s(PPCContext& c, int field, int32_t a, int32_t b) {
+@@ -153,6 +198,11 @@ static inline double   as_f64(uint64_t u) { double d; std::memcpy(&d, &u, 8); re
+ static inline uint64_t as_u64(double d)   { uint64_t u; std::memcpy(&u, &d, 8); return u; }
+ static inline float    as_f32(uint32_t u) { float f; std::memcpy(&f, &u, 4); return f; }
+ static inline uint32_t as_u32(float f)    { uint32_t u; std::memcpy(&u, &f, 4); return u; }
++// a single-precision float in guest memory, as the FPRs hold it
++static inline double ldfs(uint32_t a) { return (double)as_f32(ld32(a)); }
++static inline void stfs(uint32_t a, double v) { st32(a, as_u32((float)v)); }
++static inline double ldfsr(uint32_t a) { return (double)as_f32(ld32r(a)); }
++static inline void stfsr(uint32_t a, double v) { st32r(a, as_u32((float)v)); }
+ 
+ // ---- condition register -------------------------------------------------------------
+ static inline void cr_set(PPCContext& c, int field, bool lt, bool gt, bool eq, bool so) {
+@@ -165,6 +215,8 @@ static inline void cr_cmp_s(PPCContext& c, int field, int32_t a, int32_t b) {
  static inline void cr_cmp_u(PPCContext& c, int field, uint32_t a, uint32_t b) {
      cr_set(c, field, a < b, a > b, a == b, c.xer_so);
  }
@@ -4346,7 +4638,7 @@ index 99351d5..f6af62d 100644
  static inline void cr0_rc(PPCContext& c, uint32_t v) { cr_cmp_s(c, 0, (int32_t)v, 0); }
  static inline void cr1_rc(PPCContext& c) {          // FP record form: CR1 = FPSCR[FX FEX VX OX]
      uint32_t f = c.fpscr;
-@@ -172,7 +213,7 @@ static inline void cr1_rc(PPCContext& c) {          // FP record form: CR1 = FPS
+@@ -172,7 +224,7 @@ static inline void cr1_rc(PPCContext& c) {          // FP record form: CR1 = FPS
  }
  static inline uint32_t mfcr(const PPCContext& c) {
      uint32_t v = 0;
@@ -4355,7 +4647,15 @@ index 99351d5..f6af62d 100644
      return v;
  }
  static inline void mtcrf(PPCContext& c, uint32_t crm, uint32_t v) {
-@@ -278,12 +319,24 @@ static inline void ps_quant(uint32_t type, int scale, uint32_t ea, double v, int
+@@ -217,6 +269,7 @@ static inline bool trap_cond(uint32_t to, uint32_t a, uint32_t b) {
+ 
+ // ---- floating point -------------------------------------------------------------------
+ static inline double rs(double x) { return (double)(float)x; }     // round to single
++static inline void fp_set(PPCContext& c, int d, double v) { c.f[d] = v; c.ps1[d] = v; }   // lfs: both halves
+ static inline void fp_single(PPCContext& c, int d, double v) {      // single ops fill ps0 and ps1
+     double r = rs(v); c.f[d] = r; c.ps1[d] = r;
+ }
+@@ -278,13 +331,43 @@ static inline void ps_quant(uint32_t type, int scale, uint32_t ea, double v, int
  }
  static inline int gqr_scale(uint32_t s6) { return (int)(s6 & 0x20 ? s6 | ~0x3Fu : s6); }
  static inline void psq_load(PPCContext& c, int d, uint32_t ea, int w, int i) {
@@ -4382,6 +4682,25 @@ index 99351d5..f6af62d 100644
      ps_quant(type, scale, ea, c.f[s], &sz);
      if (!w) ps_quant(type, scale, ea + sz, c.ps1[s], &sz);
  }
++// through r1, r2 or r13 (the stack: a function's saved paired singles)
++static inline void psq_loadr(PPCContext& c, int d, uint32_t ea, int w, int i) {
++    if (PPC_LIKELY((c.gqr[i] >> 16 & 7) < 4)) {
++        c.f[d] = (double)as_f32(ld32r(ea));
++        c.ps1[d] = w ? 1.0 : (double)as_f32(ld32r(ea + 4));
++        return;
++    }
++    psq_load(c, d, ea, w, i);
++}
++static inline void psq_storer(PPCContext& c, int s, uint32_t ea, int w, int i) {
++    if (PPC_LIKELY((c.gqr[i] & 7) < 4)) {
++        st32r(ea, as_u32((float)c.f[s]));
++        if (!w) st32r(ea + 4, as_u32((float)c.ps1[s]));
++        return;
++    }
++    psq_store(c, s, ea, w, i);
++}
+ static inline void ps_set(PPCContext& c, int d, double a, double b) { c.f[d] = rs(a); c.ps1[d] = rs(b); }
++static inline void ps_put(PPCContext& c, int d, double a, double b) { c.f[d] = a; c.ps1[d] = b; }
 diff --git a/runtime/rt.h b/runtime/rt.h
 index 75fec5e..a24fa76 100644
 --- a/runtime/rt.h
