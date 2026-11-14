@@ -115,8 +115,10 @@ do several things.
 - [x] E is the action button
 - [x] Get rid of all the A prompts, show the bound key instead of a controller button (texts, hud prompts,
       QTEs, menus; a tutorial box that waits for an action still shows the button, see docs/STATUS.md)
-- [ ] **medium** One key, one action for the rest (melee on F by default, Enter and E prompts that agree)
-- [ ] **medium** Phone works with mouse 1
+- [x] **medium** One key, one action for the rest (melee on F by default, Enter and E prompts that agree): melee is on F
+      (and V, Mouse X1), the smartphone moved from F to Q; a key file from before is moved once (Enter and E prompts not looked at)
+- [x] **medium** Phone works with mouse 1: with the phone in the hand the left button is the action, which takes the
+      picture or hacks ("Interact" in the game's texts), held for a hack (seen turning into the action on Dam, no picture taken)
 - [ ] **medium** Space stands up from a crouch and vaults while holding forward: a jump button in every
       way except the jump
   - check for other actions that shouldn't count as vaulting

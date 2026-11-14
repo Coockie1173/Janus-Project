@@ -40,9 +40,9 @@ Keyboard and mouse:
     Left button      fire                 Right button     aim down the sight
     Mouse wheel      change weapon        R                reload
     Left Ctrl        crouch               Left Shift       sprint
-    G                grenade              V                melee attack
+    G                grenade              F, V             melee attack
     T                cycle grenades       B                firing mode
-    F                smartphone           Tab              night vision / scoreboard
+    Q                smartphone           Tab              night vision / scoreboard
     1, 2, 3          the weapon in that slot
     Esc, P           pause                E                action
     F11, Alt+Enter   fullscreen           F1               settings menu

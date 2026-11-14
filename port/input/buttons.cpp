@@ -202,6 +202,23 @@ void menu_buttons(ClassicState& s) {
 //the wii's home button menu (wii menu, reset) has no place here: the button never reaches the game
 const uint32_t kClHome = 0x0800;
 
+//the smartphone's picture and hack are the action (b, "Interact" in the game's texts): with the
+//phone in the hand ZR (the left mouse button) is b as well, held for a hack. the phone has no use
+//for ZR of its own. what's in the hand is the inventory's item (+0xC4C, 0x10 each) +0xC96 numbers
+const uint32_t kPhone = 0x02000551, kInventoryItems = 0xC4C;
+void phone_buttons(ClassicState& s) {
+    if (!in_play() || !guest_ptr(g_local_ctrl) || ld32(kFrameCount) - g_local_frame >= 4) return;
+    const int8_t hand = (int8_t)ld8(g_local_ctrl + kItemInHand);
+    const uint32_t items = ld32(g_local_ctrl + kInventoryItems);
+    if (hand < 0 || !guest_ptr(items) || ld32(items + hand * 0x10) != kPhone) return;
+    static bool was = false;
+    static const bool trace = std::getenv("GE_TRACE") != nullptr;
+    const bool now = (s.buttons & kClZR) != 0;
+    if (now != was && trace) rt_log("goldeneye: the phone's %s", now ? "picture or hack (ZR as b)" : "ZR let go");
+    was = now;
+    if (now) s.buttons = (s.buttons & ~kClZR) | kClB;
+}
+
 //no pause while a cutscene is being skipped: + (and Esc, F1's own pause) wait until it's over
 //a pause in the middle stopped the long steps under the black, and its menu could restart or quit
 //a level halfway through a skip
@@ -222,6 +239,7 @@ void classic_filter(int chan, ClassicState& s) {
     bunnyhop_buttons(s);
     aim_lock_buttons(s);
     menu_buttons(s);
+    phone_buttons(s);
     custom_buttons(s);
     tank_buttons(s);
     skip_buttons(s);

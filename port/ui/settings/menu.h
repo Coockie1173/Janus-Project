@@ -111,6 +111,7 @@ void bind(const std::string& key);
 void add_sprint_binding();
 void AddWeaponBindings();
 void AddJumpBinding();
+void AddMeleeBinding(); //once: F from the smartphone to the melee attack
 
 //the pages
 //what the game does with each classic controller button, and the key file's name for it

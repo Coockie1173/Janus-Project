@@ -384,6 +384,7 @@ bool settings_event(const SDL_Event* e) {
     add_sprint_binding();
     AddWeaponBindings();
     AddJumpBinding();
+    AddMeleeBinding();
     if (e->type == SDL_EVENT_KEY_UP && e->key.scancode == SDL_SCANCODE_ESCAPE) g_escape = false;
     if (!g_open && e->type == SDL_EVENT_KEY_DOWN && e->key.scancode == SDL_SCANCODE_ESCAPE) {
         g_escape = true;

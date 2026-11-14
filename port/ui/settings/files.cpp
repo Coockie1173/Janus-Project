@@ -209,6 +209,35 @@ void AddWeaponBindings()
 	rt_log("goldeneye: the weapon slots are on 1, 2 and 3 now (Extra 3 to 5 in %s)", video_keys_path().c_str());
 }
 
+//a key file from before melee was on F: F goes from the smartphone to the melee attack, and the
+//smartphone gets Q when nothing has it. once: the comment it leaves says it's done
+void AddMeleeBinding()
+{
+	static bool done = false;
+	if (done || video_keys_path().empty()) return;
+	done = true;
+	const char* const kDone = "# Melee Attack is on F, the smartphone on Q (moved once by the game)";
+	if (g_keys.lines.empty() || std::find(g_keys.lines.begin(), g_keys.lines.end(), kDone) != g_keys.lines.end()) return;
+	auto is = [](const char* key) { return [key](const std::string& k) { return !SDL_strcasecmp(k.c_str(), key); }; };
+	auto phone = g_keys.keys("Down"), melee = g_keys.keys("L");
+	if (std::erase_if(phone, is("F")) && std::none_of(melee.begin(), melee.end(), is("F")))
+	{
+		melee.insert(melee.begin(), "F");
+		bool taken = false;
+		for (auto& a : kActions)
+		{
+			auto keys = g_keys.keys(a.name);
+			if (std::any_of(keys.begin(), keys.end(), is("Q"))) taken = true;
+		}
+		if (!taken) phone.push_back("Q");
+		g_keys.set_keys("Down", phone);
+		g_keys.set_keys("L", melee);
+		rt_log("goldeneye: melee is on F now, the smartphone on %s (%s)", taken ? "its other keys" : "Q", video_keys_path().c_str());
+	}
+	g_keys.lines.push_back(kDone);
+	save_keys();
+}
+
 //a key file from before the jump: Space goes from the action to it, when the action keeps a key
 void AddJumpBinding()
 {
