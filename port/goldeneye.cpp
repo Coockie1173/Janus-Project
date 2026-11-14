@@ -44,6 +44,7 @@
 //GE_ANISO=N anisotropic filtering, 2 to 16
 //GE_MSAA=N anti-aliasing, 2, 4 or 8 samples a pixel
 //GE_SHAKE=S the game's screen shake times S, 0 (none) to 5
+//GE_DRAWDIST=N details pop in N times further away, 1 (the game's) to 5 (unlimited)
 //GE_HUD=0 no hud
 //GE_TANK_BUTTONS=A,B,C the buttons of the tank's machine gun, cannon and lock (port/gameplay/tank.cpp)
 //GE_SAVED_SETTINGS=0 those five only from the environment, not from the settings the menu saved
@@ -127,6 +128,7 @@ void install() {
     install_timeline();
     install_flipbooks();
     install_shake();
+    install_draw_distance();
     install_typing();
     install_render();
     install_sound();

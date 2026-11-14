@@ -59,6 +59,12 @@ const float kShakeMax = 5.0f;
 float shake_scale(); //the game's screen shake times this, 0 is none
 void set_shake_scale(float scale);
 
+//drawdist.cpp
+void install_draw_distance();
+const float kDrawDistanceMax = 5.0f; //the top is Unlimited
+float draw_distance(); //levels of detail picked as if that many times nearer, 1 is the game's
+void set_draw_distance(float scale);
+
 //typing.cpp
 void install_typing();
 

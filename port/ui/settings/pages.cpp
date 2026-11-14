@@ -434,6 +434,7 @@ void build_pages() {
         set_anisotropy(1);
         set_anti_aliasing(1);
         set_shake_scale(1.0f);
+        set_draw_distance(1.0f);
         set_hud(true);
         g_fps_changed = g_dirty = true;
     }});

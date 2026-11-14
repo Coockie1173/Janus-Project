@@ -60,6 +60,8 @@ void save_launch_settings() {
     std::snprintf(shake_text, sizeof shake_text, "%g", shake_scale());
     char turbo_text[16], grain_text[16];
     std::snprintf(grain_text, sizeof grain_text, "%g", film_grain());
+    char drawdist_text[16];
+    std::snprintf(drawdist_text, sizeof drawdist_text, "%g", draw_distance());
     const char dof_text[2] = {(char)('0' + depth_of_field()), 0};
     std::snprintf(turbo_text, sizeof turbo_text, "%g", turbo());
     std::snprintf(tank_text, sizeof tank_text, "%d,%d,%d", tank_source(0), tank_source(1), tank_source(2));
@@ -73,7 +75,7 @@ void save_launch_settings() {
         {"LAUNCH_NOBLOOM", no_bloom() ? "1" : "0"}, {"LAUNCH_DOF", dof_text}, {"LAUNCH_INVERTFLASH", invert_flash() ? "1" : "0"}, {"LAUNCH_GRAIN", grain_text},
         {"LAUNCH_LEVELTIMER", level_timer() ? "1" : "0"}, {"LAUNCH_AUTOQTE", auto_qte() ? "1" : "0"}, {"LAUNCH_AUTOSTART", auto_start() ? "1" : "0"}, {"LAUNCH_AUTOSAVE", autosave() ? "1" : "0"}, {"LAUNCH_EXTRASMENU", extras_menu() ? "1" : "0"}, {"LAUNCH_UNLOCKALL", unlock_all() ? "1" : "0"}, {"LAUNCH_ONLINEUNLOCKS", online_unlocks() ? "1" : "0"}, {"LAUNCH_STAMINAMETER", stamina_meter() ? "1" : "0"},
         {"LAUNCH_VSYNC", vsync() ? "1" : "0"}, {"LAUNCH_PING", show_ping() ? "1" : "0"}, {"LAUNCH_OCCLUSION", occlusion() ? "1" : "0"}, {"LAUNCH_SOUNDHEIGHT", sound_height() ? "1" : "0"},
-        {"LAUNCH_HUD", hud() ? "1" : "0"}, {"LAUNCH_SHAKE", shake_text}, {"LAUNCH_TANKBUTTONS", tank_text},
+        {"LAUNCH_HUD", hud() ? "1" : "0"}, {"LAUNCH_SHAKE", shake_text}, {"LAUNCH_DRAWDIST", drawdist_text}, {"LAUNCH_TANKBUTTONS", tank_text},
         {"LAUNCH_ANISO", std::to_string(anisotropy())}, {"LAUNCH_MSAA", std::to_string(anti_aliasing())},
         {"LAUNCH_CUSTOM", custom_values()},
         {"LAUNCH_GOD", god_mode() ? "1" : "0"}, {"LAUNCH_INFINITEAMMO", infinite_ammo() ? "1" : "0"}, {"LAUNCH_INFINITESPRINT", infinite_sprint() ? "1" : "0"},
