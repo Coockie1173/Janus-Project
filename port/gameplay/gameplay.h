@@ -11,8 +11,8 @@ void teleport_apply(PPCContext& c, uint32_t controller); //after a controller's 
 
 //custom.cpp
 void install_custom();
-const int kCustomSliders = 4; //enemy health, enemy damage, enemy reaction speed, hit protection
-const int kCustomRows = 6; //the page's items: the sliders, the headshots' switch, Start Mission
+const int kCustomSliders = 5; //enemy health, enemy damage, enemy reaction speed, hit protection, enemy accuracy
+const int kCustomRows = 7; //the page's items: the sliders, the headshots' switch, Start Mission
 void custom_frame(uint32_t frame); //once a frame, on the game's thread
 void custom_buttons(ClassicState& s); //in the classic's filter: a press on a slider isn't a select
 const uint32_t kCustomSetting = 0x7D01F000; //the sliders as settings of the game's menu, a hash each from here. the game's own stop at 7D0100xx
@@ -22,7 +22,7 @@ bool custom_mode(); //the mission is played with them
 void set_custom_mode(bool on);
 std::string custom_label(int slider); //"Enemy Health: 250%"
 const char* custom_about(int slider); //the line that says what it is
-std::string custom_values(); //the four as the settings file keeps them
+std::string custom_values(); //the sliders and the switch as the settings file keeps them
 
 //fov.cpp
 void install_fov();

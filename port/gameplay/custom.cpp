@@ -18,11 +18,18 @@
 //fn_800C0C90 +0x64 times the weapon's own time a guard has to have had its target before it
 //  fires (fn_80086430; XItemHandler_NPC's target time +0x728). 1 on every difficulty
 //
+//a guard's aim isn't in the row, it's the weapon's: a shot leaves at a random angle off where it
+//aims, up to 45 degrees times (1 - accuracy), spun round the aim at random. EnemyNew's FireBullet
+//(fn_80057060) asks ge_guard_accuracy (fn_80057040) for it: the weapon row's (+0x754) +0x144 / 100,
+//bent by the guard's skill (+0x5FC) and clamped (fn_80086D70). ArmedNPC's (ge_npc_fire_bullet,
+//8004B7E0) works out 1 - row +0x144 / 100 itself
+//
 //the sliders, a hundred being 007 Classic as the game has it:
 //Enemy Health      0 to 2000: the player's shot is divided by it, at 0 any shot kills
 //Enemy Damage      0 to 2000: a guard's bullet and its melee times it
 //Enemy Reactions   0 to 100: both waits are longer the lower it is, twice as long at 0
 //Hit Protection    0 to 1000: the time after a hit times it
+//Enemy Accuracy    0 to 200: the angle off the aim times 2 - it, twice as wide at 0, none at 200
 //
 //the sliders are the game's own (a row of kind 5 with a setting's hash): the menu asks
 //ge_setting_get (8022F4D0) how full the bar is and tells ge_setting_step (8022E2F0) to move it,
@@ -42,20 +49,22 @@ namespace ge
 namespace
 {
 
-enum { Health, Damage, Reaction, Protection };
+enum { Health, Damage, Reaction, Protection, Accuracy };
 struct Slider { const char* label; const char* about; int most, step; };
 const Slider kSliders[kCustomSliders] = {
 	{"Enemy Health", "How much it takes to bring an enemy down. At 0% one shot does.", 2000, 10},
 	{"Enemy Damage", "How hard an enemy's bullets and melee hit you.", 2000, 10},
 	{"Enemy Reactions", "How fast an enemy that has seen you starts to fight and to fire. At 0% it takes twice as long.", 100, 5},
-	{"Hit Protection", "How long after a hit weaker hits don't hurt you.", 1000, 10}};
+	{"Hit Protection", "How long after a hit weaker hits don't hurt you.", 1000, 10},
+	{"Enemy Accuracy", "How close an enemy's shots fly to where it aims. At 0% they spread twice as wide, at 200% none miss.", 200, 5}};
 const int kNormal = 100;
 const double kOneShot = 1.0e6; //the player's shot times this with the health at 0
 const auto kStepEvery = std::chrono::milliseconds(40); //a held direction moves a slider this often, at any frame rate
 
-std::atomic<int> g_value[kCustomSliders] = {{kNormal}, {kNormal}, {kNormal}, {kNormal}};
+std::atomic<int> g_value[kCustomSliders] = {{kNormal}, {kNormal}, {kNormal}, {kNormal}, {kNormal}};
 std::atomic<bool> g_on{false};
 bool g_always = false; //GE_CUSTOM_ON
+PPCFunc orig_accuracy = nullptr, orig_npc_fire = nullptr;
 PPCFunc orig_bullet = nullptr, orig_shot = nullptr, orig_fight_wait = nullptr, orig_protection = nullptr, orig_melee = nullptr, orig_fire_wait = nullptr;
 PPCFunc orig_setting_get = nullptr, orig_setting_step = nullptr, orig_choice_text = nullptr, orig_choice_step = nullptr;
 std::atomic<bool> g_headshots{true}; //a shot to a guard's head kills, as in the game
@@ -75,6 +84,32 @@ void Trace(const char* what, double game, double got)
 double Part(int slider) { return g_value[slider] / double(kNormal); }
 //a wait at that reaction speed: as the game has it at 100, twice at 0
 double Slow() { return 2.0 - std::min(Part(Reaction), 1.0); }
+//how wide shots spread at that accuracy: as the game has it at 100, twice at 0, none at 200
+double Spread() { return std::max(2.0 - Part(Accuracy), 0.0); }
+
+//(a guard) -> f1 its accuracy, 0 to 1: the spread is 1 - it
+void GuardAccuracy(PPCContext& c)
+{
+	orig_accuracy(c);
+	if (!Active()) return;
+	const double game = c.f[1];
+	c.f[1] = 1.0 - (1.0 - game) * Spread();
+	Trace("a guard's accuracy", game, c.f[1]);
+}
+
+//(an armed npc) fires: its weapon row's accuracy, in percent, is what it gets for the call
+void NpcFire(PPCContext& c)
+{
+	const uint32_t row = guest_ptr(ld32(c.r[3] + 0x754)) ? ld32(c.r[3] + 0x754) : 0;
+	if (!Active() || !row) { orig_npc_fire(c); return; }
+	const uint32_t kRowAccuracy = 0x144;
+	const float game = ldf(row + kRowAccuracy);
+	const float got = float(100.0 - (100.0 - game) * Spread());
+	stf(row + kRowAccuracy, got);
+	Trace("an armed npc's accuracy", game, got);
+	orig_npc_fire(c);
+	stf(row + kRowAccuracy, game);
+}
 
 void Bullet(PPCContext& c)
 {
@@ -322,7 +357,7 @@ void set_custom_mode(bool on)
 	if (on)
 	{
 		//a mission is started with them: kept for the next time the game runs
-		rt_log("goldeneye: 007 Custom: enemy health %d%%, damage %d%%, reaction speed %d%%, hit protection %d%%, headshots that kill %s", g_value[Health].load(), g_value[Damage].load(), g_value[Reaction].load(), g_value[Protection].load(), g_headshots ? "on" : "off");
+		rt_log("goldeneye: 007 Custom: enemy health %d%%, damage %d%%, reaction speed %d%%, hit protection %d%%, accuracy %d%%, headshots that kill %s", g_value[Health].load(), g_value[Damage].load(), g_value[Reaction].load(), g_value[Protection].load(), g_value[Accuracy].load(), g_headshots ? "on" : "off");
 		save_settings();
 	}
 	else if (was) rt_log("goldeneye: 007 Custom is off");
@@ -339,18 +374,19 @@ const char* custom_about(int slider) { return kSliders[slider].about; }
 
 std::string custom_values()
 {
+	//the switch before accuracy: a file from before accuracy was there still reads
 	char text[64];
-	std::snprintf(text, sizeof text, "%d,%d,%d,%d,%d", g_value[0].load(), g_value[1].load(), g_value[2].load(), g_value[3].load(), g_headshots ? 1 : 0);
+	std::snprintf(text, sizeof text, "%d,%d,%d,%d,%d,%d", g_value[Health].load(), g_value[Damage].load(), g_value[Reaction].load(), g_value[Protection].load(), g_headshots ? 1 : 0, g_value[Accuracy].load());
 	return text;
 }
 
 void install_custom()
 {
 	g_trace = std::getenv("GE_TRACE") != nullptr;
-	//GE_CUSTOM=health,damage,reaction,protection[,headshots that kill]
+	//GE_CUSTOM=health,damage,reaction,protection[,headshots that kill[,accuracy]]
 	const std::string saved = saved_setting("GE_CUSTOM", "LAUNCH_CUSTOM");
-	int values[kCustomSliders], headshots = 1;
-	if (std::sscanf(saved.c_str(), "%d,%d,%d,%d,%d", &values[0], &values[1], &values[2], &values[3], &headshots) >= kCustomSliders)
+	int values[kCustomSliders] = {kNormal, kNormal, kNormal, kNormal, kNormal}, headshots = 1;
+	if (std::sscanf(saved.c_str(), "%d,%d,%d,%d,%d,%d", &values[Health], &values[Damage], &values[Reaction], &values[Protection], &headshots, &values[Accuracy]) >= 4)
 	{
 		for (int i = 0; i < kCustomSliders; ++i) g_value[i] = std::clamp(values[i], 0, kSliders[i].most);
 		g_headshots = headshots != 0;
@@ -370,8 +406,10 @@ void install_custom()
 	orig_choice_step = ppc_hook("ge_choice_step", ChoiceStep);
 	orig_npc_hit = ppc_hook("ge_npc_hit", NpcHit);
 	orig_slider_draw = ppc_hook("ge_slider_draw", SliderDraw);
+	orig_accuracy = ppc_hook("ge_guard_accuracy", GuardAccuracy);
+	orig_npc_fire = ppc_hook("ge_npc_fire_bullet", NpcFire);
 	g_tracehit = std::getenv("GE_TRACEHIT") != nullptr;
-	if (!orig_bullet || !orig_shot || !orig_fight_wait || !orig_protection || !orig_melee || !orig_fire_wait || !orig_setting_get || !orig_setting_step)
+	if (!orig_bullet || !orig_shot || !orig_fight_wait || !orig_protection || !orig_melee || !orig_fire_wait || !orig_setting_get || !orig_setting_step || !orig_accuracy || !orig_npc_fire)
 		rt_log("goldeneye: 007 Custom: a function of it isn't in this build, some of it won't work");
 }
 

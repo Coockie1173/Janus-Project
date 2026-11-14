@@ -163,7 +163,7 @@ const uint32_t kDifficultyRows[] = { 0x80582248, 0x805823D8 }, kDifficultyItems[
 const uint32_t kTextDifficulty = 0x430004E1; //its title
 const uint32_t kCustomPage = 0x7D000DFC;
 const uint32_t kTextCustom = 0x4300F0E0, kTextAboutCustom = 0x4300F0E1, kTextStart = 0x4300F0E2, kTextAboutStart = 0x4300F0E3;
-const uint32_t kTextSlider = 0x4300F0E8, kTextAboutSlider = 0x4300F0EC; //one a slider from each
+const uint32_t kTextSlider = 0x4300F0D0, kTextAboutSlider = 0x4300F0D8; //one a slider from each
 const uint32_t kTextHeadshots = 0x4300F0E6, kTextAboutHeadshots = 0x4300F0E7;
 const uint32_t kKindSlider = 0x00050000, kKindChoice = 0x00030000, kKindClassic = 0x00160000; //a slider of a setting, a setting with values to pick from, 007 Classic
 const uint32_t kLabelRoom = 48; //characters a slider's label has room for
