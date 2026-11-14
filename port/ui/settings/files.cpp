@@ -80,6 +80,7 @@ void save_launch_settings() {
         {"LAUNCH_CUSTOM", custom_values()},
         {"LAUNCH_GOD", god_mode() ? "1" : "0"}, {"LAUNCH_INFINITEAMMO", infinite_ammo() ? "1" : "0"}, {"LAUNCH_INFINITESPRINT", infinite_sprint() ? "1" : "0"},
         {"LAUNCH_TURBO", turbo_text}, {"LAUNCH_GRENADES", grenades() ? "1" : "0"},
+        {"LAUNCH_INVISIBLEENEMIES", invisible_enemies() ? "1" : "0"}, {"LAUNCH_INVISIBLEPLAYER", invisible_player() ? "1" : "0"},
         {"LAUNCH_WEAPONRANDOMIZER", weapon_randomizer() ? "1" : "0"},
         {"LAUNCH_NOATTACHMENTLIMIT", no_attachment_limit() ? "1" : "0"}, {"LAUNCH_BUNNYHOP", bunnyhop() ? "1" : "0"},
         {"LAUNCH_BHOP_PRESTRAFE", bhop_prestrafe() ? "1" : "0"},

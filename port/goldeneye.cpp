@@ -143,6 +143,7 @@ void install() {
     install_teleport();
     install_collision();
     install_triggers();
+    install_stealth();
     install_autosave();
     install_weapons();
     install_prompts();

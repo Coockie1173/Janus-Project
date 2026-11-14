@@ -4,6 +4,7 @@
 #     tools/ghidra.sh export                -> build/ghidra-export/: functions.tsv, symbols.tsv,
 #                                              structs.txt, enums.txt, comments.tsv
 #     tools/ghidra.sh decompile 80108A60 PlayerMove ...   the decompiler's C, by address or name
+#     tools/ghidra.sh refs 8053D18A ...       what refers to those addresses, and from which function
 # Needs Ghidra (GHIDRA=dir; default ~/Applications/ghidra_11.4_PUBLIC) with the GameCube loader
 # extension the project was made with, and a JDK.
 cd "$(dirname "$0")/.." || exit 1
@@ -27,5 +28,9 @@ decompile)
     shift
     run -process -noanalysis -readOnly -scriptPath "$PWD/tools/ghidra" -postScript Decompile.java "$@" 2> "$PROJ/decompile.log" \
         | sed -n '/^\/\/\/\/ /,$p' | grep -v '^INFO \|^WARN ' ;;
-*) sed -n '2,9p' "$0" ;;
+refs)
+    shift
+    run -process -noanalysis -readOnly -scriptPath "$PWD/tools/ghidra" -postScript Refs.java "$@" 2> "$PROJ/refs.log" \
+        | grep '^//// ' ;;
+*) sed -n '2,10p' "$0" ;;
 esac

@@ -180,7 +180,9 @@ void Root(PPCContext& c)
 void Things(PPCContext& c)
 {
 	const uint32_t world{ c.r[3] };
+	stealth_things(world, true);
 	orig_things(c);
+	stealth_things(world, false);
 	if (!g_log || g_views.empty() || !guest_ptr(world) || !guest_ptr(ld32(world + 0xA0))) return;
 	std::string hidden, key;
 	char line[200];
@@ -334,6 +336,9 @@ void install_zones()
 		if (!g_log) rt_log("goldeneye: GE_ZONELOG can't write %s", path);
 		else rt_log("goldeneye: the portal walk is logged to %s", path);
 	}
+	//always: the invisible enemies are left out around it (cheats/stealth.cpp)
+	orig_things = ppc_hook("ge_draw_things", Things);
+	if (!orig_things) rt_die("goldeneye: the things' draw is not hooked in this build");
 	if (!g_log && g_near <= 0) return;
 	orig_root = ppc_hook("ge_zone_root", Root);
 	orig_at = ppc_hook("ge_zone_at", At);
@@ -342,8 +347,6 @@ void install_zones()
 	if (!orig_root || !orig_at || !orig_walk || !orig_clip) rt_die("goldeneye: the portal walk is not hooked in this build");
 	if (!g_log) return;
 	if (const char* text{ std::getenv("GE_ZONELOG_THINGS") }) g_thingsEvery = (uint32_t)std::max(0, std::atoi(text));
-	orig_things = ppc_hook("ge_draw_things", Things);
-	if (!orig_things) rt_die("goldeneye: the things' draw is not hooked in this build");
 }
 
 } //namespace ge

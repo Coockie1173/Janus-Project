@@ -247,6 +247,8 @@ void BuildSettings()
 		turbo, [](float v) { set_turbo(v); g_dirty = true; }, 1, kTurboMax, 0.1f, 1);
 	turboRow.show = [show = turboRow.show](float v) { return v > 1 ? show(v) + "x" : std::string("Off"); };
 	AddToggle(kCheats, "grenades", "Grenades", "On: you carry four frag grenades in the campaign, thrown with Throw Grenade. Every level starts you with four.", grenades, set_grenades);
+	AddToggle(kCheats, "invisible_enemies", "Invisible Enemies", "On: the campaign's enemies aren't drawn. Their shots still are.", invisible_enemies, set_invisible_enemies);
+	AddToggle(kCheats, "invisible_player", "Invisible Player", "On: guards in the campaign never see or hear you. One already after you keeps at it until it loses you.", invisible_player, set_invisible_player);
 	AddToggle(kCheats, "noclip", "Noclip", "On: you fly where you look, through walls, and don't fall. The sprint key flies faster.", noclip, set_noclip);
 	AddToggle(kCheats, "stamina_meter", "Stamina Meter", "On: a bar shows the sprint that's left. Cancel a sprint right under the line and it's back at a second the frame after.", stamina_meter, set_stamina_meter);
 	AddToggle(kCheats, "collision_view", "Collision Viewer", "On: the level's collision is drawn in place of the world. Floors are green, walls grey, ceilings red, props orange.", collision_view, set_collision_view);
@@ -366,7 +368,7 @@ bool cheats_active()
 	return false; //bunnyhopping is on its own page, so it doesn't count, nor does the randomizer
 }
 #else
-bool cheats_active() { return gecko_cheats() || god_mode() || infinite_ammo() || infinite_sprint() || turbo() > 1 || grenades() || noclip(); }
+bool cheats_active() { return gecko_cheats() || god_mode() || infinite_ammo() || infinite_sprint() || turbo() > 1 || grenades() || noclip() || invisible_enemies() || invisible_player(); }
 #endif
 
 } //namespace ge

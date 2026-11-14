@@ -226,6 +226,7 @@ void controller_update(PPCContext& c) {
         bunnyhop_apply(ctrl);
         teleport_apply(c, ctrl);
         cheats_apply(c, ctrl);
+        stealth_apply(ctrl);
         stamina_apply(ctrl);
     } else if (network_game() && guest_ptr(player) && !is_tank(ctrl)) { //online everyone hops
         bunnyhop_apply(ctrl);
