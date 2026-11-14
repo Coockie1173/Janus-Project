@@ -72,5 +72,22 @@ if(EXISTS ${GE_IMGUI}/imgui.cpp)
   target_compile_definitions(wiiboot PRIVATE GE_IMGUI=1)
   target_link_libraries(wiiboot ${CMAKE_DL_LIBS})
 endif()
+# loads TASLib at run time (port/tas/), dlopen on linux
+target_link_libraries(wiiboot ${CMAKE_DL_LIBS})
+# TASLib, the private submodule: built as its own shared library beside wiiboot when it's checked
+# out, never linked in, an empty TASLib/ just leaves it out
+set(GE_TASLIB_DIR ${GE_ROOT}/TASLib)
+if(EXISTS ${GE_TASLIB_DIR}/CMakeLists.txt)
+  set(GE_TAS_API_DIR ${GE_PORT}/tas)
+  add_subdirectory(${GE_TASLIB_DIR} ${CMAKE_BINARY_DIR}/TASLib)
+  set_target_properties(TASLib PROPERTIES
+      LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
+      RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
+      CXX_VISIBILITY_PRESET hidden C_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
+  if(WIN32)
+    set_target_properties(TASLib PROPERTIES PREFIX "")
+  endif()
+  add_dependencies(wiiboot TASLib)
+endif()
 # what starts the game without a game folder on the command line (launcher/)
 include(${GE_ROOT}/launcher/launcher.cmake)

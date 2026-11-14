@@ -2,6 +2,7 @@
 //the triggers in menus, and every other part's filter
 #include "input/mouse.h"
 #include "debug/debug.h"
+#include "tas/tas.h"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -229,7 +230,7 @@ void skip_buttons(ClassicState& s) {
 
 void classic_filter(int chan, ClassicState& s) {
     s.buttons &= ~kClHome;
-    if (chan != 0) return;
+    if (chan != 0) return tas_buttons(chan, s);
     s.buttons |= settings_buttons();
     mouse_stick(s);
     wheel_buttons(s);
@@ -243,6 +244,7 @@ void classic_filter(int chan, ClassicState& s) {
     custom_buttons(s);
     tank_buttons(s);
     skip_buttons(s);
+    tas_buttons(chan, s);
 }
 
 bool sprint_key() { return g_sprint_held; }

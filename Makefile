@@ -51,7 +51,7 @@ all: build
 
 check-game:
 	@test -f $(GAME)/sys/main.dol || { echo "no $(GAME)/sys/main.dol: extract your own disc into ./$(GAME)"; exit 1; }
-	@test -f wiikit/recomp/__main__.py || git submodule update --init
+	@test -f wiikit/recomp/__main__.py || git submodule update --init wiikit
 
 # Dolphin's signature database names SDK functions the symbol files lack (optional)
 $(BUILD)/sig_guess.tsv: tools/sigmatch.py | check-game

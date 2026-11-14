@@ -56,6 +56,7 @@
 //GE_CRASH_MEM=1 put the guest's memory in crash dumps (build/crashes)
 //GE_TRACETEXT=1 log the texts the game looks up and the buttons its prompts ask for
 //GE_SOUND_CLICKS=1 a new sound's channel starts at 0 dB as in the game, it clicks at high frame rates
+//GE_TASLIB=F load TASLib from F (beside the executable by default), 0 for none
 //GE_DMW=F watch list for the debug overlay (F3), the .dmw in the project folder by default
 #include "debug/debug.h"
 #include "ge.h"
@@ -83,6 +84,7 @@ void each_frame(uint32_t frame) {
     pointer_frame(frame);
     net_frame();
     heap_frame();
+    tas_frame(frame);
 }
 
 #ifdef GE_DEV
@@ -158,6 +160,7 @@ void install() {
     wpad_set_classic(true);
     install_mouse();
     install_overlay();
+    install_tas();
 #ifdef GE_DEV
     install_dev();
 #endif

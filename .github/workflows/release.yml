@@ -28,6 +28,10 @@ jobs:
           git submodule update --init --force
           git -C wiikit clean -q -fdx
 
+      - name: TASLib, private, its built library ships when the runner can fetch it
+        run: |
+          git submodule update --init --checkout TASLib || echo "no access to TASLib: released without it"
+
       - name: disc and modpacks
         run: |
           test -f "$GE_GAME/sys/main.dol" || { echo "GE_GAME in the runner's .env has to be an extracted disc"; exit 1; }

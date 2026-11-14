@@ -13,6 +13,11 @@ mkdir -p "$S/config/gecko" "$S/fonts" "$S/game" "$S/licenses"
 cp build/out-win/wiiboot.exe "$S/Janus-Project.exe"
 build/deps/llvm-mingw/bin/x86_64-w64-mingw32-strip "$S/Janus-Project.exe"
 cp build/deps/sdl3-win/bin/SDL3.dll "$S/"
+# TASLib only as the built library, when the private submodule was there to build it
+if [ -f build/out-win/TASLib.dll ]; then
+    cp build/out-win/TASLib.dll "$S/"
+    build/deps/llvm-mingw/bin/x86_64-w64-mingw32-strip "$S/TASLib.dll"
+fi
 cp config/keys.txt "$S/keys.txt"
 cp config/keys.txt config/hosts.txt config/openings.txt config/cutscenes.txt build/recomp/symbols.tsv "$S/config/"
 cp build/patched/gecko.txt "$S/config/gecko-codes.txt"

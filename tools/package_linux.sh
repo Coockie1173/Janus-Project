@@ -16,6 +16,11 @@ cp build/out-linux/wiiboot "$S/Janus-Project"
 strip --strip-debug "$S/Janus-Project"
 cp -L "$SDL" "$S/lib/libSDL3.so.0"
 strip --strip-unneeded "$S/lib/libSDL3.so.0"
+# TASLib only as the built library, when the private submodule was there to build it
+if [ -f build/out-linux/libTASLib.so ]; then
+    cp build/out-linux/libTASLib.so "$S/lib/"
+    strip --strip-unneeded "$S/lib/libTASLib.so"
+fi
 cp config/keys.txt "$S/keys.txt"
 cp config/keys.txt config/hosts.txt config/openings.txt config/cutscenes.txt build/recomp/symbols.tsv "$S/config/"
 cp build/patched/gecko.txt "$S/config/gecko-codes.txt"

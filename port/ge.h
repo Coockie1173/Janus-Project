@@ -11,6 +11,7 @@
 //net/           the hosts file, the server's live patch, client-owned players
 //ui/            the settings menu (F1, ui/settings/), the debug overlay (F3), the window's icon
 //speedrun/      the speedrun timer
+//tas/           TASLib, the private library, loaded at run time when it's there
 //debug/         crash dumps, the profiler, the debug aids (GE_ variables)
 //package/       what the Windows and Linux packages ship next to the executable
 #pragma once
@@ -25,6 +26,7 @@
 #include "net/net.h"
 #include "sound/sound.h"
 #include "speedrun/speedrun.h"
+#include "tas/tas.h"
 #include "ui/ui.h"
 
 namespace ge
