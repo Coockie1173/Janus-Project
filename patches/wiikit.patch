@@ -1,5 +1,5 @@
 diff --git a/recomp/__main__.py b/recomp/__main__.py
-index db1b158..5d952c5 100644
+index db1b158..202b22a 100644
 --- a/recomp/__main__.py
 +++ b/recomp/__main__.py
 @@ -22,6 +22,7 @@ boundaries and the hook names. The generated code needs wiikit/runtime/ppc.h.
@@ -60,11 +60,11 @@ index db1b158..5d952c5 100644
 +
 +
 +def generate(img, out, per_file=8000, comments=True, hook_files=(), modules=(), log=print,
-+             cr_live=True, cr_check=False):
++             cr_live=True, cr_check=False, ps_live=True, ps_check=False):
      t0 = time.time()
      prog = Program(img, log=log)
      entries = set(prog.entries)
-@@ -177,21 +223,43 @@ def generate(img, out, per_file=8000, comments=True, hook_files=(), modules=(),
+@@ -177,21 +223,51 @@ def generate(img, out, per_file=8000, comments=True, hook_files=(), modules=(),
          files.append(name)
          buf, count, idx = [], 0, idx + 1
  
@@ -98,6 +98,10 @@ index db1b158..5d952c5 100644
 +    if cr_live:
 +        from .crlive import Analysis
 +        cr = Analysis(prog, emitted, log)
++    ps = None
++    if ps_live:
++        from . import pslive
++        ps = pslive.analyse(prog, emitted, log)
 +    for e in prog.entries:
 +        unit, body = prog.body(e)
 +        fn = FnCtx(prog, e, entries, next((m for m in modules if m.contains(e)), None))
@@ -106,15 +110,19 @@ index db1b158..5d952c5 100644
 +        cname = f"orig_{e:08X}" if e in hooks else E.fname(e)
 +        lines = [f"// {cw.demangle(title)}", f"void {cname}(PPC_CTX PPC_RESTRICT c) {{"]
 +        live = cr.live_after(e) if cr else None
++        ps_after = ps.live_after(e) if ps else None
++        ps_saves = pslive.prologue_saves(prog, e) if ps else ()
 +        for (a, ins), code in zip(body, emitted.pop(e)):
 +            if a in labels:
 +                lines.append(f"L_{a:08X}:")
 +            if cr:
 +                code = _cr_narrow(code, ins, a, live[a], cr_check)
++            if ps:
++                code = pslive.narrow(code, ps_after[a], a, ps_check, a in ps_saves)
              note = f"  // {a:08X} {_text(ins, a)}" if comments else ""
              lines.append("    " + code[0] + note)
              lines.extend("    " + x for x in code[1:])
-@@ -211,7 +279,7 @@ def generate(img, out, per_file=8000, comments=True, hook_files=(), modules=(),
+@@ -211,7 +287,7 @@ def generate(img, out, per_file=8000, comments=True, hook_files=(), modules=(),
          f.write("#pragma once\n#include \"ppc.h\"\n\n")
          f.write("extern uint32_t g_rso_base[];   // where each RSO module is loaded (rso.cpp)\n\n")
          for e in prog.entries:
@@ -123,7 +131,7 @@ index db1b158..5d952c5 100644
      with Out(os.path.join(out, "table.cpp")) as f:
          f.write('#include "funcs.h"\n#include <cstddef>\n\n')
          f.write("extern const PPCFuncEntry g_ppc_funcs[] = {\n")
-@@ -223,9 +291,9 @@ def generate(img, out, per_file=8000, comments=True, hook_files=(), modules=(),
+@@ -223,9 +299,9 @@ def generate(img, out, per_file=8000, comments=True, hook_files=(), modules=(),
          f.write(HOOKS_HEAD)
          for a, name in sorted(hooks.items()):
              f.write(f"// {name}\n"
@@ -135,10 +143,14 @@ index db1b158..5d952c5 100644
                      f"else orig_{a:08X}(c); }}\n\n")
          f.write("extern const PPCHook g_ppc_hooks[] = {\n")
          for a, name in sorted(hooks.items()):
-@@ -315,6 +383,10 @@ def main():
+@@ -315,6 +391,14 @@ def main():
      ap.add_argument("--symbols", metavar="TSV",
                      help="names for a stripped executable (addr, ..., name); its functions "
                           "are found by discovery (recomp/discover.py)")
++    ap.add_argument("--no-ps-live", action="store_true",
++                    help="every single-precision result fills ps1 (recomp/pslive.py follows which are read)")
++    ap.add_argument("--ps-check", action="store_true",
++                    help="a ps1 taken for dead holds a mark, and reading it stops the game")
 +    ap.add_argument("--no-cr-live", action="store_true",
 +                    help="every compare stores all four CR bits (recomp/crlive.py follows which are read)")
 +    ap.add_argument("--cr-check", action="store_true",
@@ -146,22 +158,23 @@ index db1b158..5d952c5 100644
      a = ap.parse_args()
      img = Image(a.image)
      modules, module_names = [], {}
-@@ -328,7 +400,8 @@ def main():
+@@ -328,7 +412,9 @@ def main():
              names.setdefault(v, n)
          symbolise(img, names)
      generate(img, a.out, a.per_file, not a.no_comments,
 -             [os.path.join(RUNTIME, "hooks.txt")] + a.hooks, modules)
 +             [os.path.join(RUNTIME, "hooks.txt")] + a.hooks, modules,
-+             cr_live=not a.no_cr_live, cr_check=a.cr_check)
++             cr_live=not a.no_cr_live, cr_check=a.cr_check,
++             ps_live=not a.no_ps_live, ps_check=a.ps_check)
  
  
  if __name__ == "__main__":
 diff --git a/recomp/crlive.py b/recomp/crlive.py
 new file mode 100644
-index 0000000..bb49877
+index 0000000..ddc7462
 --- /dev/null
 +++ b/recomp/crlive.py
-@@ -0,0 +1,280 @@
+@@ -0,0 +1,357 @@
 +"""Which condition register bits an instruction's result is still read from.
 +
 +A compare writes four CR bits and the branch after it reads one; the next
@@ -273,17 +286,28 @@ index 0000000..bb49877
 +class Analysis:
 +    """live(entry, addr): the CR bits read after the instruction at addr, before they are written."""
 +
-+    def __init__(self, prog, code, log=print):
-+        """code: {entry: [lines of each instruction of its body]}."""
++    def __init__(self, prog, code, log=print, use_def=use_def, saved=SAVED, abi_in=SAVED | 1 << 6,
++                 abi_out=ALL, pure_use=False, name=None):
++        """code: {entry: [lines of each instruction of its body]}. The defaults follow CR bits;
++        another 32-bit register set (pslive.py) gives its own use_def(lines, ins, following),
++        the bits a function of unknown callers must keep (saved) and those an indirect
++        call's target may read (abi_in) and its caller read after it (abi_out). With pure_use
++        a function's use leaves out what only its caller reads after it returns (a call passes
++        that through already): bits the callee never touches stay out of every caller's
++        "live before the call"."""
 +        self.prog = prog
 +        self.code = code
++        self.use_def = use_def
++        self.abi_out = abi_out
++        self.pure_use = pure_use
++        self.conds = {}
 +        entries = prog.entries
 +        self.entry_set = set(entries)
 +        self.fns = {e: self._shape(e) for e in entries}
 +        self.use = dict.fromkeys(entries, 0)           # read by the function before it writes them
-+        self.ret = dict.fromkeys(entries, SAVED)       # read by a caller after the function returns
++        self.ret = dict.fromkeys(entries, saved)       # read by a caller after the function returns
 +        self.use_any = 0                               # the union of use: what an indirect call may read
-+        self.ret_any = SAVED                           # read after an indirect call
++        self.ret_any = saved                           # read after an indirect call
 +        self.out = {}
 +        rounds = 0
 +        while True:
@@ -299,12 +323,17 @@ index 0000000..bb49877
 +            any_use = 0
 +            for e in entries:
 +                any_use |= self.use[e]
-+            any_use &= SAVED | 1 << 6
++            any_use &= abi_in
 +            if any_use != self.use_any:
 +                self.use_any, changed = any_use, True
 +            if not changed:
 +                break
-+        odd = sum(1 for e in entries if self.use[e] & ~SAVED & ~(1 << 6))
++        odd = sum(1 for e in entries if self.use[e] & ~abi_in)
++        if name:
++            log(f"  {name} liveness: {rounds} rounds; an indirect call reads {self.use_any:08X}, "
++                f"is followed by reads of {self.ret_any:08X}; {odd} functions read registers "
++                f"outside {abi_in:08X} they did not write")
++            return
 +        log(f"  CR liveness: {rounds} rounds; an indirect call reads {self.use_any:08X}, "
 +            f"is followed by reads of {self.ret_any:08X}; {odd} functions read CR0/1/5-7 bits "
 +            f"(other than CR1 EQ) they did not write")
@@ -314,10 +343,14 @@ index 0000000..bb49877
 +        prog = self.prog
 +        unit, body = prog.body(entry)
 +        index = {a: k for k, (a, _) in enumerate(body)}
-+        rows = []
++        rows, conds = [], []
 +        for k, (a, ins) in enumerate(body):
 +            op, f = ins.op, ins.f
-+            use, d = use_def(self.code[entry][k], ins, [i for _, i in body[k + 1:k + 5]])
++            ud = self.use_def(self.code[entry][k], ins, [i for _, i in body[k + 1:k + 5]])
++            use, d = ud[0], ud[1]
++            # (bit, mask): mask is read only if bit is read after (the operands of a result
++            # left out when nothing reads it: pslive.py)
++            conds.append(ud[2] if len(ud) > 2 else None)
 +            kind, arg = NEXT, None
 +            cond = op in ("bc", "bclr", "bcctr") and f["BO"] & 0x14 != 0x14
 +            if op in ("b", "bc"):
@@ -343,6 +376,7 @@ index 0000000..bb49877
 +            elif op == "rfi":
 +                kind, arg = DIE, False
 +            rows.append((use, d, kind, arg))
++        self.conds[entry] = conds
 +        # past the last instruction: into the next function, or nowhere
 +        last = body[-1][1] if body else None
 +        from .emit import terminates
@@ -353,6 +387,7 @@ index 0000000..bb49877
 +
 +    def _flow(self, entry):
 +        rows, end = self.fns[entry]
++        conds = self.conds[entry]
 +        n = len(rows)
 +        ret_self = self.ret[entry] | self.ret_any
 +        changed = False
@@ -385,8 +420,8 @@ index 0000000..bb49877
 +                    changed |= self._returns_to(t, after)
 +                elif kind == ICALL:
 +                    v = after | self.use_any
-+                    if after & ~self.ret_any:
-+                        self.ret_any |= after
++                    if after & self.abi_out & ~self.ret_any:
++                        self.ret_any |= after & self.abi_out
 +                        changed = True
 +                elif kind == RET:
 +                    v = ret_self | (after if arg else 0)
@@ -396,8 +431,8 @@ index 0000000..bb49877
 +                    changed |= self._returns_to(t, ret_self)
 +                elif kind == ITAIL:
 +                    v = self.use_any | ret_self | (after if arg else 0)
-+                    if ret_self & ~self.ret_any:
-+                        self.ret_any |= ret_self
++                    if ret_self & self.abi_out & ~self.ret_any:
++                        self.ret_any |= ret_self & self.abi_out
 +                        changed = True
 +                elif kind == SWITCH:
 +                    v = self.use_any | ret_self          # (the default: an indirect jump)
@@ -405,6 +440,11 @@ index 0000000..bb49877
 +                        v |= live[t]
 +                else:                                    # DIE
 +                    v = after if arg else 0
++                cond = conds[k]
++                if cond:
++                    for bit, m in cond:
++                        if v >> bit & 1:
++                            use |= m
 +                v = (v & ~d) | use
 +                if v != live[k]:
 +                    live[k] = v
@@ -412,10 +452,60 @@ index 0000000..bb49877
 +            if not again:
 +                break
 +            changed = True
-+        if n and live[0] != self.use[entry]:
-+            self.use[entry] = live[0]
++        use0 = self._pure(entry) if self.pure_use else (live[0] if n else None)
++        if n and use0 != self.use[entry]:
++            self.use[entry] = use0
 +            changed = True
 +        return changed
++
++    def _pure(self, entry):
++        """What the function reads before writing, not counting its caller's reads after it
++        returns: the flow again with nothing live at a return (writes stay judged by live)."""
++        rows, end = self.fns[entry]
++        conds = self.conds[entry]
++        live = self.out[entry]
++        n = len(rows)
++        pure = [0] * (n + 1)
++        pure[n] = self.use[end] if end is not None and end >= 0 else 0
++        while True:
++            again = False
++            for k in range(n - 1, -1, -1):
++                use, d, kind, arg = rows[k]
++                after = pure[k + 1]
++                if kind == NEXT:
++                    v = after
++                elif kind == JUMP:
++                    v = pure[arg]
++                elif kind == COND:
++                    v = after | pure[arg]
++                elif kind == CALL:
++                    v = after | self.use[arg[0]]
++                elif kind == ICALL:
++                    v = after | self.use_any
++                elif kind == RET:
++                    v = after if arg else 0
++                elif kind == TAIL:
++                    t, cond = arg
++                    v = self.use[t] | (after if cond else 0)
++                elif kind == ITAIL:
++                    v = self.use_any | (after if arg else 0)
++                elif kind == SWITCH:
++                    v = self.use_any
++                    for t in arg:
++                        v |= pure[t]
++                else:
++                    v = after if arg else 0
++                cond = conds[k]
++                if cond:
++                    for bit, m in cond:
++                        if live[k + 1] >> bit & 1:        # (the write is kept by live)
++                            use |= m
++                v = (v & ~d) | use
++                if v != pure[k]:
++                    pure[k] = v
++                    again = True
++            if not again:
++                return pure[0]
 +
 +    def _returns_to(self, t, after):
 +        if after & ~self.ret[t]:
@@ -711,6 +801,196 @@ index e7189b8..2ffec1e 100644
      if op in ("psq_lx", "psq_lux", "psq_stx", "psq_stux"):
          fn_ = "psq_load" if op.startswith("psq_l") else "psq_store"
          upd = f" c.r[{f['A']}] = ea;" if op.endswith("ux") else ""
+diff --git a/recomp/pslive.py b/recomp/pslive.py
+new file mode 100644
+index 0000000..6e6b7c3
+--- /dev/null
++++ b/recomp/pslive.py
+@@ -0,0 +1,184 @@
++"""Which paired-single second halves (ps1) are still read.
++
++A single-precision op (fadds, lfs, frsp...) fills both halves of its FPR, and
++the C++ stores both into the context: the second half is read again only by
++paired-single code (ps_*, psq_st, ps_merge1x...), and before a call or a return
++the C++ compiler has to keep the store. Here, as for the condition register
++(crlive.py, the same analysis), each function's ps1 halves are followed
++backwards from where they are read, across calls; a write nothing reads is
++narrowed to the first half (narrow()).
++
++Bit i of a mask is ps1 of FPR i. Read off the emitted C++: `c.ps1[n]` read,
++psq_store of a pair (W 0) reads ps1 of its register; fp_set, fp_single, ps_set,
++ps_put, psq_load write it.
++
++Assumptions (the recompiler's --ps-check builds a game where a half taken for
++dead holds a NaN no float can become, and each place that reads one is
++reported once: ppc_ps_dead_read. Reads of junk, as above, show up there too;
++each reported place has to be one):
++- An indirect call reaches code that keeps to the ABI: it may save and restore
++  f14-f31's second halves (CodeWarrior's psq_st prologues) and reads no other
++  ps1 it did not write; floating-point arguments and results are doubles. After
++  it, f0-f13's halves hold whatever the callee left: the compiled code does read
++  them (a double op writes only ps0, a later ps op reads the stale ps1 for a
++  half nobody uses, or stores it as junk), but the value is undefined on the
++  hardware too, so those reads don't count. Direct calls are followed exactly
++  (hand-written vector code may pass pairs).
++- A function of unknown callers (a callback, a thread's entry) keeps f14-f31.
++- Interrupts are taken only where nothing half-written is in flight, and each
++  guest thread has its own context (os.cpp): a stale half nobody reads after
++  an interrupt or a switch is never seen.
++- Nothing native reads ps1 (wiikit/runtime, port/: checked when written).
++"""
++import re
++
++from . import crlive
++
++SAVED = 0xFFFFC000                       # f14-f31
++
++_USE = re.compile(r"c\.ps1\[(\d+)\](?! = )")
++_DEF = re.compile(r"c\.ps1\[(\d+)\] = ")
++_DEF_CALL = re.compile(r"\b(?:fp_set|fp_single|ps_set|ps_put|psq_loadr?)\(c, (\d+),")
++_STORE_PAIR = re.compile(r"\bpsq_storer?\(c, (\d+), .*?, 0, \d\)")
++
++
++def _reads(text):
++    use = 0
++    for m in _USE.finditer(text):
++        use |= 1 << int(m.group(1))
++    for m in _STORE_PAIR.finditer(text):
++        use |= 1 << int(m.group(1))
++    return use
++
++
++def use_def(lines, ins, following):
++    """(read, written, [(bit, read only if bit is read after)]): what makes a second half
++    is read only when that half is (narrow() leaves it out otherwise)."""
++    use = d = 0
++    cond = []
++    for text in lines:
++        for name in ("ps_set", "ps_put"):
++            hit = _call(text, name)
++            if hit:
++                start, end, args = hit
++                use |= _reads(args[2])
++                cond.append((int(args[1]), _reads(args[3])))
++                d |= 1 << int(args[1])
++                text = text[:start] + text[end:]
++        use |= _reads(text)
++        for m in _DEF.finditer(text):
++            d |= 1 << int(m.group(1))
++        for m in _DEF_CALL.finditer(text):
++            d |= 1 << int(m.group(1))
++    return use, d, cond
++
++
++# Context saves store every FPR to put it back later; what is put back is read by the
++# thread that saved it, resuming as from the call, so the caller's own reads after the call
++# already count. Of their reads only f14-f31's are kept (as crlive.py does for mfcr saves).
++CONTEXT_SAVES = {"__OSSaveFPUContext", "OSSaveFPUContext", "OSSaveContext"}
++_SAVE_MARK = "/* context save */"
++_PROLOGUE_MARK = "/* prologue save */"
++
++
++def _use_def(lines, ins, following):
++    use, d, cond = use_def(lines, ins, following)
++    if lines and lines[0].startswith(_SAVE_MARK):
++        use &= SAVED
++    elif lines and lines[0].startswith(_PROLOGUE_MARK):
++        use = 0
++    return use, d, cond
++
++
++def _prologue_saves(body):
++    """Indexes of a prologue's saves of callee-saved pairs: psq_st of f14-f31 to the stack
++    before the first branch, of a register not yet written. The epilogue puts the value back;
++    whether the caller reads it after the call is followed through the call already."""
++    out, written = set(), set()
++    for k, (a, ins) in enumerate(body):
++        op, f = ins.op, ins.f
++        if op in ("b", "bc", "bclr", "bcctr", "rfi"):
++            break
++        if op == "psq_st" and f["A"] == 1 and f["W"] == 0 and f["D"] >= 14 and f["D"] not in written:
++            out.add(k)
++        elif op.startswith(("lf", "f", "ps_", "psq_l")) and "D" in f:
++            written.add(f["D"])
++    return out
++
++
++def prologue_saves(prog, entry):
++    """Addresses of the entry's prologue saves (not reads: narrow() doesn't check them)."""
++    unit, body = prog.body(entry)
++    if entry != unit.start:
++        return set()
++    return {body[k][0] for k in _prologue_saves(body)}
++
++
++def analyse(prog, code, log=print):
++    code = dict(code)
++    for e in prog.entries:
++        unit, body = prog.body(e)
++        if unit.name in CONTEXT_SAVES:
++            code[e] = [[_SAVE_MARK] + rows for rows in code[e]]
++        elif e == unit.start:
++            saves = _prologue_saves(body)
++            if saves:
++                code[e] = [[_PROLOGUE_MARK] + rows if k in saves else rows for k, rows in enumerate(code[e])]
++    return crlive.Analysis(prog, code, log, use_def=_use_def, saved=SAVED, abi_in=SAVED, abi_out=SAVED,
++                           pure_use=True, name="ps1")
++
++
++def _call(text, name):
++    """(start, end, [arguments]) of the first `name(...)` statement in text, or None."""
++    m = re.search(r"\b" + name + r"\(", text)
++    if not m:
++        return None
++    args, depth, k, start = [], 0, m.end(), m.end()
++    while k < len(text):
++        ch = text[k]
++        if ch in "([":
++            depth += 1
++        elif ch in ")]":
++            if depth == 0:
++                args.append(text[start:k].strip())
++                end = k + 1
++                if text[end:end + 1] == ";":
++                    end += 1
++                return m.start(), end, args
++            depth -= 1
++        elif ch == "," and depth == 0:
++            args.append(text[start:k].strip())
++            start = k + 1
++        k += 1
++    return None
++
++
++# the write of both halves -> of the first alone (with check, the second gets the dead mark)
++_NARROW = {"fp_set": "c.f[{d}] = {a};", "fp_single": "c.f[{d}] = rs({a});",
++           "ps_set": "c.f[{d}] = rs({a});", "ps_put": "c.f[{d}] = {a};"}
++
++
++def narrow(lines, live, addr, check, save=False):
++    """An instruction's lines with writes of a ps1 nothing reads left out (live: the halves
++    read after it); with check, reads of ps1 go through PPC_PSCHK."""
++    out = []
++    for text in lines:
++        for name, form in _NARROW.items():
++            hit = _call(text, name)
++            if not hit:
++                continue
++            start, end, args = hit
++            d = int(args[1])
++            if live >> d & 1:
++                continue
++            new = form.format(d=d, a=args[2])
++            if check:
++                new += f" c.ps1[{d}] = PPC_PS_DEAD;"
++            text = text[:start] + new + text[end:]
++        if check and not save:
++            text = _USE.sub(lambda m: f"PPC_PSCHK(c, {m.group(1)}, 0x{addr:08X}u)", text)
++            m = _STORE_PAIR.search(text)
++            if m:
++                text = f"(void)PPC_PSCHK(c, {m.group(1)}, 0x{addr:08X}u); " + text
++        out.append(text)
++    return out
 diff --git a/runtime/audio.cpp b/runtime/audio.cpp
 index 4050960..df1800f 100644
 --- a/runtime/audio.cpp
@@ -4304,7 +4584,7 @@ index c544428..67e8233 100644
 +void mem_watch_tick();
 +uint64_t mem_watch_faults();
 diff --git a/runtime/os.cpp b/runtime/os.cpp
-index aa1274e..3d497c6 100644
+index aa1274e..37c4d26 100644
 --- a/runtime/os.cpp
 +++ b/runtime/os.cpp
 @@ -109,6 +109,7 @@ void load_regs(PPCContext& c, uint32_t ctx) {
@@ -4408,7 +4688,7 @@ index aa1274e..3d497c6 100644
      while (c.msr & MSR_EE) {
          g_ppc_pending.store(0);
          int exc = hw_external_pending() ? EXC_EXTERNAL : dec_due() ? EXC_DECREMENTER : -1;
-@@ -455,12 +497,12 @@ void ppc_poll(PPCContext& c) {
+@@ -455,16 +497,25 @@ void ppc_poll(PPCContext& c) {
      }
  }
  
@@ -4424,7 +4704,20 @@ index aa1274e..3d497c6 100644
      t_ppc = &c;
      rt_die("%s at %s", what, rt_name(addr).c_str());
  }
-@@ -495,6 +537,28 @@ void os_report_running(int depth) {
+ 
++// a build made with the recompiler's --ps-check (pslive.py): a ps1 taken for dead is read
++void ppc_ps_dead_read(uint32_t addr, int reg) {
++    static std::mutex mx;
++    static std::map<uint32_t, int> seen;
++    std::lock_guard<std::mutex> lk(mx);
++    if (seen.emplace(addr, reg).second)
++        std::fprintf(stderr, "ps-check: f%d's second half read at %s, taken for dead\n", reg, rt_name(addr).c_str());
++}
++
+ void os_install() {
+     g_t0 = Clock::now();
+ #ifdef _WIN32
+@@ -495,6 +546,28 @@ void os_report_running(int depth) {
      rt_backtrace(c, stderr, depth);
  }
  
@@ -4454,7 +4747,7 @@ index aa1274e..3d497c6 100644
  void watch_main(int seconds) {
      for (;;) {
 diff --git a/runtime/ppc.h b/runtime/ppc.h
-index 99351d5..62849f6 100644
+index 99351d5..52dfaae 100644
 --- a/runtime/ppc.h
 +++ b/runtime/ppc.h
 @@ -22,12 +22,16 @@
@@ -4655,7 +4948,7 @@ index 99351d5..62849f6 100644
  static inline void fp_single(PPCContext& c, int d, double v) {      // single ops fill ps0 and ps1
      double r = rs(v); c.f[d] = r; c.ps1[d] = r;
  }
-@@ -278,13 +331,43 @@ static inline void ps_quant(uint32_t type, int scale, uint32_t ea, double v, int
+@@ -278,13 +331,50 @@ static inline void ps_quant(uint32_t type, int scale, uint32_t ea, double v, int
  }
  static inline int gqr_scale(uint32_t s6) { return (int)(s6 & 0x20 ? s6 | ~0x3Fu : s6); }
  static inline void psq_load(PPCContext& c, int d, uint32_t ea, int w, int i) {
@@ -4699,6 +4992,13 @@ index 99351d5..62849f6 100644
 +    }
 +    psq_store(c, s, ea, w, i);
 +}
++// A build made with the recompiler's --ps-check: a ps1 it took for dead holds a NaN no
++// float converts to (its low mantissa bits are set), and reading one stops the game.
++#define PPC_PS_DEAD_BITS 0x7FF4DEAD5EBAD001ull
++#define PPC_PS_DEAD as_f64(PPC_PS_DEAD_BITS)
++void ppc_ps_dead_read(uint32_t addr, int reg);      // reports each place once
++#define PPC_PSCHK(c, i, a) (as_u64((c).ps1[i]) == PPC_PS_DEAD_BITS ? \
++    (ppc_ps_dead_read(a, i), (c).ps1[i]) : (c).ps1[i])
  static inline void ps_set(PPCContext& c, int d, double a, double b) { c.f[d] = rs(a); c.ps1[d] = rs(b); }
 +static inline void ps_put(PPCContext& c, int d, double a, double b) { c.f[d] = a; c.ps1[d] = b; }
 diff --git a/runtime/rt.h b/runtime/rt.h
