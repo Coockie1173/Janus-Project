@@ -167,7 +167,7 @@ void stamina_bar(const Stamina& s) {
     dl->AddRectFilled(ImVec2(at, y - 5 * u), ImVec2(at + wide, y + h + 5 * u), IM_COL32(255, 255, 255, 255));
 }
 
-//bunnyhopping's speedometer (bunnyhop.cpp), under the crosshair: across the floor, a second
+//the speedometer (bunnyhop.cpp: bunnyhopping, or the cheat), under the crosshair: across the floor, a second
 void speedometer(float speed) {
     char text[16];
     std::snprintf(text, sizeof text, "%.1f", speed);

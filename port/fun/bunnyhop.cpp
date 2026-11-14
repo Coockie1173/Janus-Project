@@ -110,7 +110,11 @@
 //and clears as it ends) and no cutscene has Bond himself (+0x5E4), his input is empty: the sticks
 //and the buttons ge_input_copy takes, and the hop's key
 //
+//the speedometer is a cheat of its own too (off by default): with bunnyhopping off it's the game's
+//own step, measured where a hop's would be (after ge_look_apply), so a run reads 4.2
+//
 //GE_BUNNYHOP=1 start with it on, else what the menu saved
+//GE_SPEEDOMETER=1 the speedometer without bunnyhopping (LAUNCH_SPEEDOMETER)
 //the speed goes in the log twice a second, and what walls take (GE_BHOP_LOG=0 not)
 //GE_BHOP_PRESTRAFE=0 without pre-strafing, GE_BHOP_CROUCH=1 (a GE_HL_CROUCH build), GE_BHOP_HOVER=0 and GE_BHOP_LEDGE=0 without those, GE_BHOP_SPEED, GE_BHOP_HEIGHT, GE_BHOP_AIRCAP, GE_BHOP_AIRACCEL, GE_BHOP_WISH, GE_BHOP_MAX, GE_BHOP_GRAVITY,
 //GE_BHOP_FALL, GE_BHOP_DROP, GE_BHOP_ACCEL, GE_BHOP_FRICTION over what the menu saved
@@ -204,6 +208,7 @@ std::atomic<bool> g_prestrafe{true}, g_hover{true}, g_ledge{true};
 std::atomic<bool> g_crouch{false};
 #endif
 std::atomic<bool> g_onNow{false}, g_locked{false}; //for the menu's and the renderer's threads
+std::atomic<bool> g_speedometer{false}; //the cheat's, bunnyhopping or not
 
 //a level can have its own rules (eurochef's bhop... nodes): a trigger the game never runs, the
 //generic one (type 3) asleep (game flag 1), with kPresetMark in data 1. data 2 has bit 0 for
@@ -878,11 +883,13 @@ void bhop_defaults()
 
 bool bunnyhop_speed(float& speed)
 {
-	if (!g_onNow || !in_play() || ld32(kFrameCount) - g_speedFrame >= 4) return false;
+	if ((!g_onNow && !g_speedometer) || !in_play() || ld32(kFrameCount) - g_speedFrame >= 4) return false;
 	speed = g_speed;
 	return true;
 }
 void set_bunnyhop(bool on) { g_bunnyhop = on; }
+bool speedometer_cheat() { return g_speedometer; }
+void set_speedometer_cheat(bool on) { g_speedometer = on; }
 
 void bunnyhop_stop(uint32_t ctrl, float y)
 {
@@ -1025,7 +1032,15 @@ void bunnyhop_look(PPCContext& c, uint32_t ctrl)
 		if (hp) hp->active = false;
 		return;
 	}
-	if (!hp) return;
+	if (!hp)
+	{
+		if (g_speedometer && ctrl == local_controller() && Free(ld32(ctrl + kPlayerState)))
+		{
+			const float speed{ std::hypot(ldf(body + kBodyStep), ldf(body + kBodyStep + 8)) / dt };
+			if (std::isfinite(speed)) g_speed = speed, g_speedFrame = ld32(kFrameCount);
+		}
+		return;
+	}
 	Hopper& h = *hp;
 	const bool groundOn{ h.groundOn }, ledge{ h.ledge };
 	h.groundOn = false;
@@ -1222,6 +1237,7 @@ void bunnyhop_look(PPCContext& c, uint32_t ctrl)
 void install_bunnyhop()
 {
 	g_bunnyhop = std::atoi(saved_setting("GE_BUNNYHOP", "LAUNCH_BUNNYHOP").c_str()) != 0;
+	g_speedometer = std::atoi(saved_setting("GE_SPEEDOMETER", "LAUNCH_SPEEDOMETER").c_str()) != 0;
 	const std::string prestrafe{ saved_setting("GE_BHOP_PRESTRAFE", "LAUNCH_BHOP_PRESTRAFE") };
 	if (!prestrafe.empty()) g_prestrafe = std::atoi(prestrafe.c_str()) != 0;
 #ifdef GE_HL_CROUCH

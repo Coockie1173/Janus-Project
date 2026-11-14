@@ -34,6 +34,7 @@
 //GE_UNLOCK_ALL=1 every mission and difficulty unlocked
 //GE_NOCLIP=1 cheat, start flying through walls
 //GE_STAMINA=1 cheat, the sprint that's left as a bar
+//GE_SPEEDOMETER=1 cheat, the speed under the crosshair
 //GE_GOD=1 GE_INFINITE_AMMO=1 GE_INFINITE_SPRINT=1 cheats, the campaign's player isn't hurt, the ammo and the sprint never run out
 //GE_TURBO=x GE_GRENADES=1 cheats, the campaign's player moves x times as fast (1 to 5), carries frag grenades
 //GE_COLLISION=1 cheat, the level's collision is drawn in place of the world

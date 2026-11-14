@@ -40,7 +40,9 @@ bool bhop_prestrafe_now();
 bool bhop_custom_now(); //on for this game and a rule isn't its default: the level timer flashes grey
 float bhop_value_now(int which);
 void bunnyhop_buttons(const ClassicState& s); //the jump key, as the pad was read
-bool bunnyhop_speed(float& speed); //the speedometer's, false with it off or nobody in play
+bool bunnyhop_speed(float& speed); //the speedometer's, false with it and bunnyhopping off or nobody in play
+bool speedometer_cheat(); //cheat, the speedometer shows without bunnyhopping
+void set_speedometer_cheat(bool on);
 enum { kBhopSpeed, kBhopHeight, kBhopGravity, kBhopAirCap, kBhopAirAccel, kBhopWish, kBhopMax, kBhopFall, kBhopDrop, kBhopGroundAccel, kBhopFriction, kBhopValueCount };
 struct BhopValue { const char* label; const char* hint; const char* env; const char* launch; float value, lo, hi, by; int decimals; float initial = 0; };
 BhopValue& bhop_value(int which); //its tunables, by the enum above
