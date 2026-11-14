@@ -248,5 +248,6 @@ Texts that still talk about the controller.
       shows them (a Dam guard 10 m away gone from the picture, cutscene characters stay)
 - [x] Invisible player (enemies never see you): F1 > Cheats > Invisible Player, the game's own "can be seen" byte held off
       and the stimuli about you left out (flown up to Dam's guards: off, 100 sightings and shots; on, none); a shot
-      that lands near them still brings them
+      that lands near them still brings them; alert guards' sight and fire at the player are left out too
+      (their sight skipped the byte; Dam's checkpoint guards start alert: 8 hits in the dammid replay, now none)
 - [ ] Fly mode (noclip that doesn't go through walls)

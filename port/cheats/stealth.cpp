@@ -18,6 +18,13 @@
 //bit 0x4000) asks TargetVisible (8006B6C0), which is that byte of the target's handler, and its
 //sight of the target (fn_80053EF0) goes no further without it. the byte is held at 0 while the
 //cheat is on, and back at 1 when it's turned off
+//that byte isn't enough: the sight test (ge_guard_sense_ray, the NPC vtable +0x12C) only asks
+//TargetVisible when the guard's brain (+0x57C) has +0x4CC at 0, and TargetVisible says yes when
+//the guard's +0x578 bit 0x4000 is clear, so some guards saw the player anyway. the test is left
+//out for a guard whose target (+0x6D4) is the local player, as the game does when it can't be seen
+//a guard that's already alert (the brain's +0x4CC 1: Dam's checkpoints start some that way, aimed
+//at the player) fires without seeing anyone: its behaviours ask ge_guard_fire_ready (80086430,
+//the brain, whose +0x3D4 is the guard) first, which says no while its target is the local player
 //what a guard takes in (a sight, a noise, another guard telling it where the player is) goes
 //through ge_npc_perceive (8006A570) as a stimulus: +8 its kind (5210000D 60070003 a sighting,
 //52100004 60060001, 52100001 and 52100005 60030011 a noise...), +0x18 where, +0x38 the id of who
@@ -43,7 +50,7 @@ const uint32_t kStimulusAbout = 0x38;
 const uint32_t kIdTable = 0x805F4C54, kIdCount = 0x8, kIdPairs = 0xC;
 
 std::atomic<bool> g_enemies{false}, g_player{false};
-PPCFunc orig_perceive = nullptr;
+PPCFunc orig_perceive = nullptr, orig_sense = nullptr, orig_fire_ready = nullptr;
 bool g_trace = false;
 std::vector<uint32_t> g_hidden; //the things ge_draw_things has with bit 0 cleared
 
@@ -108,6 +115,47 @@ void Perceive(PPCContext& c)
 	if (dropped) return;
 	orig_perceive(c);
 }
+//the cheat is on and a guard's handler has the local player as its target
+bool AfterPlayer(uint32_t guard)
+{
+	const uint32_t kTarget = 0x6D4;
+	if (!g_player || !Campaign() || !guest_ptr(g_local_ctrl) || !guest_ptr(guard)) return false;
+	const uint32_t player = ld32(g_local_ctrl + 4);
+	return player && ThingOf(ld32(guard + kTarget)) == player;
+}
+
+//(brain) -> r3 1 when the guard may fire
+void FireReady(PPCContext& c)
+{
+	const uint32_t kGuard = 0x3D4;
+	const uint32_t brain = c.r[3];
+	if (guest_ptr(brain) && AfterPlayer(ld32(brain + kGuard)))
+	{
+		if (g_trace)
+		{
+			static int said = 0;
+			if (said < 20 && ++said) rt_log("stealth: guard %08X held its fire", ld32(brain + kGuard));
+		}
+		c.r[3] = 0;
+		return;
+	}
+	orig_fire_ready(c);
+}
+
+//(guard, sense, result) the guard's test of one sense towards its target
+void Sense(PPCContext& c)
+{
+	const uint32_t guard = c.r[3];
+	if (!AfterPlayer(guard)) { orig_sense(c); return; }
+	if (g_trace)
+	{
+		static int said = 0;
+		const uint32_t brain = ld32(guard + 0x57C);
+		if (said < 100 && ++said)
+			rt_log("stealth: guard %08X sense %u at the player left out (flags %08X, brain +0x4CC %X)", guard, c.r[4], ld32(guard + 0x578),
+				guest_ptr(brain) ? ld32(brain + 0x4CC) : 0);
+	}
+}
 } //namespace
 
 //after the local controller's update: the player's handler can't be seen
@@ -170,7 +218,9 @@ void install_stealth()
 	g_enemies = std::atoi(saved_setting("GE_INVISIBLE_ENEMIES", "LAUNCH_INVISIBLEENEMIES").c_str()) != 0;
 	g_player = std::atoi(saved_setting("GE_INVISIBLE_PLAYER", "LAUNCH_INVISIBLEPLAYER").c_str()) != 0;
 	orig_perceive = ppc_hook("ge_npc_perceive", Perceive);
-	if (!orig_perceive) rt_log("goldeneye: ge_npc_perceive isn't in this build, Invisible Player does nothing");
+	orig_sense = ppc_hook("ge_guard_sense_ray", Sense);
+	orig_fire_ready = ppc_hook("ge_guard_fire_ready", FireReady);
+	if (!orig_perceive || !orig_sense || !orig_fire_ready) rt_log("goldeneye: Invisible Player's hooks aren't all in this build, it isn't whole");
 }
 
 } //namespace ge
