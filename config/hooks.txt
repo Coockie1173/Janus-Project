@@ -105,7 +105,7 @@ ge_object_step         # a physics object's step: one whose place isn't a number
 ge_halt                # the game's halt, a loop on itself: the game ends with a report (port/engine/sweep.cpp)
 ge_camera_sway         # the camera's sway is two sines of the frame count: above 30 of the time in console frames (port/engine/shake.cpp)
 WIFI_FUN_80234a60      # the menu's update: a level picked in the settings menu's grid is made its pending level (port/gameplay/cutscenes.cpp)
-ge_lod_pick            # an entity's level of detail by distance: the distance divided by Draw Distance (port/engine/drawdist.cpp)
+ge_lod_pick            # an entity's level of detail by distance: the distance divided by Detail Distance (port/engine/drawdist.cpp)
 ge_camera_shake        # the camera's shakes move the look-at point: scaled by Screen Shake (port/engine/shake.cpp)
 _APPLYING_PATCH_       # the server's live patch: its data writes made, known code patches done natively, the rest left out (port/net/net.cpp)
 bd_command_set_time    # a player's command gets the frame's time in whole milliseconds: what's cut off goes into the next (port/net/net.cpp)

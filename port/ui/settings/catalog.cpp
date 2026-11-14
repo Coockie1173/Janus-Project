@@ -167,7 +167,7 @@ void BuildSettings()
 	Setting& shake = AddRange(kScreen, "screen_shake", "Screen Shake", "How much the view shakes: from explosions, on Nightclub's dance floor and the like. 1.0 is the game's own.",
 		shake_scale, [](float v) { set_shake_scale(v); g_dirty = true; }, 0, kShakeMax, 0.1f, 1);
 	shake.show = [show = shake.show](float v) { return v > 0 ? show(v) + "x" : std::string("Off"); };
-	Setting& drawDist = AddRange(kScreen, "draw_distance", "Draw Distance", "How far away details (Outpost's rocks) are drawn before they pop in. 1.0x is the game's own.",
+	Setting& drawDist = AddRange(kScreen, "draw_distance", "Detail Distance", "How far away details (Outpost's rocks) are drawn before they pop in. 1.0x is the game's own.",
 		draw_distance, [](float v) { set_draw_distance(v); g_dirty = true; }, 1, kDrawDistanceMax, 0.5f, 1);
 	drawDist.show = [show = drawDist.show](float v) { return v >= kDrawDistanceMax ? std::string("Unlimited") : show(v) + "x"; };
 	AddToggle(kScreen, "hud", "HUD", "Off: no crosshair, radar, health, ammunition or prompts, as in the game's cutscenes.", hud, set_hud);

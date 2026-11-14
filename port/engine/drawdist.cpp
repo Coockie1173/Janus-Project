@@ -10,7 +10,7 @@
 //what's picked only changes the picture: the guards' spawners ask whether a room's data is loaded
 //(+0x6A of its state), which doesn't come from here
 //
-//Draw Distance (a slider, 1x the game's up to Unlimited): the game's pick stands whenever it
+//Detail Distance (a slider, 1x the game's up to Unlimited): the game's pick stands whenever it
 //draws something. only when it comes back empty is it picked again from the distance divided by
 //the slider (Unlimited: from right next to it). so whatever the game draws is drawn as it picks
 //it, and something meant to show only from far away keeps doing so
@@ -68,7 +68,7 @@ void install_draw_distance()
 	if (std::string saved = saved_setting("GE_DRAWDIST", "LAUNCH_DRAWDIST"); !saved.empty()) set_draw_distance((float)std::atof(saved.c_str()));
 	g_trace = std::getenv("GE_LODTRACE") != nullptr;
 	orig_pick = ppc_hook("ge_lod_pick", LodPick);
-	if (!orig_pick) rt_log("goldeneye: ge_lod_pick is not hooked in this build, Draw Distance does nothing");
+	if (!orig_pick) rt_log("goldeneye: ge_lod_pick is not hooked in this build, Detail Distance does nothing");
 }
 
 } //namespace ge
