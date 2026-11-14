@@ -46,10 +46,7 @@ bool stamina(Stamina& s); //the local player's as of its last update, false with
 void install_stealth();
 bool invisible_enemies(); //cheat, the campaign's enemies aren't drawn
 void set_invisible_enemies(bool on);
-bool invisible_player(); //cheat, the campaign's guards never notice the player
-void set_invisible_player(bool on);
 void stealth_things(uint32_t world, bool before); //around ge_draw_things (zones.cpp)
-void stealth_apply(uint32_t controller); //after the local controller's update
 
 //collision.cpp
 void install_collision();

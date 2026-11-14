@@ -246,8 +246,6 @@ Texts that still talk about the controller.
       the spread of a guard's shots is twice as wide at 0 and gone at 200 (the guards' accuracy seen bent in Solar)
 - [x] Invisible enemies: F1 > Cheats > Invisible Enemies, enemies aren't drawn, their shots are; the radar still
       shows them (a Dam guard 10 m away gone from the picture, cutscene characters stay)
-- [x] Invisible player (enemies never see you): F1 > Cheats > Invisible Player, the game's own "can be seen" byte held off
-      and the stimuli about you left out (flown up to Dam's guards: off, 100 sightings and shots; on, none); a shot
-      that lands near them still brings them; alert guards' sight and fire at the player are left out too
-      (their sight skipped the byte; Dam's checkpoint guards start alert: 8 hits in the dammid replay, now none)
+- [-] Invisible player (enemies never see you): dropped, janky and crashed the game. ge_npc_perceive, ge_guard_sense_ray
+      and ge_guard_fire_ready stay named in names-manual.tsv (the git history has the attempt)
 - [ ] Fly mode (noclip that doesn't go through walls)
