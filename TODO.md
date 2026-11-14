@@ -82,7 +82,8 @@ Things that only break above 60 fps.
 - [x] **medium** Facility: the colour filter / post processing "bubble" around the player doesn't cover
       the whole screen, worse at higher FOV
 - [x] **medium** Black bars at the top and bottom in windowed mode: to avoid stretching, it must always be 16:9 or 4:3
-- [ ] **medium** Dam: the opening scene isn't as foggy as it should be
+- [x] **medium** Dam: the opening scene isn't as foggy as it should be: the hardware's fog wasn't drawn at all,
+      it is now (needs checking on Dam's opening)
 - [ ] **medium** Vertigo: the skybox is black in one corner of the map
 - [x] ~~**low** Halo around characters' hair (needs checking, may be the original game or the resolution)~~
 - [ ] **low** Dam: the sniper's lower body is visible below the window through the thermal scope (needs checking)
@@ -170,7 +171,8 @@ Texts that still talk about the controller.
 - [ ] **low** Cradle: the last Trevelyan encounter could be skipped up to "For England, James?" (leaves time to get
       ready to shoot and keeps that line)
 - [x] **low** Solar: the cutscene going up the stairs, first looking at the big tower, could be skipped
-- [ ] **low** With Auto Quick Time Events on, skip QTE cutscenes too (Cradle: the first Trevelyan encounter)
+- [x] **low** With Auto Quick Time Events on, skip QTE cutscenes too (Cradle: the first Trevelyan encounter): Cradle's
+      fight with Trevelyan up to the shot and Jungle's fight with Xenia (Cradle checked by hand, Jungle not played yet)
 
 ## Gameplay and AI
 
@@ -210,10 +212,12 @@ Texts that still talk about the controller.
 - [x] An option to turn the HUD off: F1 > Screen Settings > HUD
 - [x] The cursor is free in the menus and picks their items (the game's own menu pointer on the mouse;
       checked with a cursor for tests, not with a real mouse)
-- [ ] A speedrun timer for the whole game: resets to 0 when Dam starts, ends when input is lost at the
-      end of Cradle after killing Trevelyan, adds up the in-game times so loading screens don't count
-- [ ] A film grain slider
-- [ ] An option to turn bloom off
+- [x] A speedrun timer for the whole game: resets to 0 when Dam starts, ends when input is lost at the
+      end of Cradle after killing Trevelyan, adds up the in-game times so loading screens don't count:
+      F1 > Speedrun Timer, a split a mission on the level timer, LiveSplit .lss in and out (the last split
+      ends at Cradle's credits, not when input is lost)
+- [x] A film grain slider: F1 > Enhancements > Visuals > Film Grain, off to the game's own
+- [x] An option to turn bloom off: F1 > Enhancements > Visuals > Disable Bloom
 - [ ] The in-game menus scroll with the mouse wheel, like the F1 menus
 
 ## Cheats
