@@ -6,6 +6,7 @@
 //(ZR 0004, ZL 0080, R 0200, L 2000, a 0010, b 0040, x 0008, y 0020)
 //GE_KEYS="5:F1 6:Down 7:Return 9:Left_Shift" press keys, SDL's names with _ for a space
 //GE_MOUSEMOVE="66-67:300,0" fake mouse motion in pixels a second (x right, y down)
+//GE_WHEEL="30:-1 31:2" turn the mouse wheel that many notches at that time (+ is up)
 //GE_SCAN="41,43.5,44.5,46.5,49" snapshots guest memory at those times, then lists the floats
 //(build/scan.txt) that changed over every odd interval and stood still over every even one
 //turn the view with GE_STICK in the odd ones and the view's angles are in there
@@ -103,6 +104,9 @@ void KeysMain(std::vector<KeyPress> keys)
 std::vector<Hold> holds, moves;
 struct Press { double a, b; uint32_t bits; };
 std::vector<Press> presses;
+struct Notch { double t; int n; };
+std::vector<Notch> notches;
+size_t notch_next = 0;
 
 //MEM1 and MEM2. asked for when used: MEM2's size is set while the program starts (port/engine/heap.cpp)
 struct Ranges
@@ -559,6 +563,13 @@ void debug_mouse(float& dx, float& dy) {
         if (t >= h.a && t < h.b) { dx += h.x * (float)dt; dy += h.y * (float)dt; }
 }
 
+int debug_wheel() {
+    int n = 0;
+    double t = script_s();
+    for (; notch_next < notches.size() && notches[notch_next].t <= t; ++notch_next) n += notches[notch_next].n;
+    return n;
+}
+
 //GE_TRACELOOK=1 logs the look input vectors (controller+0x968, +0x978) after ge_look_input when they change
 PPCFunc orig_look_trace = nullptr;
 void look_trace(PPCContext& c) {
@@ -643,6 +654,14 @@ void debug_install() {
             q = end;
             while (*q == ' ') ++q;
         }
+    }
+    if (const char* e = std::getenv("GE_WHEEL")) {
+        std::stringstream all(e);
+        for (std::string part; all >> part;) {
+            size_t colon = part.find(':');
+            if (colon != std::string::npos) notches.push_back({std::atof(part.c_str()), std::atoi(part.c_str() + colon + 1)});
+        }
+        std::sort(notches.begin(), notches.end(), [](const Notch& x, const Notch& y) { return x.t < y.t; });
     }
     if (const char* e = std::getenv("GE_STICK")) {
         for (const char* q = e; *q;) {

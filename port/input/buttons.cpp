@@ -98,18 +98,20 @@ void action_update(PPCContext& c) {
 }
 
 //the wheel changes weapon: a notch up presses D-pad right (next), a notch down D-pad left
+//in a menu (or a pause) it scrolls instead, like the F1 menus: a notch up is D-pad up, down is down
 //held 80 ms with 60 ms in between, so every notch of a fast spin is its own press
-const uint32_t kClLeft = 0x0002, kClRight = 0x8000; //KPAD's classic bits
+const uint32_t kClLeft = 0x0002, kClRight = 0x8000, kClUp = 0x0001, kClDown = 0x4000; //KPAD's classic bits
 void wheel_buttons(ClassicState& s) {
     static int queued = 0; //notches still to press, + is next and - is previous
     static uint32_t held = 0;
     static auto until = std::chrono::steady_clock::now();
     auto now = std::chrono::steady_clock::now();
-    queued = std::clamp(queued + video_take_wheel(), -4, 4);
+    queued = std::clamp(queued + video_take_wheel() + debug_wheel(), -4, 4);
     if (now >= until) {
         if (held) { held = 0; until = now + std::chrono::milliseconds(60); }
         else if (queued) {
-            held = queued > 0 ? kClRight : kClLeft;
+            if (in_play()) held = queued > 0 ? kClRight : kClLeft;
+            else held = queued > 0 ? kClUp : kClDown;
             queued += queued > 0 ? -1 : 1;
             until = now + std::chrono::milliseconds(80);
         }
@@ -200,6 +202,14 @@ void menu_buttons(ClassicState& s) {
 //the wii's home button menu (wii menu, reset) has no place here: the button never reaches the game
 const uint32_t kClHome = 0x0800;
 
+//no pause while a cutscene is being skipped: + (and Esc, F1's own pause) wait until it's over
+//a pause in the middle stopped the long steps under the black, and its menu could restart or quit
+//a level halfway through a skip
+const uint32_t kClPlus = 0x0400;
+void skip_buttons(ClassicState& s) {
+    if (skipping_cutscene() && ld8(kPaused) == 0) s.buttons &= ~kClPlus;
+}
+
 void classic_filter(int chan, ClassicState& s) {
     s.buttons &= ~kClHome;
     if (chan != 0) return;
@@ -214,6 +224,7 @@ void classic_filter(int chan, ClassicState& s) {
     menu_buttons(s);
     custom_buttons(s);
     tank_buttons(s);
+    skip_buttons(s);
 }
 
 bool sprint_key() { return g_sprint_held; }

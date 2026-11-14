@@ -163,12 +163,13 @@ Texts that still talk about the controller.
 
 - [x] **high** Doors break when the intro skip is used
 - [x] **medium** Cutscenes aren't sped through when entering from another level, in time trial mode, or from Continue Game
-- [ ] **low** The game can be paused while a cutscene is being skipped
+- [x] **low** The game can be paused while a cutscene is being skipped: + and Esc wait until the skip is over
+      (pressed every half second through Dam's opening skip)
 - [x] **medium** Cradle: the opening skip goes slightly too far, leave a little more time before the slow motion part
       (fades back in 2 s earlier now, to be played)
 - [ ] **low** An option to turn off the fade out when skipping a cutscene, to follow where it goes
 - [ ] ~~**low** Cradle: the Natalya cutscene in the first area could be skipped~~
-- [ ] **low** Cradle: the last Trevelyan encounter could be skipped up to "For England, James?" (leaves time to get
+- [x] **low** Cradle: the last Trevelyan encounter could be skipped up to "For England, James?" (leaves time to get
       ready to shoot and keeps that line)
 - [x] **low** Solar: the cutscene going up the stairs, first looking at the big tower, could be skipped
 - [x] **low** With Auto Quick Time Events on, skip QTE cutscenes too (Cradle: the first Trevelyan encounter): Cradle's
@@ -196,7 +197,10 @@ Texts that still talk about the controller.
 - [ ] **medium** Choppy at times, not a steady 144; the Memorial sewers are the one place that is really
       smooth. A later message says the newest build feels much better (Airfield), so measure
       frame pacing again before chasing it
-- [ ] **medium** Anisotropic filtering costs far too much (the biggest hit the reporter has seen, at only 4x)
+- [x] **medium** Anisotropic filtering costs far too much (the biggest hit the reporter has seen, at only 4x):
+      nothing measurable at 16x on an RTX 4070 (Dam, 1440p); screen copies (bloom, colour filter, depth of
+      field) don't get it any more, which is where a weaker GPU paid for it. The MSAA stutter fixed on
+      2026-11-10 may have been what was felt (needs checking by the reporter)
 - [ ] ~~**medium** Pauses at 0 fps now and then, more than in other games on the same machine (shader
       compiles? check the shader cache)~~
 
@@ -218,7 +222,8 @@ Texts that still talk about the controller.
       ends at Cradle's credits, not when input is lost)
 - [x] A film grain slider: F1 > Enhancements > Visuals > Film Grain, off to the game's own
 - [x] An option to turn bloom off: F1 > Enhancements > Visuals > Disable Bloom
-- [ ] The in-game menus scroll with the mouse wheel, like the F1 menus
+- [x] The in-game menus scroll with the mouse wheel, like the F1 menus: in a menu or the pause menu a notch
+      is up or down, in play it still changes weapon (main menu checked by script)
 
 ## Cheats
 
