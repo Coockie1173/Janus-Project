@@ -4867,7 +4867,7 @@ index c544428..67e8233 100644
 +void mem_watch_tick();
 +uint64_t mem_watch_faults();
 diff --git a/runtime/os.cpp b/runtime/os.cpp
-index aa1274e..3945f82 100644
+index aa1274e..0ffe434 100644
 --- a/runtime/os.cpp
 +++ b/runtime/os.cpp
 @@ -43,6 +43,7 @@
@@ -5157,10 +5157,8 @@ index aa1274e..3945f82 100644
          deliver(c, exc);
      }
 +    if (det) det_window();
- }
- 
--void ppc_syscall(PPCContext&, uint32_t) {}     // the SDK's only sc flash-invalidates the icache
--void ppc_trap(PPCContext& c, uint32_t addr) {
++}
++
 +// a hardware register read takes time as well: code spins on the time-based ones (AIInit
 +// waits for the AI's sample counter to move, with interrupts off)
 +void os_det_mmio() {
@@ -5173,8 +5171,10 @@ index aa1274e..3945f82 100644
 +    int64_t ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t - g_t0).count();
 +    if (ns < g_det_next_ns) g_det_next_ns = ns;
 +    det_window();
-+}
-+
+ }
+ 
+-void ppc_syscall(PPCContext&, uint32_t) {}     // the SDK's only sc flash-invalidates the icache
+-void ppc_trap(PPCContext& c, uint32_t addr) {
 +void ppc_syscall(PPC_CTX, uint32_t) {}     // the SDK's only sc flash-invalidates the icache
 +void ppc_trap(PPC_CTX c, uint32_t addr) {
      t_ppc = &c;
@@ -5198,7 +5198,7 @@ index aa1274e..3945f82 100644
  void os_install() {
      g_t0 = Clock::now();
  #ifdef _WIN32
-@@ -481,7 +693,122 @@ void os_install() {
+@@ -481,7 +693,125 @@ void os_install() {
      for (const char* n : {"OSReturnToMenu", "OSRestart", "OSShutdownSystem", "__OSReboot"})
          ppc_hook(n, hle_leave);
      ppc_hook("RealMode", [](PPCContext&) {});  // BAT set-up: the address space is flat already
@@ -5282,13 +5282,16 @@ index aa1274e..3945f82 100644
 +        if (io.checking()) {
 +            std::string who = "thread " + rt_name(ctx);
 +            if ((bool)running != (h == me)) { io.fail(who + (running ? " ran" : " waited") + " when the state was taken"); return; }
-+            if (has_cur != inside || s_delivering != delivering) { io.fail(who + " is in another interrupt"); return; }
-+            if (s_chain != chain) { io.fail(who + " waits elsewhere: " + chain_text(chain) + ", the state's " + chain_text(s_chain)); return; }
-+            if (s_chain_cur != chain_cur) { io.fail(who + "'s interrupt waits elsewhere"); return; }
++            // these only matter for a thread alive in the state: whether it is comes with the state's memory
++            if (has_cur != inside || s_delivering != delivering) io.unless_dead.push_back({ctx, who + " is in another interrupt"});
++            else if (s_chain != chain) io.unless_dead.push_back({ctx, who + " waits elsewhere: " + chain_text(chain) + ", the state's " + chain_text(s_chain)});
++            else if (s_chain_cur != chain_cur) io.unless_dead.push_back({ctx, who + "'s interrupt waits elsewhere"});
 +        } else if (io.applying) {
 +            if (h == me) self = s_regs;
-+            else h->c = s_regs;
-+            if (has_cur) *h->cur = s_cur;
++            else if (has_cur == inside) {      // a dead thread parked elsewhere keeps its own: they're never used
++                h->c = s_regs;
++                if (has_cur) *h->cur = s_cur;
++            }
 +        }
 +    }
 +    std::vector<uint32_t> fresh;
@@ -5322,7 +5325,7 @@ index aa1274e..3945f82 100644
  }
  
  // Where the running guest thread is: its registers' summary and call chain.
-@@ -495,6 +822,28 @@ void os_report_running(int depth) {
+@@ -495,6 +825,28 @@ void os_report_running(int depth) {
      rt_backtrace(c, stderr, depth);
  }
  
@@ -5607,7 +5610,7 @@ index 99351d5..52dfaae 100644
  static inline void ps_set(PPCContext& c, int d, double a, double b) { c.f[d] = rs(a); c.ps1[d] = rs(b); }
 +static inline void ps_put(PPCContext& c, int d, double a, double b) { c.f[d] = a; c.ps1[d] = b; }
 diff --git a/runtime/rt.h b/runtime/rt.h
-index 75fec5e..5aef5ef 100644
+index 75fec5e..a69c8fa 100644
 --- a/runtime/rt.h
 +++ b/runtime/rt.h
 @@ -4,8 +4,12 @@
@@ -5765,7 +5768,7 @@ index 75fec5e..5aef5ef 100644
  void ios_ipc_write(uint32_t reg, uint32_t v);      // 0xCD000000-0xCD00000C
  uint32_t ios_ipc_read(uint32_t reg);
  void ios_irq_flag_clear(uint32_t v);               // 0xCD000030
-@@ -131,3 +221,51 @@ uint32_t ios_irq_flags();
+@@ -131,3 +221,55 @@ uint32_t ios_irq_flags();
  uint32_t ios_irq_mask();
  std::chrono::steady_clock::time_point ios_tick();  // replies now due delivered; when the next is
  void hw_cpu_idle();                               // the processor idles: IOS replies are due at once
@@ -5775,7 +5778,9 @@ index 75fec5e..5aef5ef 100644
 +// clock, the devices, and the parts a port registers. Deterministic mode only, and only from
 +// a hook on the running guest thread (c its registers) while every other one is parked: a
 +// load is refused unless each thread waits at the same guest call chain as when the state
-+// was taken (its host stack is that chain), and then changes nothing.
++// was taken (its host stack is that chain), and then changes nothing. A thread that is dead in
++// the state (OSThread state 0: cancelled or exited, never scheduled again) may wait anywhere:
++// its host stack is never gone back to, and a thread made again on it gets a new host thread.
 +struct StateIO {
 +    bool saving = false;
 +    bool applying = false;                         // loading for real (not the first read-through)
@@ -5785,6 +5790,8 @@ index 75fec5e..5aef5ef 100644
 +    bool ok = true;
 +    std::string err;
 +    std::set<std::string> check_parts;             // the read-through: the parts that look, the rest are skipped
++    std::vector<std::pair<uint32_t, std::string>> unless_dead;  // the read-through: threads waiting elsewhere, why
++    std::vector<std::pair<uint32_t, size_t>> pages;  // the read-through: guest page -> where its bytes are in the state
 +    bool checking() const { return !saving && !applying; }
 +    void raw(void* p, size_t n);
 +    void skip(size_t n);
@@ -5861,10 +5868,10 @@ index 8a4e097..8b1b1a8 100644
  uint64_t ppc_timebase() { return 0; }
 diff --git a/runtime/state.cpp b/runtime/state.cpp
 new file mode 100644
-index 0000000..8801950
+index 0000000..42f3957
 --- /dev/null
 +++ b/runtime/state.cpp
-@@ -0,0 +1,187 @@
+@@ -0,0 +1,199 @@
 +// wiikit runtime — saved states: the whole machine between two of the game's frames.
 +//
 +// Recompiled code runs as host code: a guest thread is a host thread, and where it is in its
@@ -5919,9 +5926,12 @@ index 0000000..8801950
 +    io.pod(size);
 +    if (size / kPage != pages) { io.fail("memory size"); return; }
 +    io.raw(map.data(), map.size());
-+    if (!io.saving && !io.applying) {                // checking: walk past it
++    if (!io.saving && !io.applying) {                // checking: walk past it, minding where each page is
 +        for (uint32_t i = 0; i < pages; ++i)
-+            if (map[i / 8] >> (i & 7) & 1) io.skip(kPage);
++            if (map[i / 8] >> (i & 7) & 1) {
++                io.pages.push_back({base + i * kPage, io.pos});
++                io.skip(kPage);
++            }
 +        return;
 +    }
 +    for (uint32_t i = 0; i < pages; ++i) {
@@ -6037,9 +6047,18 @@ index 0000000..8801950
 +    check.saving = false;
 +    check.in = data;
 +    check.size = size;
-+    check.check_parts = {"os", "ios"};
++    check.check_parts = {"os", "ios", "mem1", "mem2"};
 +    all(check, c);
 +    if (check.ok && check.pos != size) check.fail("the state goes on past its end");
++    // a thread waiting elsewhere is only fine dead in the state: its OSThread's state (+0x2C8) 0
++    for (auto& [ctx, why] : check.unless_dead) {
++        if (!check.ok) break;
++        const uint32_t at = ctx + 0x2C8, page = at & ~(kPage - 1);
++        uint16_t st = 0;                             // a page left out is zeros
++        for (auto& [pg, off] : check.pages)
++            if (pg == page) { st = (uint16_t)(data[off + (at - page)] << 8 | data[off + (at - page) + 1]); break; }
++        if (st != 0) check.fail(why);
++    }
 +    if (!check.ok) { err = check.err; return false; }
 +    mem_unwatch(host(0x80000000u), 0x01800000u);
 +    mem_unwatch(host(0x90000000u), g_mem2_size);
