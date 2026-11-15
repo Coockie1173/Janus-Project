@@ -7,7 +7,7 @@
 #define GE_TASLIB_API_H
 #include <stdint.h>
 
-#define GE_TAS_API_VERSION 4
+#define GE_TAS_API_VERSION 5
 
 #ifdef _WIN32
 #define GE_TAS_EXPORT __declspec(dllexport)
@@ -40,6 +40,18 @@ typedef struct GeLookInfo
 	float pitchMin, pitchMax, yawMin, yawMax; //radians, the yaw's unbounded (+-inf) for the view
 	float radPerPixel; //what a pixel of mouse turns here with the mouse settings (sensitivity, aim)
 } GeLookInfo;
+
+//the local player's bunnyhop (For Fun) as its last step left it: the speed is the hop's while active,
+//in the air the stick adds speed along itself, quake's air accelerate: the speed along the stick's
+//direction up to min(wishSpeed * stick, airCap), at most airAccel * wishSpeed * stick * dt a step
+typedef struct GeMoveInfo
+{
+	int32_t active, inAir;
+	float velX, velZ; //metres a second, x and z (a yaw's forward is (sin yaw, cos yaw))
+	float airCap, airAccel, wishSpeed, maxSpeed;
+	float deadZone; //a stick under this adds nothing
+	float dt; //the last step, seconds
+} GeMoveInfo;
 
 //a line of text over the picture, in the window's pixels from its top left
 typedef struct GeTasText
@@ -106,6 +118,9 @@ typedef struct GeTasHost
 
 	//api 4: the guest's clock against the host's, 1 real time, 0.5 half as fast (1/64..64); the sound follows
 	void (*SetSpeed)(double speed);
+
+	//api 5: 0 with bunnyhopping off or no local player hopping
+	int (*Movement)(GeMoveInfo* info);
 } GeTasHost;
 
 //what the library gives back, any callback can be null

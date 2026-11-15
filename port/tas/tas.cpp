@@ -183,6 +183,14 @@ int HostLoadState(const void* data, uint32_t size, char* err, uint32_t errSize)
 }
 void HostSleep(uint32_t ms) { std::this_thread::sleep_for(std::chrono::milliseconds(ms)); }
 void HostSetUnpaced(int on) { rt_set_unpaced(on != 0); }
+int HostMovement(GeMoveInfo* info)
+{
+	*info = GeMoveInfo{};
+	BhopMotion m;
+	if (!bunnyhop_motion(m)) return 0;
+	*info = GeMoveInfo{m.active, m.inAir, m.velX, m.velZ, m.airCap, m.airAccel, m.wishSpeed, m.maxSpeed, m.deadZone, m.dt};
+	return 1;
+}
 void HostSetSpeed(double speed) { rt_set_speed(std::clamp(speed, 1.0 / 64, 64.0)); }
 void HostSetFixedRate(uint32_t fps) { g_fixedRate = fps == 0 ? 0 : std::clamp(fps, 30u, 1000u); }
 void HostSetFramesAsDrawn(int on) { g_asDrawn = on != 0; }
@@ -319,7 +327,7 @@ const GeTasHost kHost{
 	HostSetFixedRate, HostSetFramesAsDrawn, HostSetPresence, HostSetMouseTaken, HostTakeMouse, HostMouseCaptured,
 	HostLook, HostViewTurned, HostShowText, HostSay, HostSettings, HostApplySetting, HostExeDir, HostKeyDown,
 	HostMenuPage, HostMenuRow, HostMenuKey, HostMenuKeyName, HostMenuOpen,
-	HostSetSpeed,
+	HostSetSpeed, HostMovement,
 };
 
 void Shutdown()

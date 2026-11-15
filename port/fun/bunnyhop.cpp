@@ -888,6 +888,14 @@ bool bunnyhop_speed(float& speed)
 	return true;
 }
 void set_bunnyhop(bool on) { g_bunnyhop = on; }
+bool bunnyhop_motion(BhopMotion& m)
+{
+	const uint32_t ctrl{ local_controller() };
+	const Hopper* h{ g_onNow && in_play() ? Of(ctrl) : nullptr };
+	if (!h) return false;
+	m = BhopMotion{ h->active, h->inAir, h->vel[0], h->vel[1], kAirCap, kAirAccel, kWishSpeed, kMaxSpeed, kDeadZone, ldf(ctrl + kTimeStep) };
+	return true;
+}
 bool speedometer_cheat() { return g_speedometer; }
 void set_speedometer_cheat(bool on) { g_speedometer = on; }
 
