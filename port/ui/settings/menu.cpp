@@ -394,7 +394,7 @@ bool menu_event(const SDL_Event* e);
 
 void settings_init() {
     g_font = menu_font_add(ImGui::GetIO().Fonts);
-    build_pages();
+    if (g_settings.empty()) build_pages(); //once: settings_values may have built them already
     std::atexit([] { if (g_dirty) save_launch_settings(); }); //a change made with the menu still up
     LoadHotkeys();
     g_hotkeysChanged = true;
@@ -541,9 +541,7 @@ bool settings_apply(const std::string& id, const std::string& text) {
 }
 //with --no-video the overlay never draws, so the game's frame sets a recording's hotkeys
 void settings_replay_headless() {
-    static bool built = false;
-    if (!built) build_pages();
-    built = true;
+    if (g_settings.empty()) build_pages();
     ReplayHotkeys();
 }
 #endif

@@ -4821,7 +4821,7 @@ index c544428..67e8233 100644
 +void mem_watch_tick();
 +uint64_t mem_watch_faults();
 diff --git a/runtime/os.cpp b/runtime/os.cpp
-index aa1274e..8f2de24 100644
+index aa1274e..e493afd 100644
 --- a/runtime/os.cpp
 +++ b/runtime/os.cpp
 @@ -43,6 +43,7 @@
@@ -5007,7 +5007,7 @@ index aa1274e..8f2de24 100644
 +void rt_set_deterministic(bool on) { g_det = on; }
 +bool rt_deterministic() { return g_det.load(std::memory_order_relaxed); }
 +void rt_set_unpaced(bool on) {
-+    g_det_unpaced = on;
++    if (g_det_unpaced.exchange(on) == on) return;  // the same again: the pacing goes on from where it is
 +    if (!on && g_det) det_anchor();
 +}
 +bool rt_unpaced() { return g_det_unpaced; }

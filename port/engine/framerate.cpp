@@ -74,8 +74,10 @@ void apply_rate(uint32_t fps, bool fast) {
     if (!sameRate) rt_log("goldeneye: frame rate up to %u%s", fps ? fps : kGameFps, fps > 60 ? " (frames shown as drawn, not at VI's retrace)" : "");
 }
 
+//a rate held by TASLib is paced by the limiter alone: waiting for a retrace at 59.94 as well had
+//every few frames wait out two, and with every step the same the game ran slow (50 of its 60 a second)
 void vi_wait(PPCContext& c) {
-    if (g_fps_applied > 60 || g_fast_applied) guest_sleep(c, tb_hz() / 4000);
+    if (g_fps_applied > 60 || g_fast_applied || lib_fixed_rate()) guest_sleep(c, tb_hz() / 4000);
     else orig_vi_wait(c);
 }
 
