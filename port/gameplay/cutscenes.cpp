@@ -378,8 +378,9 @@ void FadeOut()
 
 void Run()
 {
-	//the pause menu and ours run at their own pace
-	bool held = ld8(kPaused) != 0 || settings_open();
+	//the pause menu and ours run at their own pace. deterministic (TAS), ours doesn't count: nothing
+	//keeps whether it was open, so a movie played back would skip on where the recording waited
+	bool held = ld8(kPaused) != 0 || (settings_open() && !rt_deterministic());
 	if (held) set_fast_forward(false);
 	if (held)
 	{
