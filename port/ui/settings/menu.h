@@ -47,6 +47,9 @@ NextStart& next_start();
 //keys other files listen for (settings_key): pressed with the menu closed they call theirs, kept in the launcher's file
 struct AddedKey { int page; std::string launch, label, hint, key; void (*pressed)(); };
 inline std::vector<AddedKey> g_addedKeys;
+//rows other files add as they are (settings_row): not settings of the game's, not in a hotkey's list
+struct AddedRow { int page; std::string label, hint; std::function<std::string()> value; std::function<void(int)> adjust; std::function<void()> select; };
+inline std::vector<AddedRow> g_addedRows;
 void save_launch_settings();
 
 //the key file's [Classic Controller] section, by name

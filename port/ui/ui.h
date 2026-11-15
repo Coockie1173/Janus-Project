@@ -10,7 +10,10 @@ bool cheats_active(); //something on the menu's Cheats page is on or a Cheats ta
 bool settings_open();
 int settings_page(const char* title, const char* about); //a page of switches another file adds, before the menu is shown
 void settings_toggle(int page, const char* id, const char* label, const char* hint, bool (*get)(), void (*set)(bool));
-void settings_key(int page, const char* id, const char* label, const char* hint, void (*pressed)()); //a key to choose on the page, pressed with the menu closed it calls pressed
+void settings_key(int page, const char* id, const char* label, const char* hint, void (*pressed)(), const char* otherwise = ""); //a key to choose on the page, pressed with the menu closed it calls pressed (may be null); otherwise: its key until one is chosen
+std::string settings_key_name(const char* id); //the key chosen on an added key's row, empty for none
+//a row of another file's, in the order added: value (none for a row only selected), adjust (left -1, right +1), select (Enter); any may be empty
+void settings_row(int page, const char* label, const char* hint, std::function<std::string()> value, std::function<void(int)> adjust, std::function<void()> select);
 void settings_say(const std::string& text); //a line at the top for a moment
 void save_settings(); //the settings file is written
 std::string saved_setting(const char* env, const char* name); //a setting as the game starts: the environment's, or what the menu saved under name in the launcher's file. empty for neither

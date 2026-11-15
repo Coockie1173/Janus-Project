@@ -383,6 +383,16 @@ void build_pages() {
     g_pages[kGameplay].rows.push_back({"Skip Cutscenes (Experimental)", "Choose which cutscenes are skipped: each mission's intro, the one in its middle and its ending.", {}, {}, [] { go(kSkips); }});
     BuildSettings();
     for (size_t i = 0; i < g_settings.size(); ++i) g_pages[g_settings[i].page].rows.push_back(SettingRow((int)i));
+	for (const AddedRow& a : g_addedRows)
+	{
+		Row r;
+		r.label = a.label;
+		r.hint = a.hint;
+		r.value = a.value;
+		r.adjust = a.adjust;
+		r.select = a.select;
+		g_pages[a.page].rows.push_back(r);
+	}
 	for (size_t i = 0; i < g_addedKeys.size(); ++i)
 	{
 		Row r;

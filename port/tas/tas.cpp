@@ -21,6 +21,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -284,6 +285,31 @@ int HostKeyDown(const char* name)
 	return keys && (int)sc < n && keys[sc] ? 1 : 0;
 }
 
+int HostMenuPage(const char* title, const char* about) { return settings_page(title, about); }
+void HostMenuRow(int page, const char* label, const char* hint, const char* (*value)(void*), void (*adjust)(void*, int), void (*select)(void*), void* user)
+{
+	settings_row(page, label, hint,
+		value ? std::function<std::string()>([value, user] { const char* v = value(user); return std::string(v ? v : ""); }) : nullptr,
+		adjust ? std::function<void(int)>([adjust, user](int d) { adjust(user, d); }) : nullptr,
+		select ? std::function<void()>([select, user] { select(user); }) : nullptr);
+}
+void HostMenuKey(int page, const char* id, const char* label, const char* hint, const char* otherwise)
+{
+	settings_key(page, id, label, hint, nullptr, otherwise ? otherwise : "");
+}
+uint32_t HostMenuKeyName(const char* id, char* out, uint32_t size)
+{
+	const std::string k = settings_key_name(id);
+	if (out && size)
+	{
+		const size_t n = std::min<size_t>(k.size(), size - 1);
+		std::memcpy(out, k.data(), n);
+		out[n] = 0;
+	}
+	return (uint32_t)k.size();
+}
+int HostMenuOpen() { return overlay_open() ? 1 : 0; }
+
 const GeTasHost kHost{
 	GE_TAS_API_VERSION, sizeof(GeTasHost), GE_VERSION, HostLog,
 	HostRead8, HostRead16, HostRead32, HostWrite8, HostWrite16, HostWrite32,
@@ -291,6 +317,7 @@ const GeTasHost kHost{
 	HostDeterministic, HostMemory, HostMem2Size, HostSaveState, HostFreeState, HostLoadState, HostSleep, HostSetUnpaced,
 	HostSetFixedRate, HostSetFramesAsDrawn, HostSetPresence, HostSetMouseTaken, HostTakeMouse, HostMouseCaptured,
 	HostLook, HostViewTurned, HostShowText, HostSay, HostSettings, HostApplySetting, HostExeDir, HostKeyDown,
+	HostMenuPage, HostMenuRow, HostMenuKey, HostMenuKeyName, HostMenuOpen,
 };
 
 void Shutdown()
@@ -383,6 +410,7 @@ bool tas_event(const SDL_Event* e)
 {
 	if (!g_pLib || !g_pLib->Key) return false;
 	if (e->type != SDL_EVENT_KEY_DOWN && e->type != SDL_EVENT_KEY_UP) return false;
+	if (overlay_open() && e->type == SDL_EVENT_KEY_DOWN) return false; //the menu's: choosing a key, moving about
 	const char* name = SDL_GetScancodeName(e->key.scancode);
 	if (!name || !*name) return false;
 	const int mods = ((e->key.mod & SDL_KMOD_SHIFT) ? 1 : 0) | ((e->key.mod & SDL_KMOD_CTRL) ? 2 : 0) | ((e->key.mod & SDL_KMOD_ALT) ? 4 : 0);

@@ -167,7 +167,7 @@ bool AddedKeyDown(const SDL_KeyboardEvent& k)
 	bool any = false;
 	for (const AddedKey& a : g_addedKeys)
 	{
-		if (a.key.empty() || SDL_strcasecmp(a.key.c_str(), name)) continue;
+		if (a.key.empty() || SDL_strcasecmp(a.key.c_str(), name) || !a.pressed) continue;
 		a.pressed();
 		any = true;
 	}
@@ -339,13 +339,41 @@ int settings_page(const char* title, const char* about) {
 #endif
 }
 
-void settings_key(int page, const char* id, const char* label, const char* hint, void (*pressed)()) {
-#ifdef GE_IMGUI
+namespace {
+std::string LaunchKey(const char* id) {
     std::string launch = "LAUNCH_KEY_";
     for (const char* c = id; *c; ++c) launch += (char)std::toupper((unsigned char)*c);
-    g_addedKeys.push_back({page, launch, label, hint, saved_setting(launch.c_str(), launch.c_str()), pressed});
+    return launch;
+}
+}
+
+void settings_key(int page, const char* id, const char* label, const char* hint, void (*pressed)(), const char* otherwise) {
+#ifdef GE_IMGUI
+    const std::string launch = LaunchKey(id);
+    std::string key = saved_setting(launch.c_str(), launch.c_str());
+    if (key.empty() && otherwise) key = otherwise;
+    g_addedKeys.push_back({page, launch, label, hint, key, pressed});
 #else
-    (void)page, (void)id, (void)label, (void)hint, (void)pressed;
+    (void)page, (void)id, (void)label, (void)hint, (void)pressed, (void)otherwise;
+#endif
+}
+
+std::string settings_key_name(const char* id) {
+#ifdef GE_IMGUI
+    const std::string launch = LaunchKey(id);
+    for (const AddedKey& k : g_addedKeys)
+        if (k.launch == launch) return k.key;
+#else
+    (void)id;
+#endif
+    return {};
+}
+
+void settings_row(int page, const char* label, const char* hint, std::function<std::string()> value, std::function<void(int)> adjust, std::function<void()> select) {
+#ifdef GE_IMGUI
+    g_addedRows.push_back({page, label, hint, std::move(value), std::move(adjust), std::move(select)});
+#else
+    (void)page, (void)label, (void)hint, (void)value, (void)adjust, (void)select;
 #endif
 }
 

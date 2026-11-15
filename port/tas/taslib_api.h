@@ -7,7 +7,7 @@
 #define GE_TASLIB_API_H
 #include <stdint.h>
 
-#define GE_TAS_API_VERSION 2
+#define GE_TAS_API_VERSION 3
 
 #ifdef _WIN32
 #define GE_TAS_EXPORT __declspec(dllexport)
@@ -92,6 +92,17 @@ typedef struct GeTasHost
 	int (*ApplySetting)(const char* id, const char* value);
 	const char* (*ExeDir)(void);
 	int (*KeyDown)(const char* name); //SDL's name of a key: held now
+
+	//api 3: a page of the settings menu (F1) of the library's own, made in init (before the menu is first shown)
+	int (*MenuPage)(const char* title, const char* about); //its number for the rows, -1 without a menu
+	//a row: value (null for a row only selected, its text the library's until the next call), adjust (left -1, right +1), select (Enter); any may be null.
+	//they're called on the renderer's thread
+	void (*MenuRow)(int page, const char* label, const char* hint, const char* (*value)(void* user), void (*adjust)(void* user, int dir),
+		void (*select)(void* user), void* user);
+	//a key chosen on the page (kept in the launcher's file as LAUNCH_KEY_<ID>), otherwise until one is chosen
+	void (*MenuKey)(int page, const char* id, const char* label, const char* hint, const char* otherwise);
+	uint32_t (*MenuKeyName)(const char* id, char* out, uint32_t size); //the key chosen on that row ("" none), its length
+	int (*MenuOpen)(void); //the settings menu or the overlay is up (keys are its then, not the library's)
 } GeTasHost;
 
 //what the library gives back, any callback can be null
