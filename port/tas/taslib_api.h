@@ -7,7 +7,7 @@
 #define GE_TASLIB_API_H
 #include <stdint.h>
 
-#define GE_TAS_API_VERSION 3
+#define GE_TAS_API_VERSION 4
 
 #ifdef _WIN32
 #define GE_TAS_EXPORT __declspec(dllexport)
@@ -103,6 +103,9 @@ typedef struct GeTasHost
 	void (*MenuKey)(int page, const char* id, const char* label, const char* hint, const char* otherwise);
 	uint32_t (*MenuKeyName)(const char* id, char* out, uint32_t size); //the key chosen on that row ("" none), its length
 	int (*MenuOpen)(void); //the settings menu or the overlay is up (keys are its then, not the library's)
+
+	//api 4: the guest's clock against the host's, 1 real time, 0.5 half as fast (1/64..64); the sound follows
+	void (*SetSpeed)(double speed);
 } GeTasHost;
 
 //what the library gives back, any callback can be null

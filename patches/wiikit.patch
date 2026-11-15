@@ -992,10 +992,20 @@ index 0000000..6e6b7c3
 +        out.append(text)
 +    return out
 diff --git a/runtime/audio.cpp b/runtime/audio.cpp
-index 4050960..df1800f 100644
+index 4050960..27dfaa2 100644
 --- a/runtime/audio.cpp
 +++ b/runtime/audio.cpp
-@@ -18,6 +18,7 @@
+@@ -11,6 +11,9 @@
+ // kTarget behind what the game counts: that matters for the rhythm game,
+ // whose beats come from the audio clock. Past kMaxQueue a block is dropped.
+ //
++// At another speed (rt_set_speed) the stream plays that much faster or slower, pitch and all,
++// and the queue's marks are in the guest's seconds: the same cushion in the host's.
++//
+ // WIIKIT_AUDIODBG=1 reports the queue and the speed every few seconds.
+ //
+ // WIIKIT_AUDIODUMP=file.wav writes everything played, for checking the mix
+@@ -18,6 +21,7 @@
  #include "rt.h"
  #include <SDL3/SDL.h>
  #include <algorithm>
@@ -1003,7 +1013,7 @@ index 4050960..df1800f 100644
  #include <cmath>
  #include <cstdio>
  #include <cstdlib>
-@@ -34,6 +35,7 @@ uint64_t underruns = 0;
+@@ -34,6 +38,7 @@ uint64_t underruns = 0;
  uint32_t stream_rate = 0;
  uint64_t dropped = 0;
  FILE* dump = nullptr;
@@ -1011,7 +1021,7 @@ index 4050960..df1800f 100644
  uint32_t dump_rate = 0, dump_bytes = 0;
  
  void wav_header(FILE* f, uint32_t rate, uint32_t bytes) {
-@@ -70,6 +72,24 @@ void audio_init(bool enabled) {
+@@ -70,6 +75,24 @@ void audio_init(bool enabled) {
      rt_log("audio: %s", SDL_GetAudioDeviceName(SDL_GetAudioStreamDevice(stream)));
  }
  
@@ -1036,7 +1046,7 @@ index 4050960..df1800f 100644
  void audio_play(const uint8_t* be_rl, uint32_t frames, uint32_t rate) {
      if (!frames || (!stream && !dump)) return;
      static std::vector<int16_t> lr;
-@@ -79,6 +99,7 @@ void audio_play(const uint8_t* be_rl, uint32_t frames, uint32_t rate) {
+@@ -79,6 +102,7 @@ void audio_play(const uint8_t* be_rl, uint32_t frames, uint32_t rate) {
          lr[2 * i + 1] = (int16_t)(p[0] << 8 | p[1]);  // right
          lr[2 * i] = (int16_t)(p[2] << 8 | p[3]);      // left
      }
@@ -1044,7 +1054,7 @@ index 4050960..df1800f 100644
      if (dump) {
          if (!dump_rate) dump_rate = rate;
          std::fwrite(lr.data(), 2, lr.size(), dump);  // little-endian hosts
-@@ -90,6 +111,19 @@ void audio_play(const uint8_t* be_rl, uint32_t frames, uint32_t rate) {
+@@ -90,35 +114,50 @@ void audio_play(const uint8_t* be_rl, uint32_t frames, uint32_t rate) {
          }
      }
      if (!stream) return;
@@ -1064,6 +1074,42 @@ index 4050960..df1800f 100644
      if (rate != stream_rate) {
          SDL_AudioSpec spec = {SDL_AUDIO_S16, 2, (int)rate};
          SDL_SetAudioStreamFormat(stream, &spec, nullptr);
+         stream_rate = rate;
+     }
++    const double speed = rt_speed(), target = kTarget * speed;
+     int queued = SDL_GetAudioStreamQueued(stream);
+     if (playing && queued == 0) {                    // ran dry: wait for the cushion again
+         SDL_PauseAudioStreamDevice(stream);
+         playing = false;
+         if (++underruns % 20 == 1) rt_log("audio: %llu underruns", (unsigned long long)underruns);
+     }
+-    if (queued > (int)(kMaxQueue * rate * 4)) {
++    if (queued > (int)(kMaxQueue * speed * rate * 4)) {
+         if (++dropped % 100 == 1) rt_log("audio: %llu blocks dropped (the device is behind)", (unsigned long long)dropped);
+         return;
+     }
+     SDL_PutAudioStreamData(stream, lr.data(), (int)(lr.size() * 2));
+     double q = (double)queued / (rate * 4.0);
+     if (!playing) {
+-        if (q + (double)frames / rate >= kTarget) {
++        if (q + (double)frames / rate >= target) {
++            SDL_SetAudioStreamFrequencyRatio(stream, (float)speed);
+             SDL_ResumeAudioStreamDevice(stream);
+             playing = true;
+-            smoothed = kTarget;
++            smoothed = target;
+         }
+         return;
+     }
+     // hold the queue at kTarget: play faster when it grows, slower when it shrinks
+     smoothed += (q - smoothed) * 0.01;
+-    double off = smoothed - kTarget, limit = std::fabs(off) > 0.01 ? 0.02 : 0.005;
+-    float ratio = (float)std::clamp(1.0 + off * 0.25, 1.0 - limit, 1.0 + limit);
++    double off = (smoothed - target) / speed, limit = std::fabs(off) > 0.01 ? 0.02 : 0.005;
++    float ratio = (float)(speed * std::clamp(1.0 + off * 0.25, 1.0 - limit, 1.0 + limit));
+     SDL_SetAudioStreamFrequencyRatio(stream, ratio);
+     static uint64_t n = 0;
+     if (dbg && ++n % 1000 == 0) rt_log("audio: queue %.1f ms (smoothed %.1f), speed %.4f", q * 1000, smoothed * 1000, ratio);
 diff --git a/runtime/ax.cpp b/runtime/ax.cpp
 index dc97745..129067a 100644
 --- a/runtime/ax.cpp
@@ -4821,7 +4867,7 @@ index c544428..67e8233 100644
 +void mem_watch_tick();
 +uint64_t mem_watch_faults();
 diff --git a/runtime/os.cpp b/runtime/os.cpp
-index aa1274e..e493afd 100644
+index aa1274e..3945f82 100644
 --- a/runtime/os.cpp
 +++ b/runtime/os.cpp
 @@ -43,6 +43,7 @@
@@ -4969,7 +5015,7 @@ index aa1274e..e493afd 100644
  // ---- interrupt delivery -----------------------------------------------------------------------
  void deliver(PPCContext& c, int exc) {
      HostThread* self = t_self;
-@@ -389,12 +489,75 @@ LONG WINAPI on_crash(EXCEPTION_POINTERS* ep) {
+@@ -389,12 +489,80 @@ LONG WINAPI on_crash(EXCEPTION_POINTERS* ep) {
  }  // namespace
  
  // ---- services ----------------------------------------------------------------------------------
@@ -4988,8 +5034,9 @@ index aa1274e..e493afd 100644
 +    return host + std::chrono::nanoseconds(g_speed_gain.load() + (int64_t)((double)run * (g_speed.load() - 1.0)));
 +}
 +double rt_speed() { return g_speed.load(std::memory_order_relaxed); }
++constexpr double kMinSpeed = 1.0 / 64;           // slow motion: the guest's clock can't stand still
 +void rt_set_speed(double speed) {
-+    if (!(speed >= 1.0)) speed = 1.0;
++    if (!(speed >= kMinSpeed)) speed = kMinSpeed;
 +    {
 +        std::lock_guard<std::mutex> lk(g_speed_mx);
 +        auto host = Clock::now();
@@ -5023,6 +5070,10 @@ index aa1274e..e493afd 100644
 +void rt_advance(std::chrono::nanoseconds by) {
 +    if (by.count() <= 0) return;
 +    if (g_det) {                               // from the guest's thread: the events it passes are taken at once
++        {                                      // and the pacing isn't waited for: that time is gone at once
++            std::lock_guard<std::mutex> lk(g_pace_mx);
++            g_pace_ns += by.count();
++        }
 +        det_step(by.count());
 +        return;
 +    }
@@ -5047,7 +5098,7 @@ index aa1274e..e493afd 100644
  
  void ppc_mttb(int upper, uint32_t v) {
      uint64_t tb = os_tb_now();
-@@ -403,6 +566,7 @@ void ppc_mttb(int upper, uint32_t v) {
+@@ -403,6 +571,7 @@ void ppc_mttb(int upper, uint32_t v) {
      g_tb_offset += (int64_t)(want - tb);
      g_dec_deadline += want - tb;               // DEC counts on its own: its deadline moves along
      clock_kick();
@@ -5055,7 +5106,7 @@ index aa1274e..e493afd 100644
  }
  
  // DEC counts down at the time base rate; the exception is taken when its
-@@ -420,6 +584,7 @@ void ppc_mtdec(uint32_t v) {
+@@ -420,6 +589,7 @@ void ppc_mtdec(uint32_t v) {
          g_dec_deadline = now + v + 1;          // DEC reaches -1 after v + 1 ticks
      }
      clock_kick();
@@ -5063,7 +5114,7 @@ index aa1274e..e493afd 100644
      if (g_dec_armed && now >= g_dec_deadline) os_raise();
  }
  
-@@ -435,8 +600,24 @@ void os_raise() {
+@@ -435,8 +605,24 @@ void os_raise() {
  
  // Nothing but an interrupt can end the loop: wait for one (with a 1 ms
  // bound, in case a line is raised some other way), then deliver it.
@@ -5089,7 +5140,7 @@ index aa1274e..e493afd 100644
      if (!g_ppc_pending.load(std::memory_order_relaxed) && (c.msr & MSR_EE)) {
          g_idle_waiting.store(true, std::memory_order_seq_cst);
          if (!g_ppc_pending.load(std::memory_order_seq_cst)) idle_wait();
-@@ -445,26 +626,52 @@ void ppc_idle(PPCContext& c) {
+@@ -445,26 +631,52 @@ void ppc_idle(PPCContext& c) {
      PPC_POLL(c);
  }
  
@@ -5106,16 +5157,16 @@ index aa1274e..e493afd 100644
          deliver(c, exc);
      }
 +    if (det) det_window();
-+}
-+
-+// a hardware register read takes time as well: code spins on the time-based ones (AIInit
-+// waits for the AI's sample counter to move, with interrupts off)
-+void os_det_mmio() {
-+    if (g_det.load(std::memory_order_relaxed)) det_step(kDetMmio);
  }
  
 -void ppc_syscall(PPCContext&, uint32_t) {}     // the SDK's only sc flash-invalidates the icache
 -void ppc_trap(PPCContext& c, uint32_t addr) {
++// a hardware register read takes time as well: code spins on the time-based ones (AIInit
++// waits for the AI's sample counter to move, with interrupts off)
++void os_det_mmio() {
++    if (g_det.load(std::memory_order_relaxed)) det_step(kDetMmio);
++}
++
 +// a device's event at t: the deterministic clock's next stop may be sooner now
 +void os_event_at(std::chrono::steady_clock::time_point t) {
 +    if (!g_det.load(std::memory_order_relaxed)) return;
@@ -5147,7 +5198,7 @@ index aa1274e..e493afd 100644
  void os_install() {
      g_t0 = Clock::now();
  #ifdef _WIN32
-@@ -481,7 +688,122 @@ void os_install() {
+@@ -481,7 +693,122 @@ void os_install() {
      for (const char* n : {"OSReturnToMenu", "OSRestart", "OSShutdownSystem", "__OSReboot"})
          ppc_hook(n, hle_leave);
      ppc_hook("RealMode", [](PPCContext&) {});  // BAT set-up: the address space is flat already
@@ -5271,7 +5322,7 @@ index aa1274e..e493afd 100644
  }
  
  // Where the running guest thread is: its registers' summary and call chain.
-@@ -495,6 +817,28 @@ void os_report_running(int depth) {
+@@ -495,6 +822,28 @@ void os_report_running(int depth) {
      rt_backtrace(c, stderr, depth);
  }
  
@@ -5556,7 +5607,7 @@ index 99351d5..52dfaae 100644
  static inline void ps_set(PPCContext& c, int d, double a, double b) { c.f[d] = rs(a); c.ps1[d] = rs(b); }
 +static inline void ps_put(PPCContext& c, int d, double a, double b) { c.f[d] = a; c.ps1[d] = b; }
 diff --git a/runtime/rt.h b/runtime/rt.h
-index 75fec5e..f0c0cbb 100644
+index 75fec5e..5aef5ef 100644
 --- a/runtime/rt.h
 +++ b/runtime/rt.h
 @@ -4,8 +4,12 @@
@@ -5597,7 +5648,7 @@ index 75fec5e..f0c0cbb 100644
  // ---- rso.cpp ----------------------------------------------------------------------------
  // RSO modules: the run-time address of a loaded module's code -> the virtual
  // one it was recompiled at (0 if no module is there); the module a virtual
-@@ -58,10 +73,42 @@ static inline uint64_t tb_hz() { return (uint64_t)g_bus_mhz * 250000; }
+@@ -58,10 +73,43 @@ static inline uint64_t tb_hz() { return (uint64_t)g_bus_mhz * 250000; }
  
  // ---- the OS layer (os.cpp) --------------------------------------------------------------
  void os_report_running(int depth);                // stderr: where the running guest thread is
@@ -5613,7 +5664,8 @@ index 75fec5e..f0c0cbb 100644
 +// The guest's clock as a host time point: the host's own while the speed is 1,
 +// ahead of it by whatever was fast-forwarded. The time base, the decrementer,
 +// VI's retraces, the AI's blocks and every device's delay go by it, so at a
-+// speed of 8 the guest lives eight seconds a second, everything in step.
++// speed of 8 the guest lives eight seconds a second, everything in step; at 0.5
++// half a second (slow motion, 1/64 at the least). The sound plays at the speed too.
 +std::chrono::steady_clock::time_point rt_now();
 +void rt_set_speed(double speed);                  // 1: real time
 +void rt_advance(std::chrono::nanoseconds by);     // the guest's clock jumps ahead: that much time has passed at once
@@ -5640,7 +5692,7 @@ index 75fec5e..f0c0cbb 100644
  void os_watch(int seconds);                       // report the running thread periodically
  void os_profile();                                // WIIKIT_PROFILE: sample the guest code (=render: the renderer), list the hot functions
  
-@@ -74,7 +121,35 @@ void gx_submit_pending();                         // after a burst, outside g_hw
+@@ -74,7 +122,35 @@ void gx_submit_pending();                         // after a burst, outside g_hw
  // game that reads the copy on the CPU (the renderer otherwise keeps copies
  // on the host GPU only). False if no copy was made to addr (physical).
  bool gx_copy_to_ram(uint32_t addr);
@@ -5676,7 +5728,7 @@ index 75fec5e..f0c0cbb 100644
  void hw_run_locked(const std::function<void()>& fn);   // run fn holding the hardware lock
  
  // ---- the hardware (hw.cpp) -----------------------------------------------------------
-@@ -104,8 +179,13 @@ void wpad_set_classic(bool on);
+@@ -104,8 +180,13 @@ void wpad_set_classic(bool on);
  void wpad_set_nunchuk(bool on);
  void wpad_set_classic_filter(WpadClassicFilter f);
  void wpad_filter_classic(int chan, ClassicState& s);  // the port's filter, if it has one
@@ -5690,7 +5742,7 @@ index 75fec5e..f0c0cbb 100644
  void ax_command_list(uint32_t addr);               // the AX micro-code: mix one frame
  uint8_t aram_read(uint32_t addr);                  // the GameCube's ARAM (hw.cpp), where its AX reads samples
  bool ax_load_coefs(const char* dir);               // dsp_coef.bin: the polyphase resampler's table
-@@ -113,6 +193,11 @@ void audio_init(bool enabled);                     // the host's audio device (S
+@@ -113,6 +194,11 @@ void audio_init(bool enabled);                     // the host's audio device (S
  // A block the AI DMA starts playing: frames of big-endian 16-bit stereo,
  // right then left, as the Wii's AI reads them.
  void audio_play(const uint8_t* be_rl, uint32_t frames, uint32_t rate);
@@ -5702,7 +5754,7 @@ index 75fec5e..f0c0cbb 100644
  
  // ---- SYSCONF (sysconf.cpp) -----------------------------------------------------------
  // Writes the NAND's /shared2/sys/SYSCONF if it has none, sets what the
-@@ -123,6 +208,10 @@ extern bool g_sysconf_eurgb60;                     // IPL.E60, after sysconf_pre
+@@ -123,6 +209,10 @@ extern bool g_sysconf_eurgb60;                     // IPL.E60, after sysconf_pre
  
  // ---- IOS (ios.cpp) ------------------------------------------------------------------
  void ios_init(const char* disc_root, const char* nand_root);
@@ -5713,7 +5765,7 @@ index 75fec5e..f0c0cbb 100644
  void ios_ipc_write(uint32_t reg, uint32_t v);      // 0xCD000000-0xCD00000C
  uint32_t ios_ipc_read(uint32_t reg);
  void ios_irq_flag_clear(uint32_t v);               // 0xCD000030
-@@ -131,3 +220,51 @@ uint32_t ios_irq_flags();
+@@ -131,3 +221,51 @@ uint32_t ios_irq_flags();
  uint32_t ios_irq_mask();
  std::chrono::steady_clock::time_point ios_tick();  // replies now due delivered; when the next is
  void hw_cpu_idle();                               // the processor idles: IOS replies are due at once
