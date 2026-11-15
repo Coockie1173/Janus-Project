@@ -518,6 +518,15 @@ std::string settings_values() {
             if (skip_exists(m, p)) out += "skip." + std::to_string(m) + "." + std::to_string(p) + "=" + (skip_on(m, p) ? "1" : "0") + "\n";
     return out;
 }
+//a setting of the Cheats page (and its Triggers page): a tool, not part of play. its off value, ""
+//for one with none of its own (a trigger's opacity), null for any other setting
+const char* settings_cheat_off(const std::string& id) {
+    if (g_settings.empty()) build_pages();
+    auto s = std::find_if(g_settings.begin(), g_settings.end(), [&id](const Setting& s) { return s.id == id; });
+    if (s == g_settings.end() || (s->page != kCheats && s->page != kTriggers)) return nullptr;
+    if (s->id == "turbo") return "1"; //the game's own speed
+    return s->kind == Setting::kToggle ? "0" : "";
+}
 //one of them set by TASLib: not written to the launcher's file
 bool settings_apply(const std::string& id, const std::string& text) {
     const float value = (float)std::atof(text.c_str());

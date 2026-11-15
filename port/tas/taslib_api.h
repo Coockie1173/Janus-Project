@@ -7,7 +7,7 @@
 #define GE_TASLIB_API_H
 #include <stdint.h>
 
-#define GE_TAS_API_VERSION 5
+#define GE_TAS_API_VERSION 6
 
 #ifdef _WIN32
 #define GE_TAS_EXPORT __declspec(dllexport)
@@ -121,6 +121,15 @@ typedef struct GeTasHost
 
 	//api 5: 0 with bunnyhopping off or no local player hopping
 	int (*Movement)(GeMoveInfo* info);
+
+	//api 6: a setting of the Cheats page (a tool, not part of play): the value that turns it off ("" one
+	//with none of its own), null for a setting that isn't one
+	const char* (*CheatOff)(const char* id);
+	//the picture as the game draws it (none of the overlays) and its sound into a video file (ffmpeg),
+	//w x h at fps, timed by the game's time less what a skip jumped. needs a window; 0 and why in err when it can't.
+	//both from the game's thread, Stop finishes the file before it returns
+	int (*StartVideo)(const char* path, uint32_t w, uint32_t h, uint32_t fps, char* err, uint32_t errSize);
+	void (*StopVideo)(void);
 } GeTasHost;
 
 //what the library gives back, any callback can be null

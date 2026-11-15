@@ -42,6 +42,7 @@ namespace ge
 
 std::string settings_values(); //ui/settings/menu.cpp
 bool settings_apply(const std::string& id, const std::string& value);
+const char* settings_cheat_off(const std::string& id);
 
 namespace
 {
@@ -191,6 +192,23 @@ int HostMovement(GeMoveInfo* info)
 	*info = GeMoveInfo{m.active, m.inAir, m.velX, m.velZ, m.airCap, m.airAccel, m.wishSpeed, m.maxSpeed, m.deadZone, m.dt};
 	return 1;
 }
+const char* HostCheatOff(const char* id)
+{
+#ifdef GE_IMGUI
+	return id ? settings_cheat_off(id) : nullptr;
+#else
+	(void)id;
+	return nullptr;
+#endif
+}
+int HostStartVideo(const char* path, uint32_t w, uint32_t h, uint32_t fps, char* err, uint32_t errSize)
+{
+	std::string why;
+	if (path && video_capture_start(path, (int)w, (int)h, (int)fps, why)) return 1;
+	if (err && errSize) std::snprintf(err, errSize, "%s", path ? why.c_str() : "no file");
+	return 0;
+}
+void HostStopVideo() { video_capture_stop(); }
 void HostSetSpeed(double speed) { rt_set_speed(std::clamp(speed, 1.0 / 64, 64.0)); }
 void HostSetFixedRate(uint32_t fps) { g_fixedRate = fps == 0 ? 0 : std::clamp(fps, 30u, 1000u); }
 void HostSetFramesAsDrawn(int on) { g_asDrawn = on != 0; }
@@ -328,6 +346,7 @@ const GeTasHost kHost{
 	HostLook, HostViewTurned, HostShowText, HostSay, HostSettings, HostApplySetting, HostExeDir, HostKeyDown,
 	HostMenuPage, HostMenuRow, HostMenuKey, HostMenuKeyName, HostMenuOpen,
 	HostSetSpeed, HostMovement,
+	HostCheatOff, HostStartVideo, HostStopVideo,
 };
 
 void Shutdown()
