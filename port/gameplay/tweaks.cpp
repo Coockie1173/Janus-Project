@@ -205,7 +205,7 @@ void HudTextDraw(PPCContext& c)
 		return;
 	}
 	//red (grey) for half of each second, the game's own colour for the other half
-	auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+	auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(GameClock::now().time_since_epoch()).count();
 	uint32_t colour = ld32(text + kTextColour);
 	if (ms % 1000 < 500) st32(text + kTextColour, (cheat ? kCheatRed : kCustomGrey) | (colour & 0xFF));
 	orig_text_draw(c);
@@ -288,6 +288,7 @@ void tweaks_apply()
 
 void install_tweaks()
 {
+	rt_state_register("tweaks", [](StateIO& io) { io.pod(g_hud_hidden); io.pod(g_hud_was_hidden); io.pod(g_unlock_written); });
 	if (const char* e = std::getenv("GE_LEVEL_TIMER")) g_level_timer = std::atoi(e) != 0;
 	if (std::string saved = saved_setting("GE_HUD", "LAUNCH_HUD"); !saved.empty()) g_hud = std::atoi(saved.c_str()) != 0;
 	if (const char* e = std::getenv("GE_EXTRAS_MENU")) g_extras_menu = std::atoi(e) != 0;

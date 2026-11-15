@@ -470,6 +470,47 @@ bool menu_event(const SDL_Event* e) {
 //runs inside the overlay's ImGui frame
 bool settings_toast() { return Clock::now() < g_toastUntil; }
 void settings_replay() { ReplayHotkeys(); }
+//every setting of the menu as id=value lines (not the actions), for TASLib
+//and to see changed. a value is the setting's number, as exact as a float goes
+std::string settings_values() {
+    if (g_settings.empty()) build_pages();
+    std::string out;
+    for (const Setting& s : g_settings) {
+        if (s.kind == Setting::kAction || !s.get) continue;
+        char v[32];
+        std::snprintf(v, sizeof v, "%.9g", s.get());
+        out += s.id + "=" + v + "\n";
+    }
+    //007 Custom's sliders (the game's own menu changes them, they start as the settings file has them)
+    out += "custom=" + custom_values() + "\n";
+    out += std::string("custom_always=") + (custom_always() ? "1" : "0") + "\n";
+    //the Skip Cutscenes page's switches, a cell a line
+    for (int m = 0; m < skip_missions(); ++m)
+        for (int p = 0; p < kSkipParts; ++p)
+            if (skip_exists(m, p)) out += "skip." + std::to_string(m) + "." + std::to_string(p) + "=" + (skip_on(m, p) ? "1" : "0") + "\n";
+    return out;
+}
+//one of them set by TASLib: not written to the launcher's file
+bool settings_apply(const std::string& id, const std::string& text) {
+    const float value = (float)std::atof(text.c_str());
+    if (id == "custom") return set_custom_values(text, custom_always());
+    if (id == "custom_always") return set_custom_values(custom_values(), value != 0);
+    int m = 0, p = 0;
+    if (std::sscanf(id.c_str(), "skip.%d.%d", &m, &p) == 2) {
+        if (m < 0 || m >= skip_missions() || p < 0 || p >= kSkipParts || !skip_exists(m, p)) return false;
+        set_skip_on(m, p, value != 0);
+        return true;
+    }
+    if (g_settings.empty()) build_pages();
+    auto s = std::find_if(g_settings.begin(), g_settings.end(), [&id](const Setting& s) { return s.id == id; });
+    if (s == g_settings.end() || s->kind == Setting::kAction || !s->set) return false;
+    if (s->get && s->get() == value) return true;
+    bool dirty = g_dirty, fpsChanged = g_fps_changed;
+    s->set(value);
+    g_dirty = dirty;
+    g_fps_changed = fpsChanged;
+    return true;
+}
 //with --no-video the overlay never draws, so the game's frame sets a recording's hotkeys
 void settings_replay_headless() {
     static bool built = false;

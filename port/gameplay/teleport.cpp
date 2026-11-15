@@ -98,6 +98,7 @@ void teleport_apply(PPCContext& c, uint32_t ctrl)
 
 void install_teleport()
 {
+	rt_state_register("teleport", [](StateIO& io) { io.vec(g_teleports); io.pod(g_looked); io.pod(g_count); });
 	g_shape_test = ppc_lookup(kShapeTestFn);
 	if (!g_shape_test) rt_die("goldeneye: the trigger shape's test is not in this build");
 }

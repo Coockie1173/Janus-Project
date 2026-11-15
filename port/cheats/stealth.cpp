@@ -98,6 +98,7 @@ void set_invisible_enemies(bool on) { g_enemies = on; }
 
 void install_stealth()
 {
+	rt_state_register("stealth", [](StateIO& io) { io.vec(g_hidden); });
 	g_trace = std::getenv("GE_TRACESTEALTH") != nullptr;
 	g_enemies = std::atoi(saved_setting("GE_INVISIBLE_ENEMIES", "LAUNCH_INVISIBLEENEMIES").c_str()) != 0;
 }

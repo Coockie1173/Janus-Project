@@ -127,7 +127,7 @@ void TankLook(PPCContext& c)
 {
 	uint32_t ctrl = c.r[3];
 	bool ours = guest_ptr(ctrl) && ctrl == local_controller() && ld32(ctrl + kPlayerState) == kStateMoving;
-	if (!ours || !(mouse_sens() > 0) || ld8(kPaused) || overlay_open() || mouse_on_stick())
+	if (!ours || !(mouse_sens() > 0) || lib_mouse_taken() || ld8(kPaused) || overlay_open() || mouse_on_stick())
 	{
 		orig_tank_look(c);
 		return;

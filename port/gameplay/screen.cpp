@@ -276,6 +276,12 @@ void set_film_grain(float amount) { g_grain = std::clamp(amount, 0.0f, 1.0f); }
 
 void install_screen()
 {
+	rt_state_register("screen", [](StateIO& io) {
+		float flash = g_flash;
+		uint32_t frame = g_flash_frame;
+		io.pod(flash); io.pod(frame);
+		if (io.applying) { g_flash = flash; g_flash_frame = frame; }
+	});
     std::string saved = saved_setting("GE_NO_BLOOM", "LAUNCH_NOBLOOM");
     if (!saved.empty()) g_no_bloom = std::atoi(saved.c_str()) != 0;
     saved = saved_setting("GE_DOF", "LAUNCH_DOF");

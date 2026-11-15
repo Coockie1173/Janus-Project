@@ -21,4 +21,16 @@ inline float ldf(uint32_t a) { uint32_t b = ld32(a); float v; std::memcpy(&v, &b
 inline void stf(uint32_t a, float v) { uint32_t b; std::memcpy(&b, &v, 4); st32(a, b); }
 inline bool in_play() { return guest_ptr(ld32(kPlayerPtr)) && ld8(kPaused) == 0; }
 
+//the guest's clock (rt_now) as a std::chrono clock: what goes by the game's own time, so a
+//timer of ours keeps step with it (a skip's jumps, the deterministic mode's virtual clock)
+struct GameClock
+{
+	using duration = std::chrono::steady_clock::duration;
+	using rep = duration::rep;
+	using period = duration::period;
+	using time_point = std::chrono::steady_clock::time_point;
+	static constexpr bool is_steady = true;
+	static time_point now() { return rt_now(); }
+};
+
 } //namespace ge

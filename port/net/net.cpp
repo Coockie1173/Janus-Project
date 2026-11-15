@@ -507,12 +507,16 @@ namespace
 const uint32_t kCommandTime = 0x4; //the byte in a bdUserCommand
 const double kMaxCommandMs = 255.0;
 
+//what is carried from frame to frame (kept in saved states: it goes into every command)
+struct CommandTime { uint32_t frame = ~0u; double left = 0; uint8_t sent = 0; };
+CommandTime g_commandTime;
+
 //(f1 seconds, the command)
 void SetCommandTime(PPCContext& c)
 {
-	static uint32_t frame = ~0u;
-	static double left = 0; //milliseconds not sent yet, under 1
-	static uint8_t sent = 0;
+	uint32_t& frame = g_commandTime.frame;
+	double& left = g_commandTime.left; //milliseconds not sent yet, under 1
+	uint8_t& sent = g_commandTime.sent;
 	static double asked = 0, given = 0; //since the last line of the log
 	static uint32_t commands = 0;
 	const uint32_t now = ld32(kFrameCount);
@@ -553,6 +557,7 @@ void SetCommandTime(PPCContext& c)
 
 void install_command_time()
 {
+	rt_state_register("command_time", [](StateIO& io) { io.pod(g_commandTime); });
 	if (!ppc_hook("bd_command_set_time", SetCommandTime))
 		rt_log("goldeneye: bd_command_set_time is not hooked in this build, online a player's step loses the part of a millisecond every frame");
 }

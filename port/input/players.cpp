@@ -210,7 +210,8 @@ void controller_update(PPCContext& c) {
                 rt_log("goldeneye: player state %X: the mouse %s", st, look_name(look_mode(ctrl)));
             }
             Look look = look_mode(ctrl);
-            if (g_mouse_sens > 0 && !ld8(kPaused) && !overlay_open() && look != kLookLocked && !mouse_on_stick() && !net_turns() && !is_tank(ctrl)) {
+            tas_controller(ctrl);
+            if (g_mouse_sens > 0 && !lib_mouse_taken() && !ld8(kPaused) && !overlay_open() && look != kLookLocked && !mouse_on_stick() && !net_turns() && !is_tank(ctrl)) {
                 g_look_frame = frame;
                 if (look == kLookAim) mouse_aim(ctrl);
                 else mouse_look(ctrl, player);
@@ -270,6 +271,7 @@ void controller_update(PPCContext& c) {
 }
 
 void install_players() {
+    rt_state_register("players", [](StateIO& io) { io.pod(g_local_frame); io.pod(g_local_ctrl); });
     controller_not_local = ppc_lookup(kControllerNotLocal);
     orig_controller_update = ppc_hook("ge_controller_update", controller_update);
     if (!orig_controller_update || !controller_not_local) rt_die("goldeneye: the controller update is not hooked in this build");

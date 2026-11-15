@@ -261,6 +261,7 @@ void BodyUpdateTraced(PPCContext& c)
 
 void install_body()
 {
+	rt_state_register("body", [](StateIO& io) { io.pod(g_body); });
 	g_trace = std::getenv("GE_TRACE") != nullptr;
 	g_off = std::getenv("GE_BODY_OFF") != nullptr;
 	orig_body_update = ppc_hook("ge_body_update", std::getenv("GE_TRACEPOS") ? BodyUpdateTraced : BodyUpdate);

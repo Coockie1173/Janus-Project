@@ -287,7 +287,7 @@ struct Way
 {
 	std::vector<uint32_t> reached; //markers that went off
 	uint32_t awake = 0, objective = 0, last = 0, before = 0; //a marker seen awake, the ones reached last and before it
-	std::chrono::steady_clock::time_point stalled{}; //none awake since
+	GameClock::time_point stalled{}; //none awake since
 	bool waiting = false;
 };
 Way g_way;
@@ -687,7 +687,7 @@ void WakeWay()
 		return;
 	}
 	if (!g_way.last) return;
-	const auto now{ std::chrono::steady_clock::now() };
+	const auto now{ GameClock::now() };
 	if (!g_way.waiting)
 	{
 		g_way.waiting = true;
@@ -1234,8 +1234,23 @@ void bunnyhop_look(PPCContext& c, uint32_t ctrl)
 	Trace(h, gameX, gameZ, floor);
 }
 
+//what play keeps here from frame to frame, kept in saved states (the menu's settings aren't: they're settings)
+static void BhopState(StateIO& io)
+{
+	bool onNow = g_onNow, locked = g_locked, jump = g_jump;
+	uint32_t mapLevel = g_mapLevel, speedFrame = g_speedFrame;
+	io.pod(g_now); io.pod(g_mode); io.pod(g_rulesFrame); io.pod(g_host); io.pod(g_hostKnown);
+	io.pod(onNow); io.pod(locked); io.pod(jump); io.pod(g_mapRules); io.pod(mapLevel); io.pod(g_mapLooked); io.pod(g_mapCount);
+	io.pod(speedFrame); io.pod(g_onFoot); io.pod(g_saidOnFoot); io.pod(g_tankOnFoot); io.pod(g_held);
+	io.vec(g_way.reached); io.pod(g_way.awake); io.pod(g_way.objective); io.pod(g_way.last); io.pod(g_way.before);
+	io.time(g_way.stalled); io.pod(g_way.waiting); io.pod(g_wayFrame);
+	io.pod(g_hoppers);
+	if (io.applying) { g_onNow = onNow; g_locked = locked; g_jump = jump; g_mapLevel = mapLevel; g_speedFrame = speedFrame; }
+}
+
 void install_bunnyhop()
 {
+	rt_state_register("bunnyhop", BhopState);
 	g_bunnyhop = std::atoi(saved_setting("GE_BUNNYHOP", "LAUNCH_BUNNYHOP").c_str()) != 0;
 	g_speedometer = std::atoi(saved_setting("GE_SPEEDOMETER", "LAUNCH_SPEEDOMETER").c_str()) != 0;
 	const std::string prestrafe{ saved_setting("GE_BHOP_PRESTRAFE", "LAUNCH_BHOP_PRESTRAFE") };

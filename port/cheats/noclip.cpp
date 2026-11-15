@@ -145,6 +145,7 @@ void noclip_apply(uint32_t ctrl)
 
 void install_noclip()
 {
+	rt_state_register("noclip", [](StateIO& io) { io.pod(g_entity); io.pod(g_body); io.pod(g_pos); io.pod(g_ctrl); });
 	if (const char* e = std::getenv("GE_NOCLIP")) g_noclip = std::atoi(e) != 0;
 	g_trace = std::getenv("GE_TRACE") != nullptr;
 }

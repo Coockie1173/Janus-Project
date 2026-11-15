@@ -50,7 +50,7 @@ void set_mouse_everywhere(bool on) { g_mouse_everywhere = on; }
 void mouse_applied(uint32_t frame) { g_look_frame = frame; }
 void mouse_frame(uint32_t f) {
     mouse_capture(!overlay_open());
-    if (!g_stick_took && g_look_frame != f - 1 && g_look_frame != f) {
+    if (!g_stick_took && !lib_mouse_taken() && g_look_frame != f - 1 && g_look_frame != f) {
         float dx, dy;
         video_take_mouse_motion(dx, dy);
     }

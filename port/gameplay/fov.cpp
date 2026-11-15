@@ -47,8 +47,9 @@ std::atomic<float> g_aim_zoom{1}; //how much further than the pistol's sight the
 const float kHalfRadPerDegree = 0.00872665f, kSightFov = 20.0f; //anything aimed narrower than that counts as a scope
 PPCFunc orig_player_camera = nullptr;
 
+float g_aimed = 0; //the weapon's angle as last worked out
 void ads_fov_apply(uint32_t ctrl) {
-    static float aimed = 0; //the weapon's angle as last worked out
+    float& aimed = g_aimed;
     float blend = ldf(ctrl + kCtrlAimBlend);
     g_host_drawn = 0;
     g_aim_zoom = 1;
@@ -192,6 +193,11 @@ bool no_colour_filter() { return g_no_colour_filter; }
 void set_no_colour_filter(bool on) { g_no_colour_filter = on; }
 
 void install_fov() {
+    rt_state_register("fov", [](StateIO& io) {
+        float drawn = g_host_drawn, zoom = g_aim_zoom;
+        io.pod(g_fov_written); io.pod(g_aimed); io.pod(drawn); io.pod(zoom);
+        if (io.applying) { g_host_drawn = drawn; g_aim_zoom = zoom; }
+    });
     if (const char* e = std::getenv("GE_NO_COLOUR_FILTER")) g_no_colour_filter = std::atoi(e) != 0;
     g_trace_filter = std::getenv("GE_TRACE") != nullptr;
     orig_draw_delayed = ppc_hook("draw_delayed?", DrawDelayed);

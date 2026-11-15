@@ -71,7 +71,7 @@ Heard g_heard[kHeardCount];
 double Now()
 {
 	using namespace std::chrono;
-	return duration<double>(steady_clock::now().time_since_epoch()).count();
+	return duration<double>(GameClock::now().time_since_epoch()).count();
 }
 
 //how much of the way from the listener to the sound the level blocks, 0 to 1
@@ -197,6 +197,7 @@ float occlusion_gain(const PPCContext& c, const float place[3], float low, float
 
 void install_occlusion()
 {
+	rt_state_register("occlusion", [](StateIO& io) { io.pod(g_heard); });
 	if (const char* e = std::getenv("GE_OCCLUSION")) g_on = std::atoi(e) != 0;
 	g_force = std::getenv("GE_OCCLUSION_FORCE") != nullptr;
 	g_trace = std::getenv("GE_TRACE") != nullptr;

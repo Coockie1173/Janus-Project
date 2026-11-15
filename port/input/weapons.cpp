@@ -25,10 +25,11 @@ const uint32_t kWeaponUsable = 0x8014AEC0; //(controller, item, weapons only, ho
 const uint32_t kCycleReturns[2] = {0x8014F5A0, 0x8014F600}; //the cycle's two calls of the search
 const auto kPressLasts = std::chrono::milliseconds(250); //a press nothing took (a menu, a cutscene) is dropped
 
-using Clock = std::chrono::steady_clock;
+using Clock = GameClock;
 std::atomic<int> g_pressed{-1}; //the slot whose key went down, as the pad was last read
 std::atomic<Clock::rep> g_pressedAt{};
 int g_slot = -1; //the slot the search answers with, during ge_weapon_input
+uint32_t g_slotKeys = 0; //the slot keys as the pad was last read
 PPCFunc orig_weapon_input = nullptr;
 PPCFunc orig_next_slot = nullptr;
 PPCFunc weapon_usable = nullptr;
@@ -86,7 +87,7 @@ void NextSlot(PPCContext& c)
 //in the classic's filter: a slot's key going down is kept for the game's next frame
 void weapon_buttons(ClassicState& s)
 {
-	static uint32_t was = 0;
+	uint32_t& was = g_slotKeys;
 	uint32_t keys = s.extra / kExtraSlot & ((1u << kSlotCount) - 1), down = keys & ~was;
 	was = keys;
 	if (!down || !in_play()) return;
@@ -98,6 +99,12 @@ void weapon_buttons(ClassicState& s)
 
 void install_weapons()
 {
+	rt_state_register("weapons", [](StateIO& io) {
+		int pressed = g_pressed;
+		Clock::rep at = g_pressedAt;
+		io.pod(pressed); io.pod(at); io.pod(g_slotKeys);
+		if (io.applying) { g_pressed = pressed; g_pressedAt = at; }
+	});
 	orig_weapon_input = ppc_hook("ge_weapon_input", WeaponInput);
 	orig_next_slot = ppc_hook("ge_weapon_next_slot", NextSlot);
 	weapon_usable = ppc_lookup(kWeaponUsable);

@@ -50,6 +50,7 @@
 //GE_RANDOMIZER_WEAPON=id[:flags] the forced weapon (the model flags in hex), GE_TRACE=1 logs every swap and a guard that didn't take its gun
 #include "ge.h"
 #include <algorithm>
+#include <sstream>
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
@@ -531,6 +532,20 @@ uint32_t forced_weapon_id() { return g_forced; }
 
 void install_randomizer()
 {
+	if (rt_deterministic()) g_rng.seed(0x6E5F2A1Bu); //the same weapons every run
+	rt_state_register("randomizer", [](StateIO& io) {
+		std::ostringstream rng;
+		rng << g_rng;
+		std::string text = rng.str();
+		io.str(text);
+		std::vector<std::pair<uint32_t, Pick>> swapped(g_swapped.begin(), g_swapped.end());
+		io.vec(swapped);
+		io.pod(g_slotMemory); io.pod(g_bankAsked); io.pod(g_noSlot); io.pod(g_swappedLevel); io.pod(g_swappedPlayer);
+		if (!io.applying) return;
+		std::istringstream back(text);
+		back >> g_rng;
+		g_swapped = std::map<uint32_t, Pick>(swapped.begin(), swapped.end());
+	});
 	g_on = std::atoi(saved_setting("GE_WEAPON_RANDOMIZER", "LAUNCH_WEAPONRANDOMIZER").c_str()) != 0;
 	g_trace = std::getenv("GE_TRACE") != nullptr;
 	g_unlimited = std::atoi(saved_setting("GE_NO_ATTACHMENT_LIMIT", "LAUNCH_NOATTACHMENTLIMIT").c_str()) != 0;

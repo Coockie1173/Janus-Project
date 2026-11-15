@@ -70,7 +70,7 @@ void apply_rate(uint32_t fps, bool fast) {
     g_fps_applied = fps;
     g_fast_applied = fast;
     g_gx_early_done = fps > kGameFps || fast; //the game's thread doesn't wait for the renderer
-    g_present_on_frame = fps > 60 || fast;
+    g_present_on_frame = fps > 60 || fast || lib_frames_as_drawn();
     if (!sameRate) rt_log("goldeneye: frame rate up to %u%s", fps ? fps : kGameFps, fps > 60 ? " (frames shown as drawn, not at VI's retrace)" : "");
 }
 
@@ -93,27 +93,44 @@ uint32_t wanted_rate() {
     return most <= kGameFps ? 0 : most;
 }
 
+//what frame_tick keeps from one call to the next
+uint32_t g_frame = 0; //the frame count the per-frame work last ran for: the tick spins between frames
+bool g_skipping = false;
+float g_before = 0;
+
 void frame_tick(PPCContext& c) {
-    uint32_t fps = wanted_rate();
+    //TASLib's hook first, between two frames: a state it loads changes all that follows
+    if (ld32(kFrameCount) != g_frame) tas_boundary(c);
+    const uint32_t held = lib_fixed_rate();
+    uint32_t fps = held ? held : wanted_rate();
     bool fast = g_fast;
     if (fps != g_fps_applied || fast != g_fast_applied) apply_rate(fps, fast);
-    //raise the game's highest rate to ours, or update it if it was already ours
-    uint32_t want = fps ? fps : kGameFps, max = ld32(kFpsMax);
-    if (max && max != want && (max < want || max == g_max_written)) {
-        st32(kFpsMax, want);
-        if (ldf(kFpsNow) > (float)want) stf(kFpsNow, (float)want);
-        g_max_written = want;
+    if (held && !fast && !g_skipping) {
+        //a rate the library holds: every step the same, the limiter neither climbs nor falls
+        st32(kFpsMax - 4, held);
+        st32(kFpsMax, held);
+        stf(kFpsNow, (float)held);
+        g_max_written = held;
+    } else {
+        //raise the game's highest rate to ours, or update it if it was already ours
+        uint32_t want = fps ? fps : kGameFps, max = ld32(kFpsMax);
+        if (max && max != want && (max < want || max == g_max_written)) {
+            st32(kFpsMax, want);
+            if (ldf(kFpsNow) > (float)want) stf(kFpsNow, (float)want);
+            g_max_written = want;
+        }
     }
-    if (sleep_ticks && fps > 60 && !fast) {
+    const bool det = rt_deterministic();
+    if (sleep_ticks && (fps > 60 || det) && !fast) {
         //the limiter spins until the next frame's time, so sleep up to just before it
+        //(a deterministic clock stands still while code runs: there the whole way)
         uint64_t next = (uint64_t)ld32(kNextFrame) << 32 | ld32(kNextFrame + 4), now = os_tb_now();
-        uint64_t margin = tb_hz() / 5000; //0.2 ms
+        uint64_t margin = det ? 0 : tb_hz() / 5000; //0.2 ms
         if (next > now + margin && next - now < tb_hz()) guest_sleep(c, next - now - margin);
     }
-    static uint32_t frame = 0; //the tick spins between frames, only look once a frame
     uint32_t f = ld32(kFrameCount);
-    if (f != frame) {
-        frame = f;
+    if (f != g_frame) {
+        g_frame = f;
         each_frame(f);
         autosave_frame(c);
         mods_menu_frame(c);
@@ -128,10 +145,9 @@ void frame_tick(PPCContext& c) {
     //frame of our own rate, so the clock only jumps what a step is longer than that
     //each_frame may just have ended the skip: then the engine goes on at its highest rate,
     //left at the long steps' it would take a second of very slow frames to climb back
-    static bool skipping = false;
-    if (skipping && !g_fast) stf(kFpsNow, (float)engine_top_rate());
-    skipping = g_fast;
-    if (skipping) {
+    if (g_skipping && !g_fast) stf(kFpsNow, (float)engine_top_rate());
+    g_skipping = g_fast;
+    if (g_skipping) {
         float ease = g_ease_rate;
         uint32_t top = engine_top_rate();
         stf(kFpsNow, ease > 0 ? std::min(ease, (float)top) : g_skip_rate.load());
@@ -169,8 +185,8 @@ void frame_tick(PPCContext& c) {
     //by 1 a frame, so 144 turns into 17 for a hundred frames
     //so put the rate back to where it was minus 1, and let a climbing rate climb 4 a frame
     //a machine that really can't hold the rate still comes down 1 per late frame
-    static float before = 0;
-    if (fast || skipping) before = 0;
+    float& before = g_before;
+    if (fast || g_skipping || held) before = 0;
     else if (fps) {
         static const bool keep = !std::getenv("GE_NO_RATE_FIX");
         float rate = ldf(kFpsNow), top = (float)ld32(kFpsMax);
@@ -205,6 +221,13 @@ void frame_tick(PPCContext& c) {
 }
 
 void install_fps() {
+    rt_state_register("framerate", [](StateIO& io) {
+        bool fast = g_fast;
+        float ease = g_ease_rate;
+        io.pod(g_frame); io.pod(g_skipping); io.pod(g_before); io.pod(g_fps_applied); io.pod(g_max_written);
+        io.pod(fast); io.pod(g_fast_applied); io.pod(ease);
+        if (io.applying) { g_fast = fast; g_ease_rate = ease; }
+    });
     orig_tick = ppc_hook("ge_frame_tick", frame_tick);
     if (!orig_tick) rt_die("goldeneye: ge_frame_tick is not hooked in this build");
     //"auto" (what launch.sh passes) is 60, or the screen's rate if that's lower

@@ -135,9 +135,14 @@ void wheel_buttons(ClassicState& s) {
 //GE_TRACEAIM=1 logs the state, the blend and the two items whenever they change
 const uint32_t kItemInHand = 0xC96, kItemNext = 0xC97;
 std::atomic<bool> g_aim_locked{false}, g_aim_broken{false}; //the lock holds aim down, the game took the gun down
+//what the aim lock keeps from frame to frame and from read to read (saved states keep it too)
+struct AimLock { bool was_locked = false, rose = false; float last = 0; bool locked = false, was_down = false, was_sprint = false; };
+AimLock g_lock;
+uint32_t g_held_from_menu = 0;
 void aim_lock_frame(uint32_t ctrl) {
-    static bool was_locked = false, rose = false;
-    static float last = 0;
+    bool& was_locked = g_lock.was_locked;
+    bool& rose = g_lock.rose;
+    float& last = g_lock.last;
     static const bool trace = std::getenv("GE_TRACEAIM") != nullptr;
     bool locked = g_aim_locked;
     float blend = aim_blend(ctrl);
@@ -167,13 +172,14 @@ void aim_lock_frame(uint32_t ctrl) {
 }
 
 void aim_lock_buttons(ClassicState& s) {
-    static bool locked = false, was_down = false;
+    bool& locked = g_lock.locked;
+    bool& was_down = g_lock.was_down;
     bool down = (s.buttons & kClZL) != 0, pressed = down && !was_down;
     was_down = down;
     uint32_t state = 0;
     Look look = local_player_state(state) ? look_mode(g_local_ctrl) : kLookLocked;
     bool free = look == kLookView || look == kLookAim; //on foot, or a cutscene that leaves the look or the aim (Airfield's motorbike)
-    static bool was_sprint = false;
+    bool& was_sprint = g_lock.was_sprint;
     bool sprint = g_sprint_key && !was_sprint; //the game won't sprint with aim held, so the sprint key lets go too
     was_sprint = g_sprint_key;
     bool broken = g_aim_broken.exchange(false);
@@ -187,7 +193,7 @@ void aim_lock_buttons(ClassicState& s) {
 }
 
 void menu_buttons(ClassicState& s) {
-    static uint32_t held_from_menu = 0;
+    uint32_t& held_from_menu = g_held_from_menu;
     uint32_t triggers = s.buttons & (kClZR | kClZL);
     if (!in_play()) {
         if (triggers & kClZR) s.buttons |= kClA;
@@ -228,13 +234,19 @@ void skip_buttons(ClassicState& s) {
     if (skipping_cutscene() && ld8(kPaused) == 0) s.buttons &= ~kClPlus;
 }
 
+//what the host's keys, wheel and pad make of the pad goes to TASLib (when it's there) before the
+//port's rules, which may put its own in its place
 void classic_filter(int chan, ClassicState& s) {
     s.buttons &= ~kClHome;
-    if (chan != 0) return tas_buttons(chan, s);
+    if (chan != 0) {
+        tas_input(chan, s);
+        return tas_buttons(chan, s);
+    }
     s.buttons |= settings_buttons();
     mouse_stick(s);
     wheel_buttons(s);
     debug_classic(s);
+    tas_input(chan, s);
     sprint_buttons(s);
     weapon_buttons(s);
     bunnyhop_buttons(s);
@@ -250,6 +262,12 @@ void classic_filter(int chan, ClassicState& s) {
 bool sprint_key() { return g_sprint_held; }
 
 void install_buttons() {
+    rt_state_register("buttons", [](StateIO& io) {
+        bool key = g_sprint_key, waits = g_sprint_waits, locked = g_aim_locked, broken = g_aim_broken;
+        io.pod(key); io.pod(waits); io.pod(locked); io.pod(broken);
+        io.pod(g_sprint_held); io.pod(g_sprint_pressed); io.pod(g_lock); io.pod(g_held_from_menu);
+        if (io.applying) { g_sprint_key = key; g_sprint_waits = waits; g_aim_locked = locked; g_aim_broken = broken; }
+    });
     wpad_set_classic_filter(classic_filter);
     orig_sprint[0] = ppc_hook("ge_sprint_update", sprint_read<0>);
     orig_sprint[1] = ppc_hook("ge_sprint_end", sprint_read<1>);

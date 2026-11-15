@@ -1,11 +1,13 @@
 //what the game and TASLib (the private library, loaded at run time) hand each other
 //plain C so the library can be built apart and swapped without rebuilding the game
 //bump GE_TAS_API_VERSION when a struct changes, only add fields at the end
+//
+//the game only offers hooks and primitives here, what the library does with them is its own
 #ifndef GE_TASLIB_API_H
 #define GE_TASLIB_API_H
 #include <stdint.h>
 
-#define GE_TAS_API_VERSION 1
+#define GE_TAS_API_VERSION 2
 
 #ifdef _WIN32
 #define GE_TAS_EXPORT __declspec(dllexport)
@@ -17,12 +19,36 @@
 extern "C" {
 #endif
 
-//the classic controller, what the game reads this frame
+//the classic controller as it is held: KPAD's classic bits, sticks -1..1, triggers 0..1, and
+//the port's own keys in extra (bit 0 sprint, bits 2..4 weapon slots 1..3, bit 5 jump)
 typedef struct GeTasPad
 {
 	uint32_t buttons;
 	float lx, ly, rx, ry, lt, rt;
+	uint32_t extra; //api 2
 } GeTasPad;
+
+//the local player's look as the mouse turns it: the mode, where its two floats are and their limits
+//view: the player's yaw (radians, growing right) and the view's pitch (radians, down positive)
+//aim: inside a cutscene's or a vehicle's view, the aim's yaw and pitch
+enum { GE_LOOK_NONE = 0, GE_LOOK_VIEW = 1, GE_LOOK_AIM = 2 };
+typedef struct GeLookInfo
+{
+	int32_t mode;
+	uint32_t controller; //the local controller
+	uint32_t yawAddr, pitchAddr; //floats in guest memory
+	float pitchMin, pitchMax, yawMin, yawMax; //radians, the yaw's unbounded (+-inf) for the view
+	float radPerPixel; //what a pixel of mouse turns here with the mouse settings (sensitivity, aim)
+} GeLookInfo;
+
+//a line of text over the picture, in the window's pixels from its top left
+typedef struct GeTasText
+{
+	float x, y;
+	uint32_t rgba; //0xRRGGBBAA
+	float scale; //1 the overlay's font
+	const char* text;
+} GeTasText;
 
 //what the game offers the library
 typedef struct GeTasHost
@@ -40,6 +66,32 @@ typedef struct GeTasHost
 	int (*ValidAddr)(uint32_t addr);
 	uint32_t (*FrameCount)(void);
 	int (*InPlay)(void);
+
+	//api 2
+	int (*Deterministic)(void); //the runtime's deterministic mode is on (asked for by the early export)
+	const uint8_t* (*Memory)(uint32_t addr, uint32_t size); //guest memory to read, null outside MEM1/MEM2
+	uint32_t (*Mem2Size)(void);
+	//saved states, only from inside Boundary. Save hands back a buffer of the host's (FreeState it),
+	//Load puts one back and says why not in err when it can't (0)
+	int (*SaveState)(void** data, uint32_t* size);
+	void (*FreeState)(void* data);
+	int (*LoadState)(const void* data, uint32_t size, char* err, uint32_t errSize);
+	void (*Sleep)(uint32_t ms); //the window keeps drawing meanwhile
+	void (*SetUnpaced)(int on); //deterministic mode: the guest's clock runs as fast as the host can
+	void (*SetFixedRate)(uint32_t fps); //the engine's rate held at fps, 30..1000; 0 the game's limiter
+	void (*SetFramesAsDrawn)(int on); //each frame shown as it's drawn, not at VI's retrace
+	void (*SetPresence)(uint32_t mask); //the channels holding a controller (bit a channel), ~0 the host's pads
+	void (*SetMouseTaken)(int on); //the mouse turns nothing and works no menu by itself: the library takes it
+	void (*TakeMouse)(float* dx, float* dy); //the mouse's motion since last taken, pixels (inverted as the settings say)
+	int (*MouseCaptured)(void); //the cursor is the game's (in play, no menu over it)
+	int (*Look)(GeLookInfo* info); //the local player's look now, 0 (mode NONE) when there's none
+	void (*ViewTurned)(float dx); //the view was turned by dx radians (the aim snap lets go of a turning view)
+	void (*ShowText)(const GeTasText* lines, uint32_t count); //replaces what was shown, from any thread
+	void (*Say)(const char* text); //a line at the top for a moment (the settings menu's)
+	uint32_t (*Settings)(char* out, uint32_t size); //"id=value\n" for every setting of the menu, the length (out may be short)
+	int (*ApplySetting)(const char* id, const char* value);
+	const char* (*ExeDir)(void);
+	int (*KeyDown)(const char* name); //SDL's name of a key: held now
 } GeTasHost;
 
 //what the library gives back, any callback can be null
@@ -51,11 +103,23 @@ typedef struct GeTasLib
 	void (*Frame)(uint32_t frame); //once a game frame, on the game's thread
 	void (*Pad)(int chan, GeTasPad* pad); //last say over the pad, after every other filter
 	void (*Shutdown)(void);
+
+	//api 2
+	void (*Boundary)(void); //between two frames on the game's thread, before anything of the next: states, Sleep
+	int (*Input)(int chan, GeTasPad* pad); //the raw pad (host keys, wheel, a gamepad) before the port's rules: 1 when the library's replaces it
+	void (*ControllerUpdate)(uint32_t controller); //the local controller's update starts, on the game's thread
+	int (*Key)(const char* name, int down, int repeat, int mods); //a window's key (renderer's thread): 1 when it's the library's; mods bit 0 shift, 1 ctrl, 2 alt
 } GeTasLib;
 
 //the one export, null when the library doesn't want to run
 typedef const GeTasLib* (*GeTasInitFn)(const GeTasHost* host);
 #define GE_TAS_INIT_NAME "ge_taslib_init"
+
+//optional, asked before the runtime starts (nothing else of the game is up yet): what it needs from
+//the start. bit 0: the runtime's deterministic mode
+typedef uint32_t (*GeTasEarlyFn)(void);
+#define GE_TAS_EARLY_NAME "ge_taslib_early"
+#define GE_TAS_EARLY_DETERMINISTIC 1u
 
 #ifdef __cplusplus
 }

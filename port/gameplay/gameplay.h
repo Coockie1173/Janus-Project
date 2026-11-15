@@ -23,6 +23,8 @@ void set_custom_mode(bool on);
 std::string custom_label(int slider); //"Enemy Health: 250%"
 const char* custom_about(int slider); //the line that says what it is
 std::string custom_values(); //the sliders and the switch as the settings file keeps them
+bool set_custom_values(const std::string& text, bool always); //and back, always: every mission played with them (GE_CUSTOM_ON)
+bool custom_always();
 
 //fov.cpp
 void install_fov();

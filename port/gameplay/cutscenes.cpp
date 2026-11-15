@@ -88,7 +88,7 @@ const uint32_t kLevelTimer = 0x805C963C; //a float, seconds played in the level
 const uint32_t kTimelineHash = 0x20; //of a cutscene's timeline, the hash that names it
 const uint32_t kCutscenePlaying = 0x806EB6C8; //a byte OB_Cutscene sets as one starts and clears as it ends
 
-using Clock = std::chrono::steady_clock;
+using Clock = GameClock; //the skip's fade and the rest go by the game's time
 
 enum class Skip { Idle, Waiting, FadingOut, Running };
 
@@ -638,6 +638,17 @@ void load_level(uint32_t hash) { g_asked_level = hash; }
 
 void install_cutscenes()
 {
+	rt_state_register("cutscenes", [](StateIO& io) {
+		bool running = g_running;
+		uint32_t asked = g_asked_level;
+		float from = g_fade_from, to = g_fade_to;
+		double started = g_fade_started;
+		io.pod(g_part); io.pod(running); io.pod(g_restarting); io.pod(asked); io.pod(g_state); io.pod(g_frames); io.pod(g_drawn);
+		io.pod(g_counting); io.pod(g_played); io.pod(g_ends); io.pod(g_armed_ends); io.pod(g_through); io.pod(g_armed_through);
+		io.pod(g_back_first); io.pod(g_wait_until); io.pod(g_holding); io.time(g_started); io.time(g_started_guest);
+		io.pod(from); io.pod(to); io.pod(started);
+		if (io.applying) { g_running = running; g_asked_level = asked; g_fade_from = from; g_fade_to = to; g_fade_started = started; }
+	});
 	if (const char* e = std::getenv("GE_ENTRANCE")) g_forced_entrance = std::atoi(e);
 	if (const char* e = std::getenv("GE_LEVEL")) g_forced_level = (uint32_t)std::strtoul(e, nullptr, 16);
 	g_trace = std::getenv("GE_TRACE") != nullptr;

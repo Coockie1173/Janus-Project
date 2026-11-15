@@ -128,6 +128,7 @@ void set_shake_scale(float scale) { g_scale = std::clamp(scale, 0.0f, kShakeMax)
 
 void install_shake()
 {
+	rt_state_register("shake", [](StateIO& io) { io.pod(g_time); io.pod(g_time_frame); });
 	std::string saved = saved_setting("GE_SHAKE", "LAUNCH_SHAKE");
 	if (!saved.empty()) set_shake_scale((float)std::atof(saved.c_str()));
 	orig_shake = ppc_hook("ge_camera_shake", CameraShake);

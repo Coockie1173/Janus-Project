@@ -106,18 +106,18 @@ void mouse_aim(uint32_t ctrl) {
 const uint32_t kLookStickX = 0x518;
 const float kSnapStick = 0.02f; //past the game's 0.01
 const auto kMouseStill = std::chrono::milliseconds(100);
-std::chrono::steady_clock::time_point g_mouse_moved{}; //when the mouse last turned the view
+GameClock::time_point g_mouse_moved{}; //when the mouse last turned the view
 float g_mouse_way = 1; //and which way across
 PPCFunc orig_aim_snap = nullptr;
 
 void mouse_moved(float dx) {
-    g_mouse_moved = std::chrono::steady_clock::now();
+    g_mouse_moved = GameClock::now();
     if (dx != 0) g_mouse_way = dx;
 }
 
 void aim_snap(PPCContext& c) {
     uint32_t ctrl = c.r[3];
-    bool moving = ctrl == g_local_ctrl && ld32(kFrameCount) == g_local_frame && std::chrono::steady_clock::now() - g_mouse_moved < kMouseStill;
+    bool moving = ctrl == g_local_ctrl && ld32(kFrameCount) == g_local_frame && GameClock::now() - g_mouse_moved < kMouseStill;
     if (!moving || std::fabs(ldf(ctrl + kLookStickX)) > kSnapStick) { orig_aim_snap(c); return; }
     uint32_t stick = ld32(ctrl + kLookStickX);
     stf(ctrl + kLookStickX, std::copysign(kSnapStick, g_mouse_way));
@@ -208,7 +208,7 @@ void net_command_look(uint32_t cmd, bool first) {
     float yaw = 0, pitch = 0;
     if (first) {
         uint32_t ctrl = local_controller();
-        bool turns = ctrl && g_mouse_sens > 0 && g_mouse_mode != 2 && !ld8(kPaused) && !overlay_open() && !is_tank(ctrl) && look_mode(ctrl) == kLookView;
+        bool turns = ctrl && g_mouse_sens > 0 && !lib_mouse_taken() && g_mouse_mode != 2 && !ld8(kPaused) && !overlay_open() && !is_tank(ctrl) && look_mode(ctrl) == kLookView;
         if (turns) {
             float dx = 0, dy = 0;
             video_take_mouse_motion(dx, dy);
@@ -312,7 +312,7 @@ float g_pitch_rate_scale = 1.25f; //the pitch's rate compared to the yaw's at th
 bool g_stick_took = false;
 std::atomic<float> g_stick_sens[2]{kStickSens, kStickSens}; //what the game turns the stick with, across and up and down (look_settings)
 void mouse_stick(ClassicState& s) {
-    g_stick_took = g_mouse_sens > 0 && in_play() && !overlay_open() && stick_look_allowed() && mouse_on_stick();
+    g_stick_took = g_mouse_sens > 0 && !lib_mouse_taken() && in_play() && !overlay_open() && stick_look_allowed() && mouse_on_stick();
     if (!g_stick_took) return;
     //the mouse's speed measured over at least 4 ms, every read in between gets the same
     static auto last = std::chrono::steady_clock::now();
@@ -407,6 +407,10 @@ void look_settings(PPCContext& c) {
 }
 
 void install_look() {
+    rt_state_register("look", [](StateIO& io) {
+        io.pod(g_look_frame); io.pod(g_look_ctrl); io.pod(g_look_yaw); io.pod(g_pitch_limit_now);
+        io.time(g_mouse_moved); io.pod(g_mouse_way); io.pod(g_turns);
+    });
     orig_look_apply = ppc_hook("ge_look_apply", look_apply);
     orig_input_copy = ppc_hook("ge_input_copy", input_copy);
     orig_command_fill = ppc_hook("ge_command_fill", command_fill);

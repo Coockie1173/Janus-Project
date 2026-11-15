@@ -143,6 +143,7 @@ void set_auto_qte(bool on) { g_auto_qte = on; }
 
 void install_qte()
 {
+	rt_state_register("qte", [](StateIO& io) { uint32_t w = g_waiting_frame; io.pod(w); if (io.applying) g_waiting_frame = w; });
 	if (const char* e = std::getenv("GE_AUTO_QTE")) g_auto_qte = std::atoi(e) != 0;
 	orig_cutscene_input = ppc_hook("ge_cutscene_input", CutsceneInput);
 	if (!orig_cutscene_input) rt_die("goldeneye: the cutscene input is not hooked in this build");

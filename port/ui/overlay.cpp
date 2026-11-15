@@ -272,6 +272,7 @@ bool event(const SDL_Event* e) {
         if (!e->key.repeat) pictures_shoot();
         return true;
     }
+    if (tas_event(e)) return true; //TASLib's keys first, over the settings' hotkeys
     if (speedrun_event(e)) return true;
     if (settings_event(e)) return true;
     if (g_have && e->type == SDL_EVENT_KEY_DOWN && e->key.scancode == SDL_SCANCODE_F3 && !e->key.repeat) {
@@ -319,7 +320,8 @@ void draw() {
     float speed = 0;
     bool hop = bunnyhop_speed(speed);
     bool flash = flash_showing();
-    if (!flash && !overlay_open() && !g_show_state && !skipping_cutscene() && fade <= 0 && !settings_toast() && !cheats && !meter && !hop && !speedrun_in_game()) return;
+    bool lib = tas_showing();
+    if (!lib && !flash && !overlay_open() && !g_show_state && !skipping_cutscene() && fade <= 0 && !settings_toast() && !cheats && !meter && !hop && !speedrun_in_game()) return;
     //with only the state shown the cursor stays hidden over the picture
     ImGuiIO& io = ImGui::GetIO();
     if (overlay_open()) io.ConfigFlags &= ~ImGuiConfigFlags_NoMouseCursorChange;
@@ -336,6 +338,7 @@ void draw() {
     if (g_show_state) player_state();
     if (skipping_cutscene()) skipping_label();
     if (g_open) watches();
+    if (lib) tas_draw();
     settings_draw();
     speedrun_draw();
     ImGui::Render();

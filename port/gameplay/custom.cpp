@@ -297,8 +297,8 @@ void SettingStep(PPCContext& c)
 {
 	const int slider = SliderOf(c.r[4]);
 	if (slider < 0) { orig_setting_step(c); return; }
-	static std::chrono::steady_clock::time_point last;
-	const auto now = std::chrono::steady_clock::now();
+	static GameClock::time_point last;
+	const auto now = GameClock::now();
 	const int way = (int32_t)c.r[5];
 	c.r[3] = 0;
 	if (way == 0 || now - last < kStepEvery) return;
@@ -379,6 +379,19 @@ std::string custom_values()
 	std::snprintf(text, sizeof text, "%d,%d,%d,%d,%d,%d", g_value[Health].load(), g_value[Damage].load(), g_value[Reaction].load(), g_value[Protection].load(), g_headshots ? 1 : 0, g_value[Accuracy].load());
 	return text;
 }
+
+//the sliders and the switch from custom_values()'s text; always: every mission played with them
+bool set_custom_values(const std::string& text, bool always)
+{
+	int values[kCustomSliders] = {kNormal, kNormal, kNormal, kNormal, kNormal}, headshots = 1;
+	if (std::sscanf(text.c_str(), "%d,%d,%d,%d,%d,%d", &values[Health], &values[Damage], &values[Reaction], &values[Protection], &headshots, &values[Accuracy]) < 4) return false;
+	for (int i = 0; i < kCustomSliders; ++i) g_value[i] = std::clamp(values[i], 0, kSliders[i].most);
+	g_headshots = headshots != 0;
+	g_always = always;
+	if (always) g_on = true;
+	return true;
+}
+bool custom_always() { return g_always; }
 
 void install_custom()
 {

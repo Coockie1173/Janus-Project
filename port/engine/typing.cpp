@@ -67,6 +67,15 @@ void TypedUpdate(PPCContext& c)
 
 void install_typing()
 {
+	rt_state_register("typing", [](StateIO& io) {
+		std::vector<std::pair<uint32_t, std::pair<float, uint32_t>>> v;
+		for (const auto& [text, t] : g_typing) v.push_back({text, {t.due, t.frames}});
+		std::sort(v.begin(), v.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+		io.vec(v);
+		if (!io.applying) return;
+		g_typing.clear();
+		for (const auto& [text, t] : v) g_typing[text] = Typing{t.first, t.second, std::chrono::steady_clock::now()};
+	});
 	g_trace = std::getenv("GE_TRACETYPE") != nullptr;
 	orig_typed_update = ppc_hook("ge_typed_text_update", TypedUpdate);
 	if (!orig_typed_update) rt_log("goldeneye: ge_typed_text_update is not hooked in this build, typed texts get faster with the frame rate");

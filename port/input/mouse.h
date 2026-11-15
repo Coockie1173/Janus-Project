@@ -40,6 +40,8 @@ void install_players();
 
 //look.cpp
 extern float g_pitch_limit_now; //what the two floats hold for the controller being updated
+float pitch_limit(); //how far up and down the local view goes, radians
+void mouse_moved(float dx); //the view was turned (the aim snap lets go of a turning view)
 void set_pitch_limit(float limit);
 float pitch_limit_of(uint32_t ctrl);
 extern uint32_t g_look_frame; //the frame the mouse was last applied in

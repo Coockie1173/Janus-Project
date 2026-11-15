@@ -125,6 +125,7 @@ void autosave_frame(PPCContext& c)
 
 void install_autosave()
 {
+	rt_state_register("autosave", [](StateIO& io) { io.pod(g_pending); io.pod(g_level); io.pod(g_saving); io.pod(g_stepping); io.pod(g_frames); });
 	if (const char* e = std::getenv("GE_AUTOSAVE")) g_autosave = std::atoi(e) != 0;
 	g_trace = std::getenv("GE_TRACE") != nullptr;
 	save_game = ppc_lookup(kSaveGame);
