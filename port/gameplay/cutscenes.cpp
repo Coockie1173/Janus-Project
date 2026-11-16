@@ -293,16 +293,11 @@ void Stop(const char* why, bool hold = false)
 }
 
 //a mission starts from its beginning: its opening is the next cutscene
-//deterministic (TAS mode) nothing is skipped: the skip lives off the game's frames (the fade, the long
-//steps, the frames left undrawn), and a movie starting or a state loaded in the middle of one played
-//differently from the recording
-bool SkipsAllowed() { return !rt_deterministic(); }
-
 void Arm(uint32_t level)
 {
 	Stop("a level change");
 	int m = MissionOf(level);
-	if (m < 0 || !g_on[m][kSkipIntro] || !SkipsAllowed()) return;
+	if (m < 0 || !g_on[m][kSkipIntro]) return;
 	g_state = Skip::Waiting;
 	g_option = &g_on[m][kSkipIntro];
 	g_part = kSkipIntro;
@@ -320,7 +315,7 @@ void ArmCutscene(uint32_t cutscene)
 {
 	if (g_state != Skip::Idle) return;
 	auto known = g_cutscenes.find({ld32(kCurrentLevel), cutscene});
-	if (known == g_cutscenes.end() || !g_on[known->second.mission][known->second.part] || !SkipsAllowed()) return;
+	if (known == g_cutscenes.end() || !g_on[known->second.mission][known->second.part]) return;
 	if (known->second.qte && !auto_qte()) return;
 	g_state = Skip::Waiting;
 	g_option = &g_on[known->second.mission][known->second.part];
@@ -649,12 +644,21 @@ void install_cutscenes()
 		uint32_t asked = g_asked_level;
 		float from = g_fade_from, to = g_fade_to;
 		double started = g_fade_started;
+		//the setting the skip belongs to, as its mission (-1 none)
+		int32_t option = -1;
+		for (int m = 0; m < skip_missions(); ++m)
+		{
+			if (g_option == &g_on[m][g_part]) option = m;
+		}
 		io.pod(g_part); io.pod(running); io.pod(g_restarting); io.pod(asked); io.pod(g_state); io.pod(g_frames); io.pod(g_drawn);
 		io.pod(g_counting); io.pod(g_played); io.pod(g_ends); io.pod(g_armed_ends); io.pod(g_through); io.pod(g_armed_through);
 		io.pod(g_back_first); io.pod(g_wait_until); io.pod(g_holding); io.time(g_started); io.time(g_started_guest);
 		io.pod(from); io.pod(to); io.pod(started);
+		//the rest came later: a state from before has none of it, nothing was skipped in TAS mode then
+		if (io.more()) { io.pod(option); io.pod(g_any); io.pod(g_armed_any); io.pod(g_qte); io.pod(g_armed_qte); io.pod(g_hold_from); }
 		if (!io.applying) return;
 		g_running = running; g_asked_level = asked; g_fade_from = from; g_fade_to = to; g_fade_started = started;
+		g_option = option >= 0 && option < skip_missions() && g_part >= 0 && g_part < kSkipParts ? &g_on[option][g_part] : &g_never;
 		//what follows from the state, as it was when it was saved: a state loaded in the middle of a skip
 		//kept the frames undrawn (other game code, so another game) and the sound off. a running skip
 		//sets which frames are drawn before the next is
