@@ -237,10 +237,10 @@ std::string g_takes; //the cutscenes that took the player since it was last let 
 
 //the black over the picture, read by the renderer's thread
 std::atomic<float> g_fade_from{0.0f}, g_fade_to{0.0f};
-std::atomic<double> g_fade_started{0.0}; //in seconds of the steady clock
+std::atomic<double> g_fade_started{0.0}; //in seconds of the game's clock since the runtime started (rt_epoch): kept in a state
 std::atomic<bool> g_fade_hidden{false}; //the pause menu is up, it has to be seen
 
-double Now() { return std::chrono::duration<double>(Clock::now().time_since_epoch()).count(); }
+double Now() { return std::chrono::duration<double>(Clock::now() - rt_epoch()).count(); }
 float FadeNow()
 {
 	float along = std::clamp((float)(Now() - g_fade_started) / kFadeSeconds, 0.0f, 1.0f);
