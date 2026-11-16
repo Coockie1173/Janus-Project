@@ -156,7 +156,8 @@ typedef struct GeTasHost
 	//api 8: the clip matrix of the local player's view as last drawn (16 floats, a row vector (x y z 1) times it), 0 none yet
 	int (*ViewClip)(float* m);
 	//quiet: the frames run unseen and unheard, the window keeps the picture it shows and the sound is silent.
-	//let go, the next picture shown is one drawn after it (none of the quiet ones)
+	//let go, the pictures the game shows are put back as they were when it was taken (none of the quiet ones):
+	//let go after loading back a state saved before it, then the frames drawn after
 	void (*SetQuiet)(int on);
 } GeTasHost;
 

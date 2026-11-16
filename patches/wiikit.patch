@@ -1669,7 +1669,7 @@ index 3d2da4e..6fce0b7 100644
      X(PFNGLTEXTUREPARAMETERIPROC, glTextureParameteri)                                              \
      X(PFNGLBINDTEXTUREUNITPROC, glBindTextureUnit)                                                  \
 diff --git a/runtime/gx.cpp b/runtime/gx.cpp
-index a6b37f2..47339c6 100644
+index a6b37f2..5317653 100644
 --- a/runtime/gx.cpp
 +++ b/runtime/gx.cpp
 @@ -21,10 +21,19 @@
@@ -2833,13 +2833,13 @@ index a6b37f2..47339c6 100644
 +                perf_vtx += perf_ticks() - t0;
              } else {
 -                fl = decode_vertices(f, p + 3, count, out);
-+                decode_vertices(f, fl, p + 3, count, out);
-             }
+-            }
 -            if (extend && rec[draw_hdr + 2] != fl) {      // other attributes: a draw of its own
 -                const uint8_t hdr[7] = {VC_DRAW, (uint8_t)(op & 0xF8), 0, 0, 0, 0, 0};
 -                rec.insert(rec.begin() + (ptrdiff_t)at, hdr, hdr + sizeof hdr);
 -                draw_hdr = at;
--            }
++                decode_vertices(f, fl, p + 3, count, out);
+             }
 -            rec[draw_hdr + 2] = fl;
 -            uint32_t pieces;
 -            std::memcpy(&pieces, &rec[draw_hdr + 3], 4);
@@ -2998,7 +2998,7 @@ index a6b37f2..47339c6 100644
      g_efb_peek = gx_efb_peek;
  }
  
-@@ -729,19 +1561,61 @@ void gx_init() {
+@@ -729,19 +1561,72 @@ void gx_init() {
  // AI's, which start each audio frame's mix, above all. So does this wait.
  // A handler may switch guest threads, and another thread may hand the
  // record over in the meantime.
@@ -3042,6 +3042,17 @@ index a6b37f2..47339c6 100644
 +    });
 +}
 +
++void gx_hold(bool on) {
++    if (!video) return;
++    GpSync gp;
++    hw_run_locked([&] {
++        put<uint8_t>(VC_HOLD);
++        put<uint8_t>(on);
++        flush(false);
++    });
++    gx_submit_pending();
++}
++
 +// with the GP on its thread, its thread hands the record over
  void gx_submit_pending() {
 +    if (gp_thread_on() && !t_gp) return;
@@ -3062,7 +3073,7 @@ index a6b37f2..47339c6 100644
  
  // The write-gather pipe: CPU stores to 0xCC008000 collect in a 32-byte
  // buffer, and reach the FIFO in memory as 32-byte bursts, as on the console
-@@ -760,7 +1634,7 @@ static void gp_run() {
+@@ -760,7 +1645,7 @@ static void gp_run() {
      if (!(cp_reg16[1] & 1)) return;
      size_t k = 0;
      while (k < held.size() && !(bp_enabled() && held[k].addr == bp_addr())) {
@@ -3071,7 +3082,7 @@ index a6b37f2..47339c6 100644
          ++k;
      }
      held.erase(held.begin(), held.begin() + (ptrdiff_t)k);
-@@ -768,15 +1642,20 @@ static void gp_run() {
+@@ -768,15 +1653,20 @@ static void gp_run() {
  
  void gx_pipe_burst(const uint8_t* b, int n) {
      uint32_t at = pi_wptr_addr();
@@ -3099,7 +3110,7 @@ index a6b37f2..47339c6 100644
      Burst h{at, {}};
      std::memcpy(h.b, b, 32);
      held.push_back(h);
-@@ -840,14 +1719,17 @@ uint32_t gx_pe_read(uint32_t off, int) {
+@@ -840,14 +1730,17 @@ uint32_t gx_pe_read(uint32_t off, int) {
  void gx_pe_write(uint32_t off, uint32_t v, int) {
      if (off == 0x0A) {
          uint16_t clear = (uint16_t)(v & 0xC);            // status bits: write 1 to clear
@@ -3120,7 +3131,7 @@ index a6b37f2..47339c6 100644
      if (bp_reached() && (cp_reg16[1] & 0x20)) c |= 0x800;   // CP breakpoint
      if ((cp_reg16[1] & 0x04) && cp_overflow()) c |= 0x800;   // CP overflow: the FIFO is full
      if ((cp_reg16[1] & 0x08) && cp_underflow()) c |= 0x800;  // CP underflow: drained again
-@@ -855,10 +1737,66 @@ uint32_t gx_irq() {
+@@ -855,10 +1748,66 @@ uint32_t gx_irq() {
  }
  
  void gx_report() {
@@ -5683,7 +5694,7 @@ index 99351d5..52dfaae 100644
  static inline void ps_set(PPCContext& c, int d, double a, double b) { c.f[d] = rs(a); c.ps1[d] = rs(b); }
 +static inline void ps_put(PPCContext& c, int d, double a, double b) { c.f[d] = a; c.ps1[d] = b; }
 diff --git a/runtime/rt.h b/runtime/rt.h
-index 75fec5e..b79e5ee 100644
+index 75fec5e..8993bab 100644
 --- a/runtime/rt.h
 +++ b/runtime/rt.h
 @@ -4,8 +4,12 @@
@@ -5769,7 +5780,7 @@ index 75fec5e..b79e5ee 100644
  void os_watch(int seconds);                       // report the running thread periodically
  void os_profile();                                // WIIKIT_PROFILE: sample the guest code (=render: the renderer), list the hot functions
  
-@@ -74,7 +123,35 @@ void gx_submit_pending();                         // after a burst, outside g_hw
+@@ -74,7 +123,36 @@ void gx_submit_pending();                         // after a burst, outside g_hw
  // game that reads the copy on the CPU (the renderer otherwise keeps copies
  // on the host GPU only). False if no copy was made to addr (physical).
  bool gx_copy_to_ram(uint32_t addr);
@@ -5802,10 +5813,11 @@ index 75fec5e..b79e5ee 100644
 +void gx_debug_overlay(const void* vertices, uint32_t count);
 +void gx_debug_overlay_opacity(float opacity);       // 0..1, the overlay drawn that much, its edges too
 +void gx_debug_view(uint8_t views, const float* clip);
++void gx_hold(bool on);                              // video_hold's mark, in the record's order
  void hw_run_locked(const std::function<void()>& fn);   // run fn holding the hardware lock
  
  // ---- the hardware (hw.cpp) -----------------------------------------------------------
-@@ -104,8 +181,15 @@ void wpad_set_classic(bool on);
+@@ -104,8 +182,15 @@ void wpad_set_classic(bool on);
  void wpad_set_nunchuk(bool on);
  void wpad_set_classic_filter(WpadClassicFilter f);
  void wpad_filter_classic(int chan, ClassicState& s);  // the port's filter, if it has one
@@ -5821,7 +5833,7 @@ index 75fec5e..b79e5ee 100644
  void ax_command_list(uint32_t addr);               // the AX micro-code: mix one frame
  uint8_t aram_read(uint32_t addr);                  // the GameCube's ARAM (hw.cpp), where its AX reads samples
  bool ax_load_coefs(const char* dir);               // dsp_coef.bin: the polyphase resampler's table
-@@ -113,6 +197,11 @@ void audio_init(bool enabled);                     // the host's audio device (S
+@@ -113,6 +198,11 @@ void audio_init(bool enabled);                     // the host's audio device (S
  // A block the AI DMA starts playing: frames of big-endian 16-bit stereo,
  // right then left, as the Wii's AI reads them.
  void audio_play(const uint8_t* be_rl, uint32_t frames, uint32_t rate);
@@ -5833,7 +5845,7 @@ index 75fec5e..b79e5ee 100644
  
  // ---- SYSCONF (sysconf.cpp) -----------------------------------------------------------
  // Writes the NAND's /shared2/sys/SYSCONF if it has none, sets what the
-@@ -123,6 +212,10 @@ extern bool g_sysconf_eurgb60;                     // IPL.E60, after sysconf_pre
+@@ -123,6 +213,10 @@ extern bool g_sysconf_eurgb60;                     // IPL.E60, after sysconf_pre
  
  // ---- IOS (ios.cpp) ------------------------------------------------------------------
  void ios_init(const char* disc_root, const char* nand_root);
@@ -5844,7 +5856,7 @@ index 75fec5e..b79e5ee 100644
  void ios_ipc_write(uint32_t reg, uint32_t v);      // 0xCD000000-0xCD00000C
  uint32_t ios_ipc_read(uint32_t reg);
  void ios_irq_flag_clear(uint32_t v);               // 0xCD000030
-@@ -131,3 +224,69 @@ uint32_t ios_irq_flags();
+@@ -131,3 +225,69 @@ uint32_t ios_irq_flags();
  uint32_t ios_irq_mask();
  std::chrono::steady_clock::time_point ios_tick();  // replies now due delivered; when the next is
  void hw_cpu_idle();                               // the processor idles: IOS replies are due at once
@@ -6165,7 +6177,7 @@ index 0000000..f6a82e4
 +    return true;
 +}
 diff --git a/runtime/video.cpp b/runtime/video.cpp
-index 5726093..e5b64ef 100644
+index 5726093..64f8717 100644
 --- a/runtime/video.cpp
 +++ b/runtime/video.cpp
 @@ -46,7 +46,7 @@ constexpr int EFB_W = 640, EFB_H = 528;
@@ -7271,24 +7283,32 @@ index 5726093..e5b64ef 100644
 -        static const GLenum lo[16] = {GL_CLEAR, GL_AND, GL_AND_REVERSE, GL_COPY, GL_AND_INVERTED, GL_NOOP,
 -                                      GL_XOR, GL_OR, GL_NOR, GL_EQUIV, GL_INVERT, GL_OR_REVERSE,
 -                                      GL_COPY_INVERTED, GL_OR_INVERTED, GL_NAND, GL_SET};
--        glDisable(GL_BLEND);
--        glEnable(GL_COLOR_LOGIC_OP);
--        glLogicOp(lo[cm >> 12 & 15]);
--    } else {
 +        glDepthFunc(scene ? GL_GEQUAL : GL_LEQUAL);
 +        glProgramUniform1f(dbgo_prog, dbgo_fade_loc, dbgo_opacity.load());
 +        glDrawArrays(GL_TRIANGLES, 0, (GLsizei)dbgo_count);
          glDisable(GL_BLEND);
+-        glEnable(GL_COLOR_LOGIC_OP);
+-        glLogicOp(lo[cm >> 12 & 15]);
+-    } else {
+-        glDisable(GL_BLEND);
 -        glDisable(GL_COLOR_LOGIC_OP);
 +        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-+    }
+     }
+-    // GX's front faces are clockwise on screen: counter-clockwise for GL,
+-    // whose y runs the other way over the same rows
+-    if (tri && cull) { glEnable(GL_CULL_FACE); glCullFace(cull == 1 ? GL_BACK : GL_FRONT); }
+-    else glDisable(GL_CULL_FACE);
 +    if (scene) {
 +        glDepthMask(GL_TRUE);
 +        glClearDepth(1.0);
 +        glClear(GL_DEPTH_BUFFER_BIT);
 +    }
 +}
-+
+ 
+-    if (xf_lo < xf_hi) {
+-        glNamedBufferSubData(xf_ubo, xf_lo * 4, (xf_hi - xf_lo) * 4, &xf[xf_lo]);
+-        xf_lo = 0x1058;
+-        xf_hi = 0;
 +// An EFB copy: the scene is in what is copied; a copy that clears takes it out again.
 +void dbg_copy(bool clears) {
 +    if (clears) dbg_drawn = false;
@@ -7311,18 +7331,12 @@ index 5726093..e5b64ef 100644
 +        }
 +        return dbg_on & 1;                           // the overlay leaves the game's draws be
      }
--    // GX's front faces are clockwise on screen: counter-clockwise for GL,
--    // whose y runs the other way over the same rows
--    if (tri && cull) { glEnable(GL_CULL_FACE); glCullFace(cull == 1 ? GL_BACK : GL_FRONT); }
--    else glDisable(GL_CULL_FACE);
+-    set_ps_uniforms();
+-    bind_textures();
 +    if (dbg_waiting) dbg_draw();
 +    return false;
 +}
- 
--    if (xf_lo < xf_hi) {
--        glNamedBufferSubData(xf_ubo, xf_lo * 4, (xf_hi - xf_lo) * 4, &xf[xf_lo]);
--        xf_lo = 0x1058;
--        xf_hi = 0;
++
 +// A VC_DRAW's pieces (each n, then n vertices), drawn with one call.
 +void draw(uint8_t prim, uint8_t vflags, const uint8_t* pieces, uint32_t npieces) {
 +    if (dbg_hides()) return;
@@ -7332,9 +7346,7 @@ index 5726093..e5b64ef 100644
 +    for (uint32_t i = 0, k; i < npieces; ++i) {
 +        std::memcpy(&k, pieces + (size_t)n * stride + 4 * i, 4);
 +        n += k;
-     }
--    set_ps_uniforms();
--    bind_textures();
++    }
 +    if (!draw_prepare(prim, vflags, false)) return;
  
      if (efb_dumping() && std::getenv("WIIKIT_DRAWLOG")) {         // debugging: where each draw lands
@@ -7469,9 +7481,11 @@ index 5726093..e5b64ef 100644
      int W = EFB_W * S, H = EFB_H * S;
      std::vector<uint8_t> px((size_t)W * H * 4);
      std::vector<float> dz((size_t)W * H);
-@@ -703,6 +1526,9 @@ void copy_readback(uint32_t addr) {
+@@ -702,7 +1525,11 @@ void copy_readback(uint32_t addr) {
+     rb_cv.notify_all();
  }
  
++void hold_mark(bool on);
  void exec(const std::vector<uint8_t>& data) {
 +    ++rl.chunks;
 +    gl_state_stale = true;
@@ -7479,7 +7493,7 @@ index 5726093..e5b64ef 100644
      const uint8_t* p = data.data();
      const uint8_t* end = p + data.size();
      while (p < end) {
-@@ -712,24 +1538,42 @@ void exec(const std::vector<uint8_t>& data) {
+@@ -712,24 +1539,42 @@ void exec(const std::vector<uint8_t>& data) {
              uint16_t a = rd<uint16_t>(p), n = rd<uint16_t>(p);
              std::memcpy(&xf[a], p, 4u * n);
              p += 4u * n;
@@ -7525,7 +7539,7 @@ index 5726093..e5b64ef 100644
              Tex& t = texs[id];
              ensure_tex(t, w, h, levels);
              for (int l = 0; l < levels; ++l) {
-@@ -742,7 +1586,55 @@ void exec(const std::vector<uint8_t>& data) {
+@@ -742,7 +1587,56 @@ void exec(const std::vector<uint8_t>& data) {
          }
          case VC_TEXBIND: { uint8_t m = rd<uint8_t>(p); map_src[m] = rd<uint32_t>(p); break; }
          case VC_TEXEFB: { uint8_t m = rd<uint8_t>(p); map_src[m] = 1ull << 32 | rd<uint32_t>(p); break; }
@@ -7572,6 +7586,7 @@ index 5726093..e5b64ef 100644
 +            p += (size_t)n * 20;
 +            break;
 +        }
++        case VC_HOLD: hold_mark(rd<uint8_t>(p) != 0); break;
 +        case VC_DBGVIEW: {
 +            dbg_on = rd<uint8_t>(p);
 +            std::memcpy(dbg_clip, p, sizeof dbg_clip);
@@ -7582,7 +7597,7 @@ index 5726093..e5b64ef 100644
          case VC_DRAWDONE: gx_draw_done_reached(); break;
          default: rt_die("video: bad record byte %02X", p[-1]);
          }
-@@ -811,13 +1703,17 @@ namespace {
+@@ -811,13 +1705,17 @@ namespace {
  // Where the picture sits in a window of w x h (pixels or window units): the
  // TV's screen, 4:3 or 16:9 as SYSCONF says, as large as the window allows and
  // centred; of its 480 lines (NTSC) VI scans the XFB out over its active ones,
@@ -7602,7 +7617,7 @@ index 5726093..e5b64ef 100644
      return {(w - sw) / 2, (h - ph) / 2, sw, ph};
  }
  
-@@ -839,10 +1735,13 @@ enum : uint32_t { CL_UP = 0x0001, CL_LEFT = 0x0002, CL_ZR = 0x0004, CL_X = 0x000
+@@ -839,10 +1737,13 @@ enum : uint32_t { CL_UP = 0x0001, CL_LEFT = 0x0002, CL_ZR = 0x0004, CL_X = 0x000
                    CL_Y = 0x0020, CL_B = 0x0040, CL_ZL = 0x0080, CL_R = 0x0200, CL_PLUS = 0x0400,
                    CL_HOME = 0x0800, CL_MINUS = 0x1000, CL_L = 0x2000, CL_DOWN = 0x4000, CL_RIGHT = 0x8000 };
  constexpr uint32_t kStick = 1u << 16;               // L up, down, left, right, then R's: kStick << 0..7
@@ -7616,7 +7631,7 @@ index 5726093..e5b64ef 100644
  
  const char* DEFAULT_KEYS =
      "# wiiboot's keys: each Wii Remote button, then the keys and mouse buttons that press it.\n"
-@@ -869,6 +1768,8 @@ const char* DEFAULT_KEYS =
+@@ -869,6 +1770,8 @@ const char* DEFAULT_KEYS =
      "# takes the keys, the mouse and the first pad at once (Input = Pad or Keyboard: only one of them;\n"
      "# wiiboot --input says the same).\n"
      "# The pad: its triggers are ZL and ZR, its shoulders L and R, Start +, Back -, its guide button Home.\n"
@@ -7625,7 +7640,7 @@ index 5726093..e5b64ef 100644
      "# Face Buttons = Position: the right one is A, the bottom one B, the top one X, the left one Y (the\n"
      "# Classic's own layout); Label: the button labelled A (Cross) is A, B (Circle) B, X (Square) X, Y (Triangle) Y.\n"
      "# Dead Zone: how far the pad's sticks move before they count, of their travel.\n"
-@@ -897,7 +1798,9 @@ const char* DEFAULT_KEYS =
+@@ -897,7 +1800,9 @@ const char* DEFAULT_KEYS =
      "Right Stick Up    =\n"
      "Right Stick Down  =\n"
      "Right Stick Left  =\n"
@@ -7636,7 +7651,7 @@ index 5726093..e5b64ef 100644
  
  std::string trim(const std::string& t) {
      size_t a = t.find_first_not_of(" \t\r"), b = t.find_last_not_of(" \t\r");
-@@ -923,7 +1826,11 @@ bool parse_keys(const std::string& text, const std::string& path, bool remote, b
+@@ -923,7 +1828,11 @@ bool parse_keys(const std::string& text, const std::string& path, bool remote, b
                                       {"Left Stick Up", kStick << 0}, {"Left Stick Down", kStick << 1},
                                       {"Left Stick Left", kStick << 2}, {"Left Stick Right", kStick << 3},
                                       {"Right Stick Up", kStick << 4}, {"Right Stick Down", kStick << 5},
@@ -7649,7 +7664,7 @@ index 5726093..e5b64ef 100644
      static const Btn mice[] = {{"Mouse Left", SDL_BUTTON_LMASK}, {"Mouse Right", SDL_BUTTON_RMASK},
                                 {"Mouse Middle", SDL_BUTTON_MMASK}, {"Mouse X1", SDL_BUTTON_X1MASK},
                                 {"Mouse X2", SDL_BUTTON_X2MASK}};
-@@ -980,7 +1887,7 @@ bool parse_keys(const std::string& text, const std::string& path, bool remote, b
+@@ -980,7 +1889,7 @@ bool parse_keys(const std::string& text, const std::string& path, bool remote, b
          }
          if (!b) {
              if (in_classic) rt_log("video: %s:%d: not a Classic Controller button (A B X Y L R ZL ZR Plus Minus Home Up Down Left Right, "
@@ -7658,7 +7673,7 @@ index 5726093..e5b64ef 100644
              else rt_log("video: %s:%d: not a Remote button (A B Up Down Left Right Plus Minus 1 2 Shake Raise; the Nunchuk's "
                          "C Z Stick Up/Down/Left/Right Walk)", path.c_str(), line);
              continue;
-@@ -1006,7 +1913,9 @@ bool parse_keys(const std::string& text, const std::string& path, bool remote, b
+@@ -1006,7 +1915,9 @@ bool parse_keys(const std::string& text, const std::string& path, bool remote, b
      return has_classic;
  }
  
@@ -7668,7 +7683,7 @@ index 5726093..e5b64ef 100644
      std::string text;
      if (FILE* f = std::fopen(path.c_str(), "rb")) {
          char buf[4096];
-@@ -1079,6 +1988,8 @@ ClassicState classic_from_pad(SDL_Gamepad* g) {
+@@ -1079,6 +1990,8 @@ ClassicState classic_from_pad(SDL_Gamepad* g) {
          {SDL_GAMEPAD_BUTTON_START, CL_PLUS}, {SDL_GAMEPAD_BUTTON_BACK, CL_MINUS}, {SDL_GAMEPAD_BUTTON_GUIDE, CL_HOME}};
      for (auto& f : fixed)
          if (SDL_GetGamepadButton(g, f.b)) s.buttons |= f.bit;
@@ -7677,7 +7692,7 @@ index 5726093..e5b64ef 100644
      // the face buttons: by position, the Classic's own layout (A right, B
      // bottom, X top, Y left), or by the pad's labels
      static const struct { SDL_GamepadButton b; uint32_t pos; } face[] = {
-@@ -1112,6 +2023,7 @@ ClassicState classic_from_pad(SDL_Gamepad* g) {
+@@ -1112,6 +2025,7 @@ ClassicState classic_from_pad(SDL_Gamepad* g) {
  void merge(ClassicState& a, const ClassicState& b) {
      a.connected |= b.connected;
      a.buttons |= b.buttons;
@@ -7685,7 +7700,7 @@ index 5726093..e5b64ef 100644
      if (std::hypot(b.lx, b.ly) > std::hypot(a.lx, a.ly)) { a.lx = b.lx; a.ly = b.ly; }
      if (std::hypot(b.rx, b.ry) > std::hypot(a.rx, a.ry)) { a.rx = b.rx; a.ry = b.ry; }
      a.lt = std::max(a.lt, b.lt);
-@@ -1186,7 +2098,7 @@ void update_pad() {
+@@ -1186,7 +2100,7 @@ void update_pad() {
      p.buttons &= ~(kRaisePlus | kRaiseMinus | kWalk | (kStick * 0xF));
      int ww = 0, wh = 0;
      SDL_GetWindowSize(win, &ww, &wh);                        // mouse coordinates are in window units
@@ -7694,7 +7709,7 @@ index 5726093..e5b64ef 100644
          // -1..1 spans the picture as present() shows it, so that the game's
          // cursor lands under the mouse
          Rect r = picture_rect((float)ww, (float)wh);
-@@ -1196,8 +2108,8 @@ void update_pad() {
+@@ -1196,8 +2110,8 @@ void update_pad() {
      }
      // over the picture the game draws its own cursor, as on the Wii
      static bool hidden = false;
@@ -7705,7 +7720,7 @@ index 5726093..e5b64ef 100644
          if (hidden) SDL_HideCursor(); else SDL_ShowCursor();
      }
      // WIIKIT_PAD="45:A 50.5:@0.2,-0.1 51:A": at each time (seconds from
-@@ -1248,6 +2160,7 @@ void update_pad() {
+@@ -1248,6 +2162,7 @@ void update_pad() {
          ClassicState& k = c[0];
          k.connected = true;
          k.buttons = cl & 0xFFFF;
@@ -7713,7 +7728,7 @@ index 5726093..e5b64ef 100644
          auto dir = [&](int i) { return cl & (kStick << i) ? 1.0f : 0.0f; };
          k.lx = dir(3) - dir(2);
          k.ly = dir(0) - dir(1);
-@@ -1261,12 +2174,125 @@ void update_pad() {
+@@ -1261,12 +2176,171 @@ void update_pad() {
      for (int i = 0; i < 4; ++i)
          if (chan_pad[i] && !(i == 0 && mode == INPUT_MODE_KEYBOARD)) merge(c[i], classic_from_pad(chan_pad[i]));
      update_rumble();
@@ -7834,12 +7849,58 @@ index 5726093..e5b64ef 100644
 +}
 +}  // namespace cap
 +
++// the renderer's side of video_hold: on, the EFB and its copies kept aside (the pictures shown, and
++// the ones the game draws with: last frame's for its effects); off, put back as they were. a frame's
++// copy to the XFB can wait at a breakpoint for the next frame: it reads the EFB the frames held drew
++bool holding = false;
++GLuint held_fbo = 0, held_col = 0, held_dep = 0;
++struct Held { std::unordered_map<uint32_t, Tex>* map; uint32_t tag; std::unordered_map<uint32_t, Tex> kept; };
++Held helds[] = {{&xfbs, 2, {}}, {&efb_copies, 0, {}}, {&efb_joined, 1, {}}};
++uint32_t held_last = 0;
++void hold_mark(bool on) {
++    if (on == holding) return;
++    holding = on;
++    glDisable(GL_SCISSOR_TEST);
++    auto blit = [](const Tex& a, const Tex& b) {
++        glBlitNamedFramebuffer(a.fbo, b.fbo, 0, 0, a.w, a.h, 0, 0, a.w, a.h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
++    };
++    if (!held_fbo) {
++        glCreateTextures(GL_TEXTURE_2D, 1, &held_col);
++        glTextureStorage2D(held_col, 1, GL_RGBA8, EFB_W * S, EFB_H * S);
++        glCreateTextures(GL_TEXTURE_2D, 1, &held_dep);
++        glTextureStorage2D(held_dep, 1, GL_DEPTH_COMPONENT32F, EFB_W * S, EFB_H * S);
++        glCreateFramebuffers(1, &held_fbo);
++        glNamedFramebufferTexture(held_fbo, GL_COLOR_ATTACHMENT0, held_col, 0);
++        glNamedFramebufferTexture(held_fbo, GL_DEPTH_ATTACHMENT, held_dep, 0);
++    }
++    efb_resolve();
++    glBlitNamedFramebuffer(on ? efb_fbo : held_fbo, on ? held_fbo : efb_fbo, 0, 0, EFB_W * S, EFB_H * S, 0, 0,
++                           EFB_W * S, EFB_H * S, GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT, GL_NEAREST);
++    if (!on && ms_samples > 1) {
++        glBlitNamedFramebuffer(efb_fbo, ms_fbo, 0, 0, EFB_W * S, EFB_H * S, 0, 0, EFB_W * S, EFB_H * S,
++                               GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT, GL_NEAREST);
++        ms_dirty = false;
++    }
++    for (Held& h : helds) {
++        if (on) {
++            h.kept.clear();
++            for (auto& [addr, t] : *h.map) blit(t, h.kept[addr] = copy_tex(addr | h.tag | 4, t.w, t.h));
++        } else {
++            h.map->clear();
++            for (auto& [addr, k] : h.kept) blit(k, (*h.map)[addr] = copy_tex(addr | h.tag, k.w, k.h));
++        }
++    }
++    if (on) held_last = last_xfb;
++    else last_xfb = held_last;
++    gl_state_stale = true;
++}
++
  void present() {
 +    gl_state_stale = true;
      ++cnt.presents;
      int ww = 0, wh = 0;
      SDL_GetWindowSizeInPixels(win, &ww, &wh);
-@@ -1275,22 +2301,121 @@ void present() {
+@@ -1275,22 +2349,121 @@ void present() {
      glColorMask(1, 1, 1, 1);
      glClearColor(0, 0, 0, 1);
      glClear(GL_COLOR_BUFFER_BIT);
@@ -7969,7 +8030,7 @@ index 5726093..e5b64ef 100644
          char name[64];
          std::snprintf(name, sizeof name, "/frame_%06llu.png", (unsigned long long)cnt.presents);
          write_png(std::string(opt.dump_dir) + name, ww, wh, flip.data());
-@@ -1317,7 +2442,6 @@ void setup() {
+@@ -1317,7 +2490,6 @@ void setup() {
      glNamedFramebufferTexture(efb_fbo, GL_DEPTH_ATTACHMENT, efb_dep, 0);
      if (glCheckNamedFramebufferStatus(efb_fbo, GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
          rt_die("video: the EFB framebuffer is incomplete");
@@ -7977,7 +8038,7 @@ index 5726093..e5b64ef 100644
      glBindFramebuffer(GL_FRAMEBUFFER, efb_fbo);
      glClearColor(0, 0, 0, 1);
      glClearDepth(1.0);
-@@ -1327,45 +2451,25 @@ void setup() {
+@@ -1327,45 +2499,25 @@ void setup() {
      const GLbitfield map = GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT;
      glNamedBufferStorage(vbo, VBO_CAP, nullptr, map);
      vbo_ptr = static_cast<uint8_t*>(glMapNamedBufferRange(vbo, 0, VBO_CAP, map));
@@ -8040,7 +8101,7 @@ index 5726093..e5b64ef 100644
  
      copy_prog = link(FULLSCREEN_VS, COPY_FS);
      if (!copy_prog) rt_die("video: the EFB copy program does not build");
-@@ -1377,6 +2481,7 @@ void setup() {
+@@ -1377,6 +2529,7 @@ void setup() {
  
  // ---- the game's side ------------------------------------------------------------------------------
  bool video_enabled() { return opt.enabled; }
@@ -8048,7 +8109,7 @@ index 5726093..e5b64ef 100644
  void video_configure(const VideoOptions& o) { opt = o; S = std::max(1, o.scale); }
  
  VideoPerf g_vperf;
-@@ -1394,7 +2499,7 @@ bool video_submit(std::vector<uint8_t>& rec, int frames, int wait_ms) {
+@@ -1394,7 +2547,7 @@ bool video_submit(std::vector<uint8_t>& rec, int frames, int wait_ms) {
      else ok = q_space.wait_for(lk, std::chrono::milliseconds(wait_ms), room);
      if (g_vperf_on) g_vperf.wait += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - t0).count();
      if (!ok) return false;
@@ -8057,7 +8118,7 @@ index 5726093..e5b64ef 100644
      q_frames += frames;
      // a buffer the renderer is done with, capacity and pages kept: fresh
      // allocations of megabytes a frame cost page faults and copies as they grow
-@@ -1424,7 +2529,7 @@ bool video_efb_read(std::vector<uint32_t>& argb, std::vector<uint32_t>& z) {
+@@ -1424,7 +2577,7 @@ bool video_efb_read(std::vector<uint32_t>& argb, std::vector<uint32_t>& z) {
      // the console's CPU takes its interrupts while it waits: so does this wait
      while (!rb_ready) {
          rb_cv.wait_for(lk, std::chrono::milliseconds(1));
@@ -8066,7 +8127,7 @@ index 5726093..e5b64ef 100644
              lk.unlock();
              ppc_poll(*t_ppc);
              lk.lock();
-@@ -1447,7 +2552,7 @@ bool video_copy_read(uint32_t addr, int w, int h, std::vector<uint8_t>& rgba) {
+@@ -1447,7 +2600,7 @@ bool video_copy_read(uint32_t addr, int w, int h, std::vector<uint8_t>& rgba) {
      if (wake) SDL_SignalSemaphore(wake);
      while (!rb_ready) {                              // taking interrupts meanwhile, as video_efb_read
          rb_cv.wait_for(lk, std::chrono::milliseconds(1));
@@ -8075,7 +8136,7 @@ index 5726093..e5b64ef 100644
              lk.unlock();
              ppc_poll(*t_ppc);
              lk.lock();
-@@ -1462,6 +2567,46 @@ std::atomic<bool> want_relative{false};
+@@ -1462,6 +2615,46 @@ std::atomic<bool> want_relative{false};
  std::mutex motion_mx;
  float motion_x = 0, motion_y = 0;
  void video_set_relative_mouse(bool on) { want_relative = on; }
@@ -8122,7 +8183,7 @@ index 5726093..e5b64ef 100644
  void video_take_mouse_motion(float& dx, float& dy) {
      std::lock_guard<std::mutex> lk(motion_mx);
      dx = motion_x; dy = motion_y;
-@@ -1473,12 +2618,42 @@ PadState video_pad() {
+@@ -1473,12 +2666,36 @@ PadState video_pad() {
      return pad;
  }
  ClassicState video_classic(int chan) {
@@ -8140,18 +8201,12 @@ index 5726093..e5b64ef 100644
 +bool g_present_on_frame = false;
 +
 +// held, the window keeps the picture it shows: frames drawn meanwhile run unseen (a look ahead that's
-+// put back after). let go, the chunks queued until then are drawn before anything is shown again, so
-+// the next picture is one submitted after
++// put back after). the hold goes in the GX record's order: its frames' XFB copies are undone when it's let
++// go, a saved state put back doesn't bring them back and the game would show them again
 +std::atomic<bool> picture_held{false};
-+std::atomic<int> held_chunks{0};
 +void video_hold(bool on) {
-+    if (on) { picture_held = true; return; }
-+    if (!picture_held) return;
-+    {
-+        std::lock_guard<std::mutex> lk(qmx);
-+        held_chunks = (int)q.size();
-+    }
-+    picture_held = false;
++    if (picture_held.exchange(on) == on) return;
++    gx_hold(on);
 +}
 +std::atomic<bool> vsync_want{false};
 +void video_set_vsync(bool on) { vsync_want = on; }
@@ -8165,7 +8220,7 @@ index 5726093..e5b64ef 100644
  void video_retrace() {
      retraces.fetch_add(1);
      if (wake) SDL_SignalSemaphore(wake);
-@@ -1499,13 +2674,21 @@ void video_run(const char* title) {
+@@ -1499,13 +2716,21 @@ void video_run(const char* title) {
      int w0 = opt.window_w ? opt.window_w : (opt.widescreen ? 1280 : 960), h0 = opt.window_h ? opt.window_h : 720;
      SDL_WindowFlags wflags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE;
      if (opt.fullscreen) wflags |= SDL_WINDOW_FULLSCREEN;
@@ -8187,7 +8242,7 @@ index 5726093..e5b64ef 100644
      rt_log("video: %s, %s", (const char*)glGetString(GL_RENDERER), (const char*)glGetString(GL_VERSION));
      if (debug) {
          glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
-@@ -1529,11 +2712,15 @@ void video_run(const char* title) {
+@@ -1529,11 +2754,15 @@ void video_run(const char* title) {
      uint64_t frames_then = 0;
      uint32_t seen = retraces.load();
      std::string base_title = title;
@@ -8203,7 +8258,7 @@ index 5726093..e5b64ef 100644
              if (e.type == SDL_EVENT_GAMEPAD_ADDED) pad_added(e.gdevice.which);
              if (e.type == SDL_EVENT_GAMEPAD_REMOVED) pad_removed(e.gdevice.which);
              // F11 or Alt+Enter: fullscreen and back
-@@ -1560,6 +2747,15 @@ void video_run(const char* title) {
+@@ -1560,6 +2789,15 @@ void video_run(const char* title) {
              }
          }
          auto now = Clock::now();
@@ -8219,7 +8274,7 @@ index 5726093..e5b64ef 100644
          if (opt.quit_after > 0 && std::chrono::duration<double>(now - t0).count() > opt.quit_after) quit = true;
          if (quit) {
              rt_log("video: %llu frames, %llu presents, %llu draws, %llu programs (%llu linked, %llu from the shader cache)",
-@@ -1574,6 +2770,18 @@ void video_run(const char* title) {
+@@ -1574,6 +2812,18 @@ void video_run(const char* title) {
          {
              bool rel = want_relative && (SDL_GetWindowFlags(win) & SDL_WINDOW_INPUT_FOCUS);
              if (rel != SDL_GetWindowRelativeMouseMode(win)) SDL_SetWindowRelativeMouseMode(win, rel);
@@ -8238,7 +8293,7 @@ index 5726093..e5b64ef 100644
              float dx = 0, dy = 0;
              SDL_GetRelativeMouseState(&dx, &dy);
              if (rel) {
-@@ -1592,12 +2800,20 @@ void video_run(const char* title) {
+@@ -1592,12 +2842,20 @@ void video_run(const char* title) {
                  double vtx = ms(g_vperf.vtx), tex = ms(g_vperf.tex), wait = ms(g_vperf.wait), draw = ms(g_vperf.draw),
                         pres = ms(g_vperf.present);
                  rt_log("perf: %.1f fps; frame %.1f ms; game thread: vertices %.1f, textures %.1f, waiting for the renderer %.1f; "
@@ -8260,7 +8315,7 @@ index 5726093..e5b64ef 100644
          for (int k = 0; k < 16; ++k) {
              Chunk c;
              {
-@@ -1608,7 +2824,10 @@ void video_run(const char* title) {
+@@ -1608,7 +2866,10 @@ void video_run(const char* title) {
              }
              if (c.readback) { if (c.copy) copy_readback(c.copy); else efb_readback(); busy = true; continue; }
              auto te = Clock::now();
@@ -8271,11 +8326,9 @@ index 5726093..e5b64ef 100644
              if (g_vperf_on) g_vperf.draw += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - te).count();
              {
                  std::lock_guard<std::mutex> lk(qmx);
-@@ -1618,11 +2837,31 @@ void video_run(const char* title) {
-             }
+@@ -1619,10 +2880,29 @@ void video_run(const char* title) {
              q_space.notify_all();
              busy = true;
-+            if (held_chunks.load() > 0) --held_chunks;
              if (retraces.load() != seen) break;
 +            if (c.frames > 0 && cap::state.load() == cap::kOn) break;   // capturing: every frame shown
          }
@@ -8291,7 +8344,7 @@ index 5726093..e5b64ef 100644
 +                seen = r - 1;
 +            } else seen = r;
 +        }
-+        if (r != seen && (picture_held.load() || held_chunks.load() > 0)) seen = r;   // the picture held
++        if (r != seen && holding) seen = r;   // the picture held
          if (r != seen) {
              seen = r;
 +            static bool vsync_now = false;
@@ -8303,7 +8356,7 @@ index 5726093..e5b64ef 100644
              auto tp = Clock::now();
              present();
              if (g_vperf_on) g_vperf.present += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - tp).count();
-@@ -1631,3 +2870,65 @@ void video_run(const char* title) {
+@@ -1631,3 +2911,65 @@ void video_run(const char* title) {
          if (!busy) SDL_WaitSemaphoreTimeout(wake, 5);
      }
  }
@@ -8370,7 +8423,7 @@ index 5726093..e5b64ef 100644
 +    }
 +}
 diff --git a/runtime/video.h b/runtime/video.h
-index ecfb499..cf24087 100644
+index ecfb499..83b691e 100644
 --- a/runtime/video.h
 +++ b/runtime/video.h
 @@ -3,7 +3,7 @@
@@ -8442,7 +8495,7 @@ index ecfb499..cf24087 100644
 +                 VC_TEXEFBN, VC_VTXUP, VC_DRAWS,
 +                 // the EFB copy last made at an address at this size, a later one of another size
 +                 // there notwithstanding: map (u8), address (u32), width, height (u16)
-+                 VC_TEXEFBS, VC_DBGMESH, VC_DBGVIEW, VC_DBGOVER };
++                 VC_TEXEFBS, VC_DBGMESH, VC_DBGVIEW, VC_DBGOVER, VC_HOLD };
 +constexpr uint32_t VTX_STATIC_CAP = 192u << 20;      // the static vertex buffer: gx.cpp gives its room out
 +enum : uint8_t { VTX_COL0 = 1, VTX_COL1 = 2, VTX_NRM = 4, VTX_NBT = 8,
 +                 VTX_ATTRS = 0x0F,                   // what the shaders are made from
