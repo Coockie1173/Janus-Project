@@ -309,7 +309,11 @@ void watches() {
     ImGui::End();
 }
 
+int g_menu_mark; //its address marks where the F1 menu starts in the foreground list
+ImVector<ImDrawCmd> g_menu_cmds; //the F1 menu's part of it, for draw_top
+
 void draw() {
+    g_menu_cmds.clear();
     speedrun_own_window();
     settings_replay();
     if (std::string said = pictures_draw(); !said.empty()) settings_say(said);
@@ -339,10 +343,34 @@ void draw() {
     if (skipping_cutscene()) skipping_label();
     if (g_open) watches();
     if (lib) tas_draw();
-    settings_draw();
     speedrun_draw();
+    //the F1 menu last, behind a mark: from the mark on it's drawn by draw_top, out of a video
+    ImDrawList* fg = ImGui::GetForegroundDrawList();
+    fg->AddCallback(ImDrawCallback_ResetRenderState, &g_menu_mark);
+    settings_draw();
     ImGui::Render();
+    g_menu_cmds.clear();
+    for (int i = 0; i < fg->CmdBuffer.Size; ++i) {
+        if (fg->CmdBuffer[i].UserCallbackData != &g_menu_mark) continue;
+        g_menu_cmds.resize(fg->CmdBuffer.Size - i);
+        std::copy(fg->CmdBuffer.begin() + i, fg->CmdBuffer.end(), g_menu_cmds.begin());
+        fg->CmdBuffer.resize(i);
+        break;
+    }
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+}
+
+//the F1 menu over what draw put down, after a video took its frame
+void draw_top() {
+    if (g_menu_cmds.empty()) return;
+    ImDrawList* fg = ImGui::GetForegroundDrawList();
+    fg->CmdBuffer.swap(g_menu_cmds);
+    g_menu_cmds.clear();
+    ImDrawData menu = *ImGui::GetDrawData();
+    menu.CmdLists.resize(0);
+    menu.CmdLists.push_back(fg);
+    menu.CmdListsCount = 1;
+    ImGui_ImplOpenGL3_RenderDrawData(&menu);
 }
 #endif
 
@@ -356,6 +384,7 @@ void install_overlay() {
     o.init = init;
     o.event = event;
     o.draw = draw;
+    o.draw_top = draw_top;
     video_set_overlay(o);
 #endif
 }

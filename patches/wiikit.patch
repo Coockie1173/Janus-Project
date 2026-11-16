@@ -6161,7 +6161,7 @@ index 0000000..f6a82e4
 +    return true;
 +}
 diff --git a/runtime/video.cpp b/runtime/video.cpp
-index 5726093..77dd080 100644
+index 5726093..84d77e7 100644
 --- a/runtime/video.cpp
 +++ b/runtime/video.cpp
 @@ -46,7 +46,7 @@ constexpr int EFB_W = 640, EFB_H = 528;
@@ -7835,7 +7835,7 @@ index 5726093..77dd080 100644
      ++cnt.presents;
      int ww = 0, wh = 0;
      SDL_GetWindowSizeInPixels(win, &ww, &wh);
-@@ -1275,22 +2301,120 @@ void present() {
+@@ -1275,22 +2301,121 @@ void present() {
      glColorMask(1, 1, 1, 1);
      glClearColor(0, 0, 0, 1);
      glClear(GL_COLOR_BUFFER_BIT);
@@ -7958,13 +7958,14 @@ index 5726093..77dd080 100644
 +    }
 +    if (overlay_cb.draw) overlay_cb.draw();
 +    if (it != xfbs.end() && cap::state.load() == cap::kOn) cap::frame(ww, wh);
++    if (overlay_cb.draw_top) overlay_cb.draw_top();
 +    if (opt.dump_dir && cnt.presents >= (uint64_t)opt.dump_from && cnt.presents % (uint64_t)opt.dump_every == 0 && ww > 0 && wh > 0) {
 +        std::vector<uint8_t> flip;                                        // the window, as shown
 +        video_read_window(flip, ww, wh);
          char name[64];
          std::snprintf(name, sizeof name, "/frame_%06llu.png", (unsigned long long)cnt.presents);
          write_png(std::string(opt.dump_dir) + name, ww, wh, flip.data());
-@@ -1317,7 +2441,6 @@ void setup() {
+@@ -1317,7 +2442,6 @@ void setup() {
      glNamedFramebufferTexture(efb_fbo, GL_DEPTH_ATTACHMENT, efb_dep, 0);
      if (glCheckNamedFramebufferStatus(efb_fbo, GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
          rt_die("video: the EFB framebuffer is incomplete");
@@ -7972,7 +7973,7 @@ index 5726093..77dd080 100644
      glBindFramebuffer(GL_FRAMEBUFFER, efb_fbo);
      glClearColor(0, 0, 0, 1);
      glClearDepth(1.0);
-@@ -1327,45 +2450,25 @@ void setup() {
+@@ -1327,45 +2451,25 @@ void setup() {
      const GLbitfield map = GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT;
      glNamedBufferStorage(vbo, VBO_CAP, nullptr, map);
      vbo_ptr = static_cast<uint8_t*>(glMapNamedBufferRange(vbo, 0, VBO_CAP, map));
@@ -8035,7 +8036,7 @@ index 5726093..77dd080 100644
  
      copy_prog = link(FULLSCREEN_VS, COPY_FS);
      if (!copy_prog) rt_die("video: the EFB copy program does not build");
-@@ -1377,6 +2480,7 @@ void setup() {
+@@ -1377,6 +2481,7 @@ void setup() {
  
  // ---- the game's side ------------------------------------------------------------------------------
  bool video_enabled() { return opt.enabled; }
@@ -8043,7 +8044,7 @@ index 5726093..77dd080 100644
  void video_configure(const VideoOptions& o) { opt = o; S = std::max(1, o.scale); }
  
  VideoPerf g_vperf;
-@@ -1394,7 +2498,7 @@ bool video_submit(std::vector<uint8_t>& rec, int frames, int wait_ms) {
+@@ -1394,7 +2499,7 @@ bool video_submit(std::vector<uint8_t>& rec, int frames, int wait_ms) {
      else ok = q_space.wait_for(lk, std::chrono::milliseconds(wait_ms), room);
      if (g_vperf_on) g_vperf.wait += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - t0).count();
      if (!ok) return false;
@@ -8052,7 +8053,7 @@ index 5726093..77dd080 100644
      q_frames += frames;
      // a buffer the renderer is done with, capacity and pages kept: fresh
      // allocations of megabytes a frame cost page faults and copies as they grow
-@@ -1424,7 +2528,7 @@ bool video_efb_read(std::vector<uint32_t>& argb, std::vector<uint32_t>& z) {
+@@ -1424,7 +2529,7 @@ bool video_efb_read(std::vector<uint32_t>& argb, std::vector<uint32_t>& z) {
      // the console's CPU takes its interrupts while it waits: so does this wait
      while (!rb_ready) {
          rb_cv.wait_for(lk, std::chrono::milliseconds(1));
@@ -8061,7 +8062,7 @@ index 5726093..77dd080 100644
              lk.unlock();
              ppc_poll(*t_ppc);
              lk.lock();
-@@ -1447,7 +2551,7 @@ bool video_copy_read(uint32_t addr, int w, int h, std::vector<uint8_t>& rgba) {
+@@ -1447,7 +2552,7 @@ bool video_copy_read(uint32_t addr, int w, int h, std::vector<uint8_t>& rgba) {
      if (wake) SDL_SignalSemaphore(wake);
      while (!rb_ready) {                              // taking interrupts meanwhile, as video_efb_read
          rb_cv.wait_for(lk, std::chrono::milliseconds(1));
@@ -8070,7 +8071,7 @@ index 5726093..77dd080 100644
              lk.unlock();
              ppc_poll(*t_ppc);
              lk.lock();
-@@ -1462,6 +2566,46 @@ std::atomic<bool> want_relative{false};
+@@ -1462,6 +2567,46 @@ std::atomic<bool> want_relative{false};
  std::mutex motion_mx;
  float motion_x = 0, motion_y = 0;
  void video_set_relative_mouse(bool on) { want_relative = on; }
@@ -8117,7 +8118,7 @@ index 5726093..77dd080 100644
  void video_take_mouse_motion(float& dx, float& dy) {
      std::lock_guard<std::mutex> lk(motion_mx);
      dx = motion_x; dy = motion_y;
-@@ -1473,12 +2617,27 @@ PadState video_pad() {
+@@ -1473,12 +2618,27 @@ PadState video_pad() {
      return pad;
  }
  ClassicState video_classic(int chan) {
@@ -8145,7 +8146,7 @@ index 5726093..77dd080 100644
  void video_retrace() {
      retraces.fetch_add(1);
      if (wake) SDL_SignalSemaphore(wake);
-@@ -1499,13 +2658,21 @@ void video_run(const char* title) {
+@@ -1499,13 +2659,21 @@ void video_run(const char* title) {
      int w0 = opt.window_w ? opt.window_w : (opt.widescreen ? 1280 : 960), h0 = opt.window_h ? opt.window_h : 720;
      SDL_WindowFlags wflags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE;
      if (opt.fullscreen) wflags |= SDL_WINDOW_FULLSCREEN;
@@ -8167,7 +8168,7 @@ index 5726093..77dd080 100644
      rt_log("video: %s, %s", (const char*)glGetString(GL_RENDERER), (const char*)glGetString(GL_VERSION));
      if (debug) {
          glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
-@@ -1529,11 +2696,15 @@ void video_run(const char* title) {
+@@ -1529,11 +2697,15 @@ void video_run(const char* title) {
      uint64_t frames_then = 0;
      uint32_t seen = retraces.load();
      std::string base_title = title;
@@ -8183,7 +8184,7 @@ index 5726093..77dd080 100644
              if (e.type == SDL_EVENT_GAMEPAD_ADDED) pad_added(e.gdevice.which);
              if (e.type == SDL_EVENT_GAMEPAD_REMOVED) pad_removed(e.gdevice.which);
              // F11 or Alt+Enter: fullscreen and back
-@@ -1560,6 +2731,15 @@ void video_run(const char* title) {
+@@ -1560,6 +2732,15 @@ void video_run(const char* title) {
              }
          }
          auto now = Clock::now();
@@ -8199,7 +8200,7 @@ index 5726093..77dd080 100644
          if (opt.quit_after > 0 && std::chrono::duration<double>(now - t0).count() > opt.quit_after) quit = true;
          if (quit) {
              rt_log("video: %llu frames, %llu presents, %llu draws, %llu programs (%llu linked, %llu from the shader cache)",
-@@ -1574,6 +2754,18 @@ void video_run(const char* title) {
+@@ -1574,6 +2755,18 @@ void video_run(const char* title) {
          {
              bool rel = want_relative && (SDL_GetWindowFlags(win) & SDL_WINDOW_INPUT_FOCUS);
              if (rel != SDL_GetWindowRelativeMouseMode(win)) SDL_SetWindowRelativeMouseMode(win, rel);
@@ -8218,7 +8219,7 @@ index 5726093..77dd080 100644
              float dx = 0, dy = 0;
              SDL_GetRelativeMouseState(&dx, &dy);
              if (rel) {
-@@ -1592,12 +2784,20 @@ void video_run(const char* title) {
+@@ -1592,12 +2785,20 @@ void video_run(const char* title) {
                  double vtx = ms(g_vperf.vtx), tex = ms(g_vperf.tex), wait = ms(g_vperf.wait), draw = ms(g_vperf.draw),
                         pres = ms(g_vperf.present);
                  rt_log("perf: %.1f fps; frame %.1f ms; game thread: vertices %.1f, textures %.1f, waiting for the renderer %.1f; "
@@ -8240,7 +8241,7 @@ index 5726093..77dd080 100644
          for (int k = 0; k < 16; ++k) {
              Chunk c;
              {
-@@ -1608,7 +2808,10 @@ void video_run(const char* title) {
+@@ -1608,7 +2809,10 @@ void video_run(const char* title) {
              }
              if (c.readback) { if (c.copy) copy_readback(c.copy); else efb_readback(); busy = true; continue; }
              auto te = Clock::now();
@@ -8251,7 +8252,7 @@ index 5726093..77dd080 100644
              if (g_vperf_on) g_vperf.draw += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - te).count();
              {
                  std::lock_guard<std::mutex> lk(qmx);
-@@ -1619,10 +2822,28 @@ void video_run(const char* title) {
+@@ -1619,10 +2823,28 @@ void video_run(const char* title) {
              q_space.notify_all();
              busy = true;
              if (retraces.load() != seen) break;
@@ -8280,7 +8281,7 @@ index 5726093..77dd080 100644
              auto tp = Clock::now();
              present();
              if (g_vperf_on) g_vperf.present += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - tp).count();
-@@ -1631,3 +2852,65 @@ void video_run(const char* title) {
+@@ -1631,3 +2853,65 @@ void video_run(const char* title) {
          if (!busy) SDL_WaitSemaphoreTimeout(wake, 5);
      }
  }
@@ -8347,7 +8348,7 @@ index 5726093..77dd080 100644
 +    }
 +}
 diff --git a/runtime/video.h b/runtime/video.h
-index ecfb499..d2667bf 100644
+index ecfb499..8afa601 100644
 --- a/runtime/video.h
 +++ b/runtime/video.h
 @@ -3,7 +3,7 @@
@@ -8462,7 +8463,7 @@ index ecfb499..d2667bf 100644
  ClassicState video_classic(int chan);
  // The Remote's motor on a channel: its pad rumbles (the Remote's own on
  // channel 1 when a pad is there).
-@@ -97,6 +140,63 @@ void video_set_rumble(int chan, bool on);
+@@ -97,6 +140,64 @@ void video_set_rumble(int chan, bool on);
  // the pause box), and the motion is summed until taken.
  void video_set_relative_mouse(bool on);
  void video_take_mouse_motion(float& dx, float& dy);
@@ -8488,6 +8489,7 @@ index ecfb499..d2667bf 100644
 +    void (*init)(SDL_Window* window, void* gl_context) = nullptr;
 +    bool (*event)(const SDL_Event* e) = nullptr;
 +    void (*draw)() = nullptr;
++    void (*draw_top)() = nullptr;   // after draw, over it, and out of a video capture (a menu)
 +};
 +void video_set_overlay(const VideoOverlay& o);
 +// The window's picture as it is right now (RGBA8, top row first), for an
