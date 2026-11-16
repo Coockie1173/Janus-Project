@@ -129,6 +129,7 @@ struct Line
 {
 	float x, y, scale;
 	uint32_t rgba;
+	uint32_t anchor;
 	std::string text;
 };
 std::vector<Line> g_text;
@@ -269,7 +270,7 @@ void HostShowText(const GeTasText* lines, uint32_t count)
 	std::lock_guard<std::mutex> lk(g_textMx);
 	g_text.clear();
 	for (uint32_t i = 0; i < count; ++i)
-		g_text.push_back({lines[i].x, lines[i].y, lines[i].scale > 0 ? lines[i].scale : 1.0f, lines[i].rgba, lines[i].text ? lines[i].text : ""});
+		g_text.push_back({lines[i].x, lines[i].y, lines[i].scale > 0 ? lines[i].scale : 1.0f, lines[i].rgba, lines[i].anchor, lines[i].text ? lines[i].text : ""});
 }
 void HostSay(const char* text) { settings_say(text ? text : ""); }
 uint32_t HostSettings(char* out, uint32_t size)
@@ -463,12 +464,22 @@ void tas_draw()
 	if (lines.empty()) return;
 	ImDrawList* dl = ImGui::GetForegroundDrawList();
 	ImFont* font = ImGui::GetFont();
+	const ImVec2 screen = ImGui::GetIO().DisplaySize;
 	for (const Line& l : lines)
 	{
 		const float size = ImGui::GetFontSize() * l.scale;
+		//the anchor's corner: x and y are offsets from it, the text kept inside the window's edge
+		float x = l.x, y = l.y;
+		if (l.anchor != GE_ANCHOR_TL)
+		{
+			const ImVec2 box = font->CalcTextSizeA(size, FLT_MAX, 0, l.text.c_str());
+			if (l.anchor == GE_ANCHOR_TR || l.anchor == GE_ANCHOR_BR) x = screen.x - box.x - l.x;
+			if (l.anchor == GE_ANCHOR_TC) x = (screen.x - box.x) * 0.5f + l.x;
+			if (l.anchor == GE_ANCHOR_BL || l.anchor == GE_ANCHOR_BR) y = screen.y - box.y - l.y;
+		}
 		const ImU32 col = IM_COL32(l.rgba >> 24 & 0xFF, l.rgba >> 16 & 0xFF, l.rgba >> 8 & 0xFF, l.rgba & 0xFF);
-		dl->AddText(font, size, ImVec2(l.x + 1, l.y + 1), IM_COL32(0, 0, 0, (l.rgba & 0xFF) * 3 / 4), l.text.c_str());
-		dl->AddText(font, size, ImVec2(l.x, l.y), col, l.text.c_str());
+		dl->AddText(font, size, ImVec2(x + 1, y + 1), IM_COL32(0, 0, 0, (l.rgba & 0xFF) * 3 / 4), l.text.c_str());
+		dl->AddText(font, size, ImVec2(x, y), col, l.text.c_str());
 	}
 #endif
 }

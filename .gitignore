@@ -48,3 +48,5 @@ compile_commands.json
 # loose .edb files that take the place of the disc's or come on top, a folder a modpack (port/mods/mods.cpp)
 /modpacks/
 /mods/
+
+/tas/

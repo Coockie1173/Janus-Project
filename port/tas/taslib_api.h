@@ -7,7 +7,7 @@
 #define GE_TASLIB_API_H
 #include <stdint.h>
 
-#define GE_TAS_API_VERSION 6
+#define GE_TAS_API_VERSION 7
 
 #ifdef _WIN32
 #define GE_TAS_EXPORT __declspec(dllexport)
@@ -53,13 +53,16 @@ typedef struct GeMoveInfo
 	float dt; //the last step, seconds
 } GeMoveInfo;
 
-//a line of text over the picture, in the window's pixels from its top left
+//a line of text over the picture. x, y are the window's pixels from the corner the anchor names, so a
+//line can sit against any edge whatever the window's size (a watermark in a corner)
+enum { GE_ANCHOR_TL = 0, GE_ANCHOR_TR = 1, GE_ANCHOR_BL = 2, GE_ANCHOR_BR = 3, GE_ANCHOR_TC = 4 }; //api 7
 typedef struct GeTasText
 {
 	float x, y;
 	uint32_t rgba; //0xRRGGBBAA
 	float scale; //1 the overlay's font
 	const char* text;
+	uint32_t anchor; //api 7: GE_ANCHOR_*, the corner x and y count from (0 top left, as before)
 } GeTasText;
 
 //what the game offers the library

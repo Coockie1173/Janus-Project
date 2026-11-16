@@ -378,8 +378,8 @@ void FadeOut()
 
 void Run()
 {
-	//the pause menu and ours run at their own pace. deterministic (TAS), ours doesn't count: nothing
-	//keeps whether it was open, so a movie played back would skip on where the recording waited
+	//the pause menu and ours run at their own pace. deterministic, ours doesn't count: nothing
+	//keeps whether it was open, so input played back would skip on where the recording waited
 	bool held = ld8(kPaused) != 0 || (settings_open() && !rt_deterministic());
 	if (held) set_fast_forward(false);
 	if (held)
@@ -654,7 +654,7 @@ void install_cutscenes()
 		io.pod(g_counting); io.pod(g_played); io.pod(g_ends); io.pod(g_armed_ends); io.pod(g_through); io.pod(g_armed_through);
 		io.pod(g_back_first); io.pod(g_wait_until); io.pod(g_holding); io.time(g_started); io.time(g_started_guest);
 		io.pod(from); io.pod(to); io.pod(started);
-		//the rest came later: a state from before has none of it, nothing was skipped in TAS mode then
+		//the rest came later: a state from before has none of it, nothing was skipped in deterministic mode then
 		if (io.more()) { io.pod(option); io.pod(g_any); io.pod(g_armed_any); io.pod(g_qte); io.pod(g_armed_qte); io.pod(g_hold_from); }
 		if (!io.applying) return;
 		g_running = running; g_asked_level = asked; g_fade_from = from; g_fade_to = to; g_fade_started = started;
