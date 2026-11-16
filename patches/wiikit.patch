@@ -992,7 +992,7 @@ index 0000000..6e6b7c3
 +        out.append(text)
 +    return out
 diff --git a/runtime/audio.cpp b/runtime/audio.cpp
-index 4050960..ff284c6 100644
+index 4050960..6fec003 100644
 --- a/runtime/audio.cpp
 +++ b/runtime/audio.cpp
 @@ -11,6 +11,9 @@
@@ -1025,7 +1025,7 @@ index 4050960..ff284c6 100644
  uint32_t dump_rate = 0, dump_bytes = 0;
  
  void wav_header(FILE* f, uint32_t rate, uint32_t bytes) {
-@@ -70,8 +76,77 @@ void audio_init(bool enabled) {
+@@ -70,8 +76,78 @@ void audio_init(bool enabled) {
      rt_log("audio: %s", SDL_GetAudioDeviceName(SDL_GetAudioStreamDevice(stream)));
  }
  
@@ -1081,7 +1081,8 @@ index 4050960..ff284c6 100644
 +    std::fclose(f);
 +}
 +
-+std::atomic<bool> muted{false};
++std::atomic<bool> muted{false}, held{false};
++void audio_hold(bool on) { held = on; }
 +std::atomic<float> fade_gain{1.0f}, fade_step{0.0f};  // the gain, and what a sample frame adds to it while fading
 +void audio_mute(bool on, double fade) {
 +    float step = fade > 0 ? (float)(1.0 / (fade * 32000.0)) : 0.0f;
@@ -1104,7 +1105,7 @@ index 4050960..ff284c6 100644
      static std::vector<int16_t> lr;
      lr.resize(2 * (size_t)frames);
      for (uint32_t i = 0; i < frames; ++i) {
-@@ -79,6 +154,7 @@ void audio_play(const uint8_t* be_rl, uint32_t frames, uint32_t rate) {
+@@ -79,6 +155,7 @@ void audio_play(const uint8_t* be_rl, uint32_t frames, uint32_t rate) {
          lr[2 * i + 1] = (int16_t)(p[0] << 8 | p[1]);  // right
          lr[2 * i] = (int16_t)(p[2] << 8 | p[3]);      // left
      }
@@ -1112,11 +1113,12 @@ index 4050960..ff284c6 100644
      if (dump) {
          if (!dump_rate) dump_rate = rate;
          std::fwrite(lr.data(), 2, lr.size(), dump);  // little-endian hosts
-@@ -89,36 +165,54 @@ void audio_play(const uint8_t* be_rl, uint32_t frames, uint32_t rate) {
+@@ -89,36 +166,55 @@ void audio_play(const uint8_t* be_rl, uint32_t frames, uint32_t rate) {
              std::fflush(dump);
          }
      }
 +    if (!stream && !capturing) return;
++    if (held) return;                                // unheard: neither played nor captured, the stream left as it is
 +    if (muted) {                                     // the dump still has it
 +        if (capturing) capture_block(nullptr, frames, rate);
 +        if (stream && playing) { SDL_PauseAudioStreamDevice(stream); SDL_ClearAudioStream(stream); playing = false; }
@@ -5681,7 +5683,7 @@ index 99351d5..52dfaae 100644
  static inline void ps_set(PPCContext& c, int d, double a, double b) { c.f[d] = rs(a); c.ps1[d] = rs(b); }
 +static inline void ps_put(PPCContext& c, int d, double a, double b) { c.f[d] = a; c.ps1[d] = b; }
 diff --git a/runtime/rt.h b/runtime/rt.h
-index 75fec5e..048b6a4 100644
+index 75fec5e..b79e5ee 100644
 --- a/runtime/rt.h
 +++ b/runtime/rt.h
 @@ -4,8 +4,12 @@
@@ -5803,7 +5805,7 @@ index 75fec5e..048b6a4 100644
  void hw_run_locked(const std::function<void()>& fn);   // run fn holding the hardware lock
  
  // ---- the hardware (hw.cpp) -----------------------------------------------------------
-@@ -104,8 +181,13 @@ void wpad_set_classic(bool on);
+@@ -104,8 +181,15 @@ void wpad_set_classic(bool on);
  void wpad_set_nunchuk(bool on);
  void wpad_set_classic_filter(WpadClassicFilter f);
  void wpad_filter_classic(int chan, ClassicState& s);  // the port's filter, if it has one
@@ -5814,10 +5816,12 @@ index 75fec5e..048b6a4 100644
 +// Muted, nothing is played and what was queued is dropped. With fade the
 +// sound goes to silence over that many seconds first, or comes back from it.
 +void audio_mute(bool on, double fade = 0);
++// Held, the blocks the game makes are dropped, apart from any mute (frames run unheard)
++void audio_hold(bool on);
  void ax_command_list(uint32_t addr);               // the AX micro-code: mix one frame
  uint8_t aram_read(uint32_t addr);                  // the GameCube's ARAM (hw.cpp), where its AX reads samples
  bool ax_load_coefs(const char* dir);               // dsp_coef.bin: the polyphase resampler's table
-@@ -113,6 +195,11 @@ void audio_init(bool enabled);                     // the host's audio device (S
+@@ -113,6 +197,11 @@ void audio_init(bool enabled);                     // the host's audio device (S
  // A block the AI DMA starts playing: frames of big-endian 16-bit stereo,
  // right then left, as the Wii's AI reads them.
  void audio_play(const uint8_t* be_rl, uint32_t frames, uint32_t rate);
@@ -5829,7 +5833,7 @@ index 75fec5e..048b6a4 100644
  
  // ---- SYSCONF (sysconf.cpp) -----------------------------------------------------------
  // Writes the NAND's /shared2/sys/SYSCONF if it has none, sets what the
-@@ -123,6 +210,10 @@ extern bool g_sysconf_eurgb60;                     // IPL.E60, after sysconf_pre
+@@ -123,6 +212,10 @@ extern bool g_sysconf_eurgb60;                     // IPL.E60, after sysconf_pre
  
  // ---- IOS (ios.cpp) ------------------------------------------------------------------
  void ios_init(const char* disc_root, const char* nand_root);
@@ -5840,7 +5844,7 @@ index 75fec5e..048b6a4 100644
  void ios_ipc_write(uint32_t reg, uint32_t v);      // 0xCD000000-0xCD00000C
  uint32_t ios_ipc_read(uint32_t reg);
  void ios_irq_flag_clear(uint32_t v);               // 0xCD000030
-@@ -131,3 +222,69 @@ uint32_t ios_irq_flags();
+@@ -131,3 +224,69 @@ uint32_t ios_irq_flags();
  uint32_t ios_irq_mask();
  std::chrono::steady_clock::time_point ios_tick();  // replies now due delivered; when the next is
  void hw_cpu_idle();                               // the processor idles: IOS replies are due at once
@@ -6161,7 +6165,7 @@ index 0000000..f6a82e4
 +    return true;
 +}
 diff --git a/runtime/video.cpp b/runtime/video.cpp
-index 5726093..84d77e7 100644
+index 5726093..e5b64ef 100644
 --- a/runtime/video.cpp
 +++ b/runtime/video.cpp
 @@ -46,7 +46,7 @@ constexpr int EFB_W = 640, EFB_H = 528;
@@ -7277,22 +7281,14 @@ index 5726093..84d77e7 100644
          glDisable(GL_BLEND);
 -        glDisable(GL_COLOR_LOGIC_OP);
 +        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-     }
--    // GX's front faces are clockwise on screen: counter-clockwise for GL,
--    // whose y runs the other way over the same rows
--    if (tri && cull) { glEnable(GL_CULL_FACE); glCullFace(cull == 1 ? GL_BACK : GL_FRONT); }
--    else glDisable(GL_CULL_FACE);
++    }
 +    if (scene) {
 +        glDepthMask(GL_TRUE);
 +        glClearDepth(1.0);
 +        glClear(GL_DEPTH_BUFFER_BIT);
 +    }
 +}
- 
--    if (xf_lo < xf_hi) {
--        glNamedBufferSubData(xf_ubo, xf_lo * 4, (xf_hi - xf_lo) * 4, &xf[xf_lo]);
--        xf_lo = 0x1058;
--        xf_hi = 0;
++
 +// An EFB copy: the scene is in what is copied; a copy that clears takes it out again.
 +void dbg_copy(bool clears) {
 +    if (clears) dbg_drawn = false;
@@ -7315,12 +7311,18 @@ index 5726093..84d77e7 100644
 +        }
 +        return dbg_on & 1;                           // the overlay leaves the game's draws be
      }
--    set_ps_uniforms();
--    bind_textures();
+-    // GX's front faces are clockwise on screen: counter-clockwise for GL,
+-    // whose y runs the other way over the same rows
+-    if (tri && cull) { glEnable(GL_CULL_FACE); glCullFace(cull == 1 ? GL_BACK : GL_FRONT); }
+-    else glDisable(GL_CULL_FACE);
 +    if (dbg_waiting) dbg_draw();
 +    return false;
 +}
-+
+ 
+-    if (xf_lo < xf_hi) {
+-        glNamedBufferSubData(xf_ubo, xf_lo * 4, (xf_hi - xf_lo) * 4, &xf[xf_lo]);
+-        xf_lo = 0x1058;
+-        xf_hi = 0;
 +// A VC_DRAW's pieces (each n, then n vertices), drawn with one call.
 +void draw(uint8_t prim, uint8_t vflags, const uint8_t* pieces, uint32_t npieces) {
 +    if (dbg_hides()) return;
@@ -7330,7 +7332,9 @@ index 5726093..84d77e7 100644
 +    for (uint32_t i = 0, k; i < npieces; ++i) {
 +        std::memcpy(&k, pieces + (size_t)n * stride + 4 * i, 4);
 +        n += k;
-+    }
+     }
+-    set_ps_uniforms();
+-    bind_textures();
 +    if (!draw_prepare(prim, vflags, false)) return;
  
      if (efb_dumping() && std::getenv("WIIKIT_DRAWLOG")) {         // debugging: where each draw lands
@@ -8118,7 +8122,7 @@ index 5726093..84d77e7 100644
  void video_take_mouse_motion(float& dx, float& dy) {
      std::lock_guard<std::mutex> lk(motion_mx);
      dx = motion_x; dy = motion_y;
-@@ -1473,12 +2618,27 @@ PadState video_pad() {
+@@ -1473,12 +2618,42 @@ PadState video_pad() {
      return pad;
  }
  ClassicState video_classic(int chan) {
@@ -8134,6 +8138,21 @@ index 5726093..84d77e7 100644
      if (chan >= 0 && chan < 4) rumble_want[chan] = on;
  }
 +bool g_present_on_frame = false;
++
++// held, the window keeps the picture it shows: frames drawn meanwhile run unseen (a look ahead that's
++// put back after). let go, the chunks queued until then are drawn before anything is shown again, so
++// the next picture is one submitted after
++std::atomic<bool> picture_held{false};
++std::atomic<int> held_chunks{0};
++void video_hold(bool on) {
++    if (on) { picture_held = true; return; }
++    if (!picture_held) return;
++    {
++        std::lock_guard<std::mutex> lk(qmx);
++        held_chunks = (int)q.size();
++    }
++    picture_held = false;
++}
 +std::atomic<bool> vsync_want{false};
 +void video_set_vsync(bool on) { vsync_want = on; }
 +void video_set_anisotropy(int level) { aniso_want = level; }
@@ -8146,7 +8165,7 @@ index 5726093..84d77e7 100644
  void video_retrace() {
      retraces.fetch_add(1);
      if (wake) SDL_SignalSemaphore(wake);
-@@ -1499,13 +2659,21 @@ void video_run(const char* title) {
+@@ -1499,13 +2674,21 @@ void video_run(const char* title) {
      int w0 = opt.window_w ? opt.window_w : (opt.widescreen ? 1280 : 960), h0 = opt.window_h ? opt.window_h : 720;
      SDL_WindowFlags wflags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE;
      if (opt.fullscreen) wflags |= SDL_WINDOW_FULLSCREEN;
@@ -8168,7 +8187,7 @@ index 5726093..84d77e7 100644
      rt_log("video: %s, %s", (const char*)glGetString(GL_RENDERER), (const char*)glGetString(GL_VERSION));
      if (debug) {
          glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
-@@ -1529,11 +2697,15 @@ void video_run(const char* title) {
+@@ -1529,11 +2712,15 @@ void video_run(const char* title) {
      uint64_t frames_then = 0;
      uint32_t seen = retraces.load();
      std::string base_title = title;
@@ -8184,7 +8203,7 @@ index 5726093..84d77e7 100644
              if (e.type == SDL_EVENT_GAMEPAD_ADDED) pad_added(e.gdevice.which);
              if (e.type == SDL_EVENT_GAMEPAD_REMOVED) pad_removed(e.gdevice.which);
              // F11 or Alt+Enter: fullscreen and back
-@@ -1560,6 +2732,15 @@ void video_run(const char* title) {
+@@ -1560,6 +2747,15 @@ void video_run(const char* title) {
              }
          }
          auto now = Clock::now();
@@ -8200,7 +8219,7 @@ index 5726093..84d77e7 100644
          if (opt.quit_after > 0 && std::chrono::duration<double>(now - t0).count() > opt.quit_after) quit = true;
          if (quit) {
              rt_log("video: %llu frames, %llu presents, %llu draws, %llu programs (%llu linked, %llu from the shader cache)",
-@@ -1574,6 +2755,18 @@ void video_run(const char* title) {
+@@ -1574,6 +2770,18 @@ void video_run(const char* title) {
          {
              bool rel = want_relative && (SDL_GetWindowFlags(win) & SDL_WINDOW_INPUT_FOCUS);
              if (rel != SDL_GetWindowRelativeMouseMode(win)) SDL_SetWindowRelativeMouseMode(win, rel);
@@ -8219,7 +8238,7 @@ index 5726093..84d77e7 100644
              float dx = 0, dy = 0;
              SDL_GetRelativeMouseState(&dx, &dy);
              if (rel) {
-@@ -1592,12 +2785,20 @@ void video_run(const char* title) {
+@@ -1592,12 +2800,20 @@ void video_run(const char* title) {
                  double vtx = ms(g_vperf.vtx), tex = ms(g_vperf.tex), wait = ms(g_vperf.wait), draw = ms(g_vperf.draw),
                         pres = ms(g_vperf.present);
                  rt_log("perf: %.1f fps; frame %.1f ms; game thread: vertices %.1f, textures %.1f, waiting for the renderer %.1f; "
@@ -8241,7 +8260,7 @@ index 5726093..84d77e7 100644
          for (int k = 0; k < 16; ++k) {
              Chunk c;
              {
-@@ -1608,7 +2809,10 @@ void video_run(const char* title) {
+@@ -1608,7 +2824,10 @@ void video_run(const char* title) {
              }
              if (c.readback) { if (c.copy) copy_readback(c.copy); else efb_readback(); busy = true; continue; }
              auto te = Clock::now();
@@ -8252,9 +8271,11 @@ index 5726093..84d77e7 100644
              if (g_vperf_on) g_vperf.draw += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - te).count();
              {
                  std::lock_guard<std::mutex> lk(qmx);
-@@ -1619,10 +2823,28 @@ void video_run(const char* title) {
+@@ -1618,11 +2837,31 @@ void video_run(const char* title) {
+             }
              q_space.notify_all();
              busy = true;
++            if (held_chunks.load() > 0) --held_chunks;
              if (retraces.load() != seen) break;
 +            if (c.frames > 0 && cap::state.load() == cap::kOn) break;   // capturing: every frame shown
          }
@@ -8270,6 +8291,7 @@ index 5726093..84d77e7 100644
 +                seen = r - 1;
 +            } else seen = r;
 +        }
++        if (r != seen && (picture_held.load() || held_chunks.load() > 0)) seen = r;   // the picture held
          if (r != seen) {
              seen = r;
 +            static bool vsync_now = false;
@@ -8281,7 +8303,7 @@ index 5726093..84d77e7 100644
              auto tp = Clock::now();
              present();
              if (g_vperf_on) g_vperf.present += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - tp).count();
-@@ -1631,3 +2853,65 @@ void video_run(const char* title) {
+@@ -1631,3 +2870,65 @@ void video_run(const char* title) {
          if (!busy) SDL_WaitSemaphoreTimeout(wake, 5);
      }
  }
@@ -8348,7 +8370,7 @@ index 5726093..84d77e7 100644
 +    }
 +}
 diff --git a/runtime/video.h b/runtime/video.h
-index ecfb499..8afa601 100644
+index ecfb499..cf24087 100644
 --- a/runtime/video.h
 +++ b/runtime/video.h
 @@ -3,7 +3,7 @@
@@ -8463,7 +8485,7 @@ index ecfb499..8afa601 100644
  ClassicState video_classic(int chan);
  // The Remote's motor on a channel: its pad rumbles (the Remote's own on
  // channel 1 when a pad is there).
-@@ -97,6 +140,64 @@ void video_set_rumble(int chan, bool on);
+@@ -97,6 +140,66 @@ void video_set_rumble(int chan, bool on);
  // the pause box), and the motion is summed until taken.
  void video_set_relative_mouse(bool on);
  void video_take_mouse_motion(float& dx, float& dy);
@@ -8474,6 +8496,8 @@ index ecfb499..8afa601 100644
 +bool video_mouse(float& x, float& y, bool& left);
 +// where the game's picture sits in a window of w x h (any units): x, y, width, height
 +void video_picture_rect(float w, float h, float rect[4]);
++// held, the window keeps the picture it shows and frames drawn meanwhile are never shown
++void video_hold(bool on);
 +// The system's cursor stays visible over the picture, for a game that draws
 +// no pointer of its own there (it is hidden over the picture otherwise).
 +void video_keep_cursor(bool on);

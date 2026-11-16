@@ -172,3 +172,6 @@ ge_bloom               # the bloom pass: none with Disable Bloom (port/gameplay/
 ge_dof                 # the depth of field pass: none with Disable Depth of Field (port/gameplay/screen.cpp)
 ge_grain_pass          # the film grain's pass: left out by the Film Grain slider at 0 (port/gameplay/screen.cpp)
 ge_screen_quad         # a screen quad of the passes: the grain's colour scaled by the Film Grain slider (port/gameplay/screen.cpp)
+ge_player_fire_bullet  # the player's bullet leaves the gun: told to TASLib (port/tas/shots.cpp)
+ge_bullet_impact       # a bullet's impact: told to TASLib (port/tas/shots.cpp)
+ge_bullet_contact      # a bullet meets a thing: told to TASLib (port/tas/shots.cpp)

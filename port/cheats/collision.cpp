@@ -623,11 +623,11 @@ void Update(PPCContext& c)
 PPCFunc orig_camera_apply = nullptr;
 void CameraApply(PPCContext& c)
 {
-	bool player = c.lr == kPlayerViewCall && Views() && guest_ptr(ld32(kPlayerPtr));
+	bool player = c.lr == kPlayerViewCall && guest_ptr(ld32(kPlayerPtr));
 	orig_camera_apply(c);
 	if (!player) return;
-	g_view_applied = true;
-	Update(c);
+	g_view_applied = true; //the player's clip is kept with the viewer off as well (player_clip)
+	if (Views()) Update(c);
 }
 
 PPCFunc orig_world_draw = nullptr;
@@ -638,8 +638,11 @@ void WorldDraw(PPCContext& c)
 	if (player)
 	{
 		for (int i = 0; i < 16; ++i) g_clip[i] = ldf(kClipMatrix + i * 4);
-		g_shown = Views();
-		gx_debug_view(g_shown, g_clip);
+		if (Views())
+		{
+			g_shown = Views();
+			gx_debug_view(g_shown, g_clip);
+		}
 	}
 	orig_world_draw(c);
 	if (g_trace && Views())

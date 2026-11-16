@@ -161,6 +161,7 @@ void install() {
     install_mouse();
     install_overlay();
     install_tas();
+    install_shots();
 #ifdef GE_DEV
     install_dev();
 #endif

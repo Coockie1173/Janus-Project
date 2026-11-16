@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <cstddef>
 #include <cstdlib>
 #include <cstring>
 #include <functional>
@@ -210,6 +211,12 @@ int HostStartVideo(const char* path, uint32_t w, uint32_t h, uint32_t fps, char*
 	return 0;
 }
 void HostStopVideo() { video_capture_stop(); }
+int HostViewClip(float* m) { return player_clip(m) ? 1 : 0; }
+void HostSetQuiet(int on)
+{
+	video_hold(on != 0);
+	audio_hold(on != 0);
+}
 void HostSetSpeed(double speed) { rt_set_speed(std::clamp(speed, 1.0 / 64, 64.0)); }
 void HostSetFixedRate(uint32_t fps) { g_fixedRate = fps == 0 ? 0 : std::clamp(fps, 30u, 1000u); }
 void HostSetFramesAsDrawn(int on) { g_asDrawn = on != 0; }
@@ -348,6 +355,7 @@ const GeTasHost kHost{
 	HostMenuPage, HostMenuRow, HostMenuKey, HostMenuKeyName, HostMenuOpen,
 	HostSetSpeed, HostMovement,
 	HostCheatOff, HostStartVideo, HostStopVideo,
+	HostViewClip, HostSetQuiet,
 };
 
 void Shutdown()
@@ -406,6 +414,11 @@ void tas_boundary(PPCContext& c)
 	g_pLib->Boundary();
 	g_pBoundary = nullptr;
 	if (g_presence != presence) wpad_set_presence(g_presence == ~0u ? nullptr : Present);
+}
+
+void tas_shot(const GeTasShot& shot)
+{
+	if (g_pLib && g_pLib->size >= offsetof(GeTasLib, Shot) + sizeof(void*) && g_pLib->Shot) g_pLib->Shot(&shot);
 }
 
 void tas_controller(uint32_t ctrl)
@@ -473,7 +486,14 @@ void tas_draw()
 		if (l.anchor != GE_ANCHOR_TL)
 		{
 			const ImVec2 box = font->CalcTextSizeA(size, FLT_MAX, 0, l.text.c_str());
-			if (l.anchor == GE_ANCHOR_TIMER)
+			if (l.anchor == GE_ANCHOR_VIEW)
+			{
+				float picture[4];
+				video_picture_rect(screen.x, screen.y, picture);
+				x = picture[0] + (l.x * 0.5f + 0.5f) * picture[2] - box.x * 0.5f;
+				y = picture[1] + (0.5f - l.y * 0.5f) * picture[3] - box.y * 0.5f;
+			}
+			else if (l.anchor == GE_ANCHOR_TIMER)
 			{
 				//above the game's mission timer, right-aligned to it; top centre when there's no timer
 				float tright, ttop;

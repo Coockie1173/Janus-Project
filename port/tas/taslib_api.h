@@ -7,7 +7,7 @@
 #define GE_TASLIB_API_H
 #include <stdint.h>
 
-#define GE_TAS_API_VERSION 7
+#define GE_TAS_API_VERSION 8
 
 #ifdef _WIN32
 #define GE_TAS_EXPORT __declspec(dllexport)
@@ -57,7 +57,9 @@ typedef struct GeMoveInfo
 //line can sit against any edge whatever the window's size (a watermark in a corner)
 //GE_ANCHOR_TIMER sits the line above the game's mission timer (right-aligned to it); x and y are the
 //pixels left of the timer's right edge and above its top. off a mission (no timer) it falls back to top centre
-enum { GE_ANCHOR_TL = 0, GE_ANCHOR_TR = 1, GE_ANCHOR_BL = 2, GE_ANCHOR_BR = 3, GE_ANCHOR_TC = 4, GE_ANCHOR_TIMER = 5 }; //api 7
+//GE_ANCHOR_VIEW (api 8): x and y are a place on the game's picture, -1 to 1 across and up (a point the view's clip
+//matrix put there), the text centred on it
+enum { GE_ANCHOR_TL = 0, GE_ANCHOR_TR = 1, GE_ANCHOR_BL = 2, GE_ANCHOR_BR = 3, GE_ANCHOR_TC = 4, GE_ANCHOR_TIMER = 5, GE_ANCHOR_VIEW = 6 }; //api 7
 typedef struct GeTasText
 {
 	float x, y;
@@ -66,6 +68,21 @@ typedef struct GeTasText
 	const char* text;
 	uint32_t anchor; //api 7: GE_ANCHOR_*, the corner x and y count from (0 top left, as before)
 } GeTasText;
+
+//api 8: the local player's bullets as they happen, on the game's thread
+//fired: it leaves the gun (x y z where, v its velocity in metres a second), a shotgun's pellets each a bullet after
+//impact: it lands on the world (x y z where); contact: on a thing (x y z where, thing the entity)
+//hurt: a guard takes it (thing the guard, before and after its health, flags the hit's: bit 0 the head)
+enum { GE_SHOT_FIRED = 0, GE_SHOT_IMPACT = 1, GE_SHOT_CONTACT = 2, GE_SHOT_HURT = 3 };
+typedef struct GeTasShot
+{
+	int32_t kind;
+	float x, y, z;
+	float vx, vy, vz;
+	uint32_t thing;
+	float before, after;
+	uint32_t flags;
+} GeTasShot;
 
 //what the game offers the library
 typedef struct GeTasHost
@@ -135,6 +152,12 @@ typedef struct GeTasHost
 	//both from the game's thread, Stop finishes the file before it returns
 	int (*StartVideo)(const char* path, uint32_t w, uint32_t h, uint32_t fps, char* err, uint32_t errSize);
 	void (*StopVideo)(void);
+
+	//api 8: the clip matrix of the local player's view as last drawn (16 floats, a row vector (x y z 1) times it), 0 none yet
+	int (*ViewClip)(float* m);
+	//quiet: the frames run unseen and unheard, the window keeps the picture it shows and the sound is silent.
+	//let go, the next picture shown is one drawn after it (none of the quiet ones)
+	void (*SetQuiet)(int on);
 } GeTasHost;
 
 //what the library gives back, any callback can be null
@@ -152,6 +175,9 @@ typedef struct GeTasLib
 	int (*Input)(int chan, GeTasPad* pad); //the raw pad (host keys, wheel, a gamepad) before the port's rules: 1 when the library's replaces it
 	void (*ControllerUpdate)(uint32_t controller); //the local controller's update starts, on the game's thread
 	int (*Key)(const char* name, int down, int repeat, int mods); //a window's key (renderer's thread): 1 when it's the library's; mods bit 0 shift, 1 ctrl, 2 alt
+
+	//api 8
+	void (*Shot)(const GeTasShot* shot); //the local player's bullet: fired, landed, a guard hurt (game's thread)
 } GeTasLib;
 
 //the one export, null when the library doesn't want to run

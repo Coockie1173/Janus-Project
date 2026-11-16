@@ -195,6 +195,7 @@ void NpcHit(PPCContext& c)
 	}
 	orig_npc_hit(c);
 	if (body) { st32(hit + 0x3C, flags); stf(hit + 0x44, damage); }
+	shots_npc_hit(npc, hit, before);
 	if (!g_tracehit) return;
 	const uint32_t by = ld32(hit + 0x30);
 	std::string table;
