@@ -273,8 +273,8 @@ void Stop(const char* why, bool hold = false)
 		set_fast_forward(false);
 		double took = std::chrono::duration<double>(Clock::now() - g_started).count();
 		double skipped = std::chrono::duration<double>(rt_now() - g_started_guest).count();
-		rt_log("goldeneye: skip cutscenes: %s, %.1f s of cutscene (%u frames) in %.1f s, level %08X's cutscene left at %.2f",
-			why, skipped, g_frames, took, ld32(kCurrentLevel), ldf(kLevelTimer));
+		rt_log("goldeneye: skip cutscenes: %s, %.1f s of cutscene (%u frames) in %.1f s, level %08X's cutscene left at %.2f (frame %u)",
+			why, skipped, g_frames, took, ld32(kCurrentLevel), ldf(kLevelTimer), ld32(kFrameCount));
 	}
 	else if (g_state == Skip::FadingOut) rt_log("goldeneye: skip cutscenes: not skipped, %s", why);
 	else if (g_state == Skip::Waiting && g_trace) rt_log("goldeneye: skip cutscenes: not waiting any more, %s", why);
@@ -293,11 +293,16 @@ void Stop(const char* why, bool hold = false)
 }
 
 //a mission starts from its beginning: its opening is the next cutscene
+//deterministic (TAS mode) nothing is skipped: the skip lives off the game's frames (the fade, the long
+//steps, the frames left undrawn), and a movie starting or a state loaded in the middle of one played
+//differently from the recording
+bool SkipsAllowed() { return !rt_deterministic(); }
+
 void Arm(uint32_t level)
 {
 	Stop("a level change");
 	int m = MissionOf(level);
-	if (m < 0 || !g_on[m][kSkipIntro]) return;
+	if (m < 0 || !g_on[m][kSkipIntro] || !SkipsAllowed()) return;
 	g_state = Skip::Waiting;
 	g_option = &g_on[m][kSkipIntro];
 	g_part = kSkipIntro;
@@ -315,7 +320,7 @@ void ArmCutscene(uint32_t cutscene)
 {
 	if (g_state != Skip::Idle) return;
 	auto known = g_cutscenes.find({ld32(kCurrentLevel), cutscene});
-	if (known == g_cutscenes.end() || !g_on[known->second.mission][known->second.part]) return;
+	if (known == g_cutscenes.end() || !g_on[known->second.mission][known->second.part] || !SkipsAllowed()) return;
 	if (known->second.qte && !auto_qte()) return;
 	g_state = Skip::Waiting;
 	g_option = &g_on[known->second.mission][known->second.part];
@@ -348,7 +353,7 @@ void StartFade()
 	g_holding = false;
 	FadeTo(1.0f);
 	audio_mute(true, kFadeSeconds);
-	rt_log("goldeneye: skip cutscenes: skipping a cutscene of level %08X", ld32(kCurrentLevel));
+	rt_log("goldeneye: skip cutscenes: skipping a cutscene of level %08X (frame %u)", ld32(kCurrentLevel), ld32(kFrameCount));
 }
 
 //the cutscene that is waited for or skipped has the player, or plays at all for one of "any"
@@ -648,7 +653,13 @@ void install_cutscenes()
 		io.pod(g_counting); io.pod(g_played); io.pod(g_ends); io.pod(g_armed_ends); io.pod(g_through); io.pod(g_armed_through);
 		io.pod(g_back_first); io.pod(g_wait_until); io.pod(g_holding); io.time(g_started); io.time(g_started_guest);
 		io.pod(from); io.pod(to); io.pod(started);
-		if (io.applying) { g_running = running; g_asked_level = asked; g_fade_from = from; g_fade_to = to; g_fade_started = started; }
+		if (!io.applying) return;
+		g_running = running; g_asked_level = asked; g_fade_from = from; g_fade_to = to; g_fade_started = started;
+		//what follows from the state, as it was when it was saved: a state loaded in the middle of a skip
+		//kept the frames undrawn (other game code, so another game) and the sound off. a running skip
+		//sets which frames are drawn before the next is
+		g_gx_skip_frames = false;
+		audio_mute(g_state == Skip::Running || g_state == Skip::FadingOut || g_holding);
 	});
 	if (const char* e = std::getenv("GE_ENTRANCE")) g_forced_entrance = std::atoi(e);
 	if (const char* e = std::getenv("GE_LEVEL")) g_forced_level = (uint32_t)std::strtoul(e, nullptr, 16);

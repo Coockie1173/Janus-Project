@@ -125,7 +125,7 @@ typedef struct GeTasHost
 	//api 6: a setting of the Cheats page (a tool, not part of play): the value that turns it off ("" one
 	//with none of its own), null for a setting that isn't one
 	const char* (*CheatOff)(const char* id);
-	//the picture as the game draws it (none of the overlays) and its sound into a video file (ffmpeg),
+	//the window as shown (the game's overlays, and the library's lines unless it hides them) and its sound into a video file (ffmpeg),
 	//w x h at fps, timed by the game's time less what a skip jumped. needs a window; 0 and why in err when it can't.
 	//both from the game's thread, Stop finishes the file before it returns
 	int (*StartVideo)(const char* path, uint32_t w, uint32_t h, uint32_t fps, char* err, uint32_t errSize);

@@ -228,7 +228,12 @@ void install_fps() {
         float ease = g_ease_rate;
         io.pod(g_frame); io.pod(g_skipping); io.pod(g_before); io.pod(g_fps_applied); io.pod(g_max_written);
         io.pod(fast); io.pod(g_fast_applied); io.pod(ease);
-        if (io.applying) { g_fast = fast; g_ease_rate = ease; }
+        if (!io.applying) return;
+        g_fast = fast;
+        g_ease_rate = ease;
+        //and what follows from those (set_fast_forward, apply_rate), as the state had them
+        g_ai_catch_up = fast;
+        apply_rate(g_fps_applied, g_fast_applied);
     });
     orig_tick = ppc_hook("ge_frame_tick", frame_tick);
     if (!orig_tick) rt_die("goldeneye: ge_frame_tick is not hooked in this build");

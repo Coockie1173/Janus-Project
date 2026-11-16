@@ -5681,7 +5681,7 @@ index 99351d5..52dfaae 100644
  static inline void ps_set(PPCContext& c, int d, double a, double b) { c.f[d] = rs(a); c.ps1[d] = rs(b); }
 +static inline void ps_put(PPCContext& c, int d, double a, double b) { c.f[d] = a; c.ps1[d] = b; }
 diff --git a/runtime/rt.h b/runtime/rt.h
-index 75fec5e..9b607b0 100644
+index 75fec5e..5924157 100644
 --- a/runtime/rt.h
 +++ b/runtime/rt.h
 @@ -4,8 +4,12 @@
@@ -5846,7 +5846,7 @@ index 75fec5e..9b607b0 100644
  void hw_cpu_idle();                               // the processor idles: IOS replies are due at once
 +
 +// ---- video capture (video.cpp, audio.cpp) -------------------------------------------------
-+// The picture as the game draws it (none of the port's overlays) and its sound, into a video file
++// The window as shown (the port's overlays drawn: hide what shouldn't be in it) and the sound, into a video file
 +// through ffmpeg (on the PATH, or WIIKIT_FFMPEG): w x h at fps, the picture letterboxed. Both are
 +// timed by rt_shown_ns, so a skipped cutscene is gone from it as it was from the screen, a slow
 +// renderer or an unpaced guest change nothing, and sound and picture stay together. Needs a window
@@ -6156,7 +6156,7 @@ index 0000000..42f3957
 +    return true;
 +}
 diff --git a/runtime/video.cpp b/runtime/video.cpp
-index 5726093..863f099 100644
+index 5726093..77dd080 100644
 --- a/runtime/video.cpp
 +++ b/runtime/video.cpp
 @@ -46,7 +46,7 @@ constexpr int EFB_W = 640, EFB_H = 528;
@@ -7262,39 +7262,39 @@ index 5726093..863f099 100644
 -        static const GLenum lo[16] = {GL_CLEAR, GL_AND, GL_AND_REVERSE, GL_COPY, GL_AND_INVERTED, GL_NOOP,
 -                                      GL_XOR, GL_OR, GL_NOR, GL_EQUIV, GL_INVERT, GL_OR_REVERSE,
 -                                      GL_COPY_INVERTED, GL_OR_INVERTED, GL_NAND, GL_SET};
+-        glDisable(GL_BLEND);
+-        glEnable(GL_COLOR_LOGIC_OP);
+-        glLogicOp(lo[cm >> 12 & 15]);
+-    } else {
 +        glDepthFunc(scene ? GL_GEQUAL : GL_LEQUAL);
 +        glProgramUniform1f(dbgo_prog, dbgo_fade_loc, dbgo_opacity.load());
 +        glDrawArrays(GL_TRIANGLES, 0, (GLsizei)dbgo_count);
          glDisable(GL_BLEND);
--        glEnable(GL_COLOR_LOGIC_OP);
--        glLogicOp(lo[cm >> 12 & 15]);
--    } else {
--        glDisable(GL_BLEND);
 -        glDisable(GL_COLOR_LOGIC_OP);
 +        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-+    }
-+    if (scene) {
-+        glDepthMask(GL_TRUE);
-+        glClearDepth(1.0);
-+        glClear(GL_DEPTH_BUFFER_BIT);
      }
 -    // GX's front faces are clockwise on screen: counter-clockwise for GL,
 -    // whose y runs the other way over the same rows
 -    if (tri && cull) { glEnable(GL_CULL_FACE); glCullFace(cull == 1 ? GL_BACK : GL_FRONT); }
 -    else glDisable(GL_CULL_FACE);
-+}
-+
-+// An EFB copy: the scene is in what is copied; a copy that clears takes it out again.
-+void dbg_copy(bool clears) {
-+    if (clears) dbg_drawn = false;
-+    else if (dbg_waiting) dbg_draw();
-+    else dbg_drawn = false;                          // what is drawn in 3D after a copy is another pass
++    if (scene) {
++        glDepthMask(GL_TRUE);
++        glClearDepth(1.0);
++        glClear(GL_DEPTH_BUFFER_BIT);
++    }
 +}
  
 -    if (xf_lo < xf_hi) {
 -        glNamedBufferSubData(xf_ubo, xf_lo * 4, (xf_hi - xf_lo) * 4, &xf[xf_lo]);
 -        xf_lo = 0x1058;
 -        xf_hi = 0;
++// An EFB copy: the scene is in what is copied; a copy that clears takes it out again.
++void dbg_copy(bool clears) {
++    if (clears) dbg_drawn = false;
++    else if (dbg_waiting) dbg_draw();
++    else dbg_drawn = false;                          // what is drawn in 3D after a copy is another pass
++}
++
 +// True: the draw about to be made is one the debug scene stands in for.
 +bool dbg_hides() {
 +    if (!dbg_on) return false;
@@ -7704,7 +7704,7 @@ index 5726093..863f099 100644
          auto dir = [&](int i) { return cl & (kStick << i) ? 1.0f : 0.0f; };
          k.lx = dir(3) - dir(2);
          k.ly = dir(0) - dir(1);
-@@ -1261,12 +2174,120 @@ void update_pad() {
+@@ -1261,12 +2174,125 @@ void update_pad() {
      for (int i = 0; i < 4; ++i)
          if (chan_pad[i] && !(i == 0 && mode == INPUT_MODE_KEYBOARD)) merge(c[i], classic_from_pad(chan_pad[i]));
      update_rumble();
@@ -7721,8 +7721,9 @@ index 5726093..863f099 100644
 +
 +// ---- video capture (rt.h) ----------------------------------------------------------------------
 +// the guest's thread asks (start, stop), the renderer opens ffmpeg and hands it each picture: the
-+// game's XFB letterboxed into w x h, put in the frames of the output's rate that its time (the
-+// record's rt_shown_ns) reaches, the one before standing in for any it skipped
++// window as shown, the port's overlays drawn (a port hides what shouldn't be in it), letterboxed into
++// w x h, put in the frames of the output's rate that its time (the record's rt_shown_ns) reaches, the
++// one before standing in for any it skipped
 +namespace cap {
 +enum { kIdle, kStarting, kOn, kStopping };
 +std::mutex mx;
@@ -7792,16 +7793,20 @@ index 5726093..863f099 100644
 +    }
 +}
 +
-+void frame(GLuint from, int fw, int fh, Rect r) {
-+    if (state.load() != kOn || !pipe) return;
++// the window's back buffer (fw x fh) into the capture's frame, its shape kept
++void frame(int fw, int fh) {
++    if (state.load() != kOn || !pipe || fw <= 0 || fh <= 0) return;
 +    const int64_t at = shown_at.load();
 +    if (at == INT64_MIN || at < t0) return;
-+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);           // present() has the scissor off and every colour on
++    glDisable(GL_SCISSOR_TEST);                       // the overlay leaves it on, and a blit minds it
++    glColorMask(1, 1, 1, 1);
++    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
 +    glClearColor(0, 0, 0, 1);
 +    glClear(GL_COLOR_BUFFER_BIT);
 +    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-+    const int dx = (int)std::lround(r.x), dy = (int)std::lround(r.y), dw = (int)std::lround(r.w), dh = (int)std::lround(r.h);
-+    glBlitNamedFramebuffer(from, fbo, 0, 0, fw, fh, dx, dy, dx + dw, dy + dh, GL_COLOR_BUFFER_BIT, GL_LINEAR);   // top row first, as the XFB
++    const float scale = std::min((float)w / fw, (float)h / fh);
++    const int dw = (int)std::lround(fw * scale), dh = (int)std::lround(fh * scale), dx = (w - dw) / 2, dy = (h - dh) / 2;
++    glBlitNamedFramebuffer(0, fbo, 0, 0, fw, fh, dx, dy + dh, dx + dw, dy, GL_COLOR_BUFFER_BIT, GL_LINEAR);   // turned over: top row first
 +    glBindFramebuffer(GL_READ_FRAMEBUFFER, fbo);
 +    glPixelStorei(GL_PACK_ALIGNMENT, 1);
 +    glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
@@ -7825,7 +7830,7 @@ index 5726093..863f099 100644
      ++cnt.presents;
      int ww = 0, wh = 0;
      SDL_GetWindowSizeInPixels(win, &ww, &wh);
-@@ -1275,22 +2296,120 @@ void present() {
+@@ -1275,22 +2301,120 @@ void present() {
      glColorMask(1, 1, 1, 1);
      glClearColor(0, 0, 0, 1);
      glClear(GL_COLOR_BUFFER_BIT);
@@ -7946,15 +7951,15 @@ index 5726093..863f099 100644
 +            }
 +        }
 +    }
-+    if (it != xfbs.end() && cap::state.load() == cap::kOn) cap::frame(it->second.fbo, it->second.w, it->second.h, picture_rect((float)cap::w, (float)cap::h));
 +    if (overlay_cb.draw) overlay_cb.draw();
++    if (it != xfbs.end() && cap::state.load() == cap::kOn) cap::frame(ww, wh);
 +    if (opt.dump_dir && cnt.presents >= (uint64_t)opt.dump_from && cnt.presents % (uint64_t)opt.dump_every == 0 && ww > 0 && wh > 0) {
 +        std::vector<uint8_t> flip;                                        // the window, as shown
 +        video_read_window(flip, ww, wh);
          char name[64];
          std::snprintf(name, sizeof name, "/frame_%06llu.png", (unsigned long long)cnt.presents);
          write_png(std::string(opt.dump_dir) + name, ww, wh, flip.data());
-@@ -1317,7 +2436,6 @@ void setup() {
+@@ -1317,7 +2441,6 @@ void setup() {
      glNamedFramebufferTexture(efb_fbo, GL_DEPTH_ATTACHMENT, efb_dep, 0);
      if (glCheckNamedFramebufferStatus(efb_fbo, GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
          rt_die("video: the EFB framebuffer is incomplete");
@@ -7962,7 +7967,7 @@ index 5726093..863f099 100644
      glBindFramebuffer(GL_FRAMEBUFFER, efb_fbo);
      glClearColor(0, 0, 0, 1);
      glClearDepth(1.0);
-@@ -1327,45 +2445,25 @@ void setup() {
+@@ -1327,45 +2450,25 @@ void setup() {
      const GLbitfield map = GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT;
      glNamedBufferStorage(vbo, VBO_CAP, nullptr, map);
      vbo_ptr = static_cast<uint8_t*>(glMapNamedBufferRange(vbo, 0, VBO_CAP, map));
@@ -8025,7 +8030,7 @@ index 5726093..863f099 100644
  
      copy_prog = link(FULLSCREEN_VS, COPY_FS);
      if (!copy_prog) rt_die("video: the EFB copy program does not build");
-@@ -1377,6 +2475,7 @@ void setup() {
+@@ -1377,6 +2480,7 @@ void setup() {
  
  // ---- the game's side ------------------------------------------------------------------------------
  bool video_enabled() { return opt.enabled; }
@@ -8033,7 +8038,7 @@ index 5726093..863f099 100644
  void video_configure(const VideoOptions& o) { opt = o; S = std::max(1, o.scale); }
  
  VideoPerf g_vperf;
-@@ -1394,7 +2493,7 @@ bool video_submit(std::vector<uint8_t>& rec, int frames, int wait_ms) {
+@@ -1394,7 +2498,7 @@ bool video_submit(std::vector<uint8_t>& rec, int frames, int wait_ms) {
      else ok = q_space.wait_for(lk, std::chrono::milliseconds(wait_ms), room);
      if (g_vperf_on) g_vperf.wait += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - t0).count();
      if (!ok) return false;
@@ -8042,7 +8047,7 @@ index 5726093..863f099 100644
      q_frames += frames;
      // a buffer the renderer is done with, capacity and pages kept: fresh
      // allocations of megabytes a frame cost page faults and copies as they grow
-@@ -1424,7 +2523,7 @@ bool video_efb_read(std::vector<uint32_t>& argb, std::vector<uint32_t>& z) {
+@@ -1424,7 +2528,7 @@ bool video_efb_read(std::vector<uint32_t>& argb, std::vector<uint32_t>& z) {
      // the console's CPU takes its interrupts while it waits: so does this wait
      while (!rb_ready) {
          rb_cv.wait_for(lk, std::chrono::milliseconds(1));
@@ -8051,7 +8056,7 @@ index 5726093..863f099 100644
              lk.unlock();
              ppc_poll(*t_ppc);
              lk.lock();
-@@ -1447,7 +2546,7 @@ bool video_copy_read(uint32_t addr, int w, int h, std::vector<uint8_t>& rgba) {
+@@ -1447,7 +2551,7 @@ bool video_copy_read(uint32_t addr, int w, int h, std::vector<uint8_t>& rgba) {
      if (wake) SDL_SignalSemaphore(wake);
      while (!rb_ready) {                              // taking interrupts meanwhile, as video_efb_read
          rb_cv.wait_for(lk, std::chrono::milliseconds(1));
@@ -8060,7 +8065,7 @@ index 5726093..863f099 100644
              lk.unlock();
              ppc_poll(*t_ppc);
              lk.lock();
-@@ -1462,6 +2561,46 @@ std::atomic<bool> want_relative{false};
+@@ -1462,6 +2566,46 @@ std::atomic<bool> want_relative{false};
  std::mutex motion_mx;
  float motion_x = 0, motion_y = 0;
  void video_set_relative_mouse(bool on) { want_relative = on; }
@@ -8107,7 +8112,7 @@ index 5726093..863f099 100644
  void video_take_mouse_motion(float& dx, float& dy) {
      std::lock_guard<std::mutex> lk(motion_mx);
      dx = motion_x; dy = motion_y;
-@@ -1473,12 +2612,27 @@ PadState video_pad() {
+@@ -1473,12 +2617,27 @@ PadState video_pad() {
      return pad;
  }
  ClassicState video_classic(int chan) {
@@ -8135,7 +8140,7 @@ index 5726093..863f099 100644
  void video_retrace() {
      retraces.fetch_add(1);
      if (wake) SDL_SignalSemaphore(wake);
-@@ -1499,13 +2653,21 @@ void video_run(const char* title) {
+@@ -1499,13 +2658,21 @@ void video_run(const char* title) {
      int w0 = opt.window_w ? opt.window_w : (opt.widescreen ? 1280 : 960), h0 = opt.window_h ? opt.window_h : 720;
      SDL_WindowFlags wflags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE;
      if (opt.fullscreen) wflags |= SDL_WINDOW_FULLSCREEN;
@@ -8157,7 +8162,7 @@ index 5726093..863f099 100644
      rt_log("video: %s, %s", (const char*)glGetString(GL_RENDERER), (const char*)glGetString(GL_VERSION));
      if (debug) {
          glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
-@@ -1529,11 +2691,15 @@ void video_run(const char* title) {
+@@ -1529,11 +2696,15 @@ void video_run(const char* title) {
      uint64_t frames_then = 0;
      uint32_t seen = retraces.load();
      std::string base_title = title;
@@ -8173,7 +8178,7 @@ index 5726093..863f099 100644
              if (e.type == SDL_EVENT_GAMEPAD_ADDED) pad_added(e.gdevice.which);
              if (e.type == SDL_EVENT_GAMEPAD_REMOVED) pad_removed(e.gdevice.which);
              // F11 or Alt+Enter: fullscreen and back
-@@ -1560,6 +2726,15 @@ void video_run(const char* title) {
+@@ -1560,6 +2731,15 @@ void video_run(const char* title) {
              }
          }
          auto now = Clock::now();
@@ -8189,7 +8194,7 @@ index 5726093..863f099 100644
          if (opt.quit_after > 0 && std::chrono::duration<double>(now - t0).count() > opt.quit_after) quit = true;
          if (quit) {
              rt_log("video: %llu frames, %llu presents, %llu draws, %llu programs (%llu linked, %llu from the shader cache)",
-@@ -1574,6 +2749,18 @@ void video_run(const char* title) {
+@@ -1574,6 +2754,18 @@ void video_run(const char* title) {
          {
              bool rel = want_relative && (SDL_GetWindowFlags(win) & SDL_WINDOW_INPUT_FOCUS);
              if (rel != SDL_GetWindowRelativeMouseMode(win)) SDL_SetWindowRelativeMouseMode(win, rel);
@@ -8208,7 +8213,7 @@ index 5726093..863f099 100644
              float dx = 0, dy = 0;
              SDL_GetRelativeMouseState(&dx, &dy);
              if (rel) {
-@@ -1592,12 +2779,20 @@ void video_run(const char* title) {
+@@ -1592,12 +2784,20 @@ void video_run(const char* title) {
                  double vtx = ms(g_vperf.vtx), tex = ms(g_vperf.tex), wait = ms(g_vperf.wait), draw = ms(g_vperf.draw),
                         pres = ms(g_vperf.present);
                  rt_log("perf: %.1f fps; frame %.1f ms; game thread: vertices %.1f, textures %.1f, waiting for the renderer %.1f; "
@@ -8230,7 +8235,7 @@ index 5726093..863f099 100644
          for (int k = 0; k < 16; ++k) {
              Chunk c;
              {
-@@ -1608,7 +2803,10 @@ void video_run(const char* title) {
+@@ -1608,7 +2808,10 @@ void video_run(const char* title) {
              }
              if (c.readback) { if (c.copy) copy_readback(c.copy); else efb_readback(); busy = true; continue; }
              auto te = Clock::now();
@@ -8241,7 +8246,7 @@ index 5726093..863f099 100644
              if (g_vperf_on) g_vperf.draw += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - te).count();
              {
                  std::lock_guard<std::mutex> lk(qmx);
-@@ -1619,10 +2817,28 @@ void video_run(const char* title) {
+@@ -1619,10 +2822,28 @@ void video_run(const char* title) {
              q_space.notify_all();
              busy = true;
              if (retraces.load() != seen) break;
@@ -8270,7 +8275,7 @@ index 5726093..863f099 100644
              auto tp = Clock::now();
              present();
              if (g_vperf_on) g_vperf.present += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - tp).count();
-@@ -1631,3 +2847,65 @@ void video_run(const char* title) {
+@@ -1631,3 +2852,65 @@ void video_run(const char* title) {
          if (!busy) SDL_WaitSemaphoreTimeout(wake, 5);
      }
  }
