@@ -76,6 +76,9 @@ bool hud(); //the hud is drawn
 void set_hud(bool on);
 bool level_timer(); //the hud shows the level's time
 void set_level_timer(bool on);
+//the mission timer's place on screen, for drawing beside it: true when the timer is on screen now,
+//with its top-right corner in window pixels (win_w x win_h the window, letterboxing minded)
+bool mission_timer_anchor(float win_w, float win_h, float& right_x, float& top_y);
 bool extras_menu(); //the menu's unused extras page
 void set_extras_menu(bool on);
 bool unlock_all(); //every mission and difficulty can be picked

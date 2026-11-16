@@ -473,9 +473,19 @@ void tas_draw()
 		if (l.anchor != GE_ANCHOR_TL)
 		{
 			const ImVec2 box = font->CalcTextSizeA(size, FLT_MAX, 0, l.text.c_str());
-			if (l.anchor == GE_ANCHOR_TR || l.anchor == GE_ANCHOR_BR) x = screen.x - box.x - l.x;
-			if (l.anchor == GE_ANCHOR_TC) x = (screen.x - box.x) * 0.5f + l.x;
-			if (l.anchor == GE_ANCHOR_BL || l.anchor == GE_ANCHOR_BR) y = screen.y - box.y - l.y;
+			if (l.anchor == GE_ANCHOR_TIMER)
+			{
+				//above the game's mission timer, right-aligned to it; top centre when there's no timer
+				float tright, ttop;
+				if (mission_timer_anchor(screen.x, screen.y, tright, ttop)) { x = tright - box.x - l.x; y = ttop - box.y - l.y; }
+				else { x = (screen.x - box.x) * 0.5f; y = 14 + l.y; }
+			}
+			else
+			{
+				if (l.anchor == GE_ANCHOR_TR || l.anchor == GE_ANCHOR_BR) x = screen.x - box.x - l.x;
+				if (l.anchor == GE_ANCHOR_TC) x = (screen.x - box.x) * 0.5f + l.x;
+				if (l.anchor == GE_ANCHOR_BL || l.anchor == GE_ANCHOR_BR) y = screen.y - box.y - l.y;
+			}
 		}
 		const ImU32 col = IM_COL32(l.rgba >> 24 & 0xFF, l.rgba >> 16 & 0xFF, l.rgba >> 8 & 0xFF, l.rgba & 0xFF);
 		dl->AddText(font, size, ImVec2(x + 1, y + 1), IM_COL32(0, 0, 0, (l.rgba & 0xFF) * 3 / 4), l.text.c_str());

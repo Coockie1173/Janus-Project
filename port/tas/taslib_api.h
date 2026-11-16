@@ -55,7 +55,9 @@ typedef struct GeMoveInfo
 
 //a line of text over the picture. x, y are the window's pixels from the corner the anchor names, so a
 //line can sit against any edge whatever the window's size (a watermark in a corner)
-enum { GE_ANCHOR_TL = 0, GE_ANCHOR_TR = 1, GE_ANCHOR_BL = 2, GE_ANCHOR_BR = 3, GE_ANCHOR_TC = 4 }; //api 7
+//GE_ANCHOR_TIMER sits the line above the game's mission timer (right-aligned to it); x and y are the
+//pixels left of the timer's right edge and above its top. off a mission (no timer) it falls back to top centre
+enum { GE_ANCHOR_TL = 0, GE_ANCHOR_TR = 1, GE_ANCHOR_BL = 2, GE_ANCHOR_BR = 3, GE_ANCHOR_TC = 4, GE_ANCHOR_TIMER = 5 }; //api 7
 typedef struct GeTasText
 {
 	float x, y;
