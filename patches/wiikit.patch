@@ -3677,7 +3677,7 @@ index c53d227..4ebd5ef 100644
 +    if (io.applying) ai_dma_period = std::chrono::nanoseconds(period);
 +}
 diff --git a/runtime/ios.cpp b/runtime/ios.cpp
-index 23d837a..8ab04f4 100644
+index 23d837a..3311738 100644
 --- a/runtime/ios.cpp
 +++ b/runtime/ios.cpp
 @@ -25,18 +25,41 @@
@@ -3842,10 +3842,25 @@ index 23d837a..8ab04f4 100644
  }
  
  void ios_irq_flag_clear(uint32_t v) {
-@@ -547,3 +603,47 @@ void ios_init(const char* extract_dir, const char* nand_root) {
+@@ -547,3 +603,62 @@ void ios_init(const char* extract_dir, const char* nand_root) {
      for (const char* d : {"/shared2/sys", "/tmp", "/sys"}) fs::create_directories(g_nand + d);
      fs::create_directories(g_nand + data);
  }
++
++const char* ios_nand_root() { return g_nand.c_str(); }
++
++std::string ios_save_dir() {
++    char data[64];
++    std::snprintf(data, sizeof data, "/title/%08x/%08x/data", (uint32_t)(g_title >> 32), (uint32_t)g_title);
++    return data;
++}
++
++// another host folder as the NAND, before the game has opened anything in it
++void ios_set_nand_root(const char* nand_root) {
++    g_nand = nand_root;
++    for (const char* d : {"/shared2/sys", "/tmp", "/sys"}) fs::create_directories(g_nand + d);
++    fs::create_directories(g_nand + ios_save_dir());
++}
 +
 +// saved states (state.cpp): the registers, the requests and replies on their way, and the open
 +// descriptors, which must be the same devices as when the state was taken
@@ -5694,7 +5709,7 @@ index 99351d5..52dfaae 100644
  static inline void ps_set(PPCContext& c, int d, double a, double b) { c.f[d] = rs(a); c.ps1[d] = rs(b); }
 +static inline void ps_put(PPCContext& c, int d, double a, double b) { c.f[d] = a; c.ps1[d] = b; }
 diff --git a/runtime/rt.h b/runtime/rt.h
-index 75fec5e..8993bab 100644
+index 75fec5e..efee73f 100644
 --- a/runtime/rt.h
 +++ b/runtime/rt.h
 @@ -4,8 +4,12 @@
@@ -5845,10 +5860,13 @@ index 75fec5e..8993bab 100644
  
  // ---- SYSCONF (sysconf.cpp) -----------------------------------------------------------
  // Writes the NAND's /shared2/sys/SYSCONF if it has none, sets what the
-@@ -123,6 +213,10 @@ extern bool g_sysconf_eurgb60;                     // IPL.E60, after sysconf_pre
+@@ -123,6 +213,13 @@ extern bool g_sysconf_eurgb60;                     // IPL.E60, after sysconf_pre
  
  // ---- IOS (ios.cpp) ------------------------------------------------------------------
  void ios_init(const char* disc_root, const char* nand_root);
++const char* ios_nand_root();                       // the host folder holding the NAND
++std::string ios_save_dir();                        // the title's own save folder in it ("/title/00010000/534a4245/data")
++void ios_set_nand_root(const char* nand_root);     // another folder, before the game opens anything in it
 +// The network (ios_net.h): a name given an address before the host's
 +// resolver is asked, as a hosts file would; and a log of what the game does.
 +void ios_net_add_host(const char* name, const char* address);
@@ -5856,7 +5874,7 @@ index 75fec5e..8993bab 100644
  void ios_ipc_write(uint32_t reg, uint32_t v);      // 0xCD000000-0xCD00000C
  uint32_t ios_ipc_read(uint32_t reg);
  void ios_irq_flag_clear(uint32_t v);               // 0xCD000030
-@@ -131,3 +225,69 @@ uint32_t ios_irq_flags();
+@@ -131,3 +228,69 @@ uint32_t ios_irq_flags();
  uint32_t ios_irq_mask();
  std::chrono::steady_clock::time_point ios_tick();  // replies now due delivered; when the next is
  void hw_cpu_idle();                               // the processor idles: IOS replies are due at once

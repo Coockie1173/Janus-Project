@@ -428,6 +428,12 @@ void HostUiPlace(int, int, int, int) {}
 int HostUiWhere(int*) { return 0; }
 #endif
 
+//the NAND: the folder the game's saves are in, and its own save folder in it
+std::string g_saveDir;
+const char* HostNandRoot() { return ios_nand_root(); }
+void HostSetNandRoot(const char* dir) { ios_set_nand_root(dir); }
+const char* HostSaveDir() { g_saveDir = ios_save_dir(); return g_saveDir.c_str(); }
+
 const GeTasHost kHost{
 	GE_TAS_API_VERSION, sizeof(GeTasHost), GE_VERSION, HostLog,
 	HostRead8, HostRead16, HostRead32, HostWrite8, HostWrite16, HostWrite32,
@@ -440,6 +446,7 @@ const GeTasHost kHost{
 	HostCheatOff, HostStartVideo, HostStopVideo,
 	HostViewClip, HostSetQuiet,
 	HostUiVersion, HostUiContext, HostUiAllocators, HostSetUiOpen, HostUiClosed, HostUiPlace, HostUiWhere,
+	HostNandRoot, HostSetNandRoot, HostSaveDir,
 };
 
 void Shutdown()

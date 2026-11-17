@@ -7,7 +7,7 @@
 #define GE_TASLIB_API_H
 #include <stdint.h>
 
-#define GE_TAS_API_VERSION 9
+#define GE_TAS_API_VERSION 10
 
 #ifdef _WIN32
 #define GE_TAS_EXPORT __declspec(dllexport)
@@ -171,6 +171,12 @@ typedef struct GeTasHost
 	int (*UiClosed)(void); //the window was closed with its own close button: 1, once
 	void (*UiPlace)(int x, int y, int w, int h); //where it opens next (before SetUiOpen); x or y INT_MIN, w or h 0: the system's
 	int (*UiWhere)(int* xywh); //where it is now (x, y, w, h), 0 when it isn't up
+
+	//api 10: the NAND, the host folder the game's saves are in. SetNandRoot only from init, before the game
+	//has opened anything in it: from then on the game's NAND is that folder
+	const char* (*NandRoot)(void);
+	void (*SetNandRoot)(const char* dir);
+	const char* (*SaveDir)(void); //the game's own save folder inside the NAND ("/title/00010000/534a4245/data")
 } GeTasHost;
 
 //what the library gives back, any callback can be null
