@@ -6177,7 +6177,7 @@ index 0000000..f6a82e4
 +    return true;
 +}
 diff --git a/runtime/video.cpp b/runtime/video.cpp
-index 5726093..64f8717 100644
+index 5726093..d5ee874 100644
 --- a/runtime/video.cpp
 +++ b/runtime/video.cpp
 @@ -46,7 +46,7 @@ constexpr int EFB_W = 640, EFB_H = 528;
@@ -8326,7 +8326,7 @@ index 5726093..64f8717 100644
              if (g_vperf_on) g_vperf.draw += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - te).count();
              {
                  std::lock_guard<std::mutex> lk(qmx);
-@@ -1619,10 +2880,29 @@ void video_run(const char* title) {
+@@ -1619,15 +2880,98 @@ void video_run(const char* title) {
              q_space.notify_all();
              busy = true;
              if (retraces.load() != seen) break;
@@ -8356,10 +8356,14 @@ index 5726093..64f8717 100644
              auto tp = Clock::now();
              present();
              if (g_vperf_on) g_vperf.present += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - tp).count();
-@@ -1631,3 +2911,65 @@ void video_run(const char* title) {
-         if (!busy) SDL_WaitSemaphoreTimeout(wake, 5);
-     }
- }
+             busy = true;
+         }
+-        if (!busy) SDL_WaitSemaphoreTimeout(wake, 5);
++        int idle = 5;
++        if (overlay_cb.tick) idle = std::clamp(overlay_cb.tick(), 0, 5);
++        if (!busy && idle > 0) SDL_WaitSemaphoreTimeout(wake, idle);
++    }
++}
 +
 +// ---- video capture: the guest thread's side ------------------------------------------------------
 +bool video_capture_start(const char* path, int w, int h, int fps, std::string& err) {
@@ -8420,10 +8424,10 @@ index 5726093..64f8717 100644
 +        rt_log("video: %s written, %llu frames (%.1f s)", cap::path.c_str(), (unsigned long long)frames, (double)frames / cap::fps);
 +    } else {
 +        rt_log("video: %s not finished (ffmpeg: %d, %d), the parts are kept beside it", cap::path.c_str(), encoded, muxed);
-+    }
-+}
+     }
+ }
 diff --git a/runtime/video.h b/runtime/video.h
-index ecfb499..83b691e 100644
+index ecfb499..24fcf02 100644
 --- a/runtime/video.h
 +++ b/runtime/video.h
 @@ -3,7 +3,7 @@
@@ -8538,7 +8542,7 @@ index ecfb499..83b691e 100644
  ClassicState video_classic(int chan);
  // The Remote's motor on a channel: its pad rumbles (the Remote's own on
  // channel 1 when a pad is there).
-@@ -97,6 +140,66 @@ void video_set_rumble(int chan, bool on);
+@@ -97,6 +140,70 @@ void video_set_rumble(int chan, bool on);
  // the pause box), and the motion is summed until taken.
  void video_set_relative_mouse(bool on);
  void video_take_mouse_motion(float& dx, float& dy);
@@ -8559,7 +8563,10 @@ index ecfb499..83b691e 100644
 +// window and its OpenGL context exist, event for every SDL event (true: the
 +// overlay took it, and the window's own keys, Esc and the rest, do not see
 +// it), draw before each swap, with the window's framebuffer bound. All on
-+// the renderer's thread.
++// the renderer's thread. tick every turn of the renderer's loop, frames drawn
++// or not (a paused game draws none and is presented ten times a second): for
++// windows of the port's own, paced by themselves: it gives back the most
++// milliseconds the loop may wait before the next turn (it waits 5 at most).
 +struct SDL_Window;
 +union SDL_Event;
 +struct VideoOverlay {
@@ -8567,6 +8574,7 @@ index ecfb499..83b691e 100644
 +    bool (*event)(const SDL_Event* e) = nullptr;
 +    void (*draw)() = nullptr;
 +    void (*draw_top)() = nullptr;   // after draw, over it, and out of a video capture (a menu)
++    int (*tick)() = nullptr;
 +};
 +void video_set_overlay(const VideoOverlay& o);
 +// The window's picture as it is right now (RGBA8, top row first), for an

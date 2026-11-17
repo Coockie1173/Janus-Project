@@ -20,6 +20,7 @@
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
@@ -573,7 +574,7 @@ bool tas_event(const SDL_Event* e)
 bool tas_ui_open() { return g_pLib && (g_uiMode == 1 || (g_uiMode == 2 && g_ui.Focused())); }
 
 //before the game's overlay, every frame: the library's window opened, closed and drawn
-void tas_own_window()
+int tas_own_window()
 {
 	const bool want = g_pLib && g_uiMode != 0 && g_pLib->size >= offsetof(GeTasLib, DrawUi) + sizeof(void*) && g_pLib->DrawUi;
 	if (want && !g_ui.Opened())
@@ -591,7 +592,7 @@ void tas_own_window()
 		{
 			g_uiClosed = true; //the library takes it as closed
 			g_uiMode = 0;
-			return;
+			return 5;
 		}
 	}
 	if (!want && g_ui.Opened())
@@ -600,7 +601,22 @@ void tas_own_window()
 		std::lock_guard<std::mutex> lk(g_uiMx);
 		g_uiUp = false;
 	}
-	if (!g_ui.Opened()) return;
+	if (!g_ui.Opened()) return 5;
+	//a picture a refresh of its screen: the renderer's loop turns far more often than that, and with the
+	//game paused it presents ten times a second, which is why it isn't drawn from the overlay's frame
+	using Clock = std::chrono::steady_clock;
+	static Clock::time_point drawn, asked;
+	static float hz = 60;
+	const Clock::time_point now = Clock::now();
+	if (now - asked >= std::chrono::seconds(1))
+	{
+		asked = now;
+		const SDL_DisplayMode* m = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(g_ui.Window()));
+		hz = m && m->refresh_rate > 0 ? std::clamp(m->refresh_rate, 30.0f, 360.0f) : 60.0f;
+	}
+	const float left = std::chrono::duration<float, std::milli>(drawn - now).count() + 1000 / hz; //ms to the next picture
+	if (left > 0) return (int)std::ceil(left);
+	drawn = now;
 	{
 		std::lock_guard<std::mutex> lk(g_uiMx);
 		SDL_GetWindowPosition(g_ui.Window(), &g_uiWhere[0], &g_uiWhere[1]);
@@ -610,10 +626,11 @@ void tas_own_window()
 	g_ui.Begin();
 	g_pLib->DrawUi();
 	g_ui.End();
+	return (int)(1000 / hz);
 }
 #else
 bool tas_ui_open() { return false; }
-void tas_own_window() {}
+int tas_own_window() { return 5; }
 #endif
 
 bool tas_showing()

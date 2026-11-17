@@ -315,7 +315,6 @@ ImVector<ImDrawCmd> g_menu_cmds; //the F1 menu's part of it, for draw_top
 void draw() {
     g_menu_cmds.clear();
     speedrun_own_window();
-    tas_own_window();
     settings_replay();
     if (std::string said = pictures_draw(); !said.empty()) settings_say(said);
     float fade = cutscene_fade();
@@ -387,6 +386,7 @@ void install_overlay() {
     o.event = event;
     o.draw = draw;
     o.draw_top = draw_top;
+    o.tick = tas_own_window;
     video_set_overlay(o);
 #endif
 }

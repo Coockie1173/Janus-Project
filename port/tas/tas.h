@@ -27,6 +27,6 @@ bool tas_event(const SDL_Event* e); //a window's key, the library's first (overl
 bool tas_showing(); //the library has text up
 void tas_draw(); //inside the overlay's ImGui frame
 bool tas_ui_open(); //the library's own window wants the cursor free
-void tas_own_window(); //the library's own window opened, closed and drawn (overlay.cpp, before its frame)
+int tas_own_window(); //the library's own window opened, closed and drawn (every turn of the renderer's loop, paced by its screen): ms to its next picture
 
 } //namespace ge
