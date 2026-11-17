@@ -7,7 +7,7 @@
 #define GE_TASLIB_API_H
 #include <stdint.h>
 
-#define GE_TAS_API_VERSION 8
+#define GE_TAS_API_VERSION 9
 
 #ifdef _WIN32
 #define GE_TAS_EXPORT __declspec(dllexport)
@@ -159,6 +159,15 @@ typedef struct GeTasHost
 	//let go, the pictures the game shows are put back as they were when it was taken (none of the quiet ones):
 	//let go after loading back a state saved before it, then the frames drawn after
 	void (*SetQuiet)(int on);
+
+	//api 9: a window of the library's own, drawn with the game's Dear ImGui (the library builds the same
+	//sources in and draws into this context, with these allocators, from DrawUi). 0/null without ImGui
+	uint32_t (*UiVersion)(void); //IMGUI_VERSION_NUM the game was built with, 0 none
+	void* (*UiContext)(void); //the ImGuiContext
+	void (*UiAllocators)(void** alloc, void** free, void** user); //ImGui's, to share its heap
+	//the library's window is up: the mouse is free and works it (not the view), ImGui gets the window's
+	//events, and the library's keys still come to Key unless a text field is being typed in
+	void (*SetUiOpen)(int on);
 } GeTasHost;
 
 //what the library gives back, any callback can be null
@@ -179,6 +188,9 @@ typedef struct GeTasLib
 
 	//api 8
 	void (*Shot)(const GeTasShot* shot); //the local player's bullet: fired, landed, a guard hurt (game's thread)
+
+	//api 9
+	void (*DrawUi)(void); //inside the overlay's ImGui frame (renderer's thread), every frame while SetUiOpen(1)
 } GeTasLib;
 
 //the one export, null when the library doesn't want to run

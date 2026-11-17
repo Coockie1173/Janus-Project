@@ -124,6 +124,7 @@ PPCContext* g_pBoundary{}; //the game thread's registers while Boundary runs
 std::atomic<uint32_t> g_fixedRate{0};
 std::atomic<bool> g_asDrawn{false}, g_mouseTaken{false};
 std::atomic<uint32_t> g_presence{~0u};
+std::atomic<bool> g_uiOpen{false}; //the library's window is up
 
 std::mutex g_textMx;
 struct Line
@@ -156,26 +157,62 @@ const uint8_t* HostMemory(uint32_t a, uint32_t size)
 }
 uint32_t HostMem2Size() { return g_mem2_size; }
 
+//a state is the whole machine (140 MB or so) and the library may want one every few frames: it's made in
+//a buffer kept from one to the next, and handed over in one of the blocks given back before (FreeState
+//keeps two), so neither is a fresh allocation that has to be faulted in page by page
+std::mutex g_stateMx;
+std::vector<std::pair<void*, size_t>> g_stateSpare; //blocks given back, and their sizes
+std::vector<std::pair<void*, size_t>> g_stateOut; //blocks handed out
+void* StateBlock(size_t size)
+{
+	std::lock_guard<std::mutex> lk(g_stateMx);
+	for (size_t i = 0; i < g_stateSpare.size(); ++i)
+		if (g_stateSpare[i].second >= size)
+		{
+			auto b = g_stateSpare[i];
+			g_stateSpare.erase(g_stateSpare.begin() + (ptrdiff_t)i);
+			g_stateOut.push_back(b);
+			return b.first;
+		}
+	const size_t cap = size + (size >> 4); //room for the next one, a little bigger
+	void* p = std::malloc(cap);
+	if (p) g_stateOut.push_back({p, cap});
+	return p;
+}
 int HostSaveState(void** data, uint32_t* size)
 {
 	*data = nullptr;
 	*size = 0;
 	if (!g_pBoundary) return 0;
-	std::vector<uint8_t> out;
+	static std::vector<uint8_t> out; //the game's thread only
 	std::string err;
 	if (!rt_state_save(*g_pBoundary, out, err))
 	{
 		rt_log("taslib: no state: %s", err.c_str());
 		return 0;
 	}
-	void* p = std::malloc(out.size());
+	void* p = StateBlock(out.size());
 	if (!p) return 0;
 	std::memcpy(p, out.data(), out.size());
 	*data = p;
 	*size = (uint32_t)out.size();
 	return 1;
 }
-void HostFreeState(void* data) { std::free(data); }
+void HostFreeState(void* data) //any thread, and blocks of the library's own malloc too
+{
+	if (!data) return;
+	{
+		std::lock_guard<std::mutex> lk(g_stateMx);
+		auto it = std::find_if(g_stateOut.begin(), g_stateOut.end(), [data](const auto& b) { return b.first == data; });
+		if (it != g_stateOut.end())
+		{
+			const auto b = *it;
+			g_stateOut.erase(it);
+			if (g_stateSpare.size() < 2) { g_stateSpare.push_back(b); return; }
+		}
+	}
+	std::free(data);
+}
 int HostLoadState(const void* data, uint32_t size, char* err, uint32_t errSize)
 {
 	std::string why;
@@ -345,6 +382,31 @@ uint32_t HostMenuKeyName(const char* id, char* out, uint32_t size)
 }
 int HostMenuOpen() { return overlay_open() ? 1 : 0; }
 
+#ifdef GE_IMGUI
+uint32_t HostUiVersion() { return IMGUI_VERSION_NUM; }
+void* HostUiContext() { return ImGui::GetCurrentContext(); }
+void HostUiAllocators(void** alloc, void** free, void** user)
+{
+	ImGuiMemAllocFunc a;
+	ImGuiMemFreeFunc f;
+	ImGui::GetAllocatorFunctions(&a, &f, user);
+	*alloc = (void*)a;
+	*free = (void*)f;
+}
+#else
+uint32_t HostUiVersion() { return 0; }
+void* HostUiContext() { return nullptr; }
+void HostUiAllocators(void** alloc, void** free, void** user) { *alloc = *free = *user = nullptr; }
+#endif
+void HostSetUiOpen(int on)
+{
+#ifdef GE_IMGUI
+	g_uiOpen = on != 0;
+#else
+	(void)on;
+#endif
+}
+
 const GeTasHost kHost{
 	GE_TAS_API_VERSION, sizeof(GeTasHost), GE_VERSION, HostLog,
 	HostRead8, HostRead16, HostRead32, HostWrite8, HostWrite16, HostWrite32,
@@ -356,6 +418,7 @@ const GeTasHost kHost{
 	HostSetSpeed, HostMovement,
 	HostCheatOff, HostStartVideo, HostStopVideo,
 	HostViewClip, HostSetQuiet,
+	HostUiVersion, HostUiContext, HostUiAllocators, HostSetUiOpen,
 };
 
 void Shutdown()
@@ -453,11 +516,21 @@ bool tas_event(const SDL_Event* e)
 {
 	if (!g_pLib || !g_pLib->Key) return false;
 	if (e->type != SDL_EVENT_KEY_DOWN && e->type != SDL_EVENT_KEY_UP) return false;
-	if (overlay_open() && e->type == SDL_EVENT_KEY_DOWN) return false; //the menu's: choosing a key, moving about
+	if (menus_open() && e->type == SDL_EVENT_KEY_DOWN) return false; //the menu's: choosing a key, moving about
+#ifdef GE_IMGUI
+	if (g_uiOpen && ImGui::GetIO().WantTextInput && e->type == SDL_EVENT_KEY_DOWN) return false; //typed into the library's window
+#endif
 	const char* name = SDL_GetScancodeName(e->key.scancode);
 	if (!name || !*name) return false;
 	const int mods = ((e->key.mod & SDL_KMOD_SHIFT) ? 1 : 0) | ((e->key.mod & SDL_KMOD_CTRL) ? 2 : 0) | ((e->key.mod & SDL_KMOD_ALT) ? 4 : 0);
 	return g_pLib->Key(name, e->type == SDL_EVENT_KEY_DOWN, e->key.repeat, mods) != 0;
+}
+
+bool tas_ui_open() { return g_pLib && g_uiOpen; }
+
+void tas_draw_ui()
+{
+	if (tas_ui_open() && g_pLib->size >= offsetof(GeTasLib, DrawUi) + sizeof(void*) && g_pLib->DrawUi) g_pLib->DrawUi();
 }
 
 bool tas_showing()

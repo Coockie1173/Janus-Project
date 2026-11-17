@@ -279,7 +279,7 @@ bool event(const SDL_Event* e) {
         g_open = !g_open;
         mouse_capture(!overlay_open());
     }
-    if (g_open) ImGui_ImplSDL3_ProcessEvent(e);
+    if (g_open || tas_ui_open()) ImGui_ImplSDL3_ProcessEvent(e);
     return false;
 }
 
@@ -325,7 +325,7 @@ void draw() {
     bool hop = bunnyhop_speed(speed);
     bool flash = flash_showing();
     bool lib = tas_showing();
-    if (!lib && !flash && !overlay_open() && !g_show_state && !skipping_cutscene() && fade <= 0 && !settings_toast() && !cheats && !meter && !hop && !speedrun_in_game()) return;
+    if (!lib && !flash && !overlay_open() && !tas_ui_open() && !g_show_state && !skipping_cutscene() && fade <= 0 && !settings_toast() && !cheats && !meter && !hop && !speedrun_in_game()) return;
     //with only the state shown the cursor stays hidden over the picture
     ImGuiIO& io = ImGui::GetIO();
     if (overlay_open()) io.ConfigFlags &= ~ImGuiConfigFlags_NoMouseCursorChange;
@@ -343,6 +343,7 @@ void draw() {
     if (skipping_cutscene()) skipping_label();
     if (g_open) watches();
     if (lib) tas_draw();
+    tas_draw_ui();
     speedrun_draw();
     //the F1 menu last, behind a mark: from the mark on it's drawn by draw_top, out of a video
     ImDrawList* fg = ImGui::GetForegroundDrawList();
@@ -376,7 +377,8 @@ void draw_top() {
 
 } //namespace
 
-bool overlay_open() { return g_open || settings_open(); }
+bool menus_open() { return g_open || settings_open(); }
+bool overlay_open() { return menus_open() || tas_ui_open(); }
 
 void install_overlay() {
 #ifdef GE_IMGUI

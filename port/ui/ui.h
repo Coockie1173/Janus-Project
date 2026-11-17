@@ -21,7 +21,8 @@ uint32_t settings_buttons(); //classic buttons the menu presses itself (+ to pau
 
 //overlay.cpp
 void install_overlay();
-bool overlay_open(); //the watches or the settings menu are up, so the mouse is free
+bool overlay_open(); //the watches, the settings menu or TASLib's window are up, so the mouse is free
+bool menus_open(); //the watches or the settings menu (they take the keys)
 
 //icon.cpp
 void window_icon(SDL_Window* win); //port/package/icon.bmp on the window
