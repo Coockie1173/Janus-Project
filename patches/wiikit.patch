@@ -5988,10 +5988,10 @@ index 8a4e097..8b1b1a8 100644
  uint64_t ppc_timebase() { return 0; }
 diff --git a/runtime/state.cpp b/runtime/state.cpp
 new file mode 100644
-index 0000000..f6a82e4
+index 0000000..e1d3d88
 --- /dev/null
 +++ b/runtime/state.cpp
-@@ -0,0 +1,202 @@
+@@ -0,0 +1,225 @@
 +// wiikit runtime — saved states: the whole machine between two of the game's frames.
 +//
 +// Recompiled code runs as host code: a guest thread is a host thread, and where it is in its
@@ -6111,8 +6111,31 @@ index 0000000..f6a82e4
 +    section(io, "ax", [&] { ax_state(io); });
 +    uint32_t n = (uint32_t)port_sections().size();
 +    io.pod(n);
-+    if (!io.saving && n != port_sections().size()) { io.fail("the port keeps other parts"); return; }
-+    for (auto& s : port_sections()) section(io, s.name.c_str(), [&] { s.fn(io); });
++    if (io.saving) {
++        for (auto& s : port_sections()) section(io, s.name.c_str(), [&] { s.fn(io); });
++        return;
++    }
++    // loading: the port's parts by name, so a state from before a part was added (or after one
++    // went) still loads. a part the state hasn't keeps what it holds now, one the port doesn't
++    // know is skipped
++    for (uint32_t i = 0; i < n && io.ok; ++i) {
++        size_t at = io.pos;
++        std::string name;
++        uint64_t len = 0;
++        io.str(name);
++        io.pod(len);
++        if (!io.ok) return;
++        PortSection* known = nullptr;
++        for (auto& s : port_sections())
++            if (s.name == name) known = &s;
++        if (!known) {
++            if (io.applying) rt_log("state: the port has no part %s, left out", name.c_str());
++            io.skip((size_t)len);
++            continue;
++        }
++        io.pos = at;
++        section(io, known->name.c_str(), [&] { known->fn(io); });
++    }
 +}
 +
 +}  // namespace

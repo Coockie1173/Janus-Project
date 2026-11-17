@@ -14,8 +14,11 @@
 //out of it with a cutscene that never ends
 //
 //so above 30 the count goes by the time a console frame takes instead
+//
+//GE_UNLOAD_TRACE=1 a line when a file starts counting and when it goes
 #include "ge.h"
 #include <unordered_map>
+#include <vector>
 
 namespace ge
 {
@@ -26,6 +29,7 @@ const uint32_t kFileState = 0x18, kFileCountdown = 0x2E;
 const uint8_t kStateUnloading = 4, kCountdownStart = 4;
 PPCFunc orig_file_update = nullptr;
 std::unordered_map<uint32_t, float> g_left; //file -> console frames until it's unloaded
+bool g_trace = false; //GE_UNLOAD_TRACE: a line when a file starts counting and when it's let go
 
 void FileUpdate(PPCContext& c)
 {
@@ -37,10 +41,15 @@ void FileUpdate(PPCContext& c)
 		//the game only ever sets 4, we write 1 and 2: a 4 is a file just let go
 		uint8_t count = ld8(file + kFileCountdown);
 		auto it = g_left.find(file);
-		if (count == kCountdownStart || it == g_left.end()) it = g_left.insert_or_assign(file, (float)count).first;
+		if (count == kCountdownStart || it == g_left.end())
+		{
+			if (g_trace) rt_log("goldeneye: unload: frame %u file %08X counts from %u%s", ld32(kFrameCount), file, count, it == g_left.end() && count != kCountdownStart ? " (not known: a state was loaded)" : "");
+			it = g_left.insert_or_assign(file, (float)count).first;
+		}
 		it->second -= kGameFps / rate;
 		bool done = it->second <= 1e-3f;
 		st8(file + kFileCountdown, done ? 1 : 2); //the game takes one off and unloads at 0
+		if (done && g_trace) rt_log("goldeneye: unload: frame %u file %08X goes", ld32(kFrameCount), file);
 		if (done) g_left.erase(it);
 	}
 	orig_file_update(c);
@@ -50,6 +59,15 @@ void FileUpdate(PPCContext& c)
 
 void install_unload()
 {
+	g_trace = std::getenv("GE_UNLOAD_TRACE") != nullptr;
+	//what's left of each count goes in a state: loaded in the middle of one, a file started over from
+	//the byte (2 console frames) and went later than it did without the load, and the level's rooms
+	//and guards went another way from there
+	rt_state_register("unload", [](StateIO& io) {
+		std::vector<std::pair<uint32_t, float>> left(g_left.begin(), g_left.end());
+		io.vec(left);
+		if (io.applying) g_left = std::unordered_map<uint32_t, float>(left.begin(), left.end());
+	});
 	orig_file_update = ppc_hook("ge_file_update", FileUpdate);
 	if (!orig_file_update) rt_log("goldeneye: ge_file_update is not hooked in this build, files are unloaded four frames after they're let go at any frame rate");
 }
