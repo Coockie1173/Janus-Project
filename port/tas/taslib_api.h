@@ -160,14 +160,17 @@ typedef struct GeTasHost
 	//let go after loading back a state saved before it, then the frames drawn after
 	void (*SetQuiet)(int on);
 
-	//api 9: a window of the library's own, drawn with the game's Dear ImGui (the library builds the same
-	//sources in and draws into this context, with these allocators, from DrawUi). 0/null without ImGui
+	//api 9: a window of the library's own beside the game's, drawn with the game's Dear ImGui (the library
+	//builds the same sources in and draws into the window's context, with these allocators, from DrawUi)
 	uint32_t (*UiVersion)(void); //IMGUI_VERSION_NUM the game was built with, 0 none
-	void* (*UiContext)(void); //the ImGuiContext
+	void* (*UiContext)(void); //the window's ImGuiContext, inside DrawUi
 	void (*UiAllocators)(void** alloc, void** free, void** user); //ImGui's, to share its heap
-	//the library's window is up: the mouse is free and works it (not the view), ImGui gets the window's
-	//events, and the library's keys still come to Key unless a text field is being typed in
-	void (*SetUiOpen)(int on);
+	//0 no window. 1 the window is up and the cursor is free (the game takes no mouse). 2 the window is up,
+	//the game takes the mouse while its own window has the focus. DrawUi comes every frame while it's up
+	void (*SetUiOpen)(int mode);
+	int (*UiClosed)(void); //the window was closed with its own close button: 1, once
+	void (*UiPlace)(int x, int y, int w, int h); //where it opens next (before SetUiOpen); x or y INT_MIN, w or h 0: the system's
+	int (*UiWhere)(int* xywh); //where it is now (x, y, w, h), 0 when it isn't up
 } GeTasHost;
 
 //what the library gives back, any callback can be null
@@ -190,7 +193,7 @@ typedef struct GeTasLib
 	void (*Shot)(const GeTasShot* shot); //the local player's bullet: fired, landed, a guard hurt (game's thread)
 
 	//api 9
-	void (*DrawUi)(void); //inside the overlay's ImGui frame (renderer's thread), every frame while SetUiOpen(1)
+	void (*DrawUi)(void); //the library's window's frame, its ImGui context current (renderer's thread), while it's up
 } GeTasLib;
 
 //the one export, null when the library doesn't want to run

@@ -26,7 +26,7 @@ bool lib_mouse_taken(); //the mouse is the library's: it turns nothing and works
 bool tas_event(const SDL_Event* e); //a window's key, the library's first (overlay.cpp)
 bool tas_showing(); //the library has text up
 void tas_draw(); //inside the overlay's ImGui frame
-bool tas_ui_open(); //the library's own window is up (the mouse is free, ImGui gets the events)
-void tas_draw_ui(); //the library's window, inside the overlay's ImGui frame
+bool tas_ui_open(); //the library's own window wants the cursor free
+void tas_own_window(); //the library's own window opened, closed and drawn (overlay.cpp, before its frame)
 
 } //namespace ge

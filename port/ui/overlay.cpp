@@ -279,7 +279,7 @@ bool event(const SDL_Event* e) {
         g_open = !g_open;
         mouse_capture(!overlay_open());
     }
-    if (g_open || tas_ui_open()) ImGui_ImplSDL3_ProcessEvent(e);
+    if (g_open) ImGui_ImplSDL3_ProcessEvent(e);
     return false;
 }
 
@@ -315,6 +315,7 @@ ImVector<ImDrawCmd> g_menu_cmds; //the F1 menu's part of it, for draw_top
 void draw() {
     g_menu_cmds.clear();
     speedrun_own_window();
+    tas_own_window();
     settings_replay();
     if (std::string said = pictures_draw(); !said.empty()) settings_say(said);
     float fade = cutscene_fade();
@@ -325,7 +326,7 @@ void draw() {
     bool hop = bunnyhop_speed(speed);
     bool flash = flash_showing();
     bool lib = tas_showing();
-    if (!lib && !flash && !overlay_open() && !tas_ui_open() && !g_show_state && !skipping_cutscene() && fade <= 0 && !settings_toast() && !cheats && !meter && !hop && !speedrun_in_game()) return;
+    if (!lib && !flash && !overlay_open() && !g_show_state && !skipping_cutscene() && fade <= 0 && !settings_toast() && !cheats && !meter && !hop && !speedrun_in_game()) return;
     //with only the state shown the cursor stays hidden over the picture
     ImGuiIO& io = ImGui::GetIO();
     if (overlay_open()) io.ConfigFlags &= ~ImGuiConfigFlags_NoMouseCursorChange;
@@ -343,7 +344,6 @@ void draw() {
     if (skipping_cutscene()) skipping_label();
     if (g_open) watches();
     if (lib) tas_draw();
-    tas_draw_ui();
     speedrun_draw();
     //the F1 menu last, behind a mark: from the mark on it's drawn by draw_top, out of a video
     ImDrawList* fg = ImGui::GetForegroundDrawList();

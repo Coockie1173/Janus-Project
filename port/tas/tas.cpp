@@ -15,6 +15,8 @@
 #include "ge.h"
 #include "ge_version.h"
 #include "video.h"
+#include "ui/popwindow.h"
+#include <climits>
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <atomic>
@@ -124,7 +126,6 @@ PPCContext* g_pBoundary{}; //the game thread's registers while Boundary runs
 std::atomic<uint32_t> g_fixedRate{0};
 std::atomic<bool> g_asDrawn{false}, g_mouseTaken{false};
 std::atomic<uint32_t> g_presence{~0u};
-std::atomic<bool> g_uiOpen{false}; //the library's window is up
 
 std::mutex g_textMx;
 struct Line
@@ -383,8 +384,17 @@ uint32_t HostMenuKeyName(const char* id, char* out, uint32_t size)
 int HostMenuOpen() { return overlay_open() ? 1 : 0; }
 
 #ifdef GE_IMGUI
+//the library's window: one of its own beside the game's (ui/popwindow.h), opened and drawn on the
+//renderer's thread, asked for from any
+std::atomic<int> g_uiMode{0}; //SetUiOpen's
+std::atomic<bool> g_uiClosed{false}; //closed with its close button, not told yet
+std::mutex g_uiMx;
+int g_uiPlace[4] = {INT_MIN, INT_MIN, 0, 0}, g_uiWhere[4] = {};
+bool g_uiUp = false;
+PopWindow g_ui;
+
 uint32_t HostUiVersion() { return IMGUI_VERSION_NUM; }
-void* HostUiContext() { return ImGui::GetCurrentContext(); }
+void* HostUiContext() { return g_ui.Context(); }
 void HostUiAllocators(void** alloc, void** free, void** user)
 {
 	ImGuiMemAllocFunc a;
@@ -393,19 +403,29 @@ void HostUiAllocators(void** alloc, void** free, void** user)
 	*alloc = (void*)a;
 	*free = (void*)f;
 }
+void HostSetUiOpen(int mode) { g_uiMode = std::clamp(mode, 0, 2); }
+int HostUiClosed() { return g_uiClosed.exchange(false) ? 1 : 0; }
+void HostUiPlace(int x, int y, int w, int h)
+{
+	std::lock_guard<std::mutex> lk(g_uiMx);
+	g_uiPlace[0] = x, g_uiPlace[1] = y, g_uiPlace[2] = w, g_uiPlace[3] = h;
+}
+int HostUiWhere(int* xywh)
+{
+	std::lock_guard<std::mutex> lk(g_uiMx);
+	if (!g_uiUp) return 0;
+	std::memcpy(xywh, g_uiWhere, sizeof g_uiWhere);
+	return 1;
+}
 #else
 uint32_t HostUiVersion() { return 0; }
 void* HostUiContext() { return nullptr; }
 void HostUiAllocators(void** alloc, void** free, void** user) { *alloc = *free = *user = nullptr; }
+void HostSetUiOpen(int) {}
+int HostUiClosed() { return 0; }
+void HostUiPlace(int, int, int, int) {}
+int HostUiWhere(int*) { return 0; }
 #endif
-void HostSetUiOpen(int on)
-{
-#ifdef GE_IMGUI
-	g_uiOpen = on != 0;
-#else
-	(void)on;
-#endif
-}
 
 const GeTasHost kHost{
 	GE_TAS_API_VERSION, sizeof(GeTasHost), GE_VERSION, HostLog,
@@ -418,7 +438,7 @@ const GeTasHost kHost{
 	HostSetSpeed, HostMovement,
 	HostCheatOff, HostStartVideo, HostStopVideo,
 	HostViewClip, HostSetQuiet,
-	HostUiVersion, HostUiContext, HostUiAllocators, HostSetUiOpen,
+	HostUiVersion, HostUiContext, HostUiAllocators, HostSetUiOpen, HostUiClosed, HostUiPlace, HostUiWhere,
 };
 
 void Shutdown()
@@ -515,23 +535,86 @@ void tas_buttons(int chan, ClassicState& s)
 bool tas_event(const SDL_Event* e)
 {
 	if (!g_pLib || !g_pLib->Key) return false;
+#ifdef GE_IMGUI
+	//the library's window: its keys are the library's first (the hotkeys work from it), then its ImGui's,
+	//but not while a field of it is typed in; its mouse is its own
+	if (g_ui.Opened() && event_window(e) == SDL_GetWindowID(g_ui.Window()))
+	{
+		bool typing = false;
+		if (ImGuiContext* c = g_ui.Context())
+		{
+			ImGuiContext* outer = ImGui::GetCurrentContext();
+			ImGui::SetCurrentContext(c);
+			typing = ImGui::GetIO().WantTextInput;
+			ImGui::SetCurrentContext(outer);
+		}
+		if (!typing && (e->type == SDL_EVENT_KEY_DOWN || e->type == SDL_EVENT_KEY_UP))
+		{
+			const char* name = SDL_GetScancodeName(e->key.scancode);
+			const int mods = ((e->key.mod & SDL_KMOD_SHIFT) ? 1 : 0) | ((e->key.mod & SDL_KMOD_CTRL) ? 2 : 0) | ((e->key.mod & SDL_KMOD_ALT) ? 4 : 0);
+			if (name && *name && g_pLib->Key(name, e->type == SDL_EVENT_KEY_DOWN, e->key.repeat, mods)) return true;
+		}
+		if (e->type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) g_uiClosed = true;
+		g_ui.Event(e);
+		return true;
+	}
+#endif
 	if (e->type != SDL_EVENT_KEY_DOWN && e->type != SDL_EVENT_KEY_UP) return false;
 	if (menus_open() && e->type == SDL_EVENT_KEY_DOWN) return false; //the menu's: choosing a key, moving about
-#ifdef GE_IMGUI
-	if (g_uiOpen && ImGui::GetIO().WantTextInput && e->type == SDL_EVENT_KEY_DOWN) return false; //typed into the library's window
-#endif
+
 	const char* name = SDL_GetScancodeName(e->key.scancode);
 	if (!name || !*name) return false;
 	const int mods = ((e->key.mod & SDL_KMOD_SHIFT) ? 1 : 0) | ((e->key.mod & SDL_KMOD_CTRL) ? 2 : 0) | ((e->key.mod & SDL_KMOD_ALT) ? 4 : 0);
 	return g_pLib->Key(name, e->type == SDL_EVENT_KEY_DOWN, e->key.repeat, mods) != 0;
 }
 
-bool tas_ui_open() { return g_pLib && g_uiOpen; }
+#ifdef GE_IMGUI
+//the cursor is free for the library's window: mode 1 always, mode 2 while that window has the focus
+bool tas_ui_open() { return g_pLib && (g_uiMode == 1 || (g_uiMode == 2 && g_ui.Focused())); }
 
-void tas_draw_ui()
+//before the game's overlay, every frame: the library's window opened, closed and drawn
+void tas_own_window()
 {
-	if (tas_ui_open() && g_pLib->size >= offsetof(GeTasLib, DrawUi) + sizeof(void*) && g_pLib->DrawUi) g_pLib->DrawUi();
+	const bool want = g_pLib && g_uiMode != 0 && g_pLib->size >= offsetof(GeTasLib, DrawUi) + sizeof(void*) && g_pLib->DrawUi;
+	if (want && !g_ui.Opened())
+	{
+		int at[4];
+		{
+			std::lock_guard<std::mutex> lk(g_uiMx);
+			std::memcpy(at, g_uiPlace, sizeof at);
+		}
+		if (!g_ui.Open("TAS Editor", at[0], at[1], at[2] > 0 ? at[2] : 1180, at[3] > 0 ? at[3] : 640, true, [](ImFontAtlas* atlas) {
+				ImFontConfig c;
+				c.SizePixels = 15;
+				atlas->AddFontDefault(&c);
+			}))
+		{
+			g_uiClosed = true; //the library takes it as closed
+			g_uiMode = 0;
+			return;
+		}
+	}
+	if (!want && g_ui.Opened())
+	{
+		g_ui.Close();
+		std::lock_guard<std::mutex> lk(g_uiMx);
+		g_uiUp = false;
+	}
+	if (!g_ui.Opened()) return;
+	{
+		std::lock_guard<std::mutex> lk(g_uiMx);
+		SDL_GetWindowPosition(g_ui.Window(), &g_uiWhere[0], &g_uiWhere[1]);
+		SDL_GetWindowSize(g_ui.Window(), &g_uiWhere[2], &g_uiWhere[3]);
+		g_uiUp = true;
+	}
+	g_ui.Begin();
+	g_pLib->DrawUi();
+	g_ui.End();
 }
+#else
+bool tas_ui_open() { return false; }
+void tas_own_window() {}
+#endif
 
 bool tas_showing()
 {
