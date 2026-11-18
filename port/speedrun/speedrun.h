@@ -16,6 +16,7 @@ bool speedrun_quit_reset(); //Save and Quit resets the run
 void set_speedrun_quit_reset(bool on);
 float speedrun_opacity(); //the box over the game, in percent
 void set_speedrun_opacity(float percent);
+void speedrun_mission_end(); //mods.cpp: the Mission Complete page, the clock counts from here to the next mission
 void speedrun_menu_save(); //autosave.cpp: the game's menu saved the game, not a checkpoint
 void speedrun_reset(); //the run so far is dropped, the best times stay
 std::string speedrun_said(); //what the last import or export came to, for a few seconds

@@ -43,6 +43,7 @@ const uint32_t kLevelKind = 0xFFFF0000, kCampaignLevel = 0x01810000;
 const uint32_t kFrontEnd = 0x01080004;
 const uint32_t kDam = 0x0181013F;
 const uint32_t kMissionStart = 1;
+const float kFreshTimer = 5.0f; //a level timer under this is a level just begun
 const float kMaxStep = 1.0f; //more than this in a frame is a jump (a checkpoint), not time played
 
 struct Mission
@@ -76,6 +77,8 @@ inline bool m_Gold[kSplits]{}; //the segment was a best one as it ended
 inline float m_PbBefore[kSplits]; //the personal best this run is held against, kept when it becomes the new one
 inline bool m_Running{ false }, m_Finished{ false }, m_NewPb{ false };
 inline int m_Index{ 0 }; //the split being run
+inline bool m_Between{ false }; //the mission was won, the clock counts until the next level has a player
+inline uint32_t m_ChangeTo{ 0 }; //the level the last level change went to
 inline uint32_t m_LastLevel{ 0 };
 inline float m_LastTime{ 0 };
 inline Clock::time_point m_LastClock{};

@@ -450,6 +450,7 @@ PPCFunc orig_mission_page = nullptr;
 
 void MissionPage(PPCContext& c)
 {
+	speedrun_mission_end();
 	const uint32_t levels = kCurrentLevel, last = ld32(kLastLevel);
 	const uint32_t row = RowOf(ld32(levels + kLevelRows), ld32(levels + kLevelRowCount), kLevelRowSize, kStandIn);
 	const auto& files = mod_files();
