@@ -6,7 +6,7 @@
 //a bullet is an XItemHandler_Bullet (vtable 80572AC4): +0x410 the shooter's id (the entity's
 //+0x170), +0x419 a player's. ge_bullet_impact 800B2610 (bullet, hit) lands it on the world at the
 //hit's +0x10, ge_bullet_contact 800B2C60 (bullet, contact) on the thing at the contact's +0x38
-//(its +4 the entity) at +0x20. ge_npc_hit's hit (custom.cpp) has the bullet as its +0x30
+//(its +4 the entity) at +0x20; the shooter itself is one of those as a bullet leaves. ge_npc_hit's hit (custom.cpp) has the bullet as its +0x30
 #include "tas/tas.h"
 #include "tas/taslib_api.h"
 #include "ge.h"
@@ -69,7 +69,12 @@ void Contact(PPCContext& c)
 	if (Mine(bullet) && guest_ptr(hit))
 	{
 		const uint32_t thing = ld32(hit + 0x38);
-		Send({GE_SHOT_CONTACT, ldf(hit + 0x20), ldf(hit + 0x24), ldf(hit + 0x28), 0, 0, 0, guest_ptr(thing) ? ld32(thing + 4) : 0, 0, 0, 0});
+		const uint32_t entity = guest_ptr(thing) ? ld32(thing + 4) : 0;
+		const uint32_t ctrl = local_controller();
+		//a bullet starts inside its shooter for most guns (the muzzle is behind the player's own bounds, the
+		//P99's isn't): it touches the player as it leaves, the game lets it fly on, so it hasn't landed
+		if (!(ctrl && entity == ld32(ctrl + 4)))
+			Send({GE_SHOT_CONTACT, ldf(hit + 0x20), ldf(hit + 0x24), ldf(hit + 0x28), 0, 0, 0, entity, 0, 0, 0});
 	}
 	orig_contact(c);
 }
