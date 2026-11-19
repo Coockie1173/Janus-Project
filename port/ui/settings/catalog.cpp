@@ -233,6 +233,8 @@ void BuildSettings()
 		[] { return next_start().online; }, [](bool v) { next_start().online = v; });
 	AddToggle(kStartup, "fast_start", "Quicker Start", "On: the screens before the main menu are hurried through. From the next start on.",
 		[] { return next_start().fast_start; }, [](bool v) { next_start().fast_start = v; });
+	AddToggle(kStartup, "update_check", "Check for Updates", "On: as it starts, the game asks GitHub whether a newer build is out and offers to download it, the modpacks too. From the next start on.",
+		[] { return next_start().update_check; }, [](bool v) { next_start().update_check = v; });
 #ifndef _WIN32
 	AddToggle(kStartup, "crash_dumps", "Crash Dumps", "On: a crash or a stall writes a report into crashes/, to send along with a bug report. From the next start on.",
 		[] { return next_start().crash_dumps; }, [](bool v) { next_start().crash_dumps = v; });

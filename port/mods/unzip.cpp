@@ -305,4 +305,14 @@ bool unzip_pack(const std::string& zip, const std::string& folder)
 	return true;
 }
 
+//the zip's files in a new folder, without the one folder around them all (the updater's package)
+bool unzip_into(const std::string& zip, const std::string& folder)
+{
+	auto utf8 = [](const std::string& path) { return std::filesystem::path(std::u8string(path.begin(), path.end())); };
+	std::error_code error;
+	std::filesystem::remove_all(utf8(folder), error);
+	std::filesystem::create_directories(utf8(folder), error);
+	return Unpack(utf8(zip), utf8(folder));
+}
+
 } //namespace ge

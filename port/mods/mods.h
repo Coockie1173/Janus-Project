@@ -40,6 +40,7 @@ void modpack_select(int pack); //its files in place of the installed pack's. in 
 
 //unzip.cpp
 bool unzip_pack(const std::string& zip, const std::string& folder); //a modpack's zip into its folder, when it changed
+bool unzip_into(const std::string& zip, const std::string& folder); //any zip into a new folder (the updater)
 
 //pictures.cpp
 void install_pictures(); //after install_mods

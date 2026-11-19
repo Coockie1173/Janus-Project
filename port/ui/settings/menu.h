@@ -42,7 +42,7 @@ bool write_lines(const std::string& path, const std::vector<std::string>& lines)
 inline bool g_fps_changed = false; //the frame rate was changed in the menu
 
 //read by the launcher (launcher/launch.cpp) as the game starts, so a change here waits for the next start
-struct NextStart { bool online = true, fast_start = false, fullscreen = false, crash_dumps = true, gx_thread = true; };
+struct NextStart { bool online = true, fast_start = false, fullscreen = false, crash_dumps = true, gx_thread = true, update_check = true; };
 NextStart& next_start();
 //keys other files listen for (settings_key): pressed with the menu closed they call theirs, kept in the launcher's file
 struct AddedKey { int page; std::string launch, label, hint, key; void (*pressed)(); };

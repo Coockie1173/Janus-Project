@@ -75,6 +75,15 @@ From a command prompt in this folder, options go over what's saved, for that sta
     Janus-Project.exe --help                    every option
 
 
+Updates
+-------
+On every start the game asks GitHub whether a newer build is out (the "latest" release) and,
+if so, offers it: Download replaces the game's own files in this folder and starts the new
+version. Your saves, settings, key bindings and game/ stay as they are. Tick "Update modpacks
+as well?" and the release's modpack zips go into modpacks/ too (a pack you changed by hand
+in a folder of its own is left alone). "Skip This Version" stops asking until the next one;
+F1 > Startup > Check for Updates turns it off, so does --no-update-check.
+
 Where things are
 ----------------
     nand\           your saves and profiles (made on the first start). Back this up.

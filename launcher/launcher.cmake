@@ -24,7 +24,7 @@ set_target_properties(ge_codecs PROPERTIES C_STANDARD 11 POSITION_INDEPENDENT_CO
 target_compile_options(ge_codecs PRIVATE -w)
 
 target_sources(wiiboot PRIVATE
-    ${GE_LAUNCHER}/launch.cpp ${GE_LAUNCHER}/window.cpp ${GE_LAUNCHER}/disc.cpp ${GE_LAUNCHER}/extract.cpp)
+    ${GE_LAUNCHER}/launch.cpp ${GE_LAUNCHER}/window.cpp ${GE_LAUNCHER}/disc.cpp ${GE_LAUNCHER}/extract.cpp ${GE_LAUNCHER}/update.cpp)
 target_link_libraries(wiiboot ge_codecs)
 if(GE_PORTABLE)
   target_compile_definitions(wiiboot PRIVATE GE_LAUNCH_PORTABLE=1 GE_LAUNCH_STATE="." GE_LAUNCH_SYMBOLS="config/symbols.tsv" GE_LAUNCH_FONTS="")
