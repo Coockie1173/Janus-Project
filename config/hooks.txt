@@ -94,6 +94,7 @@ ge_geofile_onload      # a file is given its memory: one that gets none is logge
 ge_pick_next_maps      # a network game picks its next two maps: with a short map list it gives up on them being new ones (port/mods/modmenu.cpp)
 ge_level_set           # the level manager is told its level: a mod level gets a level row to stand in, in a multiplayer game, and the first mission's difficulty row, so being hurt offline doesn't read through 0 (port/mods/mods.cpp)
 ge_mission_page        # the Mission Complete page fills itself: a mod level has no row in the level table, the page gets one for that call (port/mods/mods.cpp)
+ge_page_text           # a text into one of the page's widgets: 007 Custom's settings in place of the results' rows (port/gameplay/custom.cpp)
 ge_team_mode_reset     # a team gamemode starts over: a mod level's second team gets the name of the map that has its characters (port/mods/mods.cpp)
 ge_text_find           # a text's row is looked up: a mod level's own team names in place of the game's (port/mods/mods.cpp)
 ge_spawn_points_setup  # a level spawn points are gathered: one too far above the floor is put on it, one with no floor is logged (port/mods/mods.cpp)

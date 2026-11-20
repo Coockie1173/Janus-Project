@@ -34,6 +34,15 @@
 //the sliders are the game's own (a row of kind 5 with a setting's hash): the menu asks
 //ge_setting_get (8022F4D0) how full the bar is and tells ge_setting_step (8022E2F0) to move it,
 //both by the setting's hash. four hashes the game doesn't have are answered here
+//
+//what a mission is played with is shown: under the hud's timer in play (port/ui/overlay.cpp),
+//and on the Mission Complete page, whose rows left and right switch between the game's results
+//and the settings. the page (ge_mission_page) draws each of its texts into a widget of its
+//layout with ge_page_text (the page, its widgets, a widget's hash, a text's hash or -1 and a
+//string, a style, a font, the alignment 0 left 1 right 2 centred, a word on the stack): the
+//title 150000B1, the level 15000082, the outcome 15000080 at the bottom and a row each from
+//15000083 down (the time, the time to beat, the objectives), a name on the left and its value
+//on the right. with the settings up the rows are drawn here instead, the strings on the stack
 #include "ge.h"
 #include <algorithm>
 #include <atomic>
@@ -66,6 +75,7 @@ std::atomic<bool> g_on{false};
 bool g_always = false; //GE_CUSTOM_ON
 PPCFunc orig_accuracy = nullptr, orig_npc_fire = nullptr;
 PPCFunc orig_bullet = nullptr, orig_shot = nullptr, orig_fight_wait = nullptr, orig_protection = nullptr, orig_melee = nullptr, orig_fire_wait = nullptr;
+PPCFunc orig_page_text = nullptr;
 PPCFunc orig_setting_get = nullptr, orig_setting_step = nullptr, orig_choice_text = nullptr, orig_choice_step = nullptr;
 std::atomic<bool> g_headshots{true}; //a shot to a guard's head kills, as in the game
 bool g_trace = false;
@@ -327,11 +337,93 @@ void ChoiceStep(PPCContext& c)
 	g_stepped_frame = frame;
 }
 
+//the Mission Complete page with the settings up
+const uint32_t kPageTitle = 0x150000B1, kPageOutcome = 0x15000080;
+const uint32_t kPageRow = 0x15000083, kPageRows = 0x1D; //the rows' widgets, as many as the page could have
+const uint32_t kFirstWidget = 0x15000080, kWidgetCount = 0x32, kWidgets = 0x914 + 0x9B4, kWidgetSize = 0x24;
+const uint32_t kRowStyle = 0x700002E, kRowFont = 0x109002A, kLeft = 0, kRight = 1, kCentred = 2;
+const uint32_t kPageUpFrames = 3; //the page is up when it drew this many frames ago at most
+const uint32_t kLeftButton = 0x0002, kRightButton = 0x8000; //the classic's d-pad
+const char* const kToSettings = "< >  007 Custom Settings";
+const char* const kToResults = "< >  Mission Results";
+bool g_page_drawing = false; //inside ge_mission_page
+std::atomic<uint32_t> g_page_frame{0};
+std::atomic<bool> g_page_settings{false}; //the settings are up instead of the results
+uint32_t g_page_buttons = 0;
+bool g_last_drawn = false; //the results drew into the last row this time
+bool g_listed = false;
+
+bool PageUp() { return Active() && g_page_frame != 0 && ld32(kFrameCount) - g_page_frame <= kPageUpFrames; }
+
+//one text into a widget of the page: the call as the game made it, with a string and an alignment, and
+//in another widget a row's style. the string goes on the stack under the call's frame, the callee's frame under it
+void PageString(const PPCContext& c, uint32_t widget, const std::string& text, uint32_t align)
+{
+	const uint32_t kRoom = 0x200, kFrame = 0x40;
+	const uint32_t stack = c.r[1], string = stack - kRoom, frame = string - kFrame;
+	const size_t count = std::min(text.size(), size_t(kRoom / 2 - 1));
+	for (size_t i = 0; i <= count; ++i) st16(string + uint32_t(i) * 2, i < count ? (uint8_t)text[i] : 0);
+	PPCContext call = c;
+	st32(frame, stack);
+	st32(frame + 8, ld32(stack + 8)); //the ninth argument
+	call.r[1] = frame;
+	call.r[5] = widget;
+	call.r[6] = 0xFFFFFFFF;
+	call.r[7] = string;
+	if (widget != c.r[5]) { call.r[8] = kRowStyle; call.r[9] = kRowFont; }
+	call.r[10] = align;
+	orig_page_text(call);
+}
+
+//the last row the page's layout has (each widget 0x24 bytes from +0x9B4 of the widgets' +0x914, +0 there)
+uint32_t LastRow(uint32_t widgets)
+{
+	uint32_t last = 0;
+	for (uint32_t row = kPageRow; row < kPageRow + kPageRows; ++row)
+		if (ld8(widgets + kWidgets + (row - kFirstWidget) * kWidgetSize)) last = row;
+	return last;
+}
+
+void PageText(PPCContext& c)
+{
+	if (!g_page_drawing || !Active()) { orig_page_text(c); return; }
+	const PPCContext call = c; //as it came: the call returns with its registers changed
+	const uint32_t widget = c.r[5], last = LastRow(c.r[4]);
+	if (g_trace && widget == kPageTitle && !g_listed && (g_listed = true))
+		for (uint32_t i = 0; i < kWidgetCount; ++i)
+		{
+			const uint32_t w = c.r[4] + kWidgets + i * kWidgetSize;
+			if (ld8(w)) rt_log("goldeneye: 007 Custom: the page's widget %08X at %g %g to %g %g", kFirstWidget + i, ldf(w + 4), ldf(w + 8), ldf(w + 0xC), ldf(w + 0x10));
+		}
+	if (widget == kPageTitle) g_last_drawn = false;
+	if (!g_page_settings)
+	{
+		if (widget == last) g_last_drawn = true;
+		orig_page_text(c);
+		//the way to the settings in the last row, when the results leave it empty. the outcome is drawn after the rows
+		if (widget == kPageOutcome && last && !g_last_drawn) PageString(call, last, kToSettings, kCentred);
+		return;
+	}
+	if (widget >= kPageRow && widget < kPageRow + kPageRows) return; //the results' rows, the settings are in them
+	if (widget == kPageTitle) { PageString(c, widget, "007 Custom Settings", kLeft); return; }
+	orig_page_text(c);
+	if (widget != kPageOutcome) return;
+	//two to a row, a name and its value on each side
+	uint32_t row = kPageRow;
+	for (int i = 0; i < kCustomShown && row < last; i += 2, ++row)
+	{
+		PageString(call, row, custom_shown_name(i, false) + ": " + custom_shown_value(i), kLeft);
+		if (i + 1 < kCustomShown) PageString(call, row, custom_shown_name(i + 1, false) + ": " + custom_shown_value(i + 1), kRight);
+	}
+	if (last) PageString(call, last, kToResults, kCentred);
+}
+
 } //namespace
 
 //once a frame: the page with the sliders went, nothing is held any more
 void custom_frame(uint32_t frame)
 {
+	if (!PageUp()) g_page_settings = false; //a page comes up with the results
 	const bool up = g_drawn_frame != 0 && frame - g_drawn_frame <= kUpFrames;
 	if (up == g_up) return;
 	g_up = up;
@@ -346,6 +438,39 @@ void custom_buttons(ClassicState& s)
 {
 	const uint32_t kZR = 0x0004, kA = 0x0010;
 	if (g_on_bar) s.buttons &= ~(kZR | kA);
+	//on the Mission Complete page left and right switch between the results and the settings
+	if (!PageUp()) { g_page_buttons = 0; return; }
+	const uint32_t sides = s.buttons & (kLeftButton | kRightButton);
+	if (sides & ~g_page_buttons) g_page_settings = !g_page_settings;
+	g_page_buttons = sides;
+	s.buttons &= ~(kLeftButton | kRightButton);
+}
+
+void custom_page_drawing(bool on)
+{
+	g_page_drawing = on;
+	if (on) g_page_frame = ld32(kFrameCount);
+}
+
+std::string custom_shown_name(int i, bool brief)
+{
+	static const char* const kBrief[kCustomSliders] = {"Health", "Damage", "Reactions", "Protection", "Accuracy"};
+	if (i == kCustomSliders) return brief ? "Headshots" : "Instant Kill Headshots";
+	return brief ? kBrief[i] : kSliders[i].label;
+}
+
+std::string custom_shown_value(int i)
+{
+	if (i == kCustomSliders) return g_headshots ? "On" : "Off";
+	return std::to_string(g_value[i].load()) + "%";
+}
+
+bool custom_showing()
+{
+	//not while a level loads: there's a player from step 0x15 on, behind the loading screen
+	const uint32_t kAppPtr = 0x806EB694, kLoadStep = 0x354, kStepPlaying = 0x19;
+	const uint32_t app = ld32(kAppPtr);
+	return Active() && hud() && hud_drawn() && in_play() && guest_ptr(app) && ld32(app + kLoadStep) == kStepPlaying;
 }
 
 bool custom_mode() { return g_on; }
@@ -407,6 +532,7 @@ void install_custom()
 	orig_npc_hit = ppc_hook("ge_npc_hit", NpcHit);
 	orig_slider_draw = ppc_hook("ge_slider_draw", SliderDraw);
 	orig_accuracy = ppc_hook("ge_guard_accuracy", GuardAccuracy);
+	orig_page_text = ppc_hook("ge_page_text", PageText);
 	orig_npc_fire = ppc_hook("ge_npc_fire_bullet", NpcFire);
 	g_tracehit = std::getenv("GE_TRACEHIT") != nullptr;
 	if (!orig_bullet || !orig_shot || !orig_fight_wait || !orig_protection || !orig_melee || !orig_fire_wait || !orig_setting_get || !orig_setting_step || !orig_accuracy || !orig_npc_fire)

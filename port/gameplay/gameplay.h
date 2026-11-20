@@ -23,6 +23,11 @@ void set_custom_mode(bool on);
 std::string custom_label(int slider); //"Enemy Health: 250%"
 const char* custom_about(int slider); //the line that says what it is
 std::string custom_values(); //the sliders and the switch as the settings file keeps them
+const int kCustomShown = kCustomSliders + 1; //what a mission was played with: the sliders and the switch
+std::string custom_shown_name(int i, bool brief); //"Enemy Health", brief "Health"
+std::string custom_shown_value(int i); //"250%", "On"
+bool custom_showing(); //the lines under the timer are up: a mission played with them, the hud on screen
+void custom_page_drawing(bool on); //mods.cpp: the Mission Complete page draws itself between the two
 
 //fov.cpp
 void install_fov();
@@ -74,6 +79,11 @@ bool hud(); //the hud is drawn
 void set_hud(bool on);
 bool level_timer(); //the hud shows the level's time
 void set_level_timer(bool on);
+//the mission timer's place on screen, for drawing beside it: true when the timer is on screen now,
+//with its top-right corner in window pixels (win_w x win_h the window, letterboxing minded)
+bool mission_timer_anchor(float win_w, float win_h, float& right_x, float& top_y);
+void mission_timer_place(float win_w, float win_h, float& right_x, float& top_y); //where it is when it's drawn
+bool hud_drawn(); //a text of the hud drew in the last frames
 bool extras_menu(); //the menu's unused extras page
 void set_extras_menu(bool on);
 bool unlock_all(); //every mission and difficulty can be picked
