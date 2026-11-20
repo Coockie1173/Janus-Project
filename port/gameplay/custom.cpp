@@ -36,13 +36,17 @@
 //both by the setting's hash. four hashes the game doesn't have are answered here
 //
 //what a mission is played with is shown: under the hud's timer in play (port/ui/overlay.cpp),
-//and on the Mission Complete page, whose rows left and right switch between the game's results
-//and the settings. the page (ge_mission_page) draws each of its texts into a widget of its
-//layout with ge_page_text (the page, its widgets, a widget's hash, a text's hash or -1 and a
-//string, a style, a font, the alignment 0 left 1 right 2 centred, a word on the stack): the
-//title 150000B1, the level 15000082, the outcome 15000080 at the bottom and a row each from
-//15000083 down (the time, the time to beat, the objectives), a name on the left and its value
-//on the right. with the settings up the rows are drawn here instead, the strings on the stack
+//and on the Mission Complete page, where left and right switch between the game's results and
+//the settings. the page (ge_mission_page) draws each of its texts into a widget of its layout
+//with ge_page_text (the page, its widgets, a widget's hash, a text's hash or -1 and a string, a
+//style, a font, the alignment 0 left 1 right 2 centred, a word on the stack): the title 150000B1,
+//the level's line 15000082, a row each from 15000083 to 15000087 (the time, the time to beat, the
+//objectives), a name on the left and its value on the right, and what was unlocked 15000080 at
+//the bottom. as 007 Custom the level's line ends with "007 Custom" in place of the difficulty and
+//the bottom line says how to switch, with the d-pad's characters that prompts.cpp makes the keys.
+//with the settings up they take the level's line and the rows, the six the layout has stripes
+//under (the stripes and the list's bars are drawn from somewhere else, they don't move with the
+//widgets). the strings go on the stack
 #include "ge.h"
 #include <algorithm>
 #include <atomic>
@@ -338,31 +342,33 @@ void ChoiceStep(PPCContext& c)
 }
 
 //the Mission Complete page with the settings up
-const uint32_t kPageTitle = 0x150000B1, kPageOutcome = 0x15000080;
+const uint32_t kPageTitle = 0x150000B1, kPageLevel = 0x15000082, kPageOutcome = 0x15000080;
 const uint32_t kPageRow = 0x15000083, kPageRows = 0x1D; //the rows' widgets, as many as the page could have
+//the page's widgets (fn_8023F420): 0x24 bytes each, +0 there, +4 to +0x10 the box in 640 by 448
 const uint32_t kFirstWidget = 0x15000080, kWidgetCount = 0x32, kWidgets = 0x914 + 0x9B4, kWidgetSize = 0x24;
 const uint32_t kRowStyle = 0x700002E, kRowFont = 0x109002A, kLeft = 0, kRight = 1, kCentred = 2;
 const uint32_t kPageUpFrames = 3; //the page is up when it drew this many frames ago at most
 const uint32_t kLeftButton = 0x0002, kRightButton = 0x8000; //the classic's d-pad
-const char* const kToSettings = "< >  007 Custom Settings";
-const char* const kToResults = "< >  Mission Results";
+const uint32_t kDifficultyTexts = 0x805861F8, kPageDifficulty = 0x1A; //a text's hash a difficulty, the page's difficulty (a short)
+const char16_t kLeftGlyph = 0x2738, kRightGlyph = 0x2739; //the d-pad in the font: prompts.cpp makes them the keys
 bool g_page_drawing = false; //inside ge_mission_page
 std::atomic<uint32_t> g_page_frame{0};
 std::atomic<bool> g_page_settings{false}; //the settings are up instead of the results
 uint32_t g_page_buttons = 0;
-bool g_last_drawn = false; //the results drew into the last row this time
 bool g_listed = false;
 
 bool PageUp() { return Active() && g_page_frame != 0 && ld32(kFrameCount) - g_page_frame <= kPageUpFrames; }
 
+uint32_t Widget(uint32_t widgets, uint32_t hash) { return widgets + kWidgets + (hash - kFirstWidget) * kWidgetSize; }
+
 //one text into a widget of the page: the call as the game made it, with a string and an alignment, and
 //in another widget a row's style. the string goes on the stack under the call's frame, the callee's frame under it
-void PageString(const PPCContext& c, uint32_t widget, const std::string& text, uint32_t align)
+void PageString(const PPCContext& c, uint32_t widget, const std::u16string& text, uint32_t align)
 {
 	const uint32_t kRoom = 0x200, kFrame = 0x40;
 	const uint32_t stack = c.r[1], string = stack - kRoom, frame = string - kFrame;
 	const size_t count = std::min(text.size(), size_t(kRoom / 2 - 1));
-	for (size_t i = 0; i <= count; ++i) st16(string + uint32_t(i) * 2, i < count ? (uint8_t)text[i] : 0);
+	for (size_t i = 0; i <= count; ++i) st16(string + uint32_t(i) * 2, i < count ? (uint16_t)text[i] : 0);
 	PPCContext call = c;
 	st32(frame, stack);
 	st32(frame + 8, ld32(stack + 8)); //the ninth argument
@@ -375,47 +381,63 @@ void PageString(const PPCContext& c, uint32_t widget, const std::string& text, u
 	orig_page_text(call);
 }
 
-//the last row the page's layout has (each widget 0x24 bytes from +0x9B4 of the widgets' +0x914, +0 there)
+std::u16string Wide(const std::string& text) { return std::u16string(text.begin(), text.end()); }
+
+//(the widgets) the rows' last, 0 for none
 uint32_t LastRow(uint32_t widgets)
 {
 	uint32_t last = 0;
 	for (uint32_t row = kPageRow; row < kPageRow + kPageRows; ++row)
-		if (ld8(widgets + kWidgets + (row - kFirstWidget) * kWidgetSize)) last = row;
+		if (ld8(Widget(widgets, row))) last = row;
 	return last;
+}
+
+//the level's line ends with the difficulty's name: 007 Custom's instead
+std::u16string LevelLine(const PPCContext& c)
+{
+	std::u16string line;
+	for (uint32_t at = c.r[7]; guest_ptr(at) && line.size() < 0x100; at += 2)
+	{
+		const uint16_t ch = ld16(at);
+		if (!ch) break;
+		line += char16_t(ch);
+	}
+	const std::u16string difficulty = Wide(game_text(c, ld32(kDifficultyTexts + ld16(c.r[3] + kPageDifficulty) * 4)));
+	if (difficulty.empty() || line.size() < difficulty.size() || line.compare(line.size() - difficulty.size(), difficulty.size(), difficulty) != 0) return line;
+	return line.substr(0, line.size() - difficulty.size()) + u"007 Custom";
 }
 
 void PageText(PPCContext& c)
 {
 	if (!g_page_drawing || !Active()) { orig_page_text(c); return; }
 	const PPCContext call = c; //as it came: the call returns with its registers changed
-	const uint32_t widget = c.r[5], last = LastRow(c.r[4]);
+	const uint32_t widget = c.r[5];
 	if (g_trace && widget == kPageTitle && !g_listed && (g_listed = true))
 		for (uint32_t i = 0; i < kWidgetCount; ++i)
 		{
 			const uint32_t w = c.r[4] + kWidgets + i * kWidgetSize;
 			if (ld8(w)) rt_log("goldeneye: 007 Custom: the page's widget %08X at %g %g to %g %g", kFirstWidget + i, ldf(w + 4), ldf(w + 8), ldf(w + 0xC), ldf(w + 0x10));
 		}
-	if (widget == kPageTitle) g_last_drawn = false;
-	if (!g_page_settings)
+	if (widget == kPageLevel && c.r[7] && !g_page_settings) { PageString(call, widget, LevelLine(call), (uint32_t)c.r[10]); return; }
+	if (widget == kPageOutcome)
 	{
-		if (widget == last) g_last_drawn = true;
-		orig_page_text(c);
-		//the way to the settings in the last row, when the results leave it empty. the outcome is drawn after the rows
-		if (widget == kPageOutcome && last && !g_last_drawn) PageString(call, last, kToSettings, kCentred);
-		return;
+		//the way between the two in place of what the mission unlocked
+		const std::u16string keys = {kLeftGlyph, u'/', kRightGlyph, u' '};
+		PageString(call, widget, keys + (g_page_settings ? u"Mission Results" : u"007 Custom Settings"), (uint32_t)c.r[10]);
+		if (!g_page_settings) return;
 	}
-	if (widget >= kPageRow && widget < kPageRow + kPageRows) return; //the results' rows, the settings are in them
-	if (widget == kPageTitle) { PageString(c, widget, "007 Custom Settings", kLeft); return; }
-	orig_page_text(c);
-	if (widget != kPageOutcome) return;
-	//two to a row, a name and its value on each side
-	uint32_t row = kPageRow;
-	for (int i = 0; i < kCustomShown && row < last; i += 2, ++row)
+	else if (!g_page_settings) { orig_page_text(c); return; }
+	if (widget >= kPageLevel && widget < kPageRow + kPageRows) return; //the level's line and the results' rows, the settings are in them
+	if (widget == kPageTitle) { PageString(call, widget, u"007 Custom Settings", (uint32_t)c.r[10]); return; }
+	if (widget != kPageOutcome) { orig_page_text(c); return; }
+	//a row each from the level's line down (the layout's stripes are drawn under those six), the name on the
+	//left and the value on the right
+	const uint32_t last = LastRow(c.r[4]);
+	for (int i = 0; i < kCustomShown && kPageLevel + i <= last; ++i)
 	{
-		PageString(call, row, custom_shown_name(i, false) + ": " + custom_shown_value(i), kLeft);
-		if (i + 1 < kCustomShown) PageString(call, row, custom_shown_name(i + 1, false) + ": " + custom_shown_value(i + 1), kRight);
+		PageString(call, kPageLevel + i, Wide(custom_shown_name(i, false)), kLeft);
+		PageString(call, kPageLevel + i, Wide(custom_shown_value(i)), kRight);
 	}
-	if (last) PageString(call, last, kToResults, kCentred);
 }
 
 } //namespace
