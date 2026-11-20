@@ -45,9 +45,6 @@ void settings_replay(); //a recording's hotkeys, every frame
 bool speedrun_event(const SDL_Event* e); //speedrun/window.cpp
 void speedrun_draw();
 void speedrun_own_window();
-void menu_text(ImDrawList* dl, ImVec2 at, float size, ImU32 colour, const std::string& s, bool shadow); //settings/draw.cpp, the game's font
-float menu_text_width(const std::string& s, float size);
-bool menu_font_ready();
 #endif
 
 namespace {
@@ -191,27 +188,6 @@ void speedometer(float speed) {
     dl->AddText(font, size, at, colour, text);
 }
 
-//007 Custom (custom.cpp): what the mission is played with, under the hud's timer and right-aligned to
-//it, or where the timer is when it's off. in the game's font, the hud's sizes are of its 640 by 448
-const float kTimerHudHigh = 22.0f, kCustomHudGap = 4.0f, kCustomHudSize = 13.0f, kCustomHudLine = 14.0f;
-void custom_lines() {
-    if (!menu_font_ready()) return;
-    ImVec2 screen = ImGui::GetIO().DisplaySize;
-    float picture[4];
-    video_picture_rect(screen.x, screen.y, picture);
-    float u = picture[3] / 448, right = 0, top = 0;
-    if (mission_timer_anchor(screen.x, screen.y, right, top)) top += (kTimerHudHigh + kCustomHudGap) * u;
-    else mission_timer_place(screen.x, screen.y, right, top);
-    ImDrawList* dl = ImGui::GetBackgroundDrawList();
-    float size = kCustomHudSize * u;
-    auto line = [&](const std::string& text, ImU32 colour) {
-        menu_text(dl, ImVec2(std::floor(right - menu_text_width(text, size)), std::floor(top)), size, colour, text, true);
-        top += kCustomHudLine * u;
-    };
-    line("007 Custom", IM_COL32(231, 181, 30, 240));
-    for (int i = 0; i < kCustomShown; ++i) line(custom_shown_name(i, true) + " " + custom_shown_value(i), IM_COL32(255, 255, 255, 220));
-}
-
 std::string find_dmw() {
     if (const char* e = std::getenv("GE_DMW")) return e;
     std::error_code ec;
@@ -347,8 +323,7 @@ void draw() {
     float speed = 0;
     bool hop = bunnyhop_speed(speed);
     bool flash = flash_showing();
-    bool custom = custom_showing() && fade <= 0;
-    if (!flash && !custom && !overlay_open() && !g_show_state && !skipping_cutscene() && fade <= 0 && !settings_toast() && !cheats && !meter && !hop && !speedrun_in_game()) return;
+    if (!flash && !overlay_open() && !g_show_state && !skipping_cutscene() && fade <= 0 && !settings_toast() && !cheats && !meter && !hop && !speedrun_in_game()) return;
     //with only the state shown the cursor stays hidden over the picture
     ImGuiIO& io = ImGui::GetIO();
     if (overlay_open()) io.ConfigFlags &= ~ImGuiConfigFlags_NoMouseCursorChange;
@@ -361,7 +336,6 @@ void draw() {
     if (meter) stamina_bar(sprint);
     if (hop && fade <= 0) speedometer(speed);
     if (cheats) cheats_label();
-    if (custom) custom_lines();
     if (trigger_view() && fade <= 0) trigger_list(trigger_labels(), trigger_tags());
     if (g_show_state) player_state();
     if (skipping_cutscene()) skipping_label();

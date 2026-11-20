@@ -92,11 +92,6 @@ std::atomic<bool> g_hud{true};
 const uint32_t kHudTutorialUp = 0x2523; //a byte of the hud, a tutorial box is shown
 const uint32_t kTextSize = 0x58, kTextColour = 0x24; //a hud text, its colour (RGBA)
 const uint32_t kTimerText = 0x1810; //the hud's text of the level timer
-//the mission timer's place, measured from a frame: the game's 2D hud space is 640x448 (pointer.cpp),
-//the timer right-aligned near the right, a little down from the top
-std::atomic<uint32_t> g_timer_drawn_frame{0}; //kFrameCount when the timer text last drew (it's on screen then)
-std::atomic<uint32_t> g_hud_drawn_frame{0}; //and any text of the hud
-const float kHudWide = 640.0f, kHudHigh = 448.0f, kTimerHudRight = 575.0f, kTimerHudTop = 50.0f;
 const uint32_t kAmmoText = 0x13E8, kAmmoTexts = 4; //the ammunition count's texts (fn_8018F250 fills them)
 const uint32_t kCheatRed = 0x80101000; //the hud's colours go to 0x80
 const uint32_t kCustomGrey = 0x60606000;
@@ -202,8 +197,6 @@ void HudTextDraw(PPCContext& c)
 {
 	if (g_hud_hidden) return;
 	uint32_t text = c.r[3];
-	g_hud_drawn_frame = ld32(kFrameCount);
-	if (text - c.r[4] == kTimerText) g_timer_drawn_frame = ld32(kFrameCount); //the timer is on screen this frame
 	const bool cheat{ cheats_active() && CheatText(text, c.r[4]) };
 	const bool custom{ !cheat && text - c.r[4] == kTimerText && bhop_custom_now() };
 	if (!cheat && !custom)
@@ -217,23 +210,6 @@ void HudTextDraw(PPCContext& c)
 	if (ms % 1000 < 500) st32(text + kTextColour, (cheat ? kCheatRed : kCustomGrey) | (colour & 0xFF));
 	orig_text_draw(c);
 	st32(text + kTextColour, colour);
-}
-
-//where the timer's top-right corner is in window pixels, drawn or not
-void TimerPlace(float win_w, float win_h, float& right_x, float& top_y)
-{
-	float pic[4];
-	video_picture_rect(win_w, win_h, pic); //{x, y, w, h}: where the game's picture sits in the window
-	right_x = pic[0] + kTimerHudRight / kHudWide * pic[2];
-	top_y = pic[1] + kTimerHudTop / kHudHigh * pic[3];
-}
-
-//the timer's top-right corner in window pixels, when it's on screen (its text drew just now)
-bool TimerAnchor(float win_w, float win_h, float& right_x, float& top_y)
-{
-	if (!(win_w > 0) || !(win_h > 0) || ld32(kFrameCount) - g_timer_drawn_frame.load() > 2) return false;
-	TimerPlace(win_w, win_h, right_x, top_y);
-	return true;
 }
 
 void WaypointsDraw(PPCContext& c)
@@ -292,9 +268,6 @@ void MenuLocks(PPCContext& c)
 
 bool level_timer() { return g_level_timer; }
 void set_level_timer(bool on) { g_level_timer = on; }
-bool mission_timer_anchor(float win_w, float win_h, float& right_x, float& top_y) { return TimerAnchor(win_w, win_h, right_x, top_y); }
-void mission_timer_place(float win_w, float win_h, float& right_x, float& top_y) { TimerPlace(win_w, win_h, right_x, top_y); }
-bool hud_drawn() { return ld32(kFrameCount) - g_hud_drawn_frame.load() <= 2; }
 bool hud() { return g_hud; }
 void set_hud(bool on) { g_hud = on; }
 bool extras_menu() { return g_extras_menu; }

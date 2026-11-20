@@ -35,8 +35,7 @@
 //ge_setting_get (8022F4D0) how full the bar is and tells ge_setting_step (8022E2F0) to move it,
 //both by the setting's hash. four hashes the game doesn't have are answered here
 //
-//what a mission is played with is shown: under the hud's timer in play (port/ui/overlay.cpp),
-//and on the Mission Complete page, where left and right switch between the game's results and
+//what a mission was played with is shown on the Mission Complete page, where left and right switch between the game's results and
 //the settings. the page (ge_mission_page) draws each of its texts into a widget of its layout
 //with ge_page_text (the page, its widgets, a widget's hash, a text's hash or -1 and a string, a
 //style, a font, the alignment 0 left 1 right 2 centred, a word on the stack): the title 150000B1,
@@ -435,7 +434,7 @@ void PageText(PPCContext& c)
 	const uint32_t last = LastRow(c.r[4]);
 	for (int i = 0; i < kCustomShown && kPageLevel + i <= last; ++i)
 	{
-		PageString(call, kPageLevel + i, Wide(custom_shown_name(i, false)), kLeft);
+		PageString(call, kPageLevel + i, Wide(custom_shown_name(i)), kLeft);
 		PageString(call, kPageLevel + i, Wide(custom_shown_value(i)), kRight);
 	}
 }
@@ -474,25 +473,12 @@ void custom_page_drawing(bool on)
 	if (on) g_page_frame = ld32(kFrameCount);
 }
 
-std::string custom_shown_name(int i, bool brief)
-{
-	static const char* const kBrief[kCustomSliders] = {"Health", "Damage", "Reactions", "Protection", "Accuracy"};
-	if (i == kCustomSliders) return brief ? "Headshots" : "Instant Kill Headshots";
-	return brief ? kBrief[i] : kSliders[i].label;
-}
+std::string custom_shown_name(int i) { return i == kCustomSliders ? "Instant Kill Headshots" : kSliders[i].label; }
 
 std::string custom_shown_value(int i)
 {
 	if (i == kCustomSliders) return g_headshots ? "On" : "Off";
 	return std::to_string(g_value[i].load()) + "%";
-}
-
-bool custom_showing()
-{
-	//not while a level loads: there's a player from step 0x15 on, behind the loading screen
-	const uint32_t kAppPtr = 0x806EB694, kLoadStep = 0x354, kStepPlaying = 0x19;
-	const uint32_t app = ld32(kAppPtr);
-	return Active() && hud() && hud_drawn() && in_play() && guest_ptr(app) && ld32(app + kLoadStep) == kStepPlaying;
 }
 
 bool custom_mode() { return g_on; }
