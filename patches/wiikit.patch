@@ -1,5 +1,5 @@
 diff --git a/recomp/__main__.py b/recomp/__main__.py
-index db1b158..202b22a 100644
+index db1b158..5f0cc97 100644
 --- a/recomp/__main__.py
 +++ b/recomp/__main__.py
 @@ -22,6 +22,7 @@ boundaries and the hook names. The generated code needs wiikit/runtime/ppc.h.
@@ -60,11 +60,11 @@ index db1b158..202b22a 100644
 +
 +
 +def generate(img, out, per_file=8000, comments=True, hook_files=(), modules=(), log=print,
-+             cr_live=True, cr_check=False, ps_live=True, ps_check=False):
++             cr_live=True, cr_check=False, ps_live=True, ps_check=False, gpr_live=True):
      t0 = time.time()
      prog = Program(img, log=log)
      entries = set(prog.entries)
-@@ -177,21 +223,51 @@ def generate(img, out, per_file=8000, comments=True, hook_files=(), modules=(),
+@@ -177,28 +223,68 @@ def generate(img, out, per_file=8000, comments=True, hook_files=(), modules=(),
          files.append(name)
          buf, count, idx = [], 0, idx + 1
  
@@ -102,6 +102,10 @@ index db1b158..202b22a 100644
 +    if ps_live:
 +        from . import pslive
 +        ps = pslive.analyse(prog, emitted, log)
++    gpr = None
++    if gpr_live:
++        from . import gprlive
++        gpr = gprlive.Gprs(prog, emitted, hooks, log)
 +    for e in prog.entries:
 +        unit, body = prog.body(e)
 +        fn = FnCtx(prog, e, entries, next((m for m in modules if m.contains(e)), None))
@@ -112,17 +116,32 @@ index db1b158..202b22a 100644
 +        live = cr.live_after(e) if cr else None
 +        ps_after = ps.live_after(e) if ps else None
 +        ps_saves = pslive.prologue_saves(prog, e) if ps else ()
-+        for (a, ins), code in zip(body, emitted.pop(e)):
++        regs = gprlive.Fn(gpr, e) if gpr else None
++        if regs and regs.head():
++            lines.append("    " + regs.head())
++        for k, ((a, ins), code) in enumerate(zip(body, emitted.pop(e))):
 +            if a in labels:
 +                lines.append(f"L_{a:08X}:")
 +            if cr:
 +                code = _cr_narrow(code, ins, a, live[a], cr_check)
 +            if ps:
 +                code = pslive.narrow(code, ps_after[a], a, ps_check, a in ps_saves)
++            if regs:
++                code = regs.lines(k, code)
              note = f"  // {a:08X} {_text(ins, a)}" if comments else ""
              lines.append("    " + code[0] + note)
              lines.extend("    " + x for x in code[1:])
-@@ -211,7 +287,7 @@ def generate(img, out, per_file=8000, comments=True, hook_files=(), modules=(),
+         last = body[-1][1] if body else None
+         if last is None or not E.terminates(last):
+-            lines.append("    " + fn.jump(unit.end, unit.end) if unit.end in entries else
+-                         f'    ppc_unimplemented(c, 0x{unit.end:08X}u, "fell off the end"); return;')
++            end = (fn.jump(unit.end, unit.end) if unit.end in entries else
++                   f'ppc_unimplemented(c, 0x{unit.end:08X}u, "fell off the end"); return;')
++            lines.append("    " + (regs.extra(end) if regs else end))
+         lines.append("}\n")
+         buf.append("\n".join(lines))
+         count += len(body)
+@@ -211,7 +297,7 @@ def generate(img, out, per_file=8000, comments=True, hook_files=(), modules=(),
          f.write("#pragma once\n#include \"ppc.h\"\n\n")
          f.write("extern uint32_t g_rso_base[];   // where each RSO module is loaded (rso.cpp)\n\n")
          for e in prog.entries:
@@ -131,7 +150,7 @@ index db1b158..202b22a 100644
      with Out(os.path.join(out, "table.cpp")) as f:
          f.write('#include "funcs.h"\n#include <cstddef>\n\n')
          f.write("extern const PPCFuncEntry g_ppc_funcs[] = {\n")
-@@ -223,9 +299,9 @@ def generate(img, out, per_file=8000, comments=True, hook_files=(), modules=(),
+@@ -223,9 +309,9 @@ def generate(img, out, per_file=8000, comments=True, hook_files=(), modules=(),
          f.write(HOOKS_HEAD)
          for a, name in sorted(hooks.items()):
              f.write(f"// {name}\n"
@@ -143,7 +162,7 @@ index db1b158..202b22a 100644
                      f"else orig_{a:08X}(c); }}\n\n")
          f.write("extern const PPCHook g_ppc_hooks[] = {\n")
          for a, name in sorted(hooks.items()):
-@@ -315,6 +391,14 @@ def main():
+@@ -315,6 +401,16 @@ def main():
      ap.add_argument("--symbols", metavar="TSV",
                      help="names for a stripped executable (addr, ..., name); its functions "
                           "are found by discovery (recomp/discover.py)")
@@ -151,6 +170,8 @@ index db1b158..202b22a 100644
 +                    help="every single-precision result fills ps1 (recomp/pslive.py follows which are read)")
 +    ap.add_argument("--ps-check", action="store_true",
 +                    help="a ps1 taken for dead holds a mark, and reading it stops the game")
++    ap.add_argument("--no-gpr-live", action="store_true",
++                    help="every GPR lives in the context (recomp/gprlive.py keeps them in locals)")
 +    ap.add_argument("--no-cr-live", action="store_true",
 +                    help="every compare stores all four CR bits (recomp/crlive.py follows which are read)")
 +    ap.add_argument("--cr-check", action="store_true",
@@ -158,23 +179,23 @@ index db1b158..202b22a 100644
      a = ap.parse_args()
      img = Image(a.image)
      modules, module_names = [], {}
-@@ -328,7 +412,9 @@ def main():
+@@ -328,7 +424,9 @@ def main():
              names.setdefault(v, n)
          symbolise(img, names)
      generate(img, a.out, a.per_file, not a.no_comments,
 -             [os.path.join(RUNTIME, "hooks.txt")] + a.hooks, modules)
 +             [os.path.join(RUNTIME, "hooks.txt")] + a.hooks, modules,
 +             cr_live=not a.no_cr_live, cr_check=a.cr_check,
-+             ps_live=not a.no_ps_live, ps_check=a.ps_check)
++             ps_live=not a.no_ps_live, ps_check=a.ps_check, gpr_live=not a.no_gpr_live)
  
  
  if __name__ == "__main__":
 diff --git a/recomp/crlive.py b/recomp/crlive.py
 new file mode 100644
-index 0000000..ddc7462
+index 0000000..920169d
 --- /dev/null
 +++ b/recomp/crlive.py
-@@ -0,0 +1,357 @@
+@@ -0,0 +1,361 @@
 +"""Which condition register bits an instruction's result is still read from.
 +
 +A compare writes four CR bits and the branch after it reads one; the next
@@ -287,19 +308,21 @@ index 0000000..ddc7462
 +    """live(entry, addr): the CR bits read after the instruction at addr, before they are written."""
 +
 +    def __init__(self, prog, code, log=print, use_def=use_def, saved=SAVED, abi_in=SAVED | 1 << 6,
-+                 abi_out=ALL, pure_use=False, name=None):
++                 abi_out=ALL, pure_use=False, name=None, fixed_use=None):
 +        """code: {entry: [lines of each instruction of its body]}. The defaults follow CR bits;
 +        another 32-bit register set (pslive.py) gives its own use_def(lines, ins, following),
 +        the bits a function of unknown callers must keep (saved) and those an indirect
 +        call's target may read (abi_in) and its caller read after it (abi_out). With pure_use
 +        a function's use leaves out what only its caller reads after it returns (a call passes
 +        that through already): bits the callee never touches stay out of every caller's
-+        "live before the call"."""
++        "live before the call". fixed_use {entry: bits}: functions whose code is not what runs
++        (hooked ones: native code) and the use they are taken to have."""
 +        self.prog = prog
 +        self.code = code
 +        self.use_def = use_def
 +        self.abi_out = abi_out
 +        self.pure_use = pure_use
++        self.fixed_use = fixed_use or {}
 +        self.conds = {}
 +        entries = prog.entries
 +        self.entry_set = set(entries)
@@ -453,6 +476,8 @@ index 0000000..ddc7462
 +                break
 +            changed = True
 +        use0 = self._pure(entry) if self.pure_use else (live[0] if n else None)
++        if entry in self.fixed_use:
++            use0 = self.fixed_use[entry]
 +        if n and use0 != self.use[entry]:
 +            self.use[entry] = use0
 +            changed = True
@@ -801,6 +826,259 @@ index e7189b8..2ffec1e 100644
      if op in ("psq_lx", "psq_lux", "psq_stx", "psq_stux"):
          fn_ = "psq_load" if op.startswith("psq_l") else "psq_store"
          upd = f" c.r[{f['A']}] = ea;" if op.endswith("ux") else ""
+diff --git a/recomp/gprlive.py b/recomp/gprlive.py
+new file mode 100644
+index 0000000..01cf777
+--- /dev/null
++++ b/recomp/gprlive.py
+@@ -0,0 +1,247 @@
++"""Guest GPRs as C++ locals, written to the context only where something else reads them.
++
++Every recompiled function works on c.r[n]. The context is `restrict`, so between calls the
++C++ compiler keeps them in host registers already; but a call takes the context, so before
++it every register the function changed is stored, and after it every one still needed is
++loaded again: the compiler can't know what the callee reads or writes. Nor what a caller
++reads after a return, so each register changed is stored there too.
++
++Here a function's registers that no call in it may overwrite while they are still needed
++(temporaries, arguments, results, values kept across calls that leave them alone) are locals
++(r0, r3...); the others keep the context as their home, as before (Fn). Locals go to the
++context only:
++- before a direct call, with what the callee reads before writing (crlive.Analysis's
++  `use`, pure: its own reads and its callees') and what it may write that is read after
++  the call (the callee may write it on some paths only: what it stores then has to be
++  the caller's value on the others); after it, those it may write are loaded back.
++  "May write" (mod) is every register written in the callee or anything it calls;
++- before a return, with what a caller reads after the call (`ret`) and this function wrote;
++- before an indirect call or jump, with what any indirect target reads (only ABI
++  registers: r2-r10, r13, r14-r31) and everything read after; the callee may write anything.
++  Of what an indirect callee leaves, a caller reads only r3/r4 and the callee-saved ones (a
++  volatile register after a call is undefined on the hardware too: varargs calls do pass
++  their junk on to OSReport). Without this, any such read after any indirect call would be
++  stored at every function's return;
++- before the runtime gives up (a trap, an unknown target), with everything: the crash
++  report shows them;
++- around an interrupt check (a loop's PPC_POLL when one is pending, PPC_IDLE, mtmsr), all
++  of them both ways: the thread may park in the handler, and a saved state loaded meanwhile
++  writes the registers it was interrupted with.
++
++Nothing about the ABI is assumed for direct calls: callee-saved registers a callee saves
++and restores are written by it, so they are synced around it as now. What is saved: dead
++temporaries are never stored, a register a callee leaves alone stays in a host register
++across the call. Measured (deterministic Dam run, the same 3163 frames): 2-4% less time.
++The recompiler's --no-gpr-live goes back to the context for everything.
++
++Native code. A hooked function's slot may run native code: it reads what the ABI passes and
++may write anything (a saved state is loaded from inside a hook: every register is taken
++back from the context after such a call, see runtime/state.cpp). The runtime's own callers
++of guest code (callbacks, a thread's entry) read r3/r4 and the callee-saved registers.
++r1 stays in the context (an interrupt reads it: PPC_COMMIT); ppc_lswx/ppc_stswx address
++registers by number, and a function with them keeps all of its in the context.
++"""
++import re
++
++from . import crlive
++from .crlive import CALL, ICALL, TAIL, ITAIL, SWITCH
++
++ALL = 0xFFFFFFFF
++
++
++def _bits(*regs):
++    m = 0
++    for r in regs:
++        m |= 1 << r
++    return m
++
++
++CALLEE_SAVED = _bits(*range(14, 32))
++ABI_IN = _bits(*range(1, 11), 13) | CALLEE_SAVED           # what an indirect target may read
++SAVED = _bits(1, 2, 3, 4, 13) | CALLEE_SAVED                # what the runtime reads after a callback
++STACK = _bits(1)
++
++_REF = re.compile(r"c\.r\[(\d+)\]")
++_OPAQUE = ("ppc_lswx(", "ppc_stswx(")
++
++
++_REF_OR_END = re.compile(r"c\.r\[(\d+)\]|;")
++
++
++def _use_def(lines, ins, following):
++    """(read before written, written). Statements run in order and an assignment's
++    right-hand side before its store (the emitted code writes no register conditionally)."""
++    use = d = 0
++    for t in lines:
++        if any(o in t for o in _OPAQUE):
++            return ALL, ALL
++        pending = 0                                       # stores of the statement under way
++        for m in _REF_OR_END.finditer(t):
++            if m.group(0) == ";":
++                d |= pending
++                pending = 0
++                continue
++            bit = 1 << int(m.group(1))
++            if t.startswith(" = ", m.end()):
++                pending |= bit
++            elif not d & bit:
++                use |= bit
++        d |= pending
++    return use, d
++
++
++class Gprs:
++    def __init__(self, prog, code, hooks, log=print):
++        self.prog = prog
++        self.hooks = set(hooks)
++        self.opaque = {e for e, rows in code.items() if any(o in x for row in rows for x in row for o in _OPAQUE)}
++        self.a = crlive.Analysis(prog, code, log, use_def=_use_def, saved=SAVED, abi_in=ABI_IN,
++                                 abi_out=SAVED, pure_use=True, name="GPR",
++                                 fixed_use={e: ABI_IN for e in self.hooks})
++        self.refs = {}
++        for e, rows in code.items():
++            m = 0
++            for row in rows:
++                for x in row:
++                    for r in _REF.finditer(x):
++                        m |= 1 << int(r.group(1))
++            self.refs[e] = m
++        self._mod()
++
++    def _mod(self):
++        a = self.a
++        own, deps = {}, {}
++        for e, (rows, end) in a.fns.items():
++            m, ds = 0, set()
++            for use, d, kind, arg in rows:
++                m |= d
++                if kind in (CALL, TAIL):
++                    ds.add(arg[0])
++                elif kind in (ICALL, ITAIL, SWITCH):
++                    m = ALL
++            if end is not None and end >= 0:
++                ds.add(end)
++            if e in self.hooks or e in self.opaque:
++                m = ALL
++            own[e], deps[e] = m, ds
++        self.own = {e: m for e, m in own.items()}
++        mod = dict(own)
++        changed = True
++        while changed:
++            changed = False
++            for e, ds in deps.items():
++                m = mod[e]
++                if m == ALL:
++                    continue
++                for t in ds:
++                    m |= mod[t]
++                if m != mod[e]:
++                    mod[e] = m
++                    changed = True
++        # a hooked function's slot is what callers reach
++        for e in self.hooks:
++            mod[e] = ALL
++        self.mod = mod
++
++    def local_set(self, e):
++        if e in self.opaque:
++            return 0
++        return self.refs[e] & ~STACK
++
++    def ret_self(self, e):
++        return self.a.ret[e] | self.a.ret_any
++
++
++_SYNC = re.compile(r"(?P<tail>f_(?P<tt>[0-9A-F]{8})\(c\); return;)|(?P<itail>ppc_call_indirect\(c, [^;]*\); return;)"
++                   r"|(?P<call>f_(?P<ct>[0-9A-F]{8})\(c\);)|(?P<icall>ppc_call_indirect\(c, [^;]*\);)"
++                   r"|(?P<ret>\breturn;)|(?P<die>\b(?:ppc_unimplemented|ppc_trap)\()"
++                   r"|(?P<poll>PPC_POLL\(c\);)|(?P<park>(?:PPC_IDLE\(c\)|ppc_mtmsr\(c, [^;]*\));)")
++_LOCAL = re.compile(r"c\.r\[(\d+)\]")
++
++
++def _store(mask):
++    return " ".join(f"c.r[{k}] = r{k};" for k in range(32) if mask >> k & 1)
++
++
++def _load(mask):
++    return " ".join(f"r{k} = c.r[{k}];" for k in range(32) if mask >> k & 1)
++
++
++class Fn:
++    """The rewriting of one function's lines."""
++
++    def __init__(self, g, entry):
++        self.g, self.e = g, entry
++        self.L = g.local_set(entry)
++        rows, _ = g.a.fns[entry]
++        self.live = g.a.out[entry]
++        # A register still needed after a call that may write it keeps the context as its home:
++        # as a local it would be synced around the call all the same, and in a big function the
++        # compiler spills it to the host stack too (both copies kept: measured slower, the code
++        # a quarter bigger). What is left are temporaries, arguments, results and registers the
++        # calls leave alone.
++        for k, (use, d, kind, arg) in enumerate(rows):
++            if kind == ICALL:
++                self.L &= ~self.live[k + 1]
++            elif kind == CALL:
++                self.L &= ~(self.live[k + 1] & g.mod[arg[0]])
++        self.defs = 0
++        for use, d, kind, arg in rows:
++            self.defs |= d
++        self.defs &= self.L
++        self.ret = g.ret_self(entry)
++
++    def head(self):
++        if not self.L:
++            return None
++        return "uint32_t " + ", ".join(f"r{k} = c.r[{k}]" for k in range(32) if self.L >> k & 1) + ";"
++
++    def _wrap(self, store, body, load=0):
++        s, l = _store(store & self.defs), _load(load & self.L)
++        if not s and not l:
++            return body
++        return "{ " + " ".join(x for x in (s, body, l) if x) + " }"
++
++    def lines(self, k, code):
++        """The k-th instruction's lines, its registers renamed and the context synced."""
++        if not self.L:
++            return code
++        g, L = self.g, self.L
++        after = self.live[k + 1]
++        out = []
++        for line in code:
++            line = _LOCAL.sub(lambda m: f"r{m.group(1)}" if L >> int(m.group(1)) & 1 else m.group(0), line)
++            out.append(_SYNC.sub(lambda m: self._sync(m, after), line))
++        return out
++
++    def extra(self, line):
++        """A line after the last instruction (the jump off the end into the next function)."""
++        if not self.L:
++            return line
++        return _SYNC.sub(lambda m: self._sync(m, 0), line)
++
++    def _sync(self, m, after):
++        g, a = self.g, self.g.a
++        text = m.group(0)
++        if m.group("tail"):                              # a jump into another function
++            return self._wrap(a.use[int(m.group("tt"), 16)] | self.ret, text)
++        if m.group("itail"):                             # an indirect jump
++            return self._wrap(a.use_any | self.ret, text)
++        if m.group("call"):
++            t = int(m.group("ct"), 16)
++            mod = g.mod[t]
++            return self._wrap(a.use[t] | (after & mod), text, after & mod)
++        if m.group("icall"):
++            return self._wrap(a.use_any | after, text, after)
++        if m.group("ret"):
++            return self._wrap(self.ret, text)
++        if m.group("die"):                               # the runtime gives up: the report shows them
++            return _store(self.defs) + " " + text if self.defs else text
++        # An interrupt may park this thread (the handler reschedules), and a saved state loaded
++        # meanwhile writes its registers (os_state: a thread inside an interrupt gets its outer
++        # context back too): everything goes to the context and comes back from it. For the
++        # loops' poll only when an interrupt is pending.
++        sync = self._wrap(ALL, "ppc_poll(c);" if m.group("poll") else text, ALL)
++        if m.group("poll"):
++            return f"if (PPC_UNLIKELY(g_ppc_pending.load(std::memory_order_relaxed))) {sync}"
++        return sync
 diff --git a/recomp/pslive.py b/recomp/pslive.py
 new file mode 100644
 index 0000000..6e6b7c3
