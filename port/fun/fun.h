@@ -40,10 +40,10 @@ bool bhop_prestrafe_now();
 bool bhop_custom_now(); //on for this game and a rule isn't its default: the level timer flashes grey
 float bhop_value_now(int which);
 void bunnyhop_buttons(const ClassicState& s); //the jump key, as the pad was read
-bool bunnyhop_speed(float& speed);
+bool bunnyhop_speed(float& speed); //the speedometer's, false with it and bunnyhopping off or nobody in play
 //the local player's hop as the last step left it: its speed, whether it's ours, the air's rules
 struct BhopMotion { bool active, inAir; float velX, velZ, airCap, airAccel, wishSpeed, maxSpeed, deadZone, dt; };
-bool bunnyhop_motion(BhopMotion& m); //false with bunnyhopping off or no local player hopping //the speedometer's, false with it and bunnyhopping off or nobody in play
+bool bunnyhop_motion(BhopMotion& m); //false with bunnyhopping off or no local player hopping
 bool speedometer_cheat(); //cheat, the speedometer shows without bunnyhopping
 void set_speedometer_cheat(bool on);
 enum { kBhopSpeed, kBhopHeight, kBhopGravity, kBhopAirCap, kBhopAirAccel, kBhopWish, kBhopMax, kBhopFall, kBhopDrop, kBhopGroundAccel, kBhopFriction, kBhopValueCount };
