@@ -104,6 +104,7 @@ void install() {
     install_ping();
     install_mods();
     install_custom_weapons();
+    install_weapon_previews();
     install_mods_menu();
     install_custom();
     install_pointer();

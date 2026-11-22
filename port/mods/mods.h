@@ -50,6 +50,8 @@ bool pictures_hiding(); //the hud and the gun are left out for a picture
 void pictures_frame(); //once a frame on the game's thread
 std::string pictures_draw(); //on the renderer's thread before the overlay, what to say when a picture was made
 void pictures_file(uint32_t hash, uint32_t file); //a file (the game's object for it) was given its memory
+uint32_t front_end_file(); //the menus' file (fe_main) in memory, 0 while it isn't
+uint32_t front_end_texture(uint32_t hash, uint32_t& sides); //one of its textures in memory (its header, the pixels at +0x80) and its width << 16 | height, 0 when it isn't there
 
 //weapons/weapons.cpp
 void install_custom_weapons(); //after install_mods and before install_mods_menu (its version has them): the weapons of every pack's weapons/
@@ -63,4 +65,7 @@ const char* custom_weapon_name(int n);
 int custom_weapon_pack(int n);
 bool custom_weapon_drawn(int n); //its gun is drawn right outside a network game: its own file is the one the game gets
 const std::vector<uint8_t>& custom_weapons_sum(); //what the installed pack's files say, for the network game's version
+
+//weapons/preview.cpp
+void install_weapon_previews(); //after install_custom_weapons: the loadout menu shows a custom weapon's own gun
 } //namespace ge

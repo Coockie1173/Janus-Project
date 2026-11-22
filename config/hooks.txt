@@ -165,6 +165,8 @@ ge_file_object         # a file with the section of one of its objects loaded: a
 ge_weapon_fire_sound   # a shot's sounds: a custom weapon's own .wav in place of its base's (port/mods/weapons/weapons.cpp)
 ge_character_sound     # a sound at a character: a guard's shot with a custom weapon plays its .wav (port/mods/weapons/weapons.cpp)
 ge_loadout_pick        # the loadout menu takes the lit weapon: a custom pistol stays a loadout's secondary
+ge_loadout_info        # the loadout menu's lit row: a custom weapon's picture is its own gun (port/mods/weapons/preview.cpp)
+ge_texture_bind        # a texture goes to a GX map: a gun picture becomes the custom weapon's drawn gun (port/mods/weapons/preview.cpp)
 ge_node_point          # a point of a node by its hash: traced with GE_TRACEWEAPONS (port/mods/weapons/weapons.cpp)
 ge_player_blend        # a client draws a player towards the host's copy: our own one keeps its place with client-owned players (port/net/owned.cpp)
 PlayerLand             # the player in the air or landing: online with client-owned players a joined console's own landings are its own (port/net/owned.cpp)

@@ -104,6 +104,11 @@ picture number; six places a kind of gun: pistols, SMGs, heavy, rifles, snipers,
 A network game gives each player the weapons of its loadout row by key (`fn_800C2740` from
 fn_800C2530 and fn_8013B4E0), so every console in the game needs the same custom weapons.
 
+The picture beside the list is `ge_loadout_info` (80256710): panel 0 of the menu's +0x914 on frame
+`picture << 4`. The guns' pictures are 26 fe_main textures (RGB5A3) bound by `ge_texture_bind`
+(802BE580); a custom weapon with a gun of its own shows that gun there, drawn turning
+(port/mods/weapons/preview.cpp).
+
 ### Poses
 
 `ge_weapon_poses` (800FE3A0) makes, once, a pose for every definition's idle anim mode

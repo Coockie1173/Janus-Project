@@ -184,20 +184,11 @@ bool ReadPng(const std::string& path, std::vector<uint8_t>& rgba)
 //where a lender's pixels are, 0 while the front end's file isn't in or isn't what it was
 uint32_t PixelsOf(const Lender& lender)
 {
-	const uint32_t file = guest_ptr(g_front_end) && ld32(g_front_end + kFileHash) == kFrontEnd ? ld32(g_front_end + kFileBase) : 0;
-	if (!guest_ptr(file) || ld32(file) != kGeom || ld32(file + 4) != kFrontEnd) return 0;
-	const uint32_t count = ld16(file + kTextureList), entries = file + kTextureList + 4 + ld32(file + kTextureList + 4);
-	if (count > kMostTextures || !guest_ptr(entries) || !guest_ptr(entries + count * kEntrySize)) return 0;
-	for (uint32_t i = 0; i < count; ++i)
-	{
-		const uint32_t entry = entries + i * kEntrySize;
-		if (ld32(entry + kEntryHash) != lender.texture) continue;
-		const uint32_t texture = ld32(entry + kEntryPlace);
-		if (!guest_ptr(texture) || !guest_ptr(texture + kTexPixels + kBytes)) return 0;
-		if (ld32(entry + kEntrySides) != (uint32_t(kSide) << 16 | kSide) || ld8(texture + kTexLevels) != 0 || ld8(texture + kTexFormat) != 0) return 0;
-		return texture + kTexPixels;
-	}
-	return 0;
+	uint32_t sides = 0;
+	const uint32_t texture = front_end_texture(lender.texture, sides);
+	if (!texture || !guest_ptr(texture + kTexPixels + kBytes)) return 0;
+	if (sides != (uint32_t(kSide) << 16 | kSide) || ld8(texture + kTexLevels) != 0 || ld8(texture + kTexFormat) != 0) return 0;
+	return texture + kTexPixels;
 }
 
 bool Holds(uint32_t pixels, const std::vector<uint8_t>& bytes) { return std::memcmp(PPC_MEM(pixels), bytes.data(), kBytes) == 0; }
@@ -331,6 +322,29 @@ void LobbyPicture(PPCContext& c)
 void pictures_file(uint32_t hash, uint32_t file)
 {
 	if (hash == kFrontEnd) g_front_end = file;
+}
+
+uint32_t front_end_file()
+{
+	const uint32_t file = guest_ptr(g_front_end) && ld32(g_front_end + kFileHash) == kFrontEnd ? ld32(g_front_end + kFileBase) : 0;
+	return guest_ptr(file) && ld32(file) == kGeom && ld32(file + 4) == kFrontEnd ? file : 0;
+}
+
+uint32_t front_end_texture(uint32_t hash, uint32_t& sides)
+{
+	const uint32_t file = front_end_file();
+	if (!file) return 0;
+	const uint32_t count = ld16(file + kTextureList), entries = file + kTextureList + 4 + ld32(file + kTextureList + 4);
+	if (count > kMostTextures || !guest_ptr(entries) || !guest_ptr(entries + count * kEntrySize)) return 0;
+	for (uint32_t i = 0; i < count; ++i)
+	{
+		const uint32_t entry = entries + i * kEntrySize;
+		if (ld32(entry + kEntryHash) != hash) continue;
+		const uint32_t texture = ld32(entry + kEntryPlace);
+		sides = ld32(entry + kEntrySides);
+		return guest_ptr(texture) ? texture : 0;
+	}
+	return 0;
 }
 
 void pictures_shoot() { g_wanted = true; }
