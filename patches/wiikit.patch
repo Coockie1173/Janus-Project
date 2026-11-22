@@ -1270,10 +1270,20 @@ index 0000000..6e6b7c3
 +        out.append(text)
 +    return out
 diff --git a/runtime/audio.cpp b/runtime/audio.cpp
-index 4050960..df1800f 100644
+index 4050960..6fec003 100644
 --- a/runtime/audio.cpp
 +++ b/runtime/audio.cpp
-@@ -18,6 +18,7 @@
+@@ -11,6 +11,9 @@
+ // kTarget behind what the game counts: that matters for the rhythm game,
+ // whose beats come from the audio clock. Past kMaxQueue a block is dropped.
+ //
++// At another speed (rt_set_speed) the stream plays that much faster or slower, pitch and all,
++// and the queue's marks are in the guest's seconds: the same cushion in the host's.
++//
+ // WIIKIT_AUDIODBG=1 reports the queue and the speed every few seconds.
+ //
+ // WIIKIT_AUDIODUMP=file.wav writes everything played, for checking the mix
+@@ -18,9 +21,11 @@
  #include "rt.h"
  #include <SDL3/SDL.h>
  #include <algorithm>
@@ -1281,7 +1291,11 @@ index 4050960..df1800f 100644
  #include <cmath>
  #include <cstdio>
  #include <cstdlib>
-@@ -34,6 +35,7 @@ uint64_t underruns = 0;
++#include <mutex>
+ #include <vector>
+ 
+ namespace {
+@@ -34,6 +39,7 @@ uint64_t underruns = 0;
  uint32_t stream_rate = 0;
  uint64_t dropped = 0;
  FILE* dump = nullptr;
@@ -1289,13 +1303,64 @@ index 4050960..df1800f 100644
  uint32_t dump_rate = 0, dump_bytes = 0;
  
  void wav_header(FILE* f, uint32_t rate, uint32_t bytes) {
-@@ -70,6 +72,24 @@ void audio_init(bool enabled) {
+@@ -70,8 +76,78 @@ void audio_init(bool enabled) {
      rt_log("audio: %s", SDL_GetAudioDeviceName(SDL_GetAudioStreamDevice(stream)));
  }
  
 +void audio_set_mixer(AudioMixer mix) { mixer = mix; }
 +
-+std::atomic<bool> muted{false};
++// ---- a capture's sound (video_capture_start): a block goes where rt_shown_ns says it is, from t0.
++// behind by more than kCapSlack it's caught up with silence (a mute, a jump), ahead of it a block is
++// left out, so the sound never drifts from the picture
++namespace {
++std::mutex cap_mx;
++std::atomic<FILE*> cap_wav{nullptr};
++int64_t cap_t0 = 0;
++uint32_t cap_rate = 0;
++uint64_t cap_frames = 0;                             // sample frames written
++constexpr double kCapSlack = 0.04;                   // seconds
++
++void capture_block(const int16_t* lr, uint32_t frames, uint32_t rate) {
++    std::lock_guard<std::mutex> lk(cap_mx);
++    if (!cap_wav) return;
++    if (!cap_rate) cap_rate = rate;
++    const double at = (double)(rt_shown_ns() - cap_t0) / 1e9;   // where this block ends
++    if (at <= 0) return;
++    const double want = at * cap_rate - frames;     // where it starts, in sample frames
++    if (want > (double)cap_frames + kCapSlack * cap_rate) {
++        static const int16_t zero[2 * 1024] = {};
++        for (uint64_t n = (uint64_t)want - cap_frames; n > 0;) {
++            uint32_t k = (uint32_t)std::min<uint64_t>(n, 1024);
++            std::fwrite(zero, 4, k, cap_wav.load());
++            cap_frames += k;
++            n -= k;
++        }
++    }
++    if (!lr || (double)cap_frames > want + kCapSlack * cap_rate) return;
++    std::fwrite(lr, 4, frames, cap_wav.load());             // rate changes are rare enough to leave
++    cap_frames += frames;
++}
++}  // namespace
++
++void audio_capture_begin(FILE* wav, int64_t t0) {
++    std::lock_guard<std::mutex> lk(cap_mx);
++    cap_t0 = t0;
++    cap_rate = 0;
++    cap_frames = 0;
++    wav_header(wav, 32000, 0);
++    cap_wav = wav;
++}
++
++void audio_capture_end() {
++    std::lock_guard<std::mutex> lk(cap_mx);
++    FILE* f = cap_wav.exchange(nullptr);
++    if (!f) return;
++    wav_header(f, cap_rate ? cap_rate : 32000, (uint32_t)std::min<uint64_t>(cap_frames * 4, 0xFFFFFFF0u));
++    std::fclose(f);
++}
++
++std::atomic<bool> muted{false}, held{false};
++void audio_hold(bool on) { held = on; }
 +std::atomic<float> fade_gain{1.0f}, fade_step{0.0f};  // the gain, and what a sample frame adds to it while fading
 +void audio_mute(bool on, double fade) {
 +    float step = fade > 0 ? (float)(1.0 / (fade * 32000.0)) : 0.0f;
@@ -1312,9 +1377,13 @@ index 4050960..df1800f 100644
 +}
 +
  void audio_play(const uint8_t* be_rl, uint32_t frames, uint32_t rate) {
-     if (!frames || (!stream && !dump)) return;
+-    if (!frames || (!stream && !dump)) return;
++    const bool capturing = cap_wav != nullptr;
++    if (!frames || (!stream && !dump && !capturing)) return;
      static std::vector<int16_t> lr;
-@@ -79,6 +99,7 @@ void audio_play(const uint8_t* be_rl, uint32_t frames, uint32_t rate) {
+     lr.resize(2 * (size_t)frames);
+     for (uint32_t i = 0; i < frames; ++i) {
+@@ -79,6 +155,7 @@ void audio_play(const uint8_t* be_rl, uint32_t frames, uint32_t rate) {
          lr[2 * i + 1] = (int16_t)(p[0] << 8 | p[1]);  // right
          lr[2 * i] = (int16_t)(p[2] << 8 | p[3]);      // left
      }
@@ -1322,12 +1391,15 @@ index 4050960..df1800f 100644
      if (dump) {
          if (!dump_rate) dump_rate = rate;
          std::fwrite(lr.data(), 2, lr.size(), dump);  // little-endian hosts
-@@ -90,6 +111,19 @@ void audio_play(const uint8_t* be_rl, uint32_t frames, uint32_t rate) {
+@@ -89,36 +166,55 @@ void audio_play(const uint8_t* be_rl, uint32_t frames, uint32_t rate) {
+             std::fflush(dump);
          }
      }
-     if (!stream) return;
++    if (!stream && !capturing) return;
++    if (held) return;                                // unheard: neither played nor captured, the stream left as it is
 +    if (muted) {                                     // the dump still has it
-+        if (playing) { SDL_PauseAudioStreamDevice(stream); SDL_ClearAudioStream(stream); playing = false; }
++        if (capturing) capture_block(nullptr, frames, rate);
++        if (stream && playing) { SDL_PauseAudioStreamDevice(stream); SDL_ClearAudioStream(stream); playing = false; }
 +        return;
 +    }
 +    if (float g = fade_gain, step = fade_step; g < 1.0f || step < 0) {   // coming back from a mute, or going into one
@@ -1339,9 +1411,66 @@ index 4050960..df1800f 100644
 +        fade_gain = g;
 +        if (step < 0 && g <= 0 && fade_step < 0) muted = true;
 +    }
++    if (capturing) capture_block(lr.data(), frames, rate);
+     if (!stream) return;
      if (rate != stream_rate) {
          SDL_AudioSpec spec = {SDL_AUDIO_S16, 2, (int)rate};
          SDL_SetAudioStreamFormat(stream, &spec, nullptr);
+         stream_rate = rate;
+     }
++    const double speed = rt_speed(), target = kTarget * speed;
+     int queued = SDL_GetAudioStreamQueued(stream);
+     if (playing && queued == 0) {                    // ran dry: wait for the cushion again
+         SDL_PauseAudioStreamDevice(stream);
+         playing = false;
+         if (++underruns % 20 == 1) rt_log("audio: %llu underruns", (unsigned long long)underruns);
+     }
+-    if (queued > (int)(kMaxQueue * rate * 4)) {
++    if (queued > (int)(kMaxQueue * speed * rate * 4)) {
+         if (++dropped % 100 == 1) rt_log("audio: %llu blocks dropped (the device is behind)", (unsigned long long)dropped);
+         return;
+     }
+     SDL_PutAudioStreamData(stream, lr.data(), (int)(lr.size() * 2));
+     double q = (double)queued / (rate * 4.0);
+     if (!playing) {
+-        if (q + (double)frames / rate >= kTarget) {
++        if (q + (double)frames / rate >= target) {
++            SDL_SetAudioStreamFrequencyRatio(stream, (float)speed);
+             SDL_ResumeAudioStreamDevice(stream);
+             playing = true;
+-            smoothed = kTarget;
++            smoothed = target;
+         }
+         return;
+     }
+     // hold the queue at kTarget: play faster when it grows, slower when it shrinks
+     smoothed += (q - smoothed) * 0.01;
+-    double off = smoothed - kTarget, limit = std::fabs(off) > 0.01 ? 0.02 : 0.005;
+-    float ratio = (float)std::clamp(1.0 + off * 0.25, 1.0 - limit, 1.0 + limit);
++    double off = (smoothed - target) / speed, limit = std::fabs(off) > 0.01 ? 0.02 : 0.005;
++    float ratio = (float)(speed * std::clamp(1.0 + off * 0.25, 1.0 - limit, 1.0 + limit));
+     SDL_SetAudioStreamFrequencyRatio(stream, ratio);
+     static uint64_t n = 0;
+     if (dbg && ++n % 1000 == 0) rt_log("audio: queue %.1f ms (smoothed %.1f), speed %.4f", q * 1000, smoothed * 1000, ratio);
+diff --git a/runtime/ax.cpp b/runtime/ax.cpp
+index dc97745..129067a 100644
+--- a/runtime/ax.cpp
++++ b/runtime/ax.cpp
+@@ -697,3 +697,14 @@ void ax_command_list(uint32_t addr) {
+         }
+     }
+ }
++
++// saved states (state.cpp): what carries from one mixed frame to the next
++void ax_state(StateIO& io) {
++    io.raw(mix, sizeof mix);
++    io.raw(wm, sizeof wm);
++    io.pod(last_main_volume);
++    io.raw(last_aux_volume, sizeof last_aux_volume);
++    io.pod(compressor_pos);
++    io.pod(ax_frame);
++    io.pod(wm_last);
++}
 diff --git a/runtime/boot.cpp b/runtime/boot.cpp
 index 3941f3b..621bb0b 100644
 --- a/runtime/boot.cpp
@@ -1767,7 +1896,7 @@ index 6709dd6..8af3664 100644
 +// may have it open): [at, at + size) of it is the parts in order, zeros after them. They must fit
 +bool disc_rewrite(const char* name, uint64_t at, uint64_t size, const std::vector<DiscPart>& parts);
 diff --git a/runtime/gl.h b/runtime/gl.h
-index 3d2da4e..6fce0b7 100644
+index 3d2da4e..2319b53 100644
 --- a/runtime/gl.h
 +++ b/runtime/gl.h
 @@ -6,6 +6,7 @@
@@ -1817,8 +1946,16 @@ index 3d2da4e..6fce0b7 100644
      X(PFNGLTEXTURESUBIMAGE2DPROC, glTextureSubImage2D)                                              \
      X(PFNGLTEXTUREPARAMETERIPROC, glTextureParameteri)                                              \
      X(PFNGLBINDTEXTUREUNITPROC, glBindTextureUnit)                                                  \
+@@ -81,6 +96,7 @@
+     X(PFNGLNAMEDFRAMEBUFFERTEXTUREPROC, glNamedFramebufferTexture)                                  \
+     X(PFNGLBINDFRAMEBUFFERPROC, glBindFramebuffer)                                                  \
+     X(PFNGLBLITNAMEDFRAMEBUFFERPROC, glBlitNamedFramebuffer)                                        \
++    X(PFNGLBLITFRAMEBUFFERPROC, glBlitFramebuffer)                                                  \
+     X(PFNGLCHECKNAMEDFRAMEBUFFERSTATUSPROC, glCheckNamedFramebufferStatus)
+ 
+ #define WIIKIT_GL_DECLARE(T, n) extern T n;
 diff --git a/runtime/gx.cpp b/runtime/gx.cpp
-index a6b37f2..3170df7 100644
+index a6b37f2..5317653 100644
 --- a/runtime/gx.cpp
 +++ b/runtime/gx.cpp
 @@ -21,10 +21,19 @@
@@ -1904,20 +2041,24 @@ index a6b37f2..3170df7 100644
      if (!f && trace_next.exchange(false)) {
          want = (long)st.frames + 1;
          rt_log("gx: tracing frame %ld to gxtrace_%ld.txt", want, want);
-@@ -76,6 +124,12 @@ FILE* trace_file() {
+@@ -76,6 +124,16 @@ FILE* trace_file() {
  // CP control: 0 GP read enable, 1 breakpoint enable, 2/3 overflow/underflow
  // interrupt enable, 4 GP link enable, 5 breakpoint interrupt enable
  bool linked() { return (cp_reg16[1] & 0x11) == 0x11; }
 +
 +// the port's switches as they were when the GP was given the commands (WIIKIT_GX_THREAD)
-+const bool gp_thread = !std::getenv("WIIKIT_GX_THREAD") || std::atoi(std::getenv("WIIKIT_GX_THREAD")) != 0;
++// not in deterministic mode: there draw done and tokens come at once, at the same place every run
++bool gp_thread_on() {
++    static const bool on = !rt_deterministic() && (!std::getenv("WIIKIT_GX_THREAD") || std::atoi(std::getenv("WIIKIT_GX_THREAD")) != 0);
++    return on;
++}
 +bool gp_skip_now = false, gp_early_now = false;
-+bool skip_frames() { return gp_thread ? gp_skip_now : g_gx_skip_frames; }
-+bool early_done() { return gp_thread ? gp_early_now : g_gx_early_done; }
++bool skip_frames() { return gp_thread_on() ? gp_skip_now : g_gx_skip_frames; }
++bool early_done() { return gp_thread_on() ? gp_early_now : g_gx_early_done || rt_deterministic(); }
  bool bp_enabled() { return (cp_reg16[1] & 0x3) == 0x3; }
  uint32_t bp_addr() { return (uint32_t)(cp_reg16[0x1F] & 0x3FFF) << 16 | cp_reg16[0x1E]; }   // CP 0x3C, 0x3E
  
-@@ -109,7 +163,7 @@ void warn_once(const char* what, uint32_t v) {
+@@ -109,7 +167,7 @@ void warn_once(const char* what, uint32_t v) {
  
  // guest physical range [a, a + n) is in MEM1 or MEM2
  bool mem_ok(uint32_t a, size_t n) {
@@ -1926,7 +2067,7 @@ index a6b37f2..3170df7 100644
  }
  
  // ---- the record ------------------------------------------------------------------------------
-@@ -139,7 +193,9 @@ void flush(bool force) {
+@@ -139,7 +197,9 @@ void flush(bool force) {
      submit_pending = true;
  }
  
@@ -1936,7 +2077,7 @@ index a6b37f2..3170df7 100644
      uint64_t h = 0x9E3779B97F4A7C15ull ^ n;
      size_t i = 0;
      for (; i + 8 <= n; i += 8) {
-@@ -152,6 +208,53 @@ uint64_t hash_mem(const uint8_t* p, size_t n) {
+@@ -152,6 +212,53 @@ uint64_t hash_mem(const uint8_t* p, size_t n) {
      return h;
  }
  
@@ -1990,7 +2131,7 @@ index a6b37f2..3170df7 100644
  // ---- textures --------------------------------------------------------------------------------
  // Decoded textures are cached by what names them (address, format, size,
  // levels, palette) and re-uploaded when their bytes change. Bytes are hashed
-@@ -169,14 +272,25 @@ struct TexKeyHash {
+@@ -169,14 +276,25 @@ struct TexKeyHash {
          return (size_t)(k.addr * 0x9E3779B1u ^ k.shape * 0x85EBCA77u ^ k.levels ^ k.tlut);
      }
  };
@@ -2018,7 +2159,7 @@ index a6b37f2..3170df7 100644
  
  // texture format an EFB copy format produces in RAM (for its size)
  uint32_t copy_tex_fmt(uint32_t cf) {
-@@ -184,7 +298,11 @@ uint32_t copy_tex_fmt(uint32_t cf) {
+@@ -184,7 +302,11 @@ uint32_t copy_tex_fmt(uint32_t cf) {
      return f[cf & 15];
  }
  
@@ -2030,7 +2171,7 @@ index a6b37f2..3170df7 100644
      uint32_t gen = bp[0x00], used = 0;
      int ntev = (int)(gen >> 10 & 15) + 1, nind = (int)(gen >> 16 & 7);
      for (int s = 0; s < ntev; ++s) {
-@@ -192,9 +310,11 @@ uint32_t used_maps() {
+@@ -192,9 +314,11 @@ uint32_t used_maps() {
          if (t & 0x40) used |= 1u << (t & 7);
      }
      for (int i = 0; i < nind && i < 4; ++i) used |= 1u << (bp[0x27] >> (6 * i) & 7);
@@ -2043,7 +2184,7 @@ index a6b37f2..3170df7 100644
  void bind_map(int m) {
      int off = (m & 3) + (m >= 4 ? 0x20 : 0);
      uint32_t mode0 = bp[0x80 + off], mode1 = bp[0x84 + off], img0 = bp[0x88 + off],
-@@ -203,9 +323,79 @@ void bind_map(int m) {
+@@ -203,9 +327,79 @@ void bind_map(int m) {
      uint32_t fmt = img0 >> 20 & 15, addr = (img3 & 0xFFFFFF) << 5;
      if (img1 >> 21 & 1) warn_once("texture preloaded in TMEM (not modelled), map", m);
  
@@ -2126,7 +2267,7 @@ index a6b37f2..3170df7 100644
          uint64_t tag = 1ull << 32 | addr;
          if (map_bound[m] != tag) {
              put<uint8_t>(VC_TEXEFB);
-@@ -216,7 +406,7 @@ void bind_map(int m) {
+@@ -216,7 +410,7 @@ void bind_map(int m) {
          return;
      }
      if (!gxtex_known(fmt)) { warn_once("unknown texture format", fmt); return; }
@@ -2135,7 +2276,7 @@ index a6b37f2..3170df7 100644
      int full = 1;
      while ((w >> full) || (h >> full)) ++full;
      int levels = 1;
-@@ -224,6 +414,19 @@ void bind_map(int m) {
+@@ -224,6 +418,19 @@ void bind_map(int m) {
          levels = (int)((mode1 >> 8 & 0xFF) + 15) / 16 + 1;
          if (levels > full) levels = full;
      }
@@ -2155,7 +2296,7 @@ index a6b37f2..3170df7 100644
      size_t total = 0;
      for (int l = 0; l < levels; ++l) total += gxtex_size(fmt, std::max(1, w >> l), std::max(1, h >> l));
      if (!addr || !mem_ok(addr, total)) { warn_once("texture outside memory at", addr); return; }
-@@ -246,13 +449,27 @@ void bind_map(int m) {
+@@ -246,13 +453,27 @@ void bind_map(int m) {
      TexEntry& e = it->second;
      bool upload = false;
      if (fresh || e.gen != tex_gen) {
@@ -2186,7 +2327,7 @@ index a6b37f2..3170df7 100644
          put<uint8_t>(VC_TEXUP);
          put<uint8_t>((uint8_t)m);
          put<uint32_t>(e.id);
-@@ -267,8 +484,10 @@ void bind_map(int m) {
+@@ -267,8 +488,10 @@ void bind_map(int m) {
              s += gxtex_size(fmt, lw, lh);
          }
          static const char* dump = std::getenv("WIIKIT_TEXDUMP");     // debugging: uploads as PNGs
@@ -2198,7 +2339,7 @@ index a6b37f2..3170df7 100644
              char name[512];
              std::snprintf(name, sizeof name, "%s/tex_%04d_%08X_f%u_%dx%d.png", dump, dumped++, addr, fmt, w, h);
              write_png(name, w, h, rec.data() + at);
-@@ -283,6 +502,7 @@ void bind_map(int m) {
+@@ -283,6 +506,7 @@ void bind_map(int m) {
  }
  
  void sync_textures() {
@@ -2206,7 +2347,7 @@ index a6b37f2..3170df7 100644
      uint32_t todo = used_maps() & tex_dirty;
      for (int m = 0; m < 8; ++m)
          if (todo >> m & 1) bind_map(m);
-@@ -351,11 +571,14 @@ VtxFmt vtx_fmt(int v) {
+@@ -351,11 +575,14 @@ VtxFmt vtx_fmt(int v) {
          f.tc_fmt[i] = t[i][1];
          f.tc_sc[i] = 1.0f / (float)(1u << t[i][2]);
      }
@@ -2222,7 +2363,7 @@ index a6b37f2..3170df7 100644
  }
  
  // bytes per vertex for vertex format `v`
-@@ -378,6 +601,35 @@ int vertex_size(const VtxFmt& f) {
+@@ -378,6 +605,35 @@ int vertex_size(const VtxFmt& f) {
      return n;
  }
  
@@ -2258,7 +2399,7 @@ index a6b37f2..3170df7 100644
  // an attribute's data: in the stream (direct) or in its array (indexed)
  const uint8_t* fetch(uint32_t mode, int arr, int size, const uint8_t*& p, uint32_t sub = 0) {
      if (mode == 1) { const uint8_t* q = p; p += size; return q; }
-@@ -387,53 +639,131 @@ const uint8_t* fetch(uint32_t mode, int arr, int size, const uint8_t*& p, uint32
+@@ -387,53 +643,131 @@ const uint8_t* fetch(uint32_t mode, int arr, int size, const uint8_t*& p, uint32
      return host(virt(cp[0xA0 + arr] + idx * cp[0xB0 + arr] + sub));
  }
  
@@ -2421,7 +2562,7 @@ index a6b37f2..3170df7 100644
              put<uint8_t>(VC_FRAME);
              ++rec_frames;
              flush(true);
-@@ -445,7 +775,22 @@ void efb_copy(uint32_t v) {
+@@ -445,7 +779,22 @@ void efb_copy(uint32_t v) {
      if (v >> 9 & 1) { w = (w + 1) / 2; h = (h + 1) / 2; }
      uint32_t tpf = v >> 3 & 15, real = tpf / 2 + (tpf & 1) * 8;
      size_t size = gxtex_size(copy_tex_fmt(real), w, h);
@@ -2445,7 +2586,7 @@ index a6b37f2..3170df7 100644
      tex_dirty = 0xFF;
  }
  
-@@ -454,17 +799,20 @@ void bp_write(uint32_t v) {
+@@ -454,17 +803,20 @@ void bp_write(uint32_t v) {
      if (reg == 0xFE) { bp_mask = val; return; }
      bp[reg] = (bp[reg] & ~bp_mask) | (val & bp_mask);
      bp_mask = 0xFFFFFF;
@@ -2470,7 +2611,7 @@ index a6b37f2..3170df7 100644
      case 0x64: return;                                                // TLUT source address
      case 0x65: {                                                      // load a TLUT into TMEM
          uint32_t src = (bp[0x64] & 0xFFFFFF) << 5, dst = (val & 0x3FF) << 9, n = (val >> 10 & 0x7FF) << 5;
-@@ -477,13 +825,18 @@ void bp_write(uint32_t v) {
+@@ -477,13 +829,18 @@ void bp_write(uint32_t v) {
      }
      if ((reg >= 0x80 && reg < 0x9C) || (reg >= 0xA0 && reg < 0xBC))
          tex_dirty |= (uint8_t)(1u << ((reg & 3) + (reg >= 0xA0 ? 4 : 0)));
@@ -2490,7 +2631,7 @@ index a6b37f2..3170df7 100644
  void xf_load(uint32_t addr, uint32_t n, const uint8_t* src) {
      if (addr >= 0x1058) return;
      if (addr + n > 0x1058) n = 0x1058 - addr;
-@@ -493,6 +846,7 @@ void xf_load(uint32_t addr, uint32_t n, const uint8_t* src) {
+@@ -493,6 +850,7 @@ void xf_load(uint32_t addr, uint32_t n, const uint8_t* src) {
          for (uint32_t i = 0; i < n && i < 16; ++i) { float fv; std::memcpy(&fv, &xf[addr + i], 4); std::fprintf(tf, " %08X(%g)", xf[addr + i], fv); }
          std::fprintf(tf, "\n");
      }
@@ -2498,7 +2639,7 @@ index a6b37f2..3170df7 100644
      if (video) {
          put<uint8_t>(VC_XF);
          put<uint16_t>((uint16_t)addr);
-@@ -504,16 +858,415 @@ void xf_load(uint32_t addr, uint32_t n, const uint8_t* src) {
+@@ -504,16 +862,415 @@ void xf_load(uint32_t addr, uint32_t n, const uint8_t* src) {
  // parse one command at p (n bytes available); returns its length, 0 if incomplete
  size_t parse(const uint8_t* p, size_t n, bool in_dl);
  
@@ -2919,7 +3060,7 @@ index a6b37f2..3170df7 100644
      }
  }
  
-@@ -525,6 +1278,9 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
+@@ -525,6 +1282,9 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
      case 0x08:
          if (n < 6) return 0;
          cp[p[1]] = be32(p + 2);
@@ -2929,7 +3070,7 @@ index a6b37f2..3170df7 100644
          TRACE("CP %02X %08X\n", p[1], cp[p[1]]);
          return 6;
      case 0x10: {
-@@ -556,54 +1312,27 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
+@@ -556,54 +1316,27 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
      if (op >= 0x80 && op < 0xC0) {
          if (n < 3) return 0;
          uint32_t count = (uint32_t)p[1] << 8 | p[2];
@@ -2978,13 +3119,13 @@ index a6b37f2..3170df7 100644
 +                perf_vtx += perf_ticks() - t0;
              } else {
 -                fl = decode_vertices(f, p + 3, count, out);
-+                decode_vertices(f, fl, p + 3, count, out);
-             }
+-            }
 -            if (extend && rec[draw_hdr + 2] != fl) {      // other attributes: a draw of its own
 -                const uint8_t hdr[7] = {VC_DRAW, (uint8_t)(op & 0xF8), 0, 0, 0, 0, 0};
 -                rec.insert(rec.begin() + (ptrdiff_t)at, hdr, hdr + sizeof hdr);
 -                draw_hdr = at;
--            }
++                decode_vertices(f, fl, p + 3, count, out);
+             }
 -            rec[draw_hdr + 2] = fl;
 -            uint32_t pieces;
 -            std::memcpy(&pieces, &rec[draw_hdr + 3], 4);
@@ -2998,7 +3139,7 @@ index a6b37f2..3170df7 100644
          }
          return len;
      }
-@@ -614,8 +1343,17 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
+@@ -614,8 +1347,17 @@ size_t parse(const uint8_t* p, size_t n, bool in_dl) {
  
  void feed(const uint8_t* b, int n) {
      if (desync) return;
@@ -3017,7 +3158,7 @@ index a6b37f2..3170df7 100644
      while (off < stream.size()) {
          size_t k = parse(stream.data() + off, stream.size() - off, false);
          if (!k) { --st.cmds; break; }
-@@ -624,6 +1362,86 @@ void feed(const uint8_t* b, int n) {
+@@ -624,6 +1366,86 @@ void feed(const uint8_t* b, int n) {
      stream.erase(stream.begin(), stream.begin() + (ptrdiff_t)off);
  }
  
@@ -3075,7 +3216,7 @@ index a6b37f2..3170df7 100644
 +
 +// a burst for the GP: parsed here, or handed to its thread
 +void gp_feed(const uint8_t* b) {
-+    if (!gp_thread) { feed(b, 32); return; }
++    if (!gp_thread_on()) { feed(b, 32); return; }
 +    const uint64_t h = ring_head.load(std::memory_order_relaxed);
 +    while (h - tail_seen >= kSlots) {
 +        tail_seen = ring_tail.load(std::memory_order_acquire);
@@ -3093,7 +3234,7 @@ index a6b37f2..3170df7 100644
 +struct GpSync {
 +    bool was;
 +    GpSync() : was(t_gp) {
-+        if (!gp_thread || t_gp) return;
++        if (!gp_thread_on() || t_gp) return;
 +        const uint64_t h = ring_head.load(std::memory_order_seq_cst);
 +        for (uint64_t t; (t = ring_tail.load(std::memory_order_acquire)) < h;) ring_tail.wait(t, std::memory_order_acquire);
 +        t_gp = true;
@@ -3104,7 +3245,7 @@ index a6b37f2..3170df7 100644
  }  // namespace
  
  void gx_trace_next_frame() { trace_next = true; }
-@@ -633,6 +1451,7 @@ void gx_trace_next_frame() { trace_next = true; }
+@@ -633,6 +1455,7 @@ void gx_trace_next_frame() { trace_next = true; }
  // record so far is handed over, and the renderer reads the EFB back once it
  // has drawn it; peeks read that copy until anything more is recorded.
  uint32_t gx_efb_peek(uint32_t a) {
@@ -3112,7 +3253,7 @@ index a6b37f2..3170df7 100644
      static std::mutex mx;
      static std::vector<uint32_t> argb, z;
      static uint64_t at = UINT64_MAX;
-@@ -698,6 +1517,7 @@ static void encode_tex(uint32_t fmt, int w, int h, const uint8_t* rgba, uint8_t*
+@@ -698,6 +1521,7 @@ static void encode_tex(uint32_t fmt, int w, int h, const uint8_t* rgba, uint8_t*
  }
  
  bool gx_copy_to_ram(uint32_t addr) {
@@ -3120,7 +3261,7 @@ index a6b37f2..3170df7 100644
      CopyRec rec_copy;
      bool known = false;
      hw_run_locked([&] {
-@@ -714,13 +1534,21 @@ bool gx_copy_to_ram(uint32_t addr) {
+@@ -714,13 +1538,21 @@ bool gx_copy_to_ram(uint32_t addr) {
      hw_run_locked([&] {
          std::memcpy(host(virt(addr)), out.data(), out.size());
          auto c = copies.find(addr);                          // the GPU's copy still stands for these bytes
@@ -3135,7 +3276,7 @@ index a6b37f2..3170df7 100644
  
  void gx_init() {
      video = video_enabled();
-+    if (gp_thread) {
++    if (gp_thread_on()) {
 +        ring = new Slot[kSlots];
 +        std::thread(gp_main).detach();
 +        rt_log("gx: the GP runs on a thread of its own (WIIKIT_GX_THREAD=0 turns it off)");
@@ -3143,7 +3284,7 @@ index a6b37f2..3170df7 100644
      g_efb_peek = gx_efb_peek;
  }
  
-@@ -729,19 +1557,61 @@ void gx_init() {
+@@ -729,19 +1561,72 @@ void gx_init() {
  // AI's, which start each audio frame's mix, above all. So does this wait.
  // A handler may switch guest threads, and another thread may hand the
  // record over in the meantime.
@@ -3187,9 +3328,20 @@ index a6b37f2..3170df7 100644
 +    });
 +}
 +
++void gx_hold(bool on) {
++    if (!video) return;
++    GpSync gp;
++    hw_run_locked([&] {
++        put<uint8_t>(VC_HOLD);
++        put<uint8_t>(on);
++        flush(false);
++    });
++    gx_submit_pending();
++}
++
 +// with the GP on its thread, its thread hands the record over
  void gx_submit_pending() {
-+    if (gp_thread && !t_gp) return;
++    if (gp_thread_on() && !t_gp) return;
 +    submit_now();
 +}
 +namespace {
@@ -3199,7 +3351,7 @@ index a6b37f2..3170df7 100644
      while (!rec.empty()) {
          int frames = rec_frames;
 -        if (video_submit(rec, frames, 1)) { rec_frames = 0; draw_end = SIZE_MAX; break; }
-+        if (video_submit(rec, frames, 1)) { rec_frames = 0; draw_end = sdraw_end = SIZE_MAX; break; }
++        if (video_submit(rec, frames, rt_deterministic() ? -1 : 1)) { rec_frames = 0; draw_end = sdraw_end = SIZE_MAX; break; }
          if (t_ppc && g_ppc_pending.load(std::memory_order_relaxed)) ppc_poll(*t_ppc);
      }
  }
@@ -3207,7 +3359,7 @@ index a6b37f2..3170df7 100644
  
  // The write-gather pipe: CPU stores to 0xCC008000 collect in a 32-byte
  // buffer, and reach the FIFO in memory as 32-byte bursts, as on the console
-@@ -760,7 +1630,7 @@ static void gp_run() {
+@@ -760,7 +1645,7 @@ static void gp_run() {
      if (!(cp_reg16[1] & 1)) return;
      size_t k = 0;
      while (k < held.size() && !(bp_enabled() && held[k].addr == bp_addr())) {
@@ -3216,7 +3368,7 @@ index a6b37f2..3170df7 100644
          ++k;
      }
      held.erase(held.begin(), held.begin() + (ptrdiff_t)k);
-@@ -768,15 +1638,20 @@ static void gp_run() {
+@@ -768,15 +1653,20 @@ static void gp_run() {
  
  void gx_pipe_burst(const uint8_t* b, int n) {
      uint32_t at = pi_wptr_addr();
@@ -3244,7 +3396,7 @@ index a6b37f2..3170df7 100644
      Burst h{at, {}};
      std::memcpy(h.b, b, 32);
      held.push_back(h);
-@@ -840,14 +1715,17 @@ uint32_t gx_pe_read(uint32_t off, int) {
+@@ -840,14 +1730,17 @@ uint32_t gx_pe_read(uint32_t off, int) {
  void gx_pe_write(uint32_t off, uint32_t v, int) {
      if (off == 0x0A) {
          uint16_t clear = (uint16_t)(v & 0xC);            // status bits: write 1 to clear
@@ -3265,12 +3417,12 @@ index a6b37f2..3170df7 100644
      if (bp_reached() && (cp_reg16[1] & 0x20)) c |= 0x800;   // CP breakpoint
      if ((cp_reg16[1] & 0x04) && cp_overflow()) c |= 0x800;   // CP overflow: the FIFO is full
      if ((cp_reg16[1] & 0x08) && cp_underflow()) c |= 0x800;  // CP underflow: drained again
-@@ -855,10 +1733,19 @@ uint32_t gx_irq() {
+@@ -855,10 +1748,66 @@ uint32_t gx_irq() {
  }
  
  void gx_report() {
 +    GpSync gp;
-+    if (gp_thread) rt_log("gx: the GP's thread was %llu bursts behind at most", (unsigned long long)gp_most_behind);
++    if (gp_thread_on()) rt_log("gx: the GP's thread was %llu bursts behind at most", (unsigned long long)gp_most_behind);
      rt_log("gx: %llu commands, %llu draws (%llu vertices), %llu display lists, %llu EFB copies "
             "(%llu frames), %llu draw-done, %llu texture uploads, %llu EFB peeks (%llu read-backs)",
             (unsigned long long)st.cmds, (unsigned long long)st.draws, (unsigned long long)st.verts,
@@ -3284,6 +3436,53 @@ index a6b37f2..3170df7 100644
 +               (unsigned long long)dl_stat.kept, (unsigned long long)dl_stat.calls, (unsigned long long)dl_stat.built,
 +               (unsigned long long)dl_stat.plain, (unsigned long long)(dl_stat.bytes >> 20),
 +               (unsigned long long)(dl_stat.copied >> 20), arena_gen - 1, (unsigned long long)(hashed_bytes >> 20), (unsigned long long)mem_watch_faults());
++}
++
++// saved states (state.cpp): the CPU's FIFO, the CP's, PE's, BP's and XF's registers, what is
++// held at a breakpoint and not yet parsed, TMEM's palettes. On a load what was decoded from
++// memory (textures, display lists) is looked at again, and the renderer is given every
++// register that is only state, as the game set them
++void gx_state(StateIO& io) {
++    if (io.saving && gp_thread_on()) { io.fail("the GP's thread is on"); return; }
++    io.pod(pi_base);
++    io.pod(pi_end);
++    io.pod(pi_wptr);
++    io.raw(cp_reg16, sizeof cp_reg16);
++    uint16_t ctl = pe_ctrl.load(), tok = pe_token.load();
++    io.pod(ctl);
++    io.pod(tok);
++    {
++        std::lock_guard<std::mutex> pk(pe_mx);
++        io.vec(pe_queue);
++    }
++    io.raw(cp, sizeof cp);
++    io.raw(bp, sizeof bp);
++    io.raw(xf, sizeof xf);
++    io.pod(bp_mask);
++    io.vec(stream);
++    io.pod(desync);
++    io.vec(held);
++    io.vec(tmem);
++    if (!io.applying) return;
++    pe_ctrl = ctl;
++    pe_token = tok;
++    ++tex_gen;
++    tex_dirty = 0xFF;
++    dl_cache.clear();
++    used_stale = sig_stale = true;
++    if (!video) return;
++    put<uint8_t>(VC_XF);
++    put<uint16_t>(0);
++    put<uint16_t>((uint16_t)0x1058);
++    std::memcpy(grow(4 * 0x1058), xf, 4 * 0x1058);
++    for (uint32_t reg = 0; reg < 0x100; ++reg) {
++        switch (reg) {
++        case 0x45: case 0x46: case 0x47: case 0x48: case 0x52: case 0x63: case 0x64: case 0x65: case 0x66: case 0x67:
++        case 0xFE: case 0xFF: continue;              // what makes something happen, not state
++        }
++        put<uint8_t>(VC_BP);
++        put<uint32_t>(reg << 24 | bp[reg]);
++    }
  }
 diff --git a/runtime/gxshader.cpp b/runtime/gxshader.cpp
 index 7943c4d..4e5b980 100644
@@ -3435,7 +3634,7 @@ index 7943c4d..4e5b980 100644
  }
  
 diff --git a/runtime/hw.cpp b/runtime/hw.cpp
-index c53d227..2771bad 100644
+index c53d227..4ebd5ef 100644
 --- a/runtime/hw.cpp
 +++ b/runtime/hw.cpp
 @@ -25,13 +25,16 @@
@@ -3492,7 +3691,7 @@ index c53d227..2771bad 100644
 +    }
 +}
 +void ax_submit(uint32_t addr) {
-+    if (ax_sync) { ax_command_list(addr); ax_done(dsp_boot); return; }
++    if (ax_sync || rt_deterministic()) { ax_command_list(addr); ax_done(dsp_boot); return; }
 +    static bool started = false;
 +    if (!started) { started = true; std::thread(ax_main).detach(); }
 +    {
@@ -3530,16 +3729,17 @@ index c53d227..2771bad 100644
          dsp_ucode = Ucode::ROM;
          dsp_to_cpu.clear();
      }
-@@ -252,7 +296,7 @@ void dsp_ar_dma() {
+@@ -252,7 +296,8 @@ void dsp_ar_dma() {
          dsp_ar[4] &= 0x8000;
          dsp_ar[5] = 0;
          ar_busy = true;
 -        ar_done = std::chrono::steady_clock::now() + std::chrono::nanoseconds((cnt / 32 + 1) * 506);
 +        ar_done = rt_now() + std::chrono::nanoseconds((cnt / 32 + 1) * 506);
++        os_event_at(ar_done);
          dsp_cr |= DSP_DMA;
          return;
      }
-@@ -302,7 +346,7 @@ void ai_dma_block() {                                // a block starts: its samp
+@@ -302,7 +347,7 @@ void ai_dma_block() {                                // a block starts: its samp
          }
      }
      ai_dma_period = std::chrono::nanoseconds(bytes * 1000000000ull / (4ull * rate));
@@ -3548,12 +3748,13 @@ index c53d227..2771bad 100644
      dsp_cr |= DSP_AIDINT;
      dbg_aid_raised = ai_dma_block_start;
  }
-@@ -311,14 +355,14 @@ void ai_dma_write(uint16_t v) {
+@@ -311,14 +356,15 @@ void ai_dma_write(uint16_t v) {
      if (on && !ai_dma_on) {
          store_write(0xCC005036, v, 2);
          ai_dma_block();
 -        ai_dma_next = HostClock::now() + ai_dma_period;
 +        ai_dma_next = rt_now() + ai_dma_period;
++        os_event_at(ai_dma_next);
      }
      ai_dma_on = on;
  }
@@ -3565,16 +3766,38 @@ index c53d227..2771bad 100644
      int64_t left = (int64_t)ctl - (int64_t)(ctl * done.count() / ai_dma_period.count());
      return (uint16_t)(left < 0 ? 0 : left > ctl ? ctl : left);
  }
-@@ -517,7 +561,7 @@ bool di_irq() {
+@@ -392,7 +438,11 @@ void sram_init() {
+     sram[0] = sum >> 8; sram[1] = (uint8_t)sum; sram[2] = inv >> 8; sram[3] = (uint8_t)inv;
+ }
+ 
+-uint32_t rtc_now() { return (uint32_t)(std::time(nullptr) - 946684800); }   // seconds since 2000
++// seconds since 2000; deterministic: a fixed day (2026-01-01) and the virtual clock since the start
++uint32_t rtc_now() {
++    if (rt_deterministic()) return 820454400u + (uint32_t)(rt_virtual_ns() / 1000000000);
++    return (uint32_t)(std::time(nullptr) - 946684800);
++}
+ 
+ // one byte through the IPL chip: 4 command bytes, then data at (cmd >> 6) onwards
+ uint8_t ipl_byte(uint8_t in) {
+@@ -517,7 +567,8 @@ bool di_irq() {
  void di_command() {                                  // TSTART: the command starts
      uint32_t len = (di[DI_CMD0] >> 24) == 0xA8 ? di[DI_LEN] & ~31u : 0;
      di_busy = true;
 -    di_done = std::chrono::steady_clock::now() + std::chrono::microseconds(1000 + len / 16);
 +    di_done = rt_now() + std::chrono::microseconds(1000 + len / 16);
++    os_event_at(di_done);
  }
  void di_finish() {                                   // its time has passed: its effect, the interrupt
      uint32_t cmd = di[DI_CMD0] >> 24;
-@@ -844,20 +888,21 @@ int gathered = 0;
+@@ -827,6 +878,7 @@ void mmio_write(uint32_t a, uint32_t v, int size) {
+ }  // namespace
+ 
+ uint32_t ppc_mmio_read(uint32_t a, int size) {
++    os_det_mmio();
+     std::lock_guard<std::recursive_mutex> lk(g_hw);
+     uint32_t v = mmio_read(a, size);
+     log_access('R', a, size, v);
+@@ -844,20 +896,21 @@ int gathered = 0;
  // padding's remainder must not land at the start of that buffer.
  void ppc_wpar_write(uint32_t) { gathered = 0; }
  
@@ -3609,7 +3832,7 @@ index c53d227..2771bad 100644
      {
          std::lock_guard<std::recursive_mutex> lk(g_hw);
          log_access('W', a, size, v);
-@@ -866,6 +911,17 @@ void ppc_mmio_write(uint32_t a, uint32_t v, int size) {
+@@ -866,6 +919,17 @@ void ppc_mmio_write(uint32_t a, uint32_t v, int size) {
      if ((a & 0xFFFFF000u) == 0xCC000000u) gx_submit_pending();   // the CP: the GP may have run on past a breakpoint
  }
  
@@ -3627,7 +3850,7 @@ index c53d227..2771bad 100644
  std::chrono::steady_clock::time_point ar_tick();
  std::chrono::steady_clock::time_point di_tick();
  
-@@ -893,7 +949,7 @@ std::chrono::steady_clock::time_point hw_tick() {
+@@ -893,7 +957,7 @@ std::chrono::steady_clock::time_point hw_tick() {
  }
  
  std::chrono::steady_clock::time_point di_tick() {    // a disc command's end
@@ -3636,7 +3859,7 @@ index c53d227..2771bad 100644
      if (!di_busy) return now + std::chrono::milliseconds(100);
      if (now < di_done) return di_done;
      di_busy = false;
-@@ -903,7 +959,7 @@ std::chrono::steady_clock::time_point di_tick() {    // a disc command's end
+@@ -903,7 +967,7 @@ std::chrono::steady_clock::time_point di_tick() {    // a disc command's end
  }
  
  std::chrono::steady_clock::time_point ar_tick() {    // an ARAM DMA's end: its interrupt
@@ -3645,7 +3868,7 @@ index c53d227..2771bad 100644
      if (!ar_busy) return now + std::chrono::milliseconds(100);
      if (now < ar_done) return ar_done;
      ar_busy = false;
-@@ -912,8 +968,14 @@ std::chrono::steady_clock::time_point ar_tick() {    // an ARAM DMA's end: its i
+@@ -912,8 +976,14 @@ std::chrono::steady_clock::time_point ar_tick() {    // an ARAM DMA's end: its i
      return now + std::chrono::milliseconds(100);
  }
  
@@ -3661,7 +3884,7 @@ index c53d227..2771bad 100644
      if (!ai_dma_on || ai_dma_period.count() <= 0) return now + std::chrono::milliseconds(100);
      if (now >= ai_dma_next) {
          // The next block waits for the guest's mix of it: its AI interrupt
-@@ -922,6 +984,11 @@ std::chrono::steady_clock::time_point ai_tick() {
+@@ -922,6 +992,11 @@ std::chrono::steady_clock::time_point ai_tick() {
          // without its frame is a gap in the sound. The host's audio queue
          // absorbs the wait.
          bool ready = ai_frame_ready();
@@ -3673,7 +3896,7 @@ index c53d227..2771bad 100644
          if (!ready && now - ai_dma_next < std::chrono::milliseconds(50))
              return now + std::chrono::microseconds(250);
          ai_dma_block();
-@@ -930,7 +997,7 @@ std::chrono::steady_clock::time_point ai_tick() {
+@@ -930,7 +1005,7 @@ std::chrono::steady_clock::time_point ai_tick() {
          // game stopped mixing) or a long stall starts it afresh: catching up
          // then would only give up on the blocks after it too
          ai_dma_next += ai_dma_period;
@@ -3682,8 +3905,65 @@ index c53d227..2771bad 100644
          os_raise();
      }
      return ai_dma_next;
+@@ -1004,3 +1079,56 @@ void hw_init() {
+     if (g_gamecube) aram.assign(0x01000000, 0);
+     vi_frame_tb = os_tb_now();
+ }
++
++// saved states (state.cpp): every register and timed event here. Interrupts the DSP or
++// the AI owe are as their registers say
++void hw_state(StateIO& io) {
++    std::lock_guard<std::recursive_mutex> lk(g_hw);
++    if (io.saving) {
++        std::lock_guard<std::mutex> ak(ax_mx);
++        if (!ax_lists.empty()) { io.fail("a sound frame is being mixed"); return; }
++    }
++    io.raw(g_regs, sizeof g_regs);
++    io.pod(pi_mask);
++    io.raw(vi, sizeof vi);
++    io.pod(vi_frame_tb);
++    io.pod(dsp_cr);
++    io.pod(dsp_ucode);
++    io.deq(dsp_to_cpu);
++    io.pod(dsp_from_cpu);
++    io.pod(dsp_boot_mails);
++    io.pod(dsp_cmdlist_next);
++    io.pod(dsp_frames);
++    io.raw(dsp_ar, sizeof dsp_ar);
++    io.pod(ar_busy);
++    io.time(ar_done);
++    io.pod(dsp_boot);
++    io.pod(ai_dma_on);
++    io.time(ai_dma_next);
++    io.time(ai_dma_block_start);
++    int64_t period = ai_dma_period.count();
++    io.pod(period);
++    io.pod(ai_cr);
++    io.pod(ai_frames_then);
++    io.pod(ai_count_base);
++    io.pod(ai_start_tb);
++    io.raw(exi, sizeof exi);
++    io.raw(sram, sizeof sram);
++    io.pod(ipl_cmd);
++    io.pod(ipl_cursor);
++    io.str(uart_line);
++    io.raw(di, sizeof di);
++    io.pod(di_busy);
++    io.time(di_done);
++    io.pod(si_comcsr);
++    io.pod(si_sr);
++    io.pod(si_poll);
++    io.raw(si_out, sizeof si_out);
++    io.raw(si_in, sizeof si_in);
++    io.pod(gpiob_out);
++    io.raw(gather, sizeof gather);
++    io.pod(gathered);
++    io.pod(g_ai_catch_up);
++    if (g_gamecube) io.vec(aram);
++    if (io.applying) ai_dma_period = std::chrono::nanoseconds(period);
++}
 diff --git a/runtime/ios.cpp b/runtime/ios.cpp
-index 23d837a..080f875 100644
+index 23d837a..3311738 100644
 --- a/runtime/ios.cpp
 +++ b/runtime/ios.cpp
 @@ -25,18 +25,41 @@
@@ -3729,7 +4009,23 @@ index 23d837a..080f875 100644
  namespace fs = std::filesystem;
  
  namespace {
-@@ -133,6 +156,11 @@ struct DI : Device {
+@@ -90,6 +113,7 @@ struct Device {
+         (void)addr;
+         return IPC_EINVAL;
+     }
++    virtual void state(StateIO&) {}                   // what a saved state keeps of it
+ };
+ 
+ std::string g_nand;                                   // host folder holding the NAND
+@@ -105,6 +129,7 @@ void reply(uint32_t addr, int32_t result);
+ // obeys either is an "unauthorized device".
+ struct DI : Device {
+     uint32_t error = 0;
++    void state(StateIO& io) override { io.pod(error); }
+     int32_t fail(uint32_t code) { error = code; return 2; }
+     int32_t ioctl(uint32_t req, uint32_t in, uint32_t, uint32_t out, uint32_t out_len, uint32_t) override {
+         uint32_t cmd = rd32(in) >> 24;
+@@ -133,6 +158,11 @@ struct DI : Device {
              uint32_t len = rd32(in + 4);
              uint64_t off = (uint64_t)rd32(in + 8) << 2;
              if (len > out_len) len = out_len;
@@ -3741,7 +4037,20 @@ index 23d837a..080f875 100644
              disc_read(off, host(out), len);
              return 1;
          }
-@@ -173,6 +201,7 @@ struct NandFile : Device {
+@@ -164,6 +194,12 @@ std::string host_path(const std::string& guest) { return g_nand + guest; }
+ struct NandFile : Device {
+     FILE* f = nullptr;
+     uint32_t mode = 0;
++    void state(StateIO& io) override {                // where it is: what it holds is the host's file's now
++        int64_t pos = f ? (int64_t)std::ftell(f) : -1;
++        io.pod(mode);
++        io.pod(pos);
++        if (io.applying && f && pos >= 0) std::fseek(f, (long)pos, SEEK_SET);
++    }
+     int32_t open(uint32_t m) override {
+         mode = m;
+         std::string p = host_path(name);
+@@ -173,6 +209,7 @@ struct NandFile : Device {
      }
      void close() override { if (f) std::fclose(f); f = nullptr; }
      int32_t read(uint32_t buf, uint32_t len) override {
@@ -3749,7 +4058,15 @@ index 23d837a..080f875 100644
          return (int32_t)std::fread(host(buf), 1, len, f);
      }
      int32_t write(uint32_t buf, uint32_t len) override {
-@@ -374,8 +403,16 @@ struct USBHID : Device {
+@@ -354,6 +391,7 @@ struct STMEventHook : Device {
+ struct USBHID : Device {
+     bool listed = false;
+     uint32_t waiting = 0;                             // the pending GetDeviceChange
++    void state(StateIO& io) override { io.pod(listed); io.pod(waiting); }
+     int32_t ioctl(uint32_t req, uint32_t in, uint32_t in_len, uint32_t out, uint32_t out_len, uint32_t addr) override {
+         switch (req) {
+         case 0:                                       // GetDeviceChange: the attached devices, -1 ended
+@@ -374,8 +412,16 @@ struct USBHID : Device {
      }
  };
  
@@ -3766,16 +4083,17 @@ index 23d837a..080f875 100644
      if (path == "/dev/di") d = std::make_unique<DI>();
      else if (path == "/dev/fs") d = std::make_unique<FS>();
      else if (path == "/dev/es") d = std::make_unique<ES>();
-@@ -395,7 +432,7 @@ void reply(uint32_t addr, int32_t result) {
+@@ -395,7 +441,8 @@ void reply(uint32_t addr, int32_t result) {
      wr32(addr, 8);
      wr32(addr + 4, (uint32_t)result);
      wr32(addr + 8, cmd);
 -    replies.push_back({addr, Clock::now() + kReplyLatency});
 +    replies.push_back({addr, rt_now() + kReplyLatency});
++    os_event_at(replies.back().due);
  }
  
  int32_t execute(uint32_t addr) {
-@@ -464,7 +501,7 @@ void update() {
+@@ -464,7 +511,7 @@ void update() {
          if (r != PENDING) reply(addr, r);
          return;
      }
@@ -3784,7 +4102,7 @@ index 23d837a..080f875 100644
          arm_msg = replies.front().addr & 0x7FFFFFFFu; // physical
          replies.pop_front();
          ctrl.y1 = true;
-@@ -516,14 +553,23 @@ uint32_t ios_ipc_read(uint32_t reg) {
+@@ -516,14 +563,23 @@ uint32_t ios_ipc_read(uint32_t reg) {
  }
  
  void ios_idle() {
@@ -3810,6 +4128,69 @@ index 23d837a..080f875 100644
  }
  
  void ios_irq_flag_clear(uint32_t v) {
+@@ -547,3 +603,62 @@ void ios_init(const char* extract_dir, const char* nand_root) {
+     for (const char* d : {"/shared2/sys", "/tmp", "/sys"}) fs::create_directories(g_nand + d);
+     fs::create_directories(g_nand + data);
+ }
++
++const char* ios_nand_root() { return g_nand.c_str(); }
++
++std::string ios_save_dir() {
++    char data[64];
++    std::snprintf(data, sizeof data, "/title/%08x/%08x/data", (uint32_t)(g_title >> 32), (uint32_t)g_title);
++    return data;
++}
++
++// another host folder as the NAND, before the game has opened anything in it
++void ios_set_nand_root(const char* nand_root) {
++    g_nand = nand_root;
++    for (const char* d : {"/shared2/sys", "/tmp", "/sys"}) fs::create_directories(g_nand + d);
++    fs::create_directories(g_nand + ios_save_dir());
++}
++
++// saved states (state.cpp): the registers, the requests and replies on their way, and the open
++// descriptors, which must be the same devices as when the state was taken
++void ios_state(StateIO& io) {
++    std::vector<std::string> names(32);
++    for (int i = 0; i < 32; ++i) names[i] = g_fds[i] ? g_fds[i]->name : std::string();
++    if (io.saving && !g_netops.empty()) { io.fail("network calls are waiting"); return; }
++    for (int i = 0; i < 32 && io.ok; ++i) {
++        std::string n = names[i];
++        io.str(n);
++        if (io.checking() && n != names[i])
++            io.fail("descriptor " + std::to_string(i) + " is " + (names[i].empty() ? "closed" : names[i]) + ", in the state " + (n.empty() ? "closed" : n));
++        if (!io.ok) return;
++        uint64_t len = 0;
++        size_t at = io.saving ? io.out->size() : io.pos;
++        io.pod(len);
++        size_t start = io.saving ? io.out->size() : io.pos;
++        if (io.checking()) { io.skip((size_t)len); continue; }
++        if (g_fds[i]) g_fds[i]->state(io);
++        if (io.saving) { len = io.out->size() - start; std::memcpy(io.out->data() + at, &len, sizeof len); }
++        else if (io.pos != start + len) io.fail("descriptor " + std::to_string(i) + "'s part has the wrong size");
++    }
++    uint8_t x[6] = {ctrl.x1, ctrl.x2, ctrl.y1, ctrl.y2, ctrl.iy1, ctrl.iy2};
++    io.raw(x, sizeof x);
++    io.pod(ppc_msg);
++    io.pod(arm_msg);
++    io.pod(irq_flags);
++    io.pod(irq_mask);
++    io.deq(requests);
++    uint32_t n = (uint32_t)replies.size();
++    io.pod(n);
++    std::deque<Reply> r;
++    for (uint32_t i = 0; i < n && io.ok; ++i) {
++        Reply e = io.saving ? replies[i] : Reply{};
++        io.pod(e.addr);
++        io.time(e.due);
++        r.push_back(e);
++    }
++    io.pod(g_eventhook);
++    if (io.applying) {
++        ctrl.x1 = x[0]; ctrl.x2 = x[1]; ctrl.y1 = x[2]; ctrl.y2 = x[3]; ctrl.iy1 = x[4]; ctrl.iy2 = x[5];
++        replies = r;
++    }
++}
 diff --git a/runtime/ios_net.h b/runtime/ios_net.h
 new file mode 100644
 index 0000000..af0c901
@@ -4862,10 +5243,18 @@ index c544428..67e8233 100644
 +void mem_watch_tick();
 +uint64_t mem_watch_faults();
 diff --git a/runtime/os.cpp b/runtime/os.cpp
-index aa1274e..37c4d26 100644
+index aa1274e..3003c6b 100644
 --- a/runtime/os.cpp
 +++ b/runtime/os.cpp
-@@ -109,6 +109,7 @@ void load_regs(PPCContext& c, uint32_t ctx) {
+@@ -43,6 +43,7 @@
+ #endif
+ 
+ std::atomic<uint32_t> g_ppc_pending{0};
++extern std::atomic<double> g_speed;
+ 
+ namespace {
+ 
+@@ -109,6 +110,7 @@ void load_regs(PPCContext& c, uint32_t ctx) {
  void thread_body(HostThread* h, uint32_t entry) {
      t_self = h;
      t_ppc = &h->c;
@@ -4873,7 +5262,7 @@ index aa1274e..37c4d26 100644
      try {
          {
              std::unique_lock<std::mutex> lk(g_mx);
-@@ -288,10 +289,13 @@ void clock_block(std::chrono::nanoseconds d) {
+@@ -288,10 +290,13 @@ void clock_block(std::chrono::nanoseconds d) {
  }
  const auto clock_margin = std::chrono::microseconds(200);
  #endif
@@ -4888,7 +5277,7 @@ index aa1274e..37c4d26 100644
          if (left <= nanoseconds(0) || g_kick.exchange(false)) return;
          if (left > clock_margin + microseconds(100)) clock_block(duration_cast<nanoseconds>(left - clock_margin));
          else std::this_thread::yield();
-@@ -320,9 +324,9 @@ void clock_main() {
+@@ -320,9 +325,9 @@ void clock_main() {
      // retraces at the rate VI is programmed for: 59.94 Hz NTSC and EuRGB60,
      // 50 Hz PAL
      auto vi_period = hw_vi_field_period();
@@ -4900,7 +5289,109 @@ index aa1274e..37c4d26 100644
          if (now >= next_vi) {
              hw_vi_retrace();
              vi_period = hw_vi_field_period();
-@@ -389,8 +393,46 @@ LONG WINAPI on_crash(EXCEPTION_POINTERS* ep) {
+@@ -342,6 +347,101 @@ void clock_main() {
+     }
+ }
+ 
++// ---- deterministic time ---------------------------------------------------------------------
++// rt_set_deterministic (anything that must give the same run twice): the guest's clock
++// is virtual. It stands still while guest code runs and moves only at points the guest's own
++// execution fixes: a read of the time base (mftb) moves it kDetMftb on, and an idle
++// processor jumps it to the next timed event (a retrace, an alarm, an IPC reply, an AI
++// block). Those events are taken on the guest's thread at that point, never by the clock
++// thread (which isn't started), so every interrupt comes at the same place in the code
++// every run. The jumps are paced against the host's clock (times rt_speed), so the game
++// still runs at its speed; rt_set_unpaced lets it run as fast as the host can.
++// Devices that would finish on a host thread of their own (the AX mixer, the GP's thread,
++// the renderer's draw done) finish at once in this mode.
++std::atomic<bool> g_det{false};                  // constant-initialized: a port's static initializer may set it
++std::atomic<int64_t> g_det_ns{0};                // the virtual clock, ns since g_t0
++int64_t g_det_next_ns = 0;                       // the next timed event as last worked out
++Clock::time_point g_det_next_vi;
++constexpr int64_t kDetMftb = 16;                 // ns a read of the time base takes
++// code that spins on a flag an interrupt sets (SCCheckStatus waiting for SYSCONF's IPC reply)
++// reads no time: while an event is due within kDetSpinWindow, each interrupt check (the loops'
++// back-edges) moves the clock kDetBackEdge on, so the reply comes as the loop spins
++constexpr int64_t kDetBackEdge = 20, kDetSpinWindow = 200000, kDetMmio = 50;
++std::atomic<bool> g_det_unpaced{false};
++std::mutex g_pace_mx;
++Clock::time_point g_pace_host;                   // the pacing's anchor: this host time is
++int64_t g_pace_ns = 0;                           // this virtual time
++
++void det_anchor() {
++    std::lock_guard<std::mutex> lk(g_pace_mx);
++    g_pace_host = Clock::now();
++    g_pace_ns = g_det_ns.load();
++}
++
++// the guest's clock waits for the host's to reach t; one that fell far behind is anchored
++// afresh rather than catching up (a pause, a slow frame)
++void det_pace(int64_t t) {
++    if (g_det_unpaced.load(std::memory_order_relaxed)) return;
++    using namespace std::chrono;
++    for (;;) {
++        Clock::time_point host0;
++        int64_t ns0;
++        {
++            std::lock_guard<std::mutex> lk(g_pace_mx);
++            host0 = g_pace_host;
++            ns0 = g_pace_ns;
++        }
++        double speed = g_speed.load(std::memory_order_relaxed);
++        auto now = Clock::now();
++        double line = (double)ns0 + (double)duration_cast<nanoseconds>(now - host0).count() * speed;
++        double ahead = (double)t - line;                 // virtual ns the guest is ahead of the host
++        if (ahead <= 0) {
++            if (-ahead > 0.1e9 * speed) det_anchor();
++            return;
++        }
++        auto wait = nanoseconds((int64_t)(ahead / speed));
++        if (wait > microseconds(1500)) std::this_thread::sleep_for(wait - microseconds(1000));
++        else if (wait > microseconds(50)) std::this_thread::yield();
++        else return;
++        if (g_det_unpaced.load(std::memory_order_relaxed)) return;
++    }
++}
++
++// the decrementer's deadline as virtual ns (the first ns the time base is past it)
++int64_t det_dec_ns() {
++    std::lock_guard<std::mutex> lk(g_clock_mx);
++    if (!g_dec_armed) return INT64_MAX;
++    int64_t ticks = (int64_t)(g_dec_deadline - (uint64_t)g_tb_offset.load());
++    if (ticks <= 0) return 0;
++    return (int64_t)((__int128)ticks * 4000 / g_bus_mhz) + 1;
++}
++
++void det_window() {
++    if (g_det_next_ns - g_det_ns.load(std::memory_order_relaxed) <= kDetSpinWindow) g_ppc_pending.store(1, std::memory_order_relaxed);
++}
++
++// every event due at the virtual time now, then when the next one is
++void det_service() {
++    auto now = rt_now();
++    if (now >= g_det_next_vi) {
++        hw_vi_retrace();
++        auto period = hw_vi_field_period();
++        g_det_next_vi += period;
++        if (g_det_next_vi <= now) g_det_next_vi = now + period;
++    }
++    auto next = std::min(g_det_next_vi, hw_tick());
++    int64_t ns = std::chrono::duration_cast<std::chrono::nanoseconds>(next - g_t0).count();
++    int64_t dec = det_dec_ns();
++    if (dec <= g_det_ns.load(std::memory_order_relaxed)) os_raise();
++    g_det_next_ns = std::min(ns, dec);
++    det_window();
++}
++
++void det_step(int64_t ns) {
++    int64_t now = g_det_ns.fetch_add(ns, std::memory_order_relaxed) + ns;
++    if (now >= g_det_next_ns) det_service();
++}
++
+ // ---- interrupt delivery -----------------------------------------------------------------------
+ void deliver(PPCContext& c, int exc) {
+     HostThread* self = t_self;
+@@ -389,12 +489,89 @@ LONG WINAPI on_crash(EXCEPTION_POINTERS* ep) {
  }  // namespace
  
  // ---- services ----------------------------------------------------------------------------------
@@ -4910,6 +5401,7 @@ index aa1274e..37c4d26 100644
 +std::atomic<int64_t> g_speed_gain{0};            // ns the guest's clock is ahead of the host's, as of g_speed_since
 +Clock::time_point g_speed_since;
 +Clock::time_point rt_now() {
++    if (g_det.load(std::memory_order_relaxed)) return g_t0 + std::chrono::nanoseconds(g_det_ns.load(std::memory_order_relaxed));
 +    auto host = Clock::now();
 +    if (g_speed.load(std::memory_order_relaxed) == 1.0)
 +        return host + std::chrono::nanoseconds(g_speed_gain.load(std::memory_order_relaxed));
@@ -4918,8 +5410,9 @@ index aa1274e..37c4d26 100644
 +    return host + std::chrono::nanoseconds(g_speed_gain.load() + (int64_t)((double)run * (g_speed.load() - 1.0)));
 +}
 +double rt_speed() { return g_speed.load(std::memory_order_relaxed); }
++constexpr double kMinSpeed = 1.0 / 64;           // slow motion: the guest's clock can't stand still
 +void rt_set_speed(double speed) {
-+    if (!(speed >= 1.0)) speed = 1.0;
++    if (!(speed >= kMinSpeed)) speed = kMinSpeed;
 +    {
 +        std::lock_guard<std::mutex> lk(g_speed_mx);
 +        auto host = Clock::now();
@@ -4930,11 +5423,45 @@ index aa1274e..37c4d26 100644
 +        g_speed_since = host;
 +        g_speed = speed;
 +    }
++    if (g_det) det_anchor();
 +    clock_kick();
++}
++
++void rt_set_deterministic(bool on) { g_det = on; }
++bool rt_deterministic() { return g_det.load(std::memory_order_relaxed); }
++void rt_set_unpaced(bool on) {
++    if (g_det_unpaced.exchange(on) == on) return;  // the same again: the pacing goes on from where it is
++    if (!on && g_det) det_anchor();
++}
++bool rt_unpaced() { return g_det_unpaced; }
++int64_t rt_virtual_ns() { return g_det_ns.load(); }
++void rt_set_virtual_ns(int64_t ns) {           // a saved state's clock (on the guest's thread)
++    g_det_ns = ns;
++    g_det_next_ns = 0;
++    det_anchor();
++}
++std::chrono::steady_clock::time_point rt_next_retrace() { return g_det_next_vi; }
++void rt_set_next_retrace(std::chrono::steady_clock::time_point t) { g_det_next_vi = t; g_det_next_ns = 0; }
++
++// the time jumped (rt_advance): the guest lived it at once, nobody saw it go by
++std::atomic<int64_t> g_jumped_ns{0};
++int64_t rt_shown_ns() {
++    const int64_t at = g_det.load(std::memory_order_relaxed) ? g_det_ns.load(std::memory_order_relaxed)
++                                                             : std::chrono::duration_cast<std::chrono::nanoseconds>(rt_now() - g_t0).count();
++    return at - g_jumped_ns.load(std::memory_order_relaxed);
 +}
 +
 +void rt_advance(std::chrono::nanoseconds by) {
 +    if (by.count() <= 0) return;
++    g_jumped_ns += by.count();
++    if (g_det) {                               // from the guest's thread: the events it passes are taken at once
++        {                                      // and the pacing isn't waited for: that time is gone at once
++            std::lock_guard<std::mutex> lk(g_pace_mx);
++            g_pace_ns += by.count();
++        }
++        det_step(by.count());
++        return;
++    }
 +    {
 +        std::lock_guard<std::mutex> lk(g_speed_mx);
 +        g_speed_gain += by.count();
@@ -4948,26 +5475,87 @@ index aa1274e..37c4d26 100644
      return (uint64_t)(ns / 4000 * g_bus_mhz + ns % 4000 * g_bus_mhz / 4000) + (uint64_t)g_tb_offset.load();
  }
  
-@@ -435,7 +477,7 @@ void os_raise() {
+-uint64_t ppc_timebase() { return os_tb_now(); }
++uint64_t ppc_timebase() {
++    if (g_det.load(std::memory_order_relaxed)) det_step(kDetMftb);
++    return os_tb_now();
++}
+ 
+ void ppc_mttb(int upper, uint32_t v) {
+     uint64_t tb = os_tb_now();
+@@ -403,6 +580,7 @@ void ppc_mttb(int upper, uint32_t v) {
+     g_tb_offset += (int64_t)(want - tb);
+     g_dec_deadline += want - tb;               // DEC counts on its own: its deadline moves along
+     clock_kick();
++    if (g_det) g_det_next_ns = 0;
+ }
+ 
+ // DEC counts down at the time base rate; the exception is taken when its
+@@ -420,6 +598,7 @@ void ppc_mtdec(uint32_t v) {
+         g_dec_deadline = now + v + 1;          // DEC reaches -1 after v + 1 ticks
+     }
+     clock_kick();
++    if (g_det) g_det_next_ns = 0;
+     if (g_dec_armed && now >= g_dec_deadline) os_raise();
+ }
+ 
+@@ -435,8 +614,24 @@ void os_raise() {
  
  // Nothing but an interrupt can end the loop: wait for one (with a 1 ms
  // bound, in case a line is raised some other way), then deliver it.
 -void ppc_idle(PPCContext& c) {
 +void ppc_idle(PPC_CTX c) {
      if (c.msr & MSR_EE) hw_cpu_idle();
++    if (g_det.load(std::memory_order_relaxed)) {
++        // nothing runs until the next timed event: the clock goes there
++        if ((c.msr & MSR_EE) && !g_ppc_pending.load(std::memory_order_relaxed)) {
++            det_service();
++            if (!g_ppc_pending.load(std::memory_order_relaxed)) {
++                int64_t next = g_det_next_ns;
++                if (next != INT64_MAX && next > g_det_ns.load()) {
++                    det_pace(next);
++                    g_det_ns = next;
++                }
++                det_service();
++            }
++        }
++        PPC_POLL(c);
++        return;
++    }
      if (!g_ppc_pending.load(std::memory_order_relaxed) && (c.msr & MSR_EE)) {
          g_idle_waiting.store(true, std::memory_order_seq_cst);
-@@ -445,7 +487,7 @@ void ppc_idle(PPCContext& c) {
+         if (!g_ppc_pending.load(std::memory_order_seq_cst)) idle_wait();
+@@ -445,26 +640,52 @@ void ppc_idle(PPCContext& c) {
      PPC_POLL(c);
  }
  
 -void ppc_poll(PPCContext& c) {
 +void ppc_poll(PPC_CTX c) {
++    bool det = g_det.load(std::memory_order_relaxed);
++    if (det && (c.msr & MSR_EE)) det_step(kDetBackEdge);
      while (c.msr & MSR_EE) {
          g_ppc_pending.store(0);
          int exc = hw_external_pending() ? EXC_EXTERNAL : dec_due() ? EXC_DECREMENTER : -1;
-@@ -455,16 +497,25 @@ void ppc_poll(PPCContext& c) {
+-        if (exc < 0) return;
++        if (exc < 0) break;
+         g_ppc_pending.store(1);                // look again after this one
+         deliver(c, exc);
      }
++    if (det) det_window();
++}
++
++// a hardware register read takes time as well: code spins on the time-based ones (AIInit
++// waits for the AI's sample counter to move, with interrupts off)
++void os_det_mmio() {
++    if (g_det.load(std::memory_order_relaxed)) det_step(kDetMmio);
++}
++
++// a device's event at t: the deterministic clock's next stop may be sooner now
++void os_event_at(std::chrono::steady_clock::time_point t) {
++    if (!g_det.load(std::memory_order_relaxed)) return;
++    int64_t ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t - g_t0).count();
++    if (ns < g_det_next_ns) g_det_next_ns = ns;
++    det_window();
  }
  
 -void ppc_syscall(PPCContext&, uint32_t) {}     // the SDK's only sc flash-invalidates the icache
@@ -4995,7 +5583,134 @@ index aa1274e..37c4d26 100644
  void os_install() {
      g_t0 = Clock::now();
  #ifdef _WIN32
-@@ -495,6 +546,28 @@ void os_report_running(int depth) {
+@@ -481,7 +702,125 @@ void os_install() {
+     for (const char* n : {"OSReturnToMenu", "OSRestart", "OSShutdownSystem", "__OSReboot"})
+         ppc_hook(n, hle_leave);
+     ppc_hook("RealMode", [](PPCContext&) {});  // BAT set-up: the address space is flat already
+-    std::thread(clock_main).detach();
++    if (rt_deterministic()) {
++        // the console has been on a while when a game starts (the system menu ran): the SDK's
++        // own waits measure from 0 (SI's, before the alarms are set up) and take a clock of
++        // nearly 0 for a transfer that has only just been made
++        g_det_ns = 2000000000;
++        g_det_next_vi = rt_now() + hw_vi_field_period();
++        det_anchor();
++        rt_log("wiikit: deterministic: the guest's clock is virtual, devices are timed on the guest's thread");
++    } else {
++        std::thread(clock_main).detach();
++    }
++}
++
++std::chrono::steady_clock::time_point rt_epoch() { return g_t0; }
++
++// ---- saved states (state.cpp): the threads and the clock ----------------------------------
++namespace {
++// the guest call chain: LR, then each frame's saved LR up the back chain
++std::vector<uint32_t> chain_of(const PPCContext& c) {
++    std::vector<uint32_t> v{c.lr};
++    auto ok = [](uint32_t a) { return (a >= 0x80000000u && a < 0x81800000u) || (a >= 0x90000000u && a < 0x90000000u + g_mem2_size); };
++    uint32_t sp = c.r[1];
++    for (int i = 0; i < 128 && ok(sp); ++i) {
++        uint32_t back = ld32(sp);
++        if (!ok(back) || back <= sp) break;
++        v.push_back(ld32(back + 4));
++        sp = back;
++    }
++    return v;
++}
++std::string chain_text(const std::vector<uint32_t>& v) {
++    std::string t;
++    for (size_t i = 0; i < v.size() && i < 6; ++i) t += (i ? " < " : "") + rt_name(v[i]);
++    return t;
++}
++}  // namespace
++
++void os_state(StateIO& io, PPCContext& self) {
++    std::lock_guard<std::mutex> lk(g_mx);
++    HostThread* me = t_self;
++    if (!me) { io.fail("not on a guest thread"); return; }
++    if (io.saving && !me->delivering.empty()) { io.fail("inside an interrupt"); return; }
++    std::vector<std::pair<uint32_t, HostThread*>> live;
++    for (auto& [ctx, h] : g_by_ctx)
++        if (!h->zombie) live.push_back({ctx, h});
++    uint32_t n = (uint32_t)live.size();
++    io.pod(n);
++    if (io.checking() && n != live.size()) {
++        io.fail("the state has " + std::to_string(n) + " threads, the game " + std::to_string(live.size()));
++        return;
++    }
++    for (uint32_t i = 0; i < n && io.ok; ++i) {
++        uint32_t ctx = io.saving ? live[i].first : 0;
++        HostThread* h = io.saving ? live[i].second : nullptr;
++        io.pod(ctx);
++        if (!io.saving) {
++            auto it = g_by_ctx.find(ctx);
++            if (it == g_by_ctx.end() || it->second->zombie) { io.fail("thread " + rt_name(ctx) + " isn't there now"); return; }
++            h = it->second;
++        }
++        uint8_t running = io.saving ? h == me : 0;
++        io.pod(running);
++        bool inside = h->cur != &h->c;
++        PPCContext regs = h == me ? self : h->c, regs_cur = inside ? *h->cur : PPCContext{};
++        std::vector<uint32_t> delivering = h->delivering;
++        std::vector<uint32_t> chain = chain_of(h == me ? self : h->c), chain_cur = inside ? chain_of(*h->cur) : std::vector<uint32_t>{};
++        uint8_t has_cur = inside;
++        std::vector<uint32_t> s_delivering = delivering, s_chain = chain, s_chain_cur = chain_cur;
++        PPCContext s_regs = regs, s_cur = regs_cur;
++        io.pod(s_regs);
++        io.vec(s_delivering);
++        io.pod(has_cur);
++        if (has_cur) io.pod(s_cur);
++        io.vec(s_chain);
++        io.vec(s_chain_cur);
++        if (!io.ok) return;
++        if (io.checking()) {
++            std::string who = "thread " + rt_name(ctx);
++            if ((bool)running != (h == me)) { io.fail(who + (running ? " ran" : " waited") + " when the state was taken"); return; }
++            // these only matter for a thread alive in the state: whether it is comes with the state's memory
++            if (has_cur != inside || s_delivering != delivering) io.unless_dead.push_back({ctx, who + " is in another interrupt"});
++            else if (s_chain != chain) io.unless_dead.push_back({ctx, who + " waits elsewhere: " + chain_text(chain) + ", the state's " + chain_text(s_chain)});
++            else if (s_chain_cur != chain_cur) io.unless_dead.push_back({ctx, who + "'s interrupt waits elsewhere"});
++        } else if (io.applying) {
++            if (h == me) self = s_regs;
++            else if (has_cur == inside) {      // a dead thread parked elsewhere keeps its own: they're never used
++                h->c = s_regs;
++                if (has_cur) *h->cur = s_cur;
++            }
++        }
++    }
++    std::vector<uint32_t> fresh;
++    for (auto& [ctx, f] : g_fresh) fresh.push_back(ctx);
++    std::vector<uint32_t> s_fresh = fresh;
++    io.vec(s_fresh);
++    if (io.checking() && s_fresh != fresh) { io.fail("threads made and not started differ"); return; }
++    // the clock
++    int64_t ns = g_det_ns.load(), tb_offset = g_tb_offset.load();
++    auto next_vi = g_det_next_vi;
++    uint8_t armed = g_dec_armed;
++    uint64_t deadline = g_dec_deadline;
++    uint32_t pending = g_ppc_pending.load();
++    io.pod(ns);
++    io.pod(tb_offset);
++    io.time(next_vi);
++    io.pod(armed);
++    io.pod(deadline);
++    io.pod(pending);
++    if (io.applying) {
++        {
++            std::lock_guard<std::mutex> ck(g_clock_mx);
++            g_tb_offset = tb_offset;
++            g_dec_armed = armed;
++            g_dec_deadline = deadline;
++        }
++        g_det_next_vi = next_vi;
++        rt_set_virtual_ns(ns);
++        g_ppc_pending = pending;
++    }
+ }
+ 
+ // Where the running guest thread is: its registers' summary and call chain.
+@@ -495,6 +834,28 @@ void os_report_running(int depth) {
      rt_backtrace(c, stderr, depth);
  }
  
@@ -5280,18 +5995,23 @@ index 99351d5..52dfaae 100644
  static inline void ps_set(PPCContext& c, int d, double a, double b) { c.f[d] = rs(a); c.ps1[d] = rs(b); }
 +static inline void ps_put(PPCContext& c, int d, double a, double b) { c.f[d] = a; c.ps1[d] = b; }
 diff --git a/runtime/rt.h b/runtime/rt.h
-index 75fec5e..a24fa76 100644
+index 75fec5e..efee73f 100644
 --- a/runtime/rt.h
 +++ b/runtime/rt.h
-@@ -6,6 +6,7 @@
+@@ -4,8 +4,12 @@
+ #include <chrono>
+ #include <cstdarg>
  #include <cstdio>
++#include <deque>
  #include <functional>
++#include <set>
  #include <string>
++#include <type_traits>
 +#include <vector>
  
  // ---- core.cpp ---------------------------------------------------------------------------
  PPCFunc ppc_lookup(uint32_t addr);
-@@ -17,6 +18,10 @@ void rt_load_symbols(const char* tsv);
+@@ -17,6 +21,10 @@ void rt_load_symbols(const char* tsv);
  std::string rt_name(uint32_t addr);               // "func+0x12", or the hex address
  [[noreturn]] void rt_die(const char* fmt, ...);
  void rt_log(const char* fmt, ...);                 // stderr, one line
@@ -5302,7 +6022,7 @@ index 75fec5e..a24fa76 100644
  // The guest call chain from a context: LR, then the saved LRs up the back chain.
  void rt_backtrace(const PPCContext& c, FILE* out, int max = 24);
  
-@@ -27,6 +32,13 @@ void rt_backtrace(const PPCContext& c, FILE* out, int max = 24);
+@@ -27,6 +35,13 @@ void rt_backtrace(const PPCContext& c, FILE* out, int max = 24);
  struct RtGameLayer { RtGameLayer(const char* name, void (*install)()); };
  void rt_game_install();
  
@@ -5316,7 +6036,7 @@ index 75fec5e..a24fa76 100644
  // ---- rso.cpp ----------------------------------------------------------------------------
  // RSO modules: the run-time address of a loaded module's code -> the virtual
  // one it was recompiled at (0 if no module is there); the module a virtual
-@@ -58,10 +70,27 @@ static inline uint64_t tb_hz() { return (uint64_t)g_bus_mhz * 250000; }
+@@ -58,10 +73,44 @@ static inline uint64_t tb_hz() { return (uint64_t)g_bus_mhz * 250000; }
  
  // ---- the OS layer (os.cpp) --------------------------------------------------------------
  void os_report_running(int depth);                // stderr: where the running guest thread is
@@ -5326,14 +6046,18 @@ index 75fec5e..a24fa76 100644
  void os_install();                                // hooks, time
  void os_start_main(uint32_t entry);               // run __start on a guest host thread, and return
  void os_raise();                                  // a device changed its interrupt line
++void os_det_mmio();                               // deterministic mode: a register read moves the clock on
++void os_event_at(std::chrono::steady_clock::time_point t);   // a device's timed event (deterministic mode's clock stops there)
  uint64_t os_tb_now();                             // guest time base now
 +// The guest's clock as a host time point: the host's own while the speed is 1,
 +// ahead of it by whatever was fast-forwarded. The time base, the decrementer,
 +// VI's retraces, the AI's blocks and every device's delay go by it, so at a
-+// speed of 8 the guest lives eight seconds a second, everything in step.
++// speed of 8 the guest lives eight seconds a second, everything in step; at 0.5
++// half a second (slow motion, 1/64 at the least). The sound plays at the speed too.
 +std::chrono::steady_clock::time_point rt_now();
 +void rt_set_speed(double speed);                  // 1: real time
 +void rt_advance(std::chrono::nanoseconds by);     // the guest's clock jumps ahead: that much time has passed at once
++int64_t rt_shown_ns();                            // the guest's time less its jumps: what was there to see, ns (a capture's clock)
 +// After a jump the AI is behind by the blocks that fell due. With
 +// g_ai_catch_up they are all played, one as soon as the guest has mixed the
 +// last (otherwise it starts afresh past 100 ms); hw_ai_behind says whether
@@ -5341,10 +6065,23 @@ index 75fec5e..a24fa76 100644
 +extern bool g_ai_catch_up;
 +bool hw_ai_behind();
 +double rt_speed();
++// Deterministic mode (os.cpp): the guest's clock is virtual and every timed event is taken
++// on the guest's thread at a point its own code fixes, so the same input gives the same run.
++// Set before the runtime starts (a port's static initializer). Its clock is paced against
++// the host's (times rt_speed) unless unpaced, then it runs as fast as the host can.
++void rt_set_deterministic(bool on);
++bool rt_deterministic();
++void rt_set_unpaced(bool on);
++bool rt_unpaced();
++int64_t rt_virtual_ns();                          // the virtual clock, ns since the start
++void rt_set_virtual_ns(int64_t ns);               // a saved state's (on the guest's thread)
++std::chrono::steady_clock::time_point rt_epoch();  // the guest clock's 0 (rt_now at the start)
++std::chrono::steady_clock::time_point rt_next_retrace();
++void rt_set_next_retrace(std::chrono::steady_clock::time_point t);
  void os_watch(int seconds);                       // report the running thread periodically
  void os_profile();                                // WIIKIT_PROFILE: sample the guest code (=render: the renderer), list the hot functions
  
-@@ -74,7 +103,35 @@ void gx_submit_pending();                         // after a burst, outside g_hw
+@@ -74,7 +123,36 @@ void gx_submit_pending();                         // after a burst, outside g_hw
  // game that reads the copy on the CPU (the renderer otherwise keeps copies
  // on the host GPU only). False if no copy was made to addr (physical).
  bool gx_copy_to_ram(uint32_t addr);
@@ -5377,20 +6114,27 @@ index 75fec5e..a24fa76 100644
 +void gx_debug_overlay(const void* vertices, uint32_t count);
 +void gx_debug_overlay_opacity(float opacity);       // 0..1, the overlay drawn that much, its edges too
 +void gx_debug_view(uint8_t views, const float* clip);
++void gx_hold(bool on);                              // video_hold's mark, in the record's order
  void hw_run_locked(const std::function<void()>& fn);   // run fn holding the hardware lock
  
  // ---- the hardware (hw.cpp) -----------------------------------------------------------
-@@ -106,6 +163,9 @@ void wpad_set_classic_filter(WpadClassicFilter f);
+@@ -104,8 +182,15 @@ void wpad_set_classic(bool on);
+ void wpad_set_nunchuk(bool on);
+ void wpad_set_classic_filter(WpadClassicFilter f);
  void wpad_filter_classic(int chan, ClassicState& s);  // the port's filter, if it has one
++// Which channels hold a controller, instead of the host's pads (the same every run).
++void wpad_set_presence(bool (*fn)(uint32_t chan));
  
  // ---- audio (ax.cpp, audio.cpp) --------------------------------------------------------
 +// Muted, nothing is played and what was queued is dropped. With fade the
 +// sound goes to silence over that many seconds first, or comes back from it.
 +void audio_mute(bool on, double fade = 0);
++// Held, the blocks the game makes are dropped, apart from any mute (frames run unheard)
++void audio_hold(bool on);
  void ax_command_list(uint32_t addr);               // the AX micro-code: mix one frame
  uint8_t aram_read(uint32_t addr);                  // the GameCube's ARAM (hw.cpp), where its AX reads samples
  bool ax_load_coefs(const char* dir);               // dsp_coef.bin: the polyphase resampler's table
-@@ -113,6 +173,11 @@ void audio_init(bool enabled);                     // the host's audio device (S
+@@ -113,6 +198,11 @@ void audio_init(bool enabled);                     // the host's audio device (S
  // A block the AI DMA starts playing: frames of big-endian 16-bit stereo,
  // right then left, as the Wii's AI reads them.
  void audio_play(const uint8_t* be_rl, uint32_t frames, uint32_t rate);
@@ -5402,10 +6146,13 @@ index 75fec5e..a24fa76 100644
  
  // ---- SYSCONF (sysconf.cpp) -----------------------------------------------------------
  // Writes the NAND's /shared2/sys/SYSCONF if it has none, sets what the
-@@ -123,6 +188,10 @@ extern bool g_sysconf_eurgb60;                     // IPL.E60, after sysconf_pre
+@@ -123,6 +213,13 @@ extern bool g_sysconf_eurgb60;                     // IPL.E60, after sysconf_pre
  
  // ---- IOS (ios.cpp) ------------------------------------------------------------------
  void ios_init(const char* disc_root, const char* nand_root);
++const char* ios_nand_root();                       // the host folder holding the NAND
++std::string ios_save_dir();                        // the title's own save folder in it ("/title/00010000/534a4245/data")
++void ios_set_nand_root(const char* nand_root);     // another folder, before the game opens anything in it
 +// The network (ios_net.h): a name given an address before the host's
 +// resolver is asked, as a hosts file would; and a log of what the game does.
 +void ios_net_add_host(const char* name, const char* address);
@@ -5413,12 +6160,86 @@ index 75fec5e..a24fa76 100644
  void ios_ipc_write(uint32_t reg, uint32_t v);      // 0xCD000000-0xCD00000C
  uint32_t ios_ipc_read(uint32_t reg);
  void ios_irq_flag_clear(uint32_t v);               // 0xCD000030
+@@ -131,3 +228,69 @@ uint32_t ios_irq_flags();
+ uint32_t ios_irq_mask();
+ std::chrono::steady_clock::time_point ios_tick();  // replies now due delivered; when the next is
+ void hw_cpu_idle();                               // the processor idles: IOS replies are due at once
++
++// ---- video capture (video.cpp, audio.cpp) -------------------------------------------------
++// The window as shown (the port's overlays drawn: hide what shouldn't be in it) and the sound, into a video file
++// through ffmpeg (on the PATH, or WIIKIT_FFMPEG): w x h at fps, the picture letterboxed. Both are
++// timed by rt_shown_ns, so a skipped cutscene is gone from it as it was from the screen, a slow
++// renderer or an unpaced guest change nothing, and sound and picture stay together. Needs a window
++// (a hidden one does). Start and stop from the guest's thread; stop waits for the file.
++bool video_capture_start(const char* path, int w, int h, int fps, std::string& err);
++void video_capture_stop();
++bool video_capturing();
++void audio_capture_begin(FILE* wav, int64_t t0);  // (video.cpp's) the sound from now, placed by rt_shown_ns
++void audio_capture_end();                         // the wav's header written, closed
++
++// ---- saved states (state.cpp) -------------------------------------------------------------
++// The whole machine between two frames: guest memory, every guest thread's registers, the
++// clock, the devices, and the parts a port registers. Deterministic mode only, and only from
++// a hook on the running guest thread (c its registers) while every other one is parked: a
++// load is refused unless each thread waits at the same guest call chain as when the state
++// was taken (its host stack is that chain), and then changes nothing. A thread that is dead in
++// the state (OSThread state 0: cancelled or exited, never scheduled again) may wait anywhere:
++// its host stack is never gone back to, and a thread made again on it gets a new host thread.
++struct StateIO {
++    bool saving = false;
++    bool applying = false;                         // loading for real (not the first read-through)
++    std::vector<uint8_t>* out = nullptr;
++    const uint8_t* in = nullptr;
++    size_t size = 0, pos = 0;
++    size_t part_end = 0;                           // loading: where the part being read ends
++    bool more() const { return saving || pos < part_end; }  // the part has fields after these (an older state's doesn't)
++    bool ok = true;
++    std::string err;
++    std::set<std::string> check_parts;             // the read-through: the parts that look, the rest are skipped
++    std::vector<std::pair<uint32_t, std::string>> unless_dead;  // the read-through: threads waiting elsewhere, why
++    std::vector<std::pair<uint32_t, size_t>> pages;  // the read-through: guest page -> where its bytes are in the state
++    bool checking() const { return !saving && !applying; }
++    void raw(void* p, size_t n);
++    void skip(size_t n);
++    void fail(const std::string& why);
++    template <class T> void pod(T& v) {
++        static_assert(std::is_trivially_copyable<T>::value, "pod: a plain value");
++        raw(&v, sizeof v);
++    }
++    template <class T> void vec(std::vector<T>& v) {
++        uint64_t n = v.size();
++        pod(n);
++        if (!saving) { if (n > (1u << 28)) { fail("a list too long"); return; } v.resize((size_t)n); }
++        if (n) raw(v.data(), (size_t)n * sizeof(T));
++    }
++    template <class T> void deq(std::deque<T>& d) {
++        std::vector<T> v(d.begin(), d.end());
++        vec(v);
++        if (!saving) d.assign(v.begin(), v.end());
++    }
++    void str(std::string& s) {
++        uint32_t n = (uint32_t)s.size();
++        pod(n);
++        if (!saving) { if (n > (1u << 24)) { fail("a string too long"); return; } s.resize(n); }
++        if (n) raw(&s[0], n);
++    }
++    void time(std::chrono::steady_clock::time_point& t);   // relative to the guest clock's 0
++};
++bool rt_state_save(PPCContext& c, std::vector<uint8_t>& out, std::string& err);
++bool rt_state_load(PPCContext& c, const uint8_t* data, size_t size, std::string& err);
++// a port's own part of every state (what it keeps on the host side that the game's play
++// depends on), registered once before the first state, in the same order every run
++void rt_state_register(const char* name, std::function<void(StateIO&)> fn);
 diff --git a/runtime/runtime.cmake b/runtime/runtime.cmake
-index 1f97bc4..5169b1a 100644
+index 1f97bc4..8879bf4 100644
 --- a/runtime/runtime.cmake
 +++ b/runtime/runtime.cmake
-@@ -14,6 +14,11 @@ add_library(wiikit_hw OBJECT ${_rt}/os.cpp ${_rt}/hw.cpp ${_rt}/gx.cpp ${_rt}/io
-             ${_rt}/video.cpp ${_rt}/gxshader.cpp ${_rt}/gxtex.cpp)
+@@ -11,9 +11,14 @@ add_library(wiikit_core OBJECT ${_rt}/core.cpp ${_rt}/mem.cpp ${_rt}/rso.cpp)
+ add_library(wiikit_stub OBJECT ${_rt}/services_stub.cpp)
+ add_library(wiikit_hw OBJECT ${_rt}/os.cpp ${_rt}/hw.cpp ${_rt}/gx.cpp ${_rt}/ios.cpp ${_rt}/sysconf.cpp
+             ${_rt}/disc.cpp ${_rt}/boot.cpp ${_rt}/wpad.cpp ${_rt}/ax.cpp ${_rt}/audio.cpp
+-            ${_rt}/video.cpp ${_rt}/gxshader.cpp ${_rt}/gxtex.cpp)
++            ${_rt}/video.cpp ${_rt}/gxshader.cpp ${_rt}/gxtex.cpp ${_rt}/state.cpp)
  find_package(SDL3 REQUIRED CONFIG)
  target_link_libraries(wiikit_hw PUBLIC SDL3::SDL3)
 +find_package(OpenSSL REQUIRED)                   # /dev/net/ssl (ios_net.h)
@@ -5451,10 +6272,251 @@ index 8a4e097..8b1b1a8 100644
  uint32_t ppc_mmio_read(uint32_t addr, int) { rt_die("mmio read %08X", addr); }
  void ppc_mmio_write(uint32_t addr, uint32_t, int) { rt_die("mmio write %08X", addr); }
  uint64_t ppc_timebase() { return 0; }
+diff --git a/runtime/state.cpp b/runtime/state.cpp
+new file mode 100644
+index 0000000..5f20bc9
+--- /dev/null
++++ b/runtime/state.cpp
+@@ -0,0 +1,226 @@
++// wiikit runtime — saved states: the whole machine between two of the game's frames.
++//
++// Recompiled code runs as host code: a guest thread is a host thread, and where it is in its
++// code is where its host stack is. A state can't carry host stacks, so it is taken and put
++// back from inside a hook on the running guest thread (a port's frame boundary), with every
++// other guest thread parked in OSLoadContext. Each thread's registers are kept, and its guest
++// call chain (the saved LRs up its stack): a state is only put back while every thread is
++// parked at the same chain as when it was taken, so its host stack is the one the state's
++// registers and memory go with (recompiled code keeps nothing of the guest's in host frames
++// across a call that can reach native code or an interrupt: recomp/gprlive.py syncs every
++// register around those). A thread that came or went, or waits somewhere else, refuses the load.
++//
++// What a state holds: MEM1 and MEM2 (pages of zeros left out), the threads, the clock (only
++// in deterministic mode, where it is virtual and every device's time goes by it), every
++// device's registers and timed events, the IOS descriptors, the GP's state (the caches of
++// what it decoded are dropped on a load), WPAD's, AX's, and what a port registers.
++#include "rt.h"
++#include "mem.h"
++#include <cstring>
++#include <map>
++#include <mutex>
++
++void os_state(StateIO& io, PPCContext& self);
++void hw_state(StateIO& io);
++void ios_state(StateIO& io);
++void gx_state(StateIO& io);
++void wpad_state(StateIO& io);
++void ax_state(StateIO& io);
++extern uint32_t g_ppc_spr[1024];
++
++namespace {
++
++constexpr uint32_t kMagic = 0x574B5354;              // WKST
++constexpr uint32_t kVersion = 1;
++constexpr uint32_t kPage = 4096;
++
++struct PortSection { std::string name; std::function<void(StateIO&)> fn; };
++std::vector<PortSection>& port_sections() {
++    static std::vector<PortSection> v;
++    return v;
++}
++
++// guest memory, a page at a time: a bit a page in a map, then the pages that aren't zero
++void mem_section(StateIO& io, uint32_t base, uint32_t size) {
++    uint8_t* p = host(base);
++    uint32_t pages = size / kPage;
++    std::vector<uint8_t> map((pages + 7) / 8);
++    if (io.saving) {
++        static const uint64_t zero[kPage / 8] = {};
++        for (uint32_t i = 0; i < pages; ++i)
++            if (std::memcmp(p + (size_t)i * kPage, zero, kPage)) map[i / 8] |= (uint8_t)(1 << (i & 7));
++    }
++    io.pod(size);
++    if (size / kPage != pages) { io.fail("memory size"); return; }
++    io.raw(map.data(), map.size());
++    if (!io.saving && !io.applying) {                // checking: walk past it, minding where each page is
++        for (uint32_t i = 0; i < pages; ++i)
++            if (map[i / 8] >> (i & 7) & 1) {
++                io.pages.push_back({base + i * kPage, io.pos});
++                io.skip(kPage);
++            }
++        return;
++    }
++    for (uint32_t i = 0; i < pages; ++i) {
++        uint8_t* pg = p + (size_t)i * kPage;
++        if (map[i / 8] >> (i & 7) & 1) io.raw(pg, kPage);
++        else if (!io.saving) std::memset(pg, 0, kPage);
++    }
++}
++
++// one named part, its length first so a reader can tell where it ends
++template <class F> void section(StateIO& io, const char* name, F&& fn) {
++    std::string n = name;
++    io.str(n);
++    if (!io.saving && n != name) { io.fail(std::string("expected part ") + name + ", found " + n); return; }
++    uint64_t len = 0;
++    size_t at = io.saving ? io.out->size() : io.pos;
++    io.pod(len);
++    size_t start = io.saving ? io.out->size() : io.pos;
++    if (!io.saving && !io.applying && !io.check_parts.count(name)) {
++        io.skip((size_t)len);
++        return;
++    }
++    size_t outer = io.part_end;
++    io.part_end = io.saving ? 0 : start + (size_t)len;
++    fn();
++    io.part_end = outer;
++    if (!io.ok) return;
++    if (io.saving) {
++        len = io.out->size() - start;
++        std::memcpy(io.out->data() + at, &len, sizeof len);
++    } else if (io.pos != start + len) {
++        io.fail(std::string("part ") + name + " has the wrong size");
++    }
++}
++
++std::string game_id() { return std::string((const char*)host(0x80000000), 6); }
++
++void all(StateIO& io, PPCContext& c) {
++    uint32_t magic = kMagic, version = kVersion;
++    io.pod(magic);
++    io.pod(version);
++    if (!io.saving && (magic != kMagic || version != kVersion)) { io.fail("not a state of this version"); return; }
++    std::string id = game_id();
++    io.str(id);
++    if (!io.saving && id != game_id()) { io.fail("a state of another game (" + id + ")"); return; }
++    uint32_t mem2 = g_mem2_size;
++    io.pod(mem2);
++    if (!io.saving && mem2 != g_mem2_size) { io.fail("MEM2 is another size"); return; }
++    section(io, "os", [&] { os_state(io, c); });
++    section(io, "ios", [&] { ios_state(io); });
++    section(io, "mem1", [&] { mem_section(io, 0x80000000u, 0x01800000u); });
++    section(io, "mem2", [&] { mem_section(io, 0x90000000u, g_mem2_size); });
++    section(io, "spr", [&] { io.raw(g_ppc_spr, sizeof g_ppc_spr); });
++    section(io, "hw", [&] { hw_state(io); });
++    section(io, "gx", [&] { gx_state(io); });
++    section(io, "wpad", [&] { wpad_state(io); });
++    section(io, "ax", [&] { ax_state(io); });
++    uint32_t n = (uint32_t)port_sections().size();
++    io.pod(n);
++    if (io.saving) {
++        for (auto& s : port_sections()) section(io, s.name.c_str(), [&] { s.fn(io); });
++        return;
++    }
++    // loading: the port's parts by name, so a state from before a part was added (or after one
++    // went) still loads. a part the state hasn't keeps what it holds now, one the port doesn't
++    // know is skipped
++    for (uint32_t i = 0; i < n && io.ok; ++i) {
++        size_t at = io.pos;
++        std::string name;
++        uint64_t len = 0;
++        io.str(name);
++        io.pod(len);
++        if (!io.ok) return;
++        PortSection* known = nullptr;
++        for (auto& s : port_sections())
++            if (s.name == name) known = &s;
++        if (!known) {
++            if (io.applying) rt_log("state: the port has no part %s, left out", name.c_str());
++            io.skip((size_t)len);
++            continue;
++        }
++        io.pos = at;
++        section(io, known->name.c_str(), [&] { known->fn(io); });
++    }
++}
++
++}  // namespace
++
++void StateIO::raw(void* p, size_t n) {
++    if (!ok) { if (!saving) std::memset(p, 0, n); return; }
++    if (saving) {
++        const uint8_t* b = static_cast<const uint8_t*>(p);
++        out->insert(out->end(), b, b + n);
++        return;
++    }
++    if (pos + n > size) { fail("the state ends early"); std::memset(p, 0, n); return; }
++    std::memcpy(p, in + pos, n);
++    pos += n;
++}
++
++void StateIO::skip(size_t n) {
++    if (pos + n > size) { fail("the state ends early"); return; }
++    pos += n;
++}
++
++void StateIO::time(std::chrono::steady_clock::time_point& t) {
++    int64_t ns = saving ? std::chrono::duration_cast<std::chrono::nanoseconds>(t - rt_epoch()).count() : 0;
++    pod(ns);
++    if (!saving) t = rt_epoch() + std::chrono::nanoseconds(ns);
++}
++
++void StateIO::fail(const std::string& why) {
++    if (!ok) return;
++    ok = false;
++    err = why;
++}
++
++void rt_state_register(const char* name, std::function<void(StateIO&)> fn) {
++    port_sections().push_back({name, std::move(fn)});
++}
++
++bool rt_state_save(PPCContext& c, std::vector<uint8_t>& out, std::string& err) {
++    if (!rt_deterministic()) { err = "states need the deterministic mode"; return false; }
++    out.clear();
++    out.reserve(64u << 20);
++    StateIO io;
++    io.saving = true;
++    io.out = &out;
++    all(io, c);
++    if (!io.ok) { err = io.err; out.clear(); }
++    return io.ok;
++}
++
++bool rt_state_load(PPCContext& c, const uint8_t* data, size_t size, std::string& err) {
++    if (!rt_deterministic()) { err = "states need the deterministic mode"; return false; }
++    // first only read it through and ask the parts that can refuse (the threads, the
++    // descriptors), nothing changed; then put it back
++    StateIO check;
++    check.saving = false;
++    check.in = data;
++    check.size = size;
++    check.check_parts = {"os", "ios", "mem1", "mem2"};
++    all(check, c);
++    if (check.ok && check.pos != size) check.fail("the state goes on past its end");
++    // a thread waiting elsewhere is only fine dead in the state: its OSThread's state (+0x2C8) 0
++    for (auto& [ctx, why] : check.unless_dead) {
++        if (!check.ok) break;
++        const uint32_t at = ctx + 0x2C8, page = at & ~(kPage - 1);
++        uint16_t st = 0;                             // a page left out is zeros
++        for (auto& [pg, off] : check.pages)
++            if (pg == page) { st = (uint16_t)(data[off + (at - page)] << 8 | data[off + (at - page) + 1]); break; }
++        if (st != 0) check.fail(why);
++    }
++    if (!check.ok) { err = check.err; return false; }
++    mem_unwatch(host(0x80000000u), 0x01800000u);
++    mem_unwatch(host(0x90000000u), g_mem2_size);
++    StateIO io;
++    io.saving = false;
++    io.applying = true;
++    io.in = data;
++    io.size = size;
++    all(io, c);
++    if (!io.ok) rt_die("state: a state that read through refused to load: %s", io.err.c_str());
++    return true;
++}
 diff --git a/runtime/video.cpp b/runtime/video.cpp
-index 5726093..25cf001 100644
+index 5726093..a078127 100644
 --- a/runtime/video.cpp
 +++ b/runtime/video.cpp
+@@ -46,7 +46,7 @@ constexpr int EFB_W = 640, EFB_H = 528;
+ using Clock = std::chrono::steady_clock;
+ 
+ // ---- the queue from the game ------------------------------------------------------------------
+-struct Chunk { std::vector<uint8_t> data; int frames; bool readback = false; uint32_t copy = 0; };   // copy: video_copy_read's
++struct Chunk { std::vector<uint8_t> data; int frames; bool readback = false; uint32_t copy = 0; int64_t at = INT64_MIN; };   // copy: video_copy_read's; at: rt_shown_ns as it was handed over
+ std::mutex qmx;
+ std::condition_variable q_space;
+ std::deque<Chunk> q;
 @@ -67,19 +67,51 @@ ClassicState classic[4];
  
  // ---- GX state, as the record left it --------------------------------------------------------
@@ -5571,8 +6633,20 @@ index 5726093..25cf001 100644
  bool dump_ps = false;                              // WIIKIT_SHADERDUMP: log the next uniforms
  
  int32_t s11(uint32_t v) { return (int32_t)((v & 0x7FF) << 21) >> 21; }
-@@ -225,12 +291,22 @@ void save_program(GLuint p, uint64_t hash) {
+@@ -223,14 +289,34 @@ void save_program(GLuint p, uint64_t hash) {
+     }
+ }
  
++// a colour blit to or from the window's framebuffer (0) through the bound framebuffers, not the
++// named call: drivers that mishandle 0 in glBlitNamedFramebuffer leave the window black (an
++// Intel HD 530 under Windows ran the game fine behind a black window)
++void blit_bound(GLuint src, GLuint dst, int sx0, int sy0, int sx1, int sy1, int dx0, int dy0, int dx1, int dy1, GLenum filter) {
++    glBindFramebuffer(GL_READ_FRAMEBUFFER, src);
++    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, dst);
++    glBlitFramebuffer(sx0, sy0, sx1, sy1, dx0, dy0, dx1, dy1, GL_COLOR_BUFFER_BIT, filter);
++    glBindFramebuffer(GL_FRAMEBUFFER, 0);
++}
++
  void ensure_tex(Tex& t, int w, int h, int levels) {
      if (t.name && t.w == w && t.h == h && t.levels == levels) return;
 -    if (t.name) glDeleteTextures(1, &t.name);
@@ -5595,7 +6669,7 @@ index 5726093..25cf001 100644
  void APIENTRY gl_debug(GLenum, GLenum type, GLuint, GLenum severity, GLsizei, const GLchar* msg, const void*) {
      if (severity == GL_DEBUG_SEVERITY_NOTIFICATION) return;
      rt_log("gl: %s%s", type == GL_DEBUG_TYPE_ERROR ? "error: " : "", msg);
-@@ -295,11 +371,117 @@ void main() {
+@@ -295,11 +381,117 @@ void main() {
  )";
  
  // ---- register side effects ----------------------------------------------------------------------
@@ -5714,7 +6788,7 @@ index 5726093..25cf001 100644
      glEnable(GL_SCISSOR_TEST);
      glScissor(x * S, y * S, w * S, h * S);
      glColorMask(cu, cu, cu, au || !has_alpha);
-@@ -318,6 +500,7 @@ long efb_dump_every = std::getenv("WIIKIT_EFBDUMP_EVERY") ? std::atol(std::geten
+@@ -318,6 +510,7 @@ long efb_dump_every = std::getenv("WIIKIT_EFBDUMP_EVERY") ? std::atol(std::geten
  bool efb_dumping() { return (long)cnt.frames == efb_dump_frame; }
  void efb_dump(const char* tag) {
      static int k = 0;
@@ -5722,7 +6796,7 @@ index 5726093..25cf001 100644
      std::vector<uint8_t> px((size_t)EFB_W * S * EFB_H * S * 4);   // top row first, as the EFB is kept
      glGetTextureImage(efb_col, 0, GL_RGBA, GL_UNSIGNED_BYTE, (GLsizei)px.size(), px.data());
      char name[160];
-@@ -325,9 +508,15 @@ void efb_dump(const char* tag) {
+@@ -325,9 +518,15 @@ void efb_dump(const char* tag) {
      write_png(name, EFB_W * S, EFB_H * S, px.data());
  }
  
@@ -5738,7 +6812,7 @@ index 5726093..25cf001 100644
      uint32_t dest = (bp[0x4B] & 0xFFFFFF) << 5;
      glDisable(GL_SCISSOR_TEST);
      if (efb_dumping()) {
-@@ -336,21 +525,28 @@ void efb_copy(uint32_t v) {
+@@ -336,21 +535,28 @@ void efb_copy(uint32_t v) {
          efb_dump(tag);
      }
      if (v >> 14 & 1) {                                           // to the XFB
@@ -5775,7 +6849,7 @@ index 5726093..25cf001 100644
          glViewport(0, 0, tw * S, th * S);
          glDisable(GL_BLEND);
          glDisable(GL_COLOR_LOGIC_OP);
-@@ -365,11 +561,143 @@ void efb_copy(uint32_t v) {
+@@ -365,11 +571,143 @@ void efb_copy(uint32_t v) {
          glBindTextureUnit(1, efb_dep);
          glBindSampler(0, 0);
          glBindSampler(1, 0);
@@ -5921,7 +6995,7 @@ index 5726093..25cf001 100644
  }
  
  void bp_set(uint32_t v) {
-@@ -381,6 +709,7 @@ void bp_set(uint32_t v) {
+@@ -381,6 +719,7 @@ void bp_set(uint32_t v) {
          else { r[2] = s11(val); r[1] = s11(val >> 12); }              // BG
      }
      if (reg == 0x52) efb_copy(val);
@@ -5929,7 +7003,7 @@ index 5726093..25cf001 100644
  }
  
  // ---- draws --------------------------------------------------------------------------------------
-@@ -451,6 +780,24 @@ void set_ps_uniforms() {
+@@ -451,6 +790,24 @@ void set_ps_uniforms() {
          std::memcpy(u.indmtx[2 * m], r0, sizeof r0);
          std::memcpy(u.indmtx[2 * m + 1], r1, sizeof r1);
      }
@@ -5954,7 +7028,7 @@ index 5726093..25cf001 100644
      if (dump_ps) {
          dump_ps = false;
          std::string t = "video: program " + std::to_string(cnt.programs - 1) + " uniforms:";
-@@ -462,9 +809,12 @@ void set_ps_uniforms() {
+@@ -462,9 +819,12 @@ void set_ps_uniforms() {
          rt_log("%s", t.c_str());
      }
      if (ps_valid && !std::memcmp(&u, &ps_last, sizeof u)) return;
@@ -5968,7 +7042,7 @@ index 5726093..25cf001 100644
  }
  
  void bind_textures() {
-@@ -475,113 +825,576 @@ void bind_textures() {
+@@ -475,113 +835,576 @@ void bind_textures() {
      for (int m = 0; m < 8; ++m) {
          if (!(used >> m & 1)) continue;
          GLuint name = 0;
@@ -6549,39 +7623,39 @@ index 5726093..25cf001 100644
 -        static const GLenum lo[16] = {GL_CLEAR, GL_AND, GL_AND_REVERSE, GL_COPY, GL_AND_INVERTED, GL_NOOP,
 -                                      GL_XOR, GL_OR, GL_NOR, GL_EQUIV, GL_INVERT, GL_OR_REVERSE,
 -                                      GL_COPY_INVERTED, GL_OR_INVERTED, GL_NAND, GL_SET};
+-        glDisable(GL_BLEND);
+-        glEnable(GL_COLOR_LOGIC_OP);
+-        glLogicOp(lo[cm >> 12 & 15]);
+-    } else {
 +        glDepthFunc(scene ? GL_GEQUAL : GL_LEQUAL);
 +        glProgramUniform1f(dbgo_prog, dbgo_fade_loc, dbgo_opacity.load());
 +        glDrawArrays(GL_TRIANGLES, 0, (GLsizei)dbgo_count);
          glDisable(GL_BLEND);
--        glEnable(GL_COLOR_LOGIC_OP);
--        glLogicOp(lo[cm >> 12 & 15]);
--    } else {
--        glDisable(GL_BLEND);
 -        glDisable(GL_COLOR_LOGIC_OP);
 +        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
++    }
++    if (scene) {
++        glDepthMask(GL_TRUE);
++        glClearDepth(1.0);
++        glClear(GL_DEPTH_BUFFER_BIT);
      }
 -    // GX's front faces are clockwise on screen: counter-clockwise for GL,
 -    // whose y runs the other way over the same rows
 -    if (tri && cull) { glEnable(GL_CULL_FACE); glCullFace(cull == 1 ? GL_BACK : GL_FRONT); }
 -    else glDisable(GL_CULL_FACE);
-+    if (scene) {
-+        glDepthMask(GL_TRUE);
-+        glClearDepth(1.0);
-+        glClear(GL_DEPTH_BUFFER_BIT);
-+    }
-+}
-+
-+// An EFB copy: the scene is in what is copied; a copy that clears takes it out again.
-+void dbg_copy(bool clears) {
-+    if (clears) dbg_drawn = false;
-+    else if (dbg_waiting) dbg_draw();
-+    else dbg_drawn = false;                          // what is drawn in 3D after a copy is another pass
 +}
  
 -    if (xf_lo < xf_hi) {
 -        glNamedBufferSubData(xf_ubo, xf_lo * 4, (xf_hi - xf_lo) * 4, &xf[xf_lo]);
 -        xf_lo = 0x1058;
 -        xf_hi = 0;
++// An EFB copy: the scene is in what is copied; a copy that clears takes it out again.
++void dbg_copy(bool clears) {
++    if (clears) dbg_drawn = false;
++    else if (dbg_waiting) dbg_draw();
++    else dbg_drawn = false;                          // what is drawn in 3D after a copy is another pass
++}
++
 +// True: the draw about to be made is one the debug scene stands in for.
 +bool dbg_hides() {
 +    if (!dbg_on) return false;
@@ -6624,7 +7698,7 @@ index 5726093..25cf001 100644
          uint32_t pm = v0.mtx[0] * 4u;
          float pos[3];
          for (int r = 0; r < 3; ++r)
-@@ -593,67 +1406,75 @@ void draw(uint8_t prim, uint8_t vflags, const uint8_t* pieces, uint32_t npieces)
+@@ -593,67 +1416,75 @@ void draw(uint8_t prim, uint8_t vflags, const uint8_t* pieces, uint32_t npieces)
                 c[2] = fx(0x1024) * pos[2] + fx(0x1025); c[3] = 1; }
          std::fprintf(lf, "%ld prim %02X n %u zm %X cm %X pix %X at %X ztex %X fog %X | vp %g %g %g %g %g %g | proj%u %g %g %g %g %g %g | "
                       "mtx %u obj %g %g %g eye %g %g %g ndc %g %g w %g | tev %u chans %u\n",
@@ -6738,7 +7812,7 @@ index 5726093..25cf001 100644
  }
  
  // ---- the record -----------------------------------------------------------------------------------
-@@ -662,6 +1483,8 @@ template <class T> T rd(const uint8_t*& p) { T v; std::memcpy(&v, p, sizeof v);
+@@ -662,6 +1493,8 @@ template <class T> T rd(const uint8_t*& p) { T v; std::memcpy(&v, p, sizeof v);
  // The EFB at its native size: the pixel at each native position's top-left
  // sample of the scaled EFB (rows from the top, as the EFB copies read it).
  void efb_readback() {
@@ -6747,9 +7821,11 @@ index 5726093..25cf001 100644
      int W = EFB_W * S, H = EFB_H * S;
      std::vector<uint8_t> px((size_t)W * H * 4);
      std::vector<float> dz((size_t)W * H);
-@@ -703,6 +1526,9 @@ void copy_readback(uint32_t addr) {
+@@ -702,7 +1535,11 @@ void copy_readback(uint32_t addr) {
+     rb_cv.notify_all();
  }
  
++void hold_mark(bool on);
  void exec(const std::vector<uint8_t>& data) {
 +    ++rl.chunks;
 +    gl_state_stale = true;
@@ -6757,7 +7833,7 @@ index 5726093..25cf001 100644
      const uint8_t* p = data.data();
      const uint8_t* end = p + data.size();
      while (p < end) {
-@@ -712,24 +1538,42 @@ void exec(const std::vector<uint8_t>& data) {
+@@ -712,24 +1549,42 @@ void exec(const std::vector<uint8_t>& data) {
              uint16_t a = rd<uint16_t>(p), n = rd<uint16_t>(p);
              std::memcpy(&xf[a], p, 4u * n);
              p += 4u * n;
@@ -6803,7 +7879,7 @@ index 5726093..25cf001 100644
              Tex& t = texs[id];
              ensure_tex(t, w, h, levels);
              for (int l = 0; l < levels; ++l) {
-@@ -742,7 +1586,55 @@ void exec(const std::vector<uint8_t>& data) {
+@@ -742,7 +1597,56 @@ void exec(const std::vector<uint8_t>& data) {
          }
          case VC_TEXBIND: { uint8_t m = rd<uint8_t>(p); map_src[m] = rd<uint32_t>(p); break; }
          case VC_TEXEFB: { uint8_t m = rd<uint8_t>(p); map_src[m] = 1ull << 32 | rd<uint32_t>(p); break; }
@@ -6850,6 +7926,7 @@ index 5726093..25cf001 100644
 +            p += (size_t)n * 20;
 +            break;
 +        }
++        case VC_HOLD: hold_mark(rd<uint8_t>(p) != 0); break;
 +        case VC_DBGVIEW: {
 +            dbg_on = rd<uint8_t>(p);
 +            std::memcpy(dbg_clip, p, sizeof dbg_clip);
@@ -6860,7 +7937,7 @@ index 5726093..25cf001 100644
          case VC_DRAWDONE: gx_draw_done_reached(); break;
          default: rt_die("video: bad record byte %02X", p[-1]);
          }
-@@ -811,13 +1703,17 @@ namespace {
+@@ -811,13 +1715,17 @@ namespace {
  // Where the picture sits in a window of w x h (pixels or window units): the
  // TV's screen, 4:3 or 16:9 as SYSCONF says, as large as the window allows and
  // centred; of its 480 lines (NTSC) VI scans the XFB out over its active ones,
@@ -6880,7 +7957,7 @@ index 5726093..25cf001 100644
      return {(w - sw) / 2, (h - ph) / 2, sw, ph};
  }
  
-@@ -839,10 +1735,13 @@ enum : uint32_t { CL_UP = 0x0001, CL_LEFT = 0x0002, CL_ZR = 0x0004, CL_X = 0x000
+@@ -839,10 +1747,13 @@ enum : uint32_t { CL_UP = 0x0001, CL_LEFT = 0x0002, CL_ZR = 0x0004, CL_X = 0x000
                    CL_Y = 0x0020, CL_B = 0x0040, CL_ZL = 0x0080, CL_R = 0x0200, CL_PLUS = 0x0400,
                    CL_HOME = 0x0800, CL_MINUS = 0x1000, CL_L = 0x2000, CL_DOWN = 0x4000, CL_RIGHT = 0x8000 };
  constexpr uint32_t kStick = 1u << 16;               // L up, down, left, right, then R's: kStick << 0..7
@@ -6894,7 +7971,7 @@ index 5726093..25cf001 100644
  
  const char* DEFAULT_KEYS =
      "# wiiboot's keys: each Wii Remote button, then the keys and mouse buttons that press it.\n"
-@@ -869,6 +1768,8 @@ const char* DEFAULT_KEYS =
+@@ -869,6 +1780,8 @@ const char* DEFAULT_KEYS =
      "# takes the keys, the mouse and the first pad at once (Input = Pad or Keyboard: only one of them;\n"
      "# wiiboot --input says the same).\n"
      "# The pad: its triggers are ZL and ZR, its shoulders L and R, Start +, Back -, its guide button Home.\n"
@@ -6903,7 +7980,7 @@ index 5726093..25cf001 100644
      "# Face Buttons = Position: the right one is A, the bottom one B, the top one X, the left one Y (the\n"
      "# Classic's own layout); Label: the button labelled A (Cross) is A, B (Circle) B, X (Square) X, Y (Triangle) Y.\n"
      "# Dead Zone: how far the pad's sticks move before they count, of their travel.\n"
-@@ -897,7 +1798,9 @@ const char* DEFAULT_KEYS =
+@@ -897,7 +1810,9 @@ const char* DEFAULT_KEYS =
      "Right Stick Up    =\n"
      "Right Stick Down  =\n"
      "Right Stick Left  =\n"
@@ -6914,7 +7991,7 @@ index 5726093..25cf001 100644
  
  std::string trim(const std::string& t) {
      size_t a = t.find_first_not_of(" \t\r"), b = t.find_last_not_of(" \t\r");
-@@ -923,7 +1826,11 @@ bool parse_keys(const std::string& text, const std::string& path, bool remote, b
+@@ -923,7 +1838,11 @@ bool parse_keys(const std::string& text, const std::string& path, bool remote, b
                                       {"Left Stick Up", kStick << 0}, {"Left Stick Down", kStick << 1},
                                       {"Left Stick Left", kStick << 2}, {"Left Stick Right", kStick << 3},
                                       {"Right Stick Up", kStick << 4}, {"Right Stick Down", kStick << 5},
@@ -6927,7 +8004,7 @@ index 5726093..25cf001 100644
      static const Btn mice[] = {{"Mouse Left", SDL_BUTTON_LMASK}, {"Mouse Right", SDL_BUTTON_RMASK},
                                 {"Mouse Middle", SDL_BUTTON_MMASK}, {"Mouse X1", SDL_BUTTON_X1MASK},
                                 {"Mouse X2", SDL_BUTTON_X2MASK}};
-@@ -980,7 +1887,7 @@ bool parse_keys(const std::string& text, const std::string& path, bool remote, b
+@@ -980,7 +1899,7 @@ bool parse_keys(const std::string& text, const std::string& path, bool remote, b
          }
          if (!b) {
              if (in_classic) rt_log("video: %s:%d: not a Classic Controller button (A B X Y L R ZL ZR Plus Minus Home Up Down Left Right, "
@@ -6936,7 +8013,7 @@ index 5726093..25cf001 100644
              else rt_log("video: %s:%d: not a Remote button (A B Up Down Left Right Plus Minus 1 2 Shake Raise; the Nunchuk's "
                          "C Z Stick Up/Down/Left/Right Walk)", path.c_str(), line);
              continue;
-@@ -1006,7 +1913,9 @@ bool parse_keys(const std::string& text, const std::string& path, bool remote, b
+@@ -1006,7 +1925,9 @@ bool parse_keys(const std::string& text, const std::string& path, bool remote, b
      return has_classic;
  }
  
@@ -6946,7 +8023,7 @@ index 5726093..25cf001 100644
      std::string text;
      if (FILE* f = std::fopen(path.c_str(), "rb")) {
          char buf[4096];
-@@ -1079,6 +1988,8 @@ ClassicState classic_from_pad(SDL_Gamepad* g) {
+@@ -1079,6 +2000,8 @@ ClassicState classic_from_pad(SDL_Gamepad* g) {
          {SDL_GAMEPAD_BUTTON_START, CL_PLUS}, {SDL_GAMEPAD_BUTTON_BACK, CL_MINUS}, {SDL_GAMEPAD_BUTTON_GUIDE, CL_HOME}};
      for (auto& f : fixed)
          if (SDL_GetGamepadButton(g, f.b)) s.buttons |= f.bit;
@@ -6955,7 +8032,7 @@ index 5726093..25cf001 100644
      // the face buttons: by position, the Classic's own layout (A right, B
      // bottom, X top, Y left), or by the pad's labels
      static const struct { SDL_GamepadButton b; uint32_t pos; } face[] = {
-@@ -1112,6 +2023,7 @@ ClassicState classic_from_pad(SDL_Gamepad* g) {
+@@ -1112,6 +2035,7 @@ ClassicState classic_from_pad(SDL_Gamepad* g) {
  void merge(ClassicState& a, const ClassicState& b) {
      a.connected |= b.connected;
      a.buttons |= b.buttons;
@@ -6963,7 +8040,7 @@ index 5726093..25cf001 100644
      if (std::hypot(b.lx, b.ly) > std::hypot(a.lx, a.ly)) { a.lx = b.lx; a.ly = b.ly; }
      if (std::hypot(b.rx, b.ry) > std::hypot(a.rx, a.ry)) { a.rx = b.rx; a.ry = b.ry; }
      a.lt = std::max(a.lt, b.lt);
-@@ -1186,7 +2098,7 @@ void update_pad() {
+@@ -1186,7 +2110,7 @@ void update_pad() {
      p.buttons &= ~(kRaisePlus | kRaiseMinus | kWalk | (kStick * 0xF));
      int ww = 0, wh = 0;
      SDL_GetWindowSize(win, &ww, &wh);                        // mouse coordinates are in window units
@@ -6972,7 +8049,7 @@ index 5726093..25cf001 100644
          // -1..1 spans the picture as present() shows it, so that the game's
          // cursor lands under the mouse
          Rect r = picture_rect((float)ww, (float)wh);
-@@ -1196,8 +2108,8 @@ void update_pad() {
+@@ -1196,8 +2120,8 @@ void update_pad() {
      }
      // over the picture the game draws its own cursor, as on the Wii
      static bool hidden = false;
@@ -6983,7 +8060,7 @@ index 5726093..25cf001 100644
          if (hidden) SDL_HideCursor(); else SDL_ShowCursor();
      }
      // WIIKIT_PAD="45:A 50.5:@0.2,-0.1 51:A": at each time (seconds from
-@@ -1248,6 +2160,7 @@ void update_pad() {
+@@ -1248,6 +2172,7 @@ void update_pad() {
          ClassicState& k = c[0];
          k.connected = true;
          k.buttons = cl & 0xFFFF;
@@ -6991,7 +8068,7 @@ index 5726093..25cf001 100644
          auto dir = [&](int i) { return cl & (kStick << i) ? 1.0f : 0.0f; };
          k.lx = dir(3) - dir(2);
          k.ly = dir(0) - dir(1);
-@@ -1261,12 +2174,19 @@ void update_pad() {
+@@ -1261,12 +2186,171 @@ void update_pad() {
      for (int i = 0; i < 4; ++i)
          if (chan_pad[i] && !(i == 0 && mode == INPUT_MODE_KEYBOARD)) merge(c[i], classic_from_pad(chan_pad[i]));
      update_rumble();
@@ -7006,12 +8083,164 @@ index 5726093..25cf001 100644
  
 +VideoOverlay overlay_cb;
 +
++// ---- video capture (rt.h) ----------------------------------------------------------------------
++// the guest's thread asks (start, stop), the renderer opens ffmpeg and hands it each picture: the
++// window as shown, the port's overlays drawn (a port hides what shouldn't be in it), letterboxed into
++// w x h, put in the frames of the output's rate that its time (the record's rt_shown_ns) reaches, the
++// one before standing in for any it skipped
++namespace cap {
++enum { kIdle, kStarting, kOn, kStopping };
++std::mutex mx;
++std::condition_variable cv;
++std::atomic<int> state{kIdle};
++std::string path, part_video, part_wav;
++int w = 1920, h = 1080, fps = 60;
++int64_t t0 = 0;
++std::atomic<int64_t> shown_at{INT64_MIN};             // the time of the record the renderer last ran
++FILE* pipe = nullptr;
++GLuint tex = 0, fbo = 0;
++std::vector<uint8_t> px, last;
++uint64_t frames = 0;
++
++std::string ffmpeg() {
++    const char* e = std::getenv("WIIKIT_FFMPEG");
++    return e && *e ? e : "ffmpeg";
++}
++std::string quote(const std::string& s) {
++#ifdef _WIN32
++    return "\"" + s + "\"";
++#else
++    std::string q = "'";
++    for (char ch : s) q += ch == '\'' ? std::string("'\\''") : std::string(1, ch);
++    return q + "'";
++#endif
++}
++FILE* open_pipe(const std::string& cmd) {
++#ifdef _WIN32
++    return _popen(cmd.c_str(), "wb");
++#else
++    return popen(cmd.c_str(), "w");
++#endif
++}
++int close_pipe(FILE* f) {
++#ifdef _WIN32
++    return _pclose(f);
++#else
++    return pclose(f);
++#endif
++}
++
++// the renderer's turn: a start opens ffmpeg, a stop hands its pipe to the waiting guest thread
++void service() {
++    const int st = state.load();
++    if (st == kStarting) {
++        if (!fbo) {
++            glCreateTextures(GL_TEXTURE_2D, 1, &tex);
++            glTextureStorage2D(tex, 1, GL_RGBA8, w, h);
++            glCreateFramebuffers(1, &fbo);
++            glNamedFramebufferTexture(fbo, GL_COLOR_ATTACHMENT0, tex, 0);
++        }
++        const std::string cmd = quote(ffmpeg()) + " -loglevel error -y -f rawvideo -pix_fmt rgba -s " + std::to_string(w) + "x" + std::to_string(h) +
++                                " -r " + std::to_string(fps) + " -i - -c:v libx264 -preset veryfast -crf 18 -pix_fmt yuv420p " + quote(part_video);
++        pipe = open_pipe(cmd);
++        px.assign((size_t)w * h * 4, 0);
++        last.clear();
++        frames = 0;
++        std::lock_guard<std::mutex> lk(mx);
++        state = pipe ? kOn : kIdle;
++        if (!pipe) rt_log("video: capture: couldn't run %s", ffmpeg().c_str());
++        cv.notify_all();
++    } else if (st == kStopping) {
++        std::lock_guard<std::mutex> lk(mx);
++        state = kIdle;
++        cv.notify_all();
++    }
++}
++
++// the window's back buffer (fw x fh) into the capture's frame, its shape kept
++void frame(int fw, int fh) {
++    if (state.load() != kOn || !pipe || fw <= 0 || fh <= 0) return;
++    const int64_t at = shown_at.load();
++    if (at == INT64_MIN || at < t0) return;
++    glDisable(GL_SCISSOR_TEST);                       // the overlay leaves it on, and a blit minds it
++    glColorMask(1, 1, 1, 1);
++    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
++    glClearColor(0, 0, 0, 1);
++    glClear(GL_COLOR_BUFFER_BIT);
++    glBindFramebuffer(GL_FRAMEBUFFER, 0);
++    const float scale = std::min((float)w / fw, (float)h / fh);
++    const int dw = (int)std::lround(fw * scale), dh = (int)std::lround(fh * scale), dx = (w - dw) / 2, dy = (h - dh) / 2;
++    blit_bound(0, fbo, 0, 0, fw, fh, dx, dy + dh, dx + dw, dy, GL_LINEAR);   // turned over: top row first
++    glBindFramebuffer(GL_READ_FRAMEBUFFER, fbo);
++    glPixelStorei(GL_PACK_ALIGNMENT, 1);
++    glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
++    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
++    const uint64_t slot = (uint64_t)((double)(at - t0) * fps / 1e9);
++    while (frames < slot) {
++        const std::vector<uint8_t>& v = last.empty() ? px : last;
++        std::fwrite(v.data(), 1, v.size(), pipe);
++        ++frames;
++    }
++    if (frames == slot) {
++        std::fwrite(px.data(), 1, px.size(), pipe);
++        ++frames;
++    }
++    last = px;
++}
++}  // namespace cap
++
++// the renderer's side of video_hold: on, the EFB and its copies kept aside (the pictures shown, and
++// the ones the game draws with: last frame's for its effects); off, put back as they were. a frame's
++// copy to the XFB can wait at a breakpoint for the next frame: it reads the EFB the frames held drew
++bool holding = false;
++GLuint held_fbo = 0, held_col = 0, held_dep = 0;
++struct Held { std::unordered_map<uint32_t, Tex>* map; uint32_t tag; std::unordered_map<uint32_t, Tex> kept; };
++Held helds[] = {{&xfbs, 2, {}}, {&efb_copies, 0, {}}, {&efb_joined, 1, {}}};
++uint32_t held_last = 0;
++void hold_mark(bool on) {
++    if (on == holding) return;
++    holding = on;
++    glDisable(GL_SCISSOR_TEST);
++    auto blit = [](const Tex& a, const Tex& b) {
++        glBlitNamedFramebuffer(a.fbo, b.fbo, 0, 0, a.w, a.h, 0, 0, a.w, a.h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
++    };
++    if (!held_fbo) {
++        glCreateTextures(GL_TEXTURE_2D, 1, &held_col);
++        glTextureStorage2D(held_col, 1, GL_RGBA8, EFB_W * S, EFB_H * S);
++        glCreateTextures(GL_TEXTURE_2D, 1, &held_dep);
++        glTextureStorage2D(held_dep, 1, GL_DEPTH_COMPONENT32F, EFB_W * S, EFB_H * S);
++        glCreateFramebuffers(1, &held_fbo);
++        glNamedFramebufferTexture(held_fbo, GL_COLOR_ATTACHMENT0, held_col, 0);
++        glNamedFramebufferTexture(held_fbo, GL_DEPTH_ATTACHMENT, held_dep, 0);
++    }
++    efb_resolve();
++    glBlitNamedFramebuffer(on ? efb_fbo : held_fbo, on ? held_fbo : efb_fbo, 0, 0, EFB_W * S, EFB_H * S, 0, 0,
++                           EFB_W * S, EFB_H * S, GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT, GL_NEAREST);
++    if (!on && ms_samples > 1) {
++        glBlitNamedFramebuffer(efb_fbo, ms_fbo, 0, 0, EFB_W * S, EFB_H * S, 0, 0, EFB_W * S, EFB_H * S,
++                               GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT, GL_NEAREST);
++        ms_dirty = false;
++    }
++    for (Held& h : helds) {
++        if (on) {
++            h.kept.clear();
++            for (auto& [addr, t] : *h.map) blit(t, h.kept[addr] = copy_tex(addr | h.tag | 4, t.w, t.h));
++        } else {
++            h.map->clear();
++            for (auto& [addr, k] : h.kept) blit(k, (*h.map)[addr] = copy_tex(addr | h.tag, k.w, k.h));
++        }
++    }
++    if (on) held_last = last_xfb;
++    else last_xfb = held_last;
++    gl_state_stale = true;
++}
++
  void present() {
 +    gl_state_stale = true;
      ++cnt.presents;
      int ww = 0, wh = 0;
      SDL_GetWindowSizeInPixels(win, &ww, &wh);
-@@ -1275,22 +2195,119 @@ void present() {
+@@ -1275,22 +2359,120 @@ void present() {
      glColorMask(1, 1, 1, 1);
      glClearColor(0, 0, 0, 1);
      glClear(GL_COLOR_BUFFER_BIT);
@@ -7025,14 +8254,15 @@ index 5726093..25cf001 100644
          int dw = (int)std::lround(r.w), dh = (int)std::lround(r.h);
 -        glNamedFramebufferTexture(copy_fbo, GL_COLOR_ATTACHMENT0, t.name, 0);
 -        glBlitNamedFramebuffer(copy_fbo, 0, 0, 0, t.w, t.h, dx, dy + dh, dx + dw, dy,   // top row first
-+        glBlitNamedFramebuffer(t.fbo, 0, 0, 0, t.w, t.h, dx, dy + dh, dx + dw, dy,   // top row first
-                                GL_COLOR_BUFFER_BIT, GL_LINEAR);
-     }
+-                               GL_COLOR_BUFFER_BIT, GL_LINEAR);
+-    }
 -    if (opt.dump_dir && cnt.presents % (uint64_t)opt.dump_every == 0 && ww > 0 && wh > 0) {
 -        std::vector<uint8_t> px((size_t)ww * wh * 4), flip(px.size());   // the window, as shown
 -        glReadPixels(0, 0, ww, wh, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
 -        for (int y = 0; y < wh; ++y)
 -            std::memcpy(&flip[(size_t)y * ww * 4], &px[(size_t)(wh - 1 - y) * ww * 4], (size_t)ww * 4);
++        blit_bound(t.fbo, 0, 0, 0, t.w, t.h, dx, dy + dh, dx + dw, dy, GL_LINEAR);   // top row first
++    }
 +    // WIIKIT_THUMBS=file: every picture shown, small (WIIKIT_THUMBS_SIZE=WxH, 160x90 unless given), as raw
 +    // RGBA one after the other, top row first. "|command" pipes them to a program instead, as in
 +    //     WIIKIT_THUMBS_SIZE=640x360 WIIKIT_THUMBS="|ffmpeg -f rawvideo -pix_fmt rgba -s 640x360 -i - -q:v 3 dir/%06d.jpg"
@@ -7133,13 +8363,15 @@ index 5726093..25cf001 100644
 +        }
 +    }
 +    if (overlay_cb.draw) overlay_cb.draw();
++    if (it != xfbs.end() && cap::state.load() == cap::kOn) cap::frame(ww, wh);
++    if (overlay_cb.draw_top) overlay_cb.draw_top();
 +    if (opt.dump_dir && cnt.presents >= (uint64_t)opt.dump_from && cnt.presents % (uint64_t)opt.dump_every == 0 && ww > 0 && wh > 0) {
 +        std::vector<uint8_t> flip;                                        // the window, as shown
 +        video_read_window(flip, ww, wh);
          char name[64];
          std::snprintf(name, sizeof name, "/frame_%06llu.png", (unsigned long long)cnt.presents);
          write_png(std::string(opt.dump_dir) + name, ww, wh, flip.data());
-@@ -1317,7 +2334,6 @@ void setup() {
+@@ -1317,7 +2499,6 @@ void setup() {
      glNamedFramebufferTexture(efb_fbo, GL_DEPTH_ATTACHMENT, efb_dep, 0);
      if (glCheckNamedFramebufferStatus(efb_fbo, GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
          rt_die("video: the EFB framebuffer is incomplete");
@@ -7147,7 +8379,7 @@ index 5726093..25cf001 100644
      glBindFramebuffer(GL_FRAMEBUFFER, efb_fbo);
      glClearColor(0, 0, 0, 1);
      glClearDepth(1.0);
-@@ -1327,45 +2343,25 @@ void setup() {
+@@ -1327,45 +2508,25 @@ void setup() {
      const GLbitfield map = GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT;
      glNamedBufferStorage(vbo, VBO_CAP, nullptr, map);
      vbo_ptr = static_cast<uint8_t*>(glMapNamedBufferRange(vbo, 0, VBO_CAP, map));
@@ -7210,7 +8442,7 @@ index 5726093..25cf001 100644
  
      copy_prog = link(FULLSCREEN_VS, COPY_FS);
      if (!copy_prog) rt_die("video: the EFB copy program does not build");
-@@ -1377,6 +2373,7 @@ void setup() {
+@@ -1377,6 +2538,7 @@ void setup() {
  
  // ---- the game's side ------------------------------------------------------------------------------
  bool video_enabled() { return opt.enabled; }
@@ -7218,7 +8450,34 @@ index 5726093..25cf001 100644
  void video_configure(const VideoOptions& o) { opt = o; S = std::max(1, o.scale); }
  
  VideoPerf g_vperf;
-@@ -1462,6 +2459,46 @@ std::atomic<bool> want_relative{false};
+@@ -1394,7 +2556,7 @@ bool video_submit(std::vector<uint8_t>& rec, int frames, int wait_ms) {
+     else ok = q_space.wait_for(lk, std::chrono::milliseconds(wait_ms), room);
+     if (g_vperf_on) g_vperf.wait += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - t0).count();
+     if (!ok) return false;
+-    q.push_back(Chunk{std::move(rec), frames});
++    q.push_back(Chunk{std::move(rec), frames, false, 0, rt_shown_ns()});
+     q_frames += frames;
+     // a buffer the renderer is done with, capacity and pages kept: fresh
+     // allocations of megabytes a frame cost page faults and copies as they grow
+@@ -1424,7 +2586,7 @@ bool video_efb_read(std::vector<uint32_t>& argb, std::vector<uint32_t>& z) {
+     // the console's CPU takes its interrupts while it waits: so does this wait
+     while (!rb_ready) {
+         rb_cv.wait_for(lk, std::chrono::milliseconds(1));
+-        if (!rb_ready && t_ppc && g_ppc_pending.load(std::memory_order_relaxed)) {
++        if (!rb_ready && t_ppc && !rt_deterministic() && g_ppc_pending.load(std::memory_order_relaxed)) {
+             lk.unlock();
+             ppc_poll(*t_ppc);
+             lk.lock();
+@@ -1447,7 +2609,7 @@ bool video_copy_read(uint32_t addr, int w, int h, std::vector<uint8_t>& rgba) {
+     if (wake) SDL_SignalSemaphore(wake);
+     while (!rb_ready) {                              // taking interrupts meanwhile, as video_efb_read
+         rb_cv.wait_for(lk, std::chrono::milliseconds(1));
+-        if (!rb_ready && t_ppc && g_ppc_pending.load(std::memory_order_relaxed)) {
++        if (!rb_ready && t_ppc && !rt_deterministic() && g_ppc_pending.load(std::memory_order_relaxed)) {
+             lk.unlock();
+             ppc_poll(*t_ppc);
+             lk.lock();
+@@ -1462,6 +2624,46 @@ std::atomic<bool> want_relative{false};
  std::mutex motion_mx;
  float motion_x = 0, motion_y = 0;
  void video_set_relative_mouse(bool on) { want_relative = on; }
@@ -7265,7 +8524,7 @@ index 5726093..25cf001 100644
  void video_take_mouse_motion(float& dx, float& dy) {
      std::lock_guard<std::mutex> lk(motion_mx);
      dx = motion_x; dy = motion_y;
-@@ -1473,12 +2510,27 @@ PadState video_pad() {
+@@ -1473,12 +2675,36 @@ PadState video_pad() {
      return pad;
  }
  ClassicState video_classic(int chan) {
@@ -7281,6 +8540,15 @@ index 5726093..25cf001 100644
      if (chan >= 0 && chan < 4) rumble_want[chan] = on;
  }
 +bool g_present_on_frame = false;
++
++// held, the window keeps the picture it shows: frames drawn meanwhile run unseen (a look ahead that's
++// put back after). the hold goes in the GX record's order: its frames' XFB copies are undone when it's let
++// go, a saved state put back doesn't bring them back and the game would show them again
++std::atomic<bool> picture_held{false};
++void video_hold(bool on) {
++    if (picture_held.exchange(on) == on) return;
++    gx_hold(on);
++}
 +std::atomic<bool> vsync_want{false};
 +void video_set_vsync(bool on) { vsync_want = on; }
 +void video_set_anisotropy(int level) { aniso_want = level; }
@@ -7293,7 +8561,7 @@ index 5726093..25cf001 100644
  void video_retrace() {
      retraces.fetch_add(1);
      if (wake) SDL_SignalSemaphore(wake);
-@@ -1499,13 +2551,21 @@ void video_run(const char* title) {
+@@ -1499,13 +2725,21 @@ void video_run(const char* title) {
      int w0 = opt.window_w ? opt.window_w : (opt.widescreen ? 1280 : 960), h0 = opt.window_h ? opt.window_h : 720;
      SDL_WindowFlags wflags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE;
      if (opt.fullscreen) wflags |= SDL_WINDOW_FULLSCREEN;
@@ -7315,7 +8583,7 @@ index 5726093..25cf001 100644
      rt_log("video: %s, %s", (const char*)glGetString(GL_RENDERER), (const char*)glGetString(GL_VERSION));
      if (debug) {
          glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
-@@ -1529,11 +2589,15 @@ void video_run(const char* title) {
+@@ -1529,11 +2763,15 @@ void video_run(const char* title) {
      uint64_t frames_then = 0;
      uint32_t seen = retraces.load();
      std::string base_title = title;
@@ -7331,7 +8599,7 @@ index 5726093..25cf001 100644
              if (e.type == SDL_EVENT_GAMEPAD_ADDED) pad_added(e.gdevice.which);
              if (e.type == SDL_EVENT_GAMEPAD_REMOVED) pad_removed(e.gdevice.which);
              // F11 or Alt+Enter: fullscreen and back
-@@ -1560,6 +2624,15 @@ void video_run(const char* title) {
+@@ -1560,7 +2798,23 @@ void video_run(const char* title) {
              }
          }
          auto now = Clock::now();
@@ -7345,9 +8613,17 @@ index 5726093..25cf001 100644
 +            }
 +        }
          if (opt.quit_after > 0 && std::chrono::duration<double>(now - t0).count() > opt.quit_after) quit = true;
++        // WIIKIT_QUIT_GUEST=S: in deterministic mode, at S seconds of the guest's clock, and how long
++        // that took (unpaced: the same work for any build, a benchmark)
++        static const double quit_guest = std::getenv("WIIKIT_QUIT_GUEST") ? std::atof(std::getenv("WIIKIT_QUIT_GUEST")) : 0;
++        if (quit_guest > 0 && rt_deterministic() && rt_virtual_ns() >= (int64_t)(quit_guest * 1e9)) {
++            rt_log("video: %.1f s of guest time took %.3f s", quit_guest, std::chrono::duration<double>(now - t0).count());
++            quit = true;
++        }
          if (quit) {
              rt_log("video: %llu frames, %llu presents, %llu draws, %llu programs (%llu linked, %llu from the shader cache)",
-@@ -1574,6 +2647,18 @@ void video_run(const char* title) {
+                    (unsigned long long)cnt.frames, (unsigned long long)cnt.presents,
+@@ -1574,6 +2828,18 @@ void video_run(const char* title) {
          {
              bool rel = want_relative && (SDL_GetWindowFlags(win) & SDL_WINDOW_INPUT_FOCUS);
              if (rel != SDL_GetWindowRelativeMouseMode(win)) SDL_SetWindowRelativeMouseMode(win, rel);
@@ -7366,7 +8642,7 @@ index 5726093..25cf001 100644
              float dx = 0, dy = 0;
              SDL_GetRelativeMouseState(&dx, &dy);
              if (rel) {
-@@ -1592,7 +2677,14 @@ void video_run(const char* title) {
+@@ -1592,12 +2858,20 @@ void video_run(const char* title) {
                  double vtx = ms(g_vperf.vtx), tex = ms(g_vperf.tex), wait = ms(g_vperf.wait), draw = ms(g_vperf.draw),
                         pres = ms(g_vperf.present);
                  rt_log("perf: %.1f fps; frame %.1f ms; game thread: vertices %.1f, textures %.1f, waiting for the renderer %.1f; "
@@ -7382,17 +8658,28 @@ index 5726093..25cf001 100644
              }
              frames_then = cnt.frames;
              t_title = now;
-@@ -1608,6 +2700,8 @@ void video_run(const char* title) {
+         }
+         bool busy = false;
++        cap::service();
+         for (int k = 0; k < 16; ++k) {
+             Chunk c;
+             {
+@@ -1608,7 +2882,10 @@ void video_run(const char* title) {
              }
              if (c.readback) { if (c.copy) copy_readback(c.copy); else efb_readback(); busy = true; continue; }
              auto te = Clock::now();
 +            ++perf_chunks;
 +            perf_bytes += c.data.size();
              exec(c.data);
++            if (c.at != INT64_MIN) cap::shown_at = c.at;
              if (g_vperf_on) g_vperf.draw += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - te).count();
              {
-@@ -1621,8 +2715,25 @@ void video_run(const char* title) {
+                 std::lock_guard<std::mutex> lk(qmx);
+@@ -1619,15 +2896,98 @@ void video_run(const char* title) {
+             q_space.notify_all();
+             busy = true;
              if (retraces.load() != seen) break;
++            if (c.frames > 0 && cap::state.load() == cap::kOn) break;   // capturing: every frame shown
          }
          uint32_t r = retraces.load();
 +        if (g_present_on_frame) {
@@ -7406,6 +8693,7 @@ index 5726093..25cf001 100644
 +                seen = r - 1;
 +            } else seen = r;
 +        }
++        if (r != seen && holding) seen = r;   // the picture held
          if (r != seen) {
              seen = r;
 +            static bool vsync_now = false;
@@ -7417,8 +8705,78 @@ index 5726093..25cf001 100644
              auto tp = Clock::now();
              present();
              if (g_vperf_on) g_vperf.present += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - tp).count();
+             busy = true;
+         }
+-        if (!busy) SDL_WaitSemaphoreTimeout(wake, 5);
++        int idle = 5;
++        if (overlay_cb.tick) idle = std::clamp(overlay_cb.tick(), 0, 5);
++        if (!busy && idle > 0) SDL_WaitSemaphoreTimeout(wake, idle);
++    }
++}
++
++// ---- video capture: the guest thread's side ------------------------------------------------------
++bool video_capture_start(const char* path, int w, int h, int fps, std::string& err) {
++    if (!opt.enabled) { err = "a capture needs a window (a hidden one does)"; return false; }
++    if (cap::state.load() != cap::kIdle) { err = "already capturing"; return false; }
++    cap::w = std::clamp(w & ~1, 64, 7680);
++    cap::h = std::clamp(h & ~1, 64, 4320);
++    cap::fps = std::clamp(fps, 1, 1000);
++    cap::path = path;
++    cap::part_video = cap::path + ".video.mkv";
++    cap::part_wav = cap::path + ".sound.wav";
++    FILE* wav = std::fopen(cap::part_wav.c_str(), "wb");
++    if (!wav) { err = "can't write " + cap::part_wav; return false; }
++    cap::t0 = rt_shown_ns();
++    audio_capture_begin(wav, cap::t0);
++    std::unique_lock<std::mutex> lk(cap::mx);
++    cap::state = cap::kStarting;
++    if (wake) SDL_SignalSemaphore(wake);
++    cap::cv.wait_for(lk, std::chrono::seconds(5), [] { return cap::state.load() != cap::kStarting; });
++    if (cap::state.load() != cap::kOn) {
++        cap::state = cap::kIdle;
++        lk.unlock();
++        audio_capture_end();
++        err = "couldn't start " + cap::ffmpeg();
++        return false;
++    }
++    rt_log("video: capturing into %s (%dx%d, %d a second)", path, cap::w, cap::h, cap::fps);
++    return true;
++}
++
++bool video_capturing() { return cap::state.load() != cap::kIdle; }
++
++// the renderer lets go of ffmpeg, its file is finished, then the picture and the sound go into one
++void video_capture_stop() {
++    if (cap::state.load() == cap::kIdle) return;
++    audio_capture_end();
++    FILE* pipe = nullptr;
++    uint64_t frames = 0;
++    {
++        std::unique_lock<std::mutex> lk(cap::mx);
++        cap::state = cap::kStopping;
++        if (wake) SDL_SignalSemaphore(wake);
++        cap::cv.wait_for(lk, std::chrono::seconds(5), [] { return cap::state.load() == cap::kIdle; });
++        cap::state = cap::kIdle;
++        pipe = cap::pipe;
++        cap::pipe = nullptr;
++        frames = cap::frames;
++    }
++    if (!pipe) return;
++    const int encoded = cap::close_pipe(pipe);
++    const std::string mux = cap::quote(cap::ffmpeg()) + " -loglevel error -y -i " + cap::quote(cap::part_video) + " -i " + cap::quote(cap::part_wav) +
++                            " -map 0:v -map 1:a -c:v copy -c:a aac -b:a 192k -af apad -shortest -movflags +faststart " + cap::quote(cap::path);
++    const int muxed = encoded == 0 ? std::system(mux.c_str()) : -1;
++    if (muxed == 0) {
++        std::error_code ec;
++        std::filesystem::remove(cap::part_video, ec);
++        std::filesystem::remove(cap::part_wav, ec);
++        rt_log("video: %s written, %llu frames (%.1f s)", cap::path.c_str(), (unsigned long long)frames, (double)frames / cap::fps);
++    } else {
++        rt_log("video: %s not finished (ffmpeg: %d, %d), the parts are kept beside it", cap::path.c_str(), encoded, muxed);
+     }
+ }
 diff --git a/runtime/video.h b/runtime/video.h
-index ecfb499..d2667bf 100644
+index ecfb499..24fcf02 100644
 --- a/runtime/video.h
 +++ b/runtime/video.h
 @@ -3,7 +3,7 @@
@@ -7490,7 +8848,7 @@ index ecfb499..d2667bf 100644
 +                 VC_TEXEFBN, VC_VTXUP, VC_DRAWS,
 +                 // the EFB copy last made at an address at this size, a later one of another size
 +                 // there notwithstanding: map (u8), address (u32), width, height (u16)
-+                 VC_TEXEFBS, VC_DBGMESH, VC_DBGVIEW, VC_DBGOVER };
++                 VC_TEXEFBS, VC_DBGMESH, VC_DBGVIEW, VC_DBGOVER, VC_HOLD };
 +constexpr uint32_t VTX_STATIC_CAP = 192u << 20;      // the static vertex buffer: gx.cpp gives its room out
 +enum : uint8_t { VTX_COL0 = 1, VTX_COL1 = 2, VTX_NRM = 4, VTX_NBT = 8,
 +                 VTX_ATTRS = 0x0F,                   // what the shaders are made from
@@ -7533,7 +8891,7 @@ index ecfb499..d2667bf 100644
  ClassicState video_classic(int chan);
  // The Remote's motor on a channel: its pad rumbles (the Remote's own on
  // channel 1 when a pad is there).
-@@ -97,6 +140,63 @@ void video_set_rumble(int chan, bool on);
+@@ -97,6 +140,70 @@ void video_set_rumble(int chan, bool on);
  // the pause box), and the motion is summed until taken.
  void video_set_relative_mouse(bool on);
  void video_take_mouse_motion(float& dx, float& dy);
@@ -7544,6 +8902,8 @@ index ecfb499..d2667bf 100644
 +bool video_mouse(float& x, float& y, bool& left);
 +// where the game's picture sits in a window of w x h (any units): x, y, width, height
 +void video_picture_rect(float w, float h, float rect[4]);
++// held, the window keeps the picture it shows and frames drawn meanwhile are never shown
++void video_hold(bool on);
 +// The system's cursor stays visible over the picture, for a game that draws
 +// no pointer of its own there (it is hidden over the picture otherwise).
 +void video_keep_cursor(bool on);
@@ -7552,13 +8912,18 @@ index ecfb499..d2667bf 100644
 +// window and its OpenGL context exist, event for every SDL event (true: the
 +// overlay took it, and the window's own keys, Esc and the rest, do not see
 +// it), draw before each swap, with the window's framebuffer bound. All on
-+// the renderer's thread.
++// the renderer's thread. tick every turn of the renderer's loop, frames drawn
++// or not (a paused game draws none and is presented ten times a second): for
++// windows of the port's own, paced by themselves: it gives back the most
++// milliseconds the loop may wait before the next turn (it waits 5 at most).
 +struct SDL_Window;
 +union SDL_Event;
 +struct VideoOverlay {
 +    void (*init)(SDL_Window* window, void* gl_context) = nullptr;
 +    bool (*event)(const SDL_Event* e) = nullptr;
 +    void (*draw)() = nullptr;
++    void (*draw_top)() = nullptr;   // after draw, over it, and out of a video capture (a menu)
++    int (*tick)() = nullptr;
 +};
 +void video_set_overlay(const VideoOverlay& o);
 +// The window's picture as it is right now (RGBA8, top row first), for an
@@ -7598,7 +8963,7 @@ index ecfb499..d2667bf 100644
  // WIIKIT_PERF=1: where a frame's time goes, reported every second by the
  // renderer. Nanoseconds, summed since the last report.
 diff --git a/runtime/wiiboot.cpp b/runtime/wiiboot.cpp
-index 250d419..71e1b59 100644
+index 250d419..5cb1261 100644
 --- a/runtime/wiiboot.cpp
 +++ b/runtime/wiiboot.cpp
 @@ -35,13 +35,20 @@
@@ -7631,3 +8996,44 @@ index 250d419..71e1b59 100644
          else if (!std::strcmp(argv[i], "--quit-after") && i + 1 < argc) vo.quit_after = std::atof(argv[++i]);
          else if (!std::strcmp(argv[i], "--aspect") && i + 1 < argc) {
              std::string a = argv[++i];
+@@ -95,6 +103,8 @@ int main(int argc, char** argv) {
+         else { std::fprintf(stderr, "wiiboot: unknown option %s\n", argv[i]); return 2; }
+     }
+     std::setvbuf(stdout, nullptr, _IOLBF, 1 << 16);
++    if (const char* d = std::getenv("WIIKIT_DETERMINISTIC")) if (std::atoi(d)) rt_set_deterministic(true);
++    if (const char* d = std::getenv("WIIKIT_UNPACED")) if (std::atoi(d)) rt_set_unpaced(true);   // (deterministic: as fast as the host can)
+     if (!mem_init()) rt_die("cannot reserve the guest address space");
+     if (vo.keys.empty()) vo.keys = root + "/../keys.txt";
+     vo.shader_cache = root + "/../shadercache";
+diff --git a/runtime/wpad.cpp b/runtime/wpad.cpp
+index 7e95621..fda6c54 100644
+--- a/runtime/wpad.cpp
++++ b/runtime/wpad.cpp
+@@ -68,8 +68,10 @@ uint8_t format(uint32_t dev) {
+     return dev == WPAD_DEV_CLASSIC ? WPAD_FMT_CLASSIC_ACC_DPD : dev == WPAD_DEV_FREESTYLE ? WPAD_FMT_FREESTYLE_ACC_DPD : WPAD_FMT_CORE_ACC_DPD;
+ }
+ 
++bool (*presence)(uint32_t chan) = nullptr;          // a port's say over which channels hold a controller
+ bool present(uint32_t chan) {
+     if (chan >= 4) return false;
++    if (presence) return presence(chan);
+     if (!classic_game) return chan == 0;
+     return video_classic((int)chan).connected;
+ }
+@@ -440,3 +442,16 @@ void wpad_install() {
+     ppc_hook("WPADGetLatestIndexInBuf", hle_WPADGetLatestIndexInBuf);
+     ppc_hook("kpad_wpad_status", hle_kpad_wpad_status);
+ }
++
++// saved states (state.cpp): what the game was told, the callbacks owed, the samples' last
++void wpad_state(StateIO& io) {
++    io.raw(chans, sizeof chans);
++    io.raw(done, sizeof done);
++    io.pod(ndone);
++    io.raw(prev, sizeof prev);
++    io.raw(rings, sizeof rings);
++    io.raw(formats, sizeof formats);
++    io.raw(dpd_on, sizeof dpd_on);
++}
++
++void wpad_set_presence(bool (*fn)(uint32_t chan)) { presence = fn; }
