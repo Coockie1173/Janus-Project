@@ -1,5 +1,6 @@
-//the loadout menu's picture of a custom weapon with a gun of its own: the gun itself, turning round,
-//in place of its base's picture
+//the loadout menu's picture of a weapon: the gun itself, turning round, in place of its picture. a
+//custom weapon with a gun of its own shows that, the game's guns (and a custom weapon without one,
+//its base) the gun a guard holds out of the disc's o_guns.edb
 //
 //the lit row's info, ge_loadout_info (80256710: r4 the menu, r5 the row's key), puts the picture's
 //animation (the menu's +0x914, panel 0) on the frame of the loadout list's picture number * 16, and a
@@ -13,7 +14,10 @@
 //
 //ours: the gun file's whole gun, the far level of detail of its body that a guard holds (the row
 //+0x10 lists' second entities, the biggest of them), drawn here on the cpu with its textures into
-//a block of the game's heap. two of them in turn, so the renderer never reads one while it's written
+//a block of the game's heap. two of them in turn, so the renderer never reads one while it's written.
+//a game's gun is o_guns' entity of its inventory id (the weapons table row's +0x174 by the key):
+//the whole gun in one mesh, what that list's second entity of the body is (the P99's 0200016E).
+//o_guns is read off the disc once, whole (its sections too), the first time one is lit
 //
 //a mesh as eurochef writes it (its ge/mesh.rs): +0x58 the strips, +0x5C the
 //points (three floats and the normal as three bytes of 6 fraction bits), +0x60 the texture
@@ -24,18 +28,21 @@
 //coordinate. a texture is a TPL from its +0x2C
 //
 //GE_TRACE=1 logs the gun each weapon's picture is made of
-//GE_PREVIEWS=dir writes every custom gun's picture there as it starts, turned four ways (NAME_0.png...)
+//GE_PREVIEWS=dir writes every custom gun's picture there as it starts, turned four ways (NAME_0.png...),
+//and every gun of o_guns (by its id, 0200016E_0.png...)
 #include "mods/weapons/weapon.h"
 #include "gxtex.h"
 #include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <mutex>
 #include <vector>
 
 namespace ge
@@ -79,15 +86,24 @@ struct Gun
 	float centre[3]{}, flat{}, high{}; //the middle of its box, how far it reaches round the upright axis, half its height
 };
 
-std::map<size_t, Gun> g_guns; //by the weapon's number
+const uint32_t kGuns = 0x0109000F; //o_guns.edb
+const uint32_t kRowInventory = 0x174; //of the weapons table's row
+const uint64_t kCustom = 1ull << 32; //a gun: a custom weapon's own (kCustom + its number) or the game's (its inventory id)
+const int64_t kNone = -1;
+
+std::map<uint64_t, Gun> g_guns; //a gun once read stays as it is, the renderer's thread draws it too (loadout.cpp)
+std::mutex g_gunsLock;
+std::vector<uint8_t> g_gunsFile; //o_guns.edb
+bool g_gunsRead = false;
 PPCFunc orig_info = nullptr, orig_bind = nullptr, game_alloc = nullptr;
 bool g_trace = false;
-int g_lit = -1; //the weapon whose row is lit
+int64_t g_lit = kNone; //the gun of the lit row
 uint32_t g_menu = 0, g_page = 0; //the menu it is lit in and its page then
 uint32_t g_front = 0; //the front end's textures' file, as they were looked up
 std::array<uint32_t, sizeof kGunPictures / sizeof kGunPictures[0]> g_pictures{}; //the gun pictures' pixels
 uint32_t g_blocks[2]{}, g_drawnFrame = ~0u, g_drawnSize = 0;
-int g_drawnWeapon = -1, g_block = 0;
+int64_t g_drawnGun = kNone;
+int g_block = 0;
 const auto g_start = std::chrono::steady_clock::now();
 
 struct File
@@ -150,14 +166,26 @@ size_t PickMesh(const File& f)
 	return bestLod ? bestLod : best;
 }
 
-bool ReadGun(const std::vector<uint8_t>& d, Gun& gun)
+//the entity of that hash, 0 when there's none
+size_t EntityOf(const File& f, uint32_t hash)
+{
+	const uint32_t count = f.U16(kEntityList);
+	const size_t rows = f.Rel(kEntityList + kListAt);
+	for (uint32_t i = 0; i < count && i < 4096; ++i)
+		if (f.U32(rows + i * kEntityRow) == hash) return Size(f, f.U32(rows + i * kEntityRow + kRowAddress)) >= 0 ? f.U32(rows + i * kEntityRow + kRowAddress) : 0;
+	return 0;
+}
+
+//the gun: the file's whole gun, or its entity of that hash. only the textures it uses are read
+bool ReadGun(const std::vector<uint8_t>& d, Gun& gun, uint32_t entity = 0)
 {
 	const File f{ d };
 	if (f.U32(0) != 0x47454F4D) return false;
-	const uint32_t textureCount = f.U16(kTextureList);
+	const uint32_t textureCount = std::min<uint32_t>(f.U16(kTextureList), 4096);
 	const size_t textureRows = f.Rel(kTextureList + kListAt);
-	for (uint32_t i = 0; i < textureCount && i < 256; ++i) gun.textures.push_back(ReadTexture(f, f.U32(textureRows + i * kTextureRow + kRowAddress)));
-	const size_t mesh = PickMesh(f);
+	gun.textures.assign(textureCount, Image{});
+	std::vector<bool> textureRead(textureCount);
+	const size_t mesh = entity ? EntityOf(f, entity) : PickMesh(f);
 	if (!mesh) return false;
 	const size_t points = f.Rel(mesh + kMeshPoints), coords = f.Rel(mesh + kMeshCoords), colours = f.Rel(mesh + kMeshColours);
 	const uint32_t pointCount = f.U32(mesh + kMeshPointCount), strips = f.U32(mesh + kMeshStripCount);
@@ -182,6 +210,11 @@ bool ReadGun(const std::vector<uint8_t>& d, Gun& gun)
 	{
 		const uint32_t bytes = f.U32(strip + kStripBytes);
 		const int texture = f.U16(strip + kStripTexture);
+		if (texture < (int)textureCount && !textureRead[texture])
+		{
+			textureRead[texture] = true;
+			gun.textures[texture] = ReadTexture(f, f.U32(textureRows + texture * kTextureRow + kRowAddress));
+		}
 		const bool lightmap = (f.U16(strip + kStripFlags) & kStripLightmap) == kStripLightmap;
 		size_t at = strip + kStripHead;
 		const size_t end = at + bytes;
@@ -224,18 +257,55 @@ bool ReadGun(const std::vector<uint8_t>& d, Gun& gun)
 	return gun.flat > 0;
 }
 
-Gun& GunOf(size_t n)
+const std::vector<uint8_t>& GunsFile()
 {
-	Gun& gun = g_guns[n];
+	if (!g_gunsRead)
+	{
+		g_gunsRead = true;
+		if (!disc_game_file(kGuns, g_gunsFile)) rt_log("goldeneye: weapons: o_guns.edb couldn't be read off the disc, the loadout menu shows the guns' pictures");
+	}
+	return g_gunsFile;
+}
+
+Gun& GunOf(uint64_t which)
+{
+	std::lock_guard<std::mutex> hold(g_gunsLock);
+	Gun& gun = g_guns[which];
 	if (gun.tried) return gun;
 	gun.tried = true;
-	const Weapon& w = g_weapons[n];
+	if (which < kCustom)
+	{
+		gun.ok = ReadGun(GunsFile(), gun, uint32_t(which));
+		if (!gun.ok) rt_log("goldeneye: weapons: o_guns has no gun %08X to draw for the loadout menu, it shows the picture", uint32_t(which));
+		else if (g_trace) rt_log("goldeneye: weapons: gun %08X's picture, %zu triangles", uint32_t(which), gun.triangles.size());
+		return gun;
+	}
+	const Weapon& w = g_weapons[size_t(which - kCustom)];
 	std::ifstream in(std::filesystem::path(modpack_folder(w.pack)) / "weapons" / w.model, std::ios::binary);
 	const std::vector<uint8_t> d((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
 	gun.ok = ReadGun(d, gun);
 	if (!gun.ok) rt_log("goldeneye: weapons: %s's gun can't be drawn for the loadout menu, it shows its base's picture", w.name.c_str());
 	else if (g_trace) rt_log("goldeneye: weapons: %s's picture is %s, %zu triangles", w.name.c_str(), w.model.c_str(), gun.triangles.size());
 	return gun;
+}
+
+//the inventory id of a weapon's key in the weapons table, 0 when it isn't there
+uint32_t IdOfKey(uint32_t key)
+{
+	const uint32_t count = ld32(kWeapons + 8), rows = ld32(kWeapons + 0xC);
+	for (uint32_t i = 0; guest_ptr(rows) && i < count && i < 512; ++i)
+		if (ld32(rows + i * kRowSize + kRowKey) == key) return ld32(rows + i * kRowSize + kRowInventory);
+	return 0;
+}
+
+//the gun a row's key shows
+int64_t GunOfKey(uint32_t key)
+{
+	for (size_t i = 0; i < g_weapons.size(); ++i)
+		if (g_weapons[i].key == key && Installed(g_weapons[i]))
+			return g_weapons[i].modelFile ? int64_t(kCustom + i) : g_weapons[i].baseId ? int64_t(g_weapons[i].baseId) : kNone;
+	const uint32_t id = IdOfKey(key);
+	return id ? int64_t(id) : kNone;
 }
 
 void Sample(const Image& image, float u, float v, float out[4])
@@ -367,11 +437,9 @@ bool IsGunPicture(uint32_t pixels)
 void Info(PPCContext& c)
 {
 	const uint32_t key = c.r[5];
-	const int was = g_lit;
-	g_lit = -1;
-	for (size_t i = 0; i < g_weapons.size(); ++i)
-		if (g_weapons[i].key == key && Installed(g_weapons[i]) && g_weapons[i].modelFile) g_lit = (int)i;
-	if (g_trace && g_lit != was) rt_log("goldeneye: weapons: the loadout menu's lit row is %08X%s%s", key, g_lit >= 0 ? ", its picture is " : "", g_lit >= 0 ? g_weapons[g_lit].name.c_str() : "");
+	const int64_t was = g_lit;
+	g_lit = GunOfKey(key);
+	if (g_trace && g_lit != was) rt_log("goldeneye: weapons: the loadout menu's lit row is %08X, its gun %llX", key, (long long)g_lit);
 	g_menu = c.r[4];
 	g_page = guest_ptr(g_menu) ? ld32(g_menu + kMenuPage) : 0;
 	if (g_lit >= 0 && !g_blocks[0])
@@ -385,10 +453,10 @@ void Bind(PPCContext& c)
 	const uint32_t now = ld32(kFrameCount), w = c.r[5], h = c.r[6];
 	if (g_lit >= 0 && guest_ptr(g_menu) && ld32(g_menu + kMenuPage) == g_page && !guest_ptr(ld32(kPlayerPtr)) && g_blocks[0] && g_blocks[1] && c.r[7] == kRgb5a3 && w <= kMostSide && h <= kMostLines && w % 4 == 0 && h % 4 == 0 && IsGunPicture(c.r[4]))
 	{
-		Gun& gun = GunOf((size_t)g_lit);
+		Gun& gun = GunOf(uint64_t(g_lit));
 		if (gun.ok)
 		{
-			if (now != g_drawnFrame || g_lit != g_drawnWeapon || (w << 16 | h) != g_drawnSize)
+			if (now != g_drawnFrame || g_lit != g_drawnGun || (w << 16 | h) != g_drawnSize)
 			{
 				const float seconds = std::chrono::duration<float>(std::chrono::steady_clock::now() - g_start).count();
 				std::vector<uint8_t> rgba;
@@ -396,7 +464,7 @@ void Bind(PPCContext& c)
 				g_block ^= 1;
 				Rgb5a3(rgba, (int)w, (int)h, g_blocks[g_block]);
 				g_drawnFrame = now;
-				g_drawnWeapon = g_lit;
+				g_drawnGun = g_lit;
 				g_drawnSize = w << 16 | h;
 			}
 			//the texture's own texobj (the 9th argument, the caller's +8) is made again for ours
@@ -415,25 +483,49 @@ void Bind(PPCContext& c)
 
 } //namespace
 
+int64_t weapon_gun_of_key(uint32_t key) { return GunOfKey(key); }
+
+bool weapon_picture(int64_t gun, float angle, int w, int h, std::vector<uint8_t>& rgba)
+{
+	if (gun < 0) return false;
+	const Gun& drawn = GunOf(uint64_t(gun));
+	if (!drawn.ok) return false;
+	Draw(drawn, angle, w, h, rgba);
+	return true;
+}
+
 void install_weapon_previews()
 {
-	if (g_weapons.empty() || std::none_of(g_weapons.begin(), g_weapons.end(), [](const Weapon& w) { return w.modelFile != 0; })) return;
 	g_trace = std::getenv("GE_TRACE") != nullptr;
 	game_alloc = ppc_lookup(kAlloc);
 	orig_info = ppc_hook("ge_loadout_info", Info);
 	orig_bind = ppc_hook("ge_texture_bind", Bind);
 	if (const char* dir = std::getenv("GE_PREVIEWS"))
-		for (size_t n = 0; n < g_weapons.size(); ++n)
+	{
+		auto dump = [&](uint64_t which, const std::string& name)
 		{
-			if (!g_weapons[n].modelFile || !GunOf(n).ok) continue;
+			if (!GunOf(which).ok) return;
 			for (int turn = 0; turn < 4; ++turn)
 			{
 				std::vector<uint8_t> rgba;
-				Draw(GunOf(n), turn * 6.2831853f / 8, 256, 64, rgba);
-				write_png((std::filesystem::path(dir) / (std::filesystem::path(g_weapons[n].file).stem().string() + "_" + std::to_string(g_weapons[n].pack) + "_" + std::to_string(turn) + ".png")).string(), 256, 64, rgba.data());
+				Draw(GunOf(which), turn * 6.2831853f / 8, 256, 64, rgba);
+				write_png((std::filesystem::path(dir) / (name + "_" + std::to_string(turn) + ".png")).string(), 256, 64, rgba.data());
 			}
-		}
-	if (!game_alloc || !orig_info || !orig_bind) rt_log("goldeneye: ge_loadout_info or ge_texture_bind is not hooked in this build, custom weapons show their base's picture");
+		};
+		for (size_t n = 0; n < g_weapons.size(); ++n)
+			if (g_weapons[n].modelFile) dump(kCustom + n, std::filesystem::path(g_weapons[n].file).stem().string() + "_" + std::to_string(g_weapons[n].pack));
+		const File f{ GunsFile() };
+		const uint32_t count = f.U16(kEntityList);
+		const size_t rows = f.Rel(kEntityList + kListAt);
+		for (uint32_t i = 0; i < count && i < 4096; ++i)
+			if (const uint32_t hash = f.U32(rows + i * kEntityRow); hash >> 16 == 0x0200)
+			{
+				char name[16];
+				std::snprintf(name, sizeof name, "%08X", hash);
+				dump(hash, name);
+			}
+	}
+	if (!game_alloc || !orig_info || !orig_bind) rt_log("goldeneye: ge_loadout_info or ge_texture_bind is not hooked in this build, the loadout menu shows the guns' pictures");
 }
 
 } //namespace ge

@@ -186,6 +186,7 @@ void OnLoad(PPCContext& c)
 
 std::vector<ModLevel> g_disc_levels;
 std::unordered_map<uint32_t, std::string> g_file_names; //the disc's files by hash, without their folders
+std::unordered_map<uint32_t, uint32_t> g_file_places; //the disc's files by hash, where each starts in Filelist.000
 
 struct Pack
 {
@@ -620,6 +621,20 @@ std::string file_name(uint32_t hash)
 	auto it = g_file_names.find(hash);
 	return it == g_file_names.end() ? std::string() : it->second;
 }
+bool disc_game_file(uint32_t hash, std::vector<uint8_t>& out)
+{
+	out.clear();
+	uint64_t data = 0, size = 0;
+	auto it = g_file_places.find(hash);
+	if (it == g_file_places.end() || !disc_file("Filelist.000", &data, &size) || it->second + 0x20ull > size) return false;
+	uint8_t head[0x20];
+	disc_read(data + it->second, head, sizeof head);
+	const uint32_t whole = Be32(&head[0x14]); //the .edb's size, its sections too
+	if (Be32(head) != kGeom || Be32(&head[4]) != hash || whole < sizeof head || it->second + uint64_t(whole) > size) return false;
+	out.resize(whole);
+	disc_read(data + it->second, out.data(), out.size());
+	return true;
+}
 const std::string& mods_folder() { return modpack_folder(g_active); }
 
 int modpack_count() { return (int)g_packs.size(); }
@@ -894,6 +909,8 @@ void install_mods()
 	{
 		const size_t cut = row.name.find_last_of("\\/");
 		g_file_names[row.hash] = cut == std::string::npos ? row.name : row.name.substr(cut + 1);
+		for (const auto& place : row.places)
+			if (place.second == 0) { g_file_places[row.hash] = place.first; break; }
 	}
 	for (const Row& row : rows)
 	{

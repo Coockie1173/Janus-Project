@@ -425,6 +425,7 @@ void MenuUpdate(PPCContext& c)
 		st8(menu + kPendingSet, 1);
 	}
 	orig_menu_update(c);
+	loadout_menu_update(c, menu);
 }
 
 void MenuPending(PPCContext& c)

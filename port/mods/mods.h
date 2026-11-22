@@ -57,6 +57,7 @@ uint32_t front_end_texture(uint32_t hash, uint32_t& sides); //one of its texture
 void install_custom_weapons(); //after install_mods and before install_mods_menu (its version has them): the weapons of every pack's weapons/
 void custom_weapons_frame(PPCContext& c); //once a frame, on the game's thread
 std::string file_name(uint32_t hash); //the disc's file of that hash ("mt_dam.edb"), empty when there is none
+bool disc_game_file(uint32_t hash, std::vector<uint8_t>& out); //the disc's own file of that hash, whole (not a mod's)
 uint32_t custom_weapon_text(uint32_t hash); //the characters of a custom weapon's name or about, 0 for any other
 bool custom_weapon(uint32_t id); //the inventory id is one of the custom weapons'
 int custom_weapon_count(); //every pack's custom weapons, by their number
@@ -67,5 +68,12 @@ bool custom_weapon_drawn(int n); //its gun is drawn right outside a network game
 const std::vector<uint8_t>& custom_weapons_sum(); //what the installed pack's files say, for the network game's version
 
 //weapons/preview.cpp
-void install_weapon_previews(); //after install_custom_weapons: the loadout menu shows a custom weapon's own gun
+void install_weapon_previews(); //after install_custom_weapons: the loadout menu shows each gun turning in place of its picture
+int64_t weapon_gun_of_key(uint32_t key); //the gun a weapon's key is drawn with, -1 for none. on the game's thread
+bool weapon_picture(int64_t gun, float angle, int w, int h, std::vector<uint8_t>& rgba); //that gun turned by angle, w x h RGBA. any thread
+
+//weapons/loadout.cpp
+void loadout_menu_update(const PPCContext& c, uint32_t menu); //the menu's update, on the game's thread: what the chosen loadout has
+bool loadout_panel_showing(); //on the renderer's thread
+void loadout_panel_draw(); //inside the overlay's frame
 } //namespace ge

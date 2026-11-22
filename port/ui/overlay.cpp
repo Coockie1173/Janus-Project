@@ -329,7 +329,7 @@ void draw() {
     bool hop = bunnyhop_speed(speed);
     bool flash = flash_showing();
     bool lib = tas_showing();
-    if (!lib && !flash && !overlay_open() && !g_show_state && !skipping_cutscene() && fade <= 0 && !settings_toast() && !cheats && !meter && !hop && !speedrun_in_game()) return;
+    if (!lib && !flash && !overlay_open() && !g_show_state && !skipping_cutscene() && fade <= 0 && !settings_toast() && !cheats && !meter && !hop && !speedrun_in_game() && !loadout_panel_showing()) return;
     //with only the state shown the cursor stays hidden over the picture
     ImGuiIO& io = ImGui::GetIO();
     if (overlay_open()) io.ConfigFlags &= ~ImGuiConfigFlags_NoMouseCursorChange;
@@ -348,6 +348,7 @@ void draw() {
     if (g_open) watches();
     if (lib) tas_draw();
     speedrun_draw();
+    loadout_panel_draw();
     //the F1 menu last, behind a mark: from the mark on it's drawn by draw_top, out of a video
     ImDrawList* fg = ImGui::GetForegroundDrawList();
     fg->AddCallback(ImDrawCallback_ResetRenderState, &g_menu_mark);

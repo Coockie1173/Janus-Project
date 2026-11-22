@@ -113,8 +113,19 @@ fn_800C2530 and fn_8013B4E0), so every console in the game needs the same custom
 
 The picture beside the list is `ge_loadout_info` (80256710): panel 0 of the menu's +0x914 on frame
 `picture << 4`. The guns' pictures are 26 fe_main textures (RGB5A3) bound by `ge_texture_bind`
-(802BE580); a custom weapon with a gun of its own shows that gun there, drawn turning
-(port/mods/weapons/preview.cpp).
+(802BE580); every gun shows its own model there instead, drawn turning (port/mods/weapons/preview.cpp):
+a custom weapon's gun file, or the game's gun out of `o_guns.edb` (read off the disc whole): its
+entity of the inventory id (the row's +0x174), the whole gun in one mesh, what a guard holds.
+
+The **chosen loadout** (the Loadout row of "Game starting in..." and of the network pause menu, choice
+setting `7D01003D`): `ge_choice_step` (8022D000) keeps its number 0..9 at the profile's +0x404 (profile
+805DE6A0 + pad × 0x590) and its hash at +0x40C, out of the table at 8057DA78 (name text, hash): five
+presets, then Custom 1..5 (`7D09001A..1E`). The items, eight words each (primary, secondary, three
+gadgets, the primary's and the secondary's attachment, a 7D08xxxx): a custom's in the profile from
++0x230 (eight lists of five words, also copied to +0x410 when chosen), a preset's in the loadouts'
+sheet 805D18E0 (+8 count, +0xC rows of 0x28: hash, name text, the eight words; FFFFFFFF no gadget,
+7D070001 no attachment). Names come from the list at 80585C80. port/mods/weapons/loadout.cpp lists
+them in a panel beside those two pages with the primary turning (pages 7D00004B and 7D0000BD).
 
 ### Poses
 
