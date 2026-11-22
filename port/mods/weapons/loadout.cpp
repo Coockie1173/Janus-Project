@@ -155,11 +155,13 @@ void loadout_menu_update(const PPCContext& c, uint32_t menu)
 namespace
 {
 
-const float kWide = 380, kPitch = 33, kText = 23, kPictureHigh = kWide / 4;
+//no box: the gun, then the items as lines of text with hairlines between, over a shadow that fades
+//out to the sides so it reads on any background
+const float kWide = 360, kPitch = 27, kLabel = 18, kText = 21, kPictureHigh = kWide / 4, kSide = 24;
 const int kPictureW = 256, kPictureH = 64;
 const float kTurnSeconds = 6.0f;
-const ImU32 kCream = IM_COL32(243, 232, 208, 255), kWhite = IM_COL32(255, 255, 255, 255), kBar = IM_COL32(70, 100, 146, 170),
-            kBack = IM_COL32(10, 18, 28, 190), kLine = IM_COL32(243, 232, 208, 200);
+const ImU32 kCream = IM_COL32(243, 232, 208, 255), kLabelColour = IM_COL32(243, 232, 208, 175), kWhite = IM_COL32(255, 255, 255, 255),
+            kHair = IM_COL32(243, 232, 208, 45), kShade = IM_COL32(0, 0, 0, 120), kClear = IM_COL32(0, 0, 0, 0);
 
 struct Gl
 {
@@ -234,29 +236,32 @@ void loadout_panel_draw()
 	const ImVec2 screen = ImGui::GetIO().DisplaySize;
 	float rect[4];
 	video_picture_rect(screen.x, screen.y, rect);
-	const float u = rect[3] / 720, x = rect[0] + panel.x * u, y0 = rect[1] + panel.y * u, w = kWide * u;
+	const float u = rect[3] / 720, x = rect[0] + panel.x * u, top = rect[1] + panel.y * u, w = kWide * u;
 	const bool picture = panel.gun >= 0 && Picture(panel.gun);
-	const float high = (kPitch * (float)panel.rows.size() + 8 + (picture ? kPictureHigh + 6 : 0)) * u;
+	const float gunHigh = picture ? kPictureHigh * u : 0;
+	const float bottom = top + gunHigh + kPitch * u * (float)panel.rows.size();
 	ImDrawList* dl = ImGui::GetBackgroundDrawList();
-	dl->AddRectFilled(ImVec2(x, y0), ImVec2(x + w, y0 + high), kBack);
-	dl->AddLine(ImVec2(x, y0), ImVec2(x + w, y0), kLine, 2 * u);
-	float y = y0 + 4 * u;
-	for (const Row& row : panel.rows)
+	//the shadow: clear at the edges, darkest behind the middle
+	const float side = kSide * u, mid = x + w / 2, fade = 14 * u;
+	dl->AddRectFilledMultiColor(ImVec2(x - side, top), ImVec2(mid, bottom), kClear, kShade, kShade, kClear);
+	dl->AddRectFilledMultiColor(ImVec2(mid, top), ImVec2(x + w + side, bottom), kShade, kClear, kClear, kShade);
+	dl->AddRectFilledMultiColor(ImVec2(x - side, top - fade), ImVec2(mid, top), kClear, kClear, kShade, kClear);
+	dl->AddRectFilledMultiColor(ImVec2(mid, top - fade), ImVec2(x + w + side, top), kClear, kClear, kClear, kShade);
+	dl->AddRectFilledMultiColor(ImVec2(x - side, bottom), ImVec2(mid, bottom + fade), kClear, kShade, kClear, kClear);
+	dl->AddRectFilledMultiColor(ImVec2(mid, bottom), ImVec2(x + w + side, bottom + fade), kShade, kClear, kClear, kClear);
+	if (picture) dl->AddImage((ImTextureID)(intptr_t)g_picture, ImVec2(x, top), ImVec2(x + w, top + gunHigh));
+	float y = top + gunHigh;
+	for (size_t i = 0; i < panel.rows.size(); ++i)
 	{
-		dl->AddRectFilled(ImVec2(x + 4 * u, y + 1 * u), ImVec2(x + w - 4 * u, y + (kPitch - 2) * u), kBar);
-		const float size = kText * u, ty = y + (kPitch - kText) * 0.5f * u - 1 * u;
-		menu_text(dl, ImVec2(x + 12 * u, ty), size, kCream, row.label, true);
-		const float room = w - 24 * u - menu_text_width(row.label, size) - 16 * u;
-		const float valueSize = std::min(size, size * room / std::max(1.0f, menu_text_width(row.value, size)));
-		menu_text(dl, ImVec2(x + w - 12 * u - menu_text_width(row.value, valueSize), ty + (size - valueSize) * 0.5f), valueSize, kWhite, row.value, true);
+		const Row& row = panel.rows[i];
+		if (i || picture) dl->AddLine(ImVec2(x, y), ImVec2(x + w, y), kHair, 1 * u);
+		const float label = kLabel * u, value = kText * u;
+		menu_text(dl, ImVec2(x, y + (kPitch - kLabel) * 0.5f * u), label, kLabelColour, row.label, true);
+		const float room = w - menu_text_width(row.label, label) - 14 * u;
+		const float size = std::min(value, value * room / std::max(1.0f, menu_text_width(row.value, value)));
+		menu_text(dl, ImVec2(x + w - menu_text_width(row.value, size), y + (kPitch * u - size) * 0.5f), size, row.label == "Primary" ? kCream : kWhite, row.value, true);
 		y += kPitch * u;
 	}
-	if (picture)
-	{
-		y += 4 * u;
-		dl->AddImage((ImTextureID)(intptr_t)g_picture, ImVec2(x + 4 * u, y), ImVec2(x + w - 4 * u, y + kPictureHigh * u));
-	}
-	dl->AddLine(ImVec2(x, y0 + high), ImVec2(x + w, y0 + high), kLine, 2 * u);
 }
 #else
 bool loadout_panel_showing() { return false; }
