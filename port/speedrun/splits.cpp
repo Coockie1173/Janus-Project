@@ -11,9 +11,9 @@
 //what's counted is the level timer (805C963C) going up while there is a player: every attempt of
 //a level, the deaths and the cutscenes, never the menus or the loads. the pause menu counts too,
 //by the clock, as the level timer stands still under it. a checkpoint's reload sets the timer
-//back, that drop isn't counted either way. between missions it's the clock too: from the Mission
-//Complete page (ge_mission_page) through the load until the next level has a player. the page's
-//time is the won mission's, the split comes after it, the load's is the next one's
+//back, that drop isn't counted either way. between missions it's the clock too: from the split
+//through the Mission Complete page and the load until the next level has a player, all of it the
+//next mission's. the game changes level before the page comes up, so the split is what starts it
 //
 //like LiveSplit: the personal best's time at the end of each split, the best segment of each,
 //the difference to the personal best as a split ends (green ahead, red behind, gold for a best
@@ -215,7 +215,11 @@ void speedrun_frame()
 	bool player = guest_ptr(ld32(kPlayerPtr));
 	//the new level is in once it has a player and its own timer runs from the start. the old one
 	//can still be the current level for a while after the change
-	if (m_Between && level == m_ChangeTo && campaign && player && t > m_LastTime && t < kFreshTimer) m_Between = false;
+	if (m_Between && level == m_ChangeTo && campaign && player && t > m_LastTime && t < kFreshTimer)
+	{
+		m_Between = false;
+		rt_log("goldeneye: speedrun: %s begins, %.3f into its split", kMissions[m_Index].name, m_Segment[m_Index]);
+	}
 	if (m_Running && m_Between) m_Segment[m_Index] += std::chrono::duration<float>(now - m_LastClock).count();
 	else if (m_Running && campaign && level == m_LastLevel && player)
 	{
@@ -233,7 +237,12 @@ void speedrun_level_change(uint32_t from, uint32_t to, uint32_t entrance, bool n
 	std::lock_guard<std::mutex> hold(g_lock);
 	EnsureLoaded();
 	if (from == kFrontEnd && to == kDam && entrance == kMissionStart) StartRun();
-	else if (m_Running && next && MissionOf(from) == m_Index && MissionOf(to) != m_Index && (entrance == kMissionStart || to == kFrontEnd)) Split();
+	else if (m_Running && next && MissionOf(from) == m_Index && MissionOf(to) != m_Index && (entrance == kMissionStart || to == kFrontEnd))
+	{
+		Split();
+		m_Between = m_Running; //the clock counts until the next mission begins
+		m_LastClock = Clock::now();
+	}
 	else if (m_Running && m_QuitReset && m_MenuSaved && to == kFrontEnd && (from & kLevelKind) == kCampaignLevel)
 	{
 		ResetRun();
@@ -241,16 +250,6 @@ void speedrun_level_change(uint32_t from, uint32_t to, uint32_t entrance, bool n
 	}
 	m_ChangeTo = to;
 	m_MenuSaved = false;
-}
-
-void speedrun_mission_end()
-{
-	uint32_t level = ld32(kCurrentLevel);
-	std::lock_guard<std::mutex> hold(g_lock);
-	if (!m_Running || m_Between || MissionOf(level) != m_Index) return;
-	m_Between = true;
-	m_ChangeTo = 0;
-	m_LastClock = Clock::now();
 }
 
 void speedrun_menu_save()

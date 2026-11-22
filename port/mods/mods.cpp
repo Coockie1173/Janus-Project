@@ -450,7 +450,6 @@ PPCFunc orig_mission_page = nullptr;
 
 void MissionPage(PPCContext& c)
 {
-	speedrun_mission_end();
 	struct Drawing { Drawing() { custom_page_drawing(true); } ~Drawing() { custom_page_drawing(false); } } drawing; //007 Custom's settings can be up in it
 	const uint32_t levels = kCurrentLevel, last = ld32(kLastLevel);
 	const uint32_t row = RowOf(ld32(levels + kLevelRows), ld32(levels + kLevelRowCount), kLevelRowSize, kStandIn);
