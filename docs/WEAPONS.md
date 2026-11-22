@@ -24,6 +24,13 @@ starting with its own copy of the key). They are put together into one row of 0x
 sorted by key (fn_800CD950, a copy). Then rows of one id with and without the silenced byte are
 paired. The table is freed at a level's end (fn_80006C40) and read again.
 
+A gun can have more rows of its id: a silenced one (+8) and a grenade launcher one (+9). The hand's
+row (the controller's +0xC98, a signed byte) is found by `fn_8014B300`: the item's id, and the
+silencer bit of its flags against +8, or in firing mode 4 the row with +9. No such row gives -1 and
+the HUD's -1 / -1. The pairs go into maps by key (`fn_8004C5C0`): 805D1A6C plain to silenced,
+805D1A8C back, 805D1AAC plain to launcher (`fn_800CD770`, the pickups'). A custom weapon gets a
+copy of each of its base's (keys from 4B000500) and the same pairs.
+
 | offset | what | P99 | AK-47 |
 |---|---|---|---|
 | +0x000 | key | 4B000009 | 4B00000D |

@@ -315,13 +315,75 @@ uint32_t ModelFile(const PPCContext& c, size_t n)
 	return file;
 }
 
-//the weapons table is filled: each weapon's row goes in, the base's with what the file changes
+//the weapons table is filled: each weapon's row goes in, the base's with what the file changes.
+//a gun of the game has more rows of its id: a silenced one (+8, the one a silencer in the
+//inventory's flags asks for: fn_8014B300 looks the hand's row up by the id and that bit, -1 and no
+//ammo without it) and one for the grenade launcher (+9, its firing mode 4). ge_weapons_load pairs
+//them by key in maps (fn_8004C5C0): 805D1A6C plain to silenced, 805D1A8C back, 805D1AAC plain to
+//the launcher's (fn_800CD770, the pickups'). each weapon gets a copy of each of its base's, keys
+//from kVariantKeys on, and the same pairs
+const uint32_t kRowLauncher = 9, kVariantKeys = 0x4B000500, kMostVariants = 4;
+const uint32_t kMostRows = 128; //the hand's row is a signed byte (+0xC98): the variants' keys sort last, past this they'd be -1
+const uint32_t kMapInsert = 0x8004C5C0; //(map, &{key, value}), sorted by key
+const uint32_t kMapSilenced = 0x805D1A6C, kMapUnsilenced = 0x805D1A8C, kMapLauncher = 0x805D1AAC;
+PPCFunc map_insert = nullptr;
+
+//what the file changes in a row
+void ChangeRow(uint32_t row, const Weapon& w)
+{
+	if (w.clip >= 0) st8(row + kRowClip, (uint8_t)std::min(w.clip, 255));
+	if (w.clips >= 0) st8(row + kRowClips, (uint8_t)std::min(w.clips, 255));
+	for (uint32_t at : kRowDamage) st32(row + at, as_u32(as_f32(ld32(row + at)) * w.damage));
+	for (const Patch& p : w.patches)
+	{
+		if (p.size == 1) st8(row + p.at, (uint8_t)p.value);
+		else st32(row + p.at, p.value);
+	}
+	//a guard's shots do the player's, unless the file says what they do
+	const bool guardSet = std::any_of(w.patches.begin(), w.patches.end(), [](const Patch& p) { return p.at >= kRowGuardShot && p.at < kRowGuardShot + kShotSize; });
+	if (!guardSet)
+		for (uint32_t at = 0; at < kShotSize; at += 4) st32(row + kRowGuardShot + at, ld32(row + kRowPlayerShot + at));
+}
+
+//a row made from one of the base's, on the stack, into the table: the file's changes for the gun
+//itself and its silenced row, the launcher's row stays the base's launcher (its clip, its damage)
+void MakeRow(const PPCContext& c, size_t n, uint32_t from, uint32_t key, bool changed)
+{
+	const Weapon& w = g_weapons[n];
+	const uint32_t stack = c.r[1], row = stack - 0x400, frame = row - 0x40; //the row on the stack, below what the call uses
+	for (uint32_t i = 0; i < kRowSize; i += 4) st32(row + i, ld32(from + i));
+	st32(row + kRowKey, key);
+	st32(row + kRowId, w.id);
+	st32(row + kRowName, w.text);
+	if (key == w.key) st8(row + kRowSilenced, 0);
+	st32(row + kRowModel, WorldModel(n, ld32(row + kRowModel)));
+	if (changed) ChangeRow(row, w);
+	PPCContext call = c;
+	st32(frame, stack);
+	call.r[1] = frame;
+	call.r[3] = kWeapons;
+	call.r[4] = row;
+	row_insert(call);
+}
+
+void MapPair(const PPCContext& c, uint32_t map, uint32_t key, uint32_t value)
+{
+	const uint32_t stack = c.r[1], pair = stack - 0x20, frame = pair - 0x40;
+	st32(pair, key);
+	st32(pair + 4, value);
+	PPCContext call = c;
+	st32(frame, stack);
+	call.r[1] = frame;
+	call.r[3] = map;
+	call.r[4] = pair;
+	map_insert(call);
+}
+
 void Load(PPCContext& c)
 {
 	const bool fresh = ld32(kWeapons + 8) == 0;
 	orig_load(c);
 	if (!fresh || g_weapons.empty() || !ld32(kWeapons + 8)) return;
-	const uint32_t stack = c.r[1], row = stack - 0x400, frame = row - 0x40; //the row on the stack, below what the call uses
 	for (Weapon& w : g_weapons)
 	{
 		if (!w.baseKey && !FindBase(c, w))
@@ -331,32 +393,37 @@ void Load(PPCContext& c)
 		}
 		const uint32_t base = RowOfKey(w.baseKey);
 		if (!base) continue;
-		for (uint32_t i = 0; i < kRowSize; i += 4) st32(row + i, ld32(base + i));
-		st32(row + kRowKey, w.key);
-		st32(row + kRowId, w.id);
-		st32(row + kRowName, w.text);
-		st8(row + kRowSilenced, 0);
-		const size_t n = size_t(&w - g_weapons.data());
-		st32(row + kRowModel, WorldModel(n, ld32(row + kRowModel)));
-		if (w.clip >= 0) st8(row + kRowClip, (uint8_t)std::min(w.clip, 255));
-		if (w.clips >= 0) st8(row + kRowClips, (uint8_t)std::min(w.clips, 255));
-		for (uint32_t at : kRowDamage) st32(row + at, as_u32(as_f32(ld32(row + at)) * w.damage));
-		for (const Patch& p : w.patches)
+		//the base's other rows, by key: the table moves as rows go in
+		std::vector<uint32_t> variants;
+		const uint32_t count = ld32(kWeapons + 8), rows = ld32(kWeapons + 0xC);
+		for (uint32_t i = 0; i < count && i < 512; ++i)
 		{
-			if (p.size == 1) st8(row + p.at, (uint8_t)p.value);
-			else st32(row + p.at, p.value);
+			const uint32_t r = rows + i * kRowSize;
+			if (ld32(r + kRowId) == w.baseId && r != base && (ld8(r + kRowSilenced) || ld8(r + kRowLauncher)) && variants.size() < kMostVariants)
+				variants.push_back(ld32(r + kRowKey));
 		}
-		//a guard's shots do the player's, unless the file says what they do
-		const bool guardSet = std::any_of(w.patches.begin(), w.patches.end(), [](const Patch& p) { return p.at >= kRowGuardShot && p.at < kRowGuardShot + kShotSize; });
-		if (!guardSet)
-			for (uint32_t at = 0; at < kShotSize; at += 4) st32(row + kRowGuardShot + at, ld32(row + kRowPlayerShot + at));
-		PPCContext call = c;
-		st32(frame, stack);
-		call.r[1] = frame;
-		call.r[3] = kWeapons;
-		call.r[4] = row;
-		row_insert(call);
+		const size_t n = size_t(&w - g_weapons.data());
+		MakeRow(c, n, base, w.key, true);
 		if (g_trace) rt_log("goldeneye: weapons: %s is %08X, id %08X, made from %08X (%s)", w.name.c_str(), w.key, w.id, w.baseKey, w.base.c_str());
+		for (size_t k = 0; k < variants.size(); ++k)
+		{
+			const uint32_t from = RowOfKey(variants[k]), key = kVariantKeys + uint32_t(n * kMostVariants + k);
+			if (!from) continue;
+			if (ld32(kWeapons + 8) >= kMostRows)
+			{
+				rt_log("goldeneye: weapons: the weapons table is full, %s has no row for an attachment", w.name.c_str());
+				break;
+			}
+			const bool silenced = ld8(from + kRowSilenced) != 0;
+			MakeRow(c, n, from, key, silenced);
+			if (silenced)
+			{
+				MapPair(c, kMapSilenced, w.key, key);
+				MapPair(c, kMapUnsilenced, key, w.key);
+			}
+			else MapPair(c, kMapLauncher, w.key, key);
+			if (g_trace) rt_log("goldeneye: weapons: %s's %s row is %08X, made from %08X", w.name.c_str(), silenced ? "silenced" : "grenade launcher", key, variants[k]);
+		}
 	}
 }
 
@@ -836,6 +903,7 @@ void install_custom_weapons()
 	if (g_weapons.empty()) return;
 	game_alloc = ppc_lookup(kAlloc);
 	row_insert = ppc_lookup(kRowInsert);
+	map_insert = ppc_lookup(kMapInsert);
 	orig_load = ppc_hook("ge_weapons_load", Load);
 	orig_def_add = ppc_hook("ge_weapon_def_add", DefAdd);
 	orig_poses = ppc_hook("ge_weapon_poses", Poses);
@@ -860,7 +928,7 @@ void install_custom_weapons()
 		orig_character_sound = ppc_hook("ge_character_sound", CharacterSound);
 		if (!orig_fire_sound || !orig_character_sound) rt_log("goldeneye: ge_weapon_fire_sound or ge_character_sound is not hooked in this build, custom weapons fire with their base's sound");
 	}
-	if (!game_alloc || !row_insert || !orig_load || !orig_def_add || !orig_poses || !weapon_pose || !orig_loadout_give || !orig_script_set || !orig_file_object || !orig_loadout_pick || !get_file || !fix_up) rt_die("goldeneye: custom weapons are not hooked in this build");
+	if (!game_alloc || !row_insert || !map_insert || !orig_load || !orig_def_add || !orig_poses || !weapon_pose || !orig_loadout_give || !orig_script_set || !orig_file_object || !orig_loadout_pick || !get_file || !fix_up) rt_die("goldeneye: custom weapons are not hooked in this build");
 }
 
 } //namespace ge
