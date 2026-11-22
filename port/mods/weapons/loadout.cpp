@@ -1,7 +1,7 @@
 //what the chosen loadout has, beside the menus that choose one: the "Game starting in..." page of a
 //network game and its pause menu, both with a Loadout row whose left and right go through the ten
-//loadouts. a panel in the menus' look lists its weapons, attachments and gadgets, the primary
-//turning under them (preview.cpp draws it)
+//loadouts. a caption centred under the menu says what it has, in the menus' font: the primary
+//turning (preview.cpp draws it), the guns with their attachments, then the gadgets
 //
 //the Loadout row is a choice row (kind 3) of setting 7D01003D: ge_choice_step (8022D000) puts the
 //loadout's number, 0 to 9, at the profile's +0x404 (profile 805DE6A0 + the pad * 0x590) and its
@@ -53,14 +53,15 @@ const uint32_t kMenuPage = 0x214, kMenuPad = 0x1A4;
 const uint32_t kGameStarting = 0x7D00004B, kPausePage = 0x7D0000BD;
 enum Item { kPrimary, kSecondary, kGadget1, kGadget2, kGadget3, kPrimaryAttachment, kSecondaryAttachment, kItems = 7 };
 
-struct Row { std::string label, value; };
 struct Panel
 {
-	float x{}, y{}; //its top left on the game's 1280 x 720 screen
-	std::vector<Row> rows;
-	int64_t gun{ -1 }; //the primary's, turning under the rows
+	float x{}, y{}; //the middle of its top on the game's 1280 x 720 screen
+	float gunHigh{}; //how high the gun is drawn
+	std::string guns, gadgets; //its two lines
+	int64_t gun{ -1 }; //the primary's, turning over the lines
 	uint32_t frame{}; //the game's frame it was made in
 };
+const char* const kDot = "  \xB7  "; //between two items
 
 std::mutex g_lock;
 Panel g_panel; //under g_lock
@@ -103,20 +104,17 @@ void Make(const PPCContext& c, uint32_t hash, uint32_t pad, Panel& panel)
 		for (uint32_t k = 0; k < kItems; ++k) items[k] = ld32(row + kSheetItems + k * 4);
 	items[kPrimary] = AsGiven(items[kPrimary]);
 	items[kSecondary] = AsGiven(items[kSecondary]);
-	panel.rows.clear();
-	auto add = [&](const char* label, Item item, bool always)
+	auto name = [&](Item item) { return NameOf(c, items[item]); };
+	auto gun = [&](Item item, Item attachment)
 	{
-		std::string name = NameOf(c, items[item]);
-		if (name.empty() && !always) return;
-		panel.rows.push_back({ label, name.empty() ? "None" : name });
+		const std::string with = name(attachment);
+		return name(item) + (with.empty() ? "" : " + " + with);
 	};
-	add("Primary", kPrimary, true);
-	add("Primary Attachment", kPrimaryAttachment, false);
-	add("Secondary", kSecondary, true);
-	add("Secondary Attachment", kSecondaryAttachment, false);
-	add("Gadget 1", kGadget1, false);
-	add("Gadget 2", kGadget2, false);
-	add("Gadget 3", kGadget3, false);
+	panel.guns = gun(kPrimary, kPrimaryAttachment);
+	if (const std::string secondary = gun(kSecondary, kSecondaryAttachment); !secondary.empty()) panel.guns += (panel.guns.empty() ? "" : kDot) + secondary;
+	panel.gadgets.clear();
+	for (Item item : { kGadget1, kGadget2, kGadget3 })
+		if (const std::string gadget = name(item); !gadget.empty()) panel.gadgets += (panel.gadgets.empty() ? "" : kDot) + gadget;
 	panel.gun = weapon_gun_of_key(items[kPrimary]);
 	if (panel.gun >= 0)
 	{
@@ -145,9 +143,10 @@ void loadout_menu_update(const PPCContext& c, uint32_t menu)
 		g_madeAt = now;
 		g_shown = true;
 	}
-	//the game starting: right of the Loadout row. paused: right of the menu's box
-	g_panel.x = 868;
-	g_panel.y = page == kGameStarting ? 122 : 236;
+	//under the Loadout row (the players' list starts at 292), paused under the menu's box
+	g_panel.x = page == kGameStarting ? 636 : 652;
+	g_panel.y = page == kGameStarting ? 162 : 418;
+	g_panel.gunHigh = page == kGameStarting ? 58 : 76;
 	g_panel.frame = now;
 }
 
@@ -155,13 +154,10 @@ void loadout_menu_update(const PPCContext& c, uint32_t menu)
 namespace
 {
 
-//no box: the gun, then the items as lines of text with hairlines between, over a shadow that fades
-//out to the sides so it reads on any background
-const float kWide = 360, kPitch = 27, kLabel = 18, kText = 21, kPictureHigh = kWide / 4, kSide = 24;
+const float kGuns = 22, kGadgets = 19, kLineGap = 2;
 const int kPictureW = 256, kPictureH = 64;
 const float kTurnSeconds = 6.0f;
-const ImU32 kCream = IM_COL32(243, 232, 208, 255), kLabelColour = IM_COL32(243, 232, 208, 175), kWhite = IM_COL32(255, 255, 255, 255),
-            kHair = IM_COL32(243, 232, 208, 45), kShade = IM_COL32(0, 0, 0, 120), kClear = IM_COL32(0, 0, 0, 0);
+const ImU32 kCream = IM_COL32(243, 232, 208, 255), kFaint = IM_COL32(243, 232, 208, 190);
 
 struct Gl
 {
@@ -236,32 +232,24 @@ void loadout_panel_draw()
 	const ImVec2 screen = ImGui::GetIO().DisplaySize;
 	float rect[4];
 	video_picture_rect(screen.x, screen.y, rect);
-	const float u = rect[3] / 720, x = rect[0] + panel.x * u, top = rect[1] + panel.y * u, w = kWide * u;
-	const bool picture = panel.gun >= 0 && Picture(panel.gun);
-	const float gunHigh = picture ? kPictureHigh * u : 0;
-	const float bottom = top + gunHigh + kPitch * u * (float)panel.rows.size();
+	const float u = rect[3] / 720, mid = rect[0] + panel.x * u;
+	float y = rect[1] + panel.y * u;
 	ImDrawList* dl = ImGui::GetBackgroundDrawList();
-	//the shadow: clear at the edges, darkest behind the middle
-	const float side = kSide * u, mid = x + w / 2, fade = 14 * u;
-	dl->AddRectFilledMultiColor(ImVec2(x - side, top), ImVec2(mid, bottom), kClear, kShade, kShade, kClear);
-	dl->AddRectFilledMultiColor(ImVec2(mid, top), ImVec2(x + w + side, bottom), kShade, kClear, kClear, kShade);
-	dl->AddRectFilledMultiColor(ImVec2(x - side, top - fade), ImVec2(mid, top), kClear, kClear, kShade, kClear);
-	dl->AddRectFilledMultiColor(ImVec2(mid, top - fade), ImVec2(x + w + side, top), kClear, kClear, kClear, kShade);
-	dl->AddRectFilledMultiColor(ImVec2(x - side, bottom), ImVec2(mid, bottom + fade), kClear, kShade, kClear, kClear);
-	dl->AddRectFilledMultiColor(ImVec2(mid, bottom), ImVec2(x + w + side, bottom + fade), kShade, kClear, kClear, kClear);
-	if (picture) dl->AddImage((ImTextureID)(intptr_t)g_picture, ImVec2(x, top), ImVec2(x + w, top + gunHigh));
-	float y = top + gunHigh;
-	for (size_t i = 0; i < panel.rows.size(); ++i)
+	if (panel.gun >= 0 && Picture(panel.gun))
 	{
-		const Row& row = panel.rows[i];
-		if (i || picture) dl->AddLine(ImVec2(x, y), ImVec2(x + w, y), kHair, 1 * u);
-		const float label = kLabel * u, value = kText * u;
-		menu_text(dl, ImVec2(x, y + (kPitch - kLabel) * 0.5f * u), label, kLabelColour, row.label, true);
-		const float room = w - menu_text_width(row.label, label) - 14 * u;
-		const float size = std::min(value, value * room / std::max(1.0f, menu_text_width(row.value, value)));
-		menu_text(dl, ImVec2(x + w - menu_text_width(row.value, size), y + (kPitch * u - size) * 0.5f), size, row.label == "Primary" ? kCream : kWhite, row.value, true);
-		y += kPitch * u;
+		const float high = panel.gunHigh * u, wide = high * kPictureW / kPictureH;
+		dl->AddImage((ImTextureID)(intptr_t)g_picture, ImVec2(mid - wide / 2, y), ImVec2(mid + wide / 2, y + high));
+		y += high;
 	}
+	auto line = [&](const std::string& text, float size, ImU32 colour)
+	{
+		if (text.empty()) return;
+		size *= u;
+		menu_text(dl, ImVec2(std::round(mid - menu_text_width(text, size) / 2), std::round(y)), size, colour, text, true);
+		y += size + kLineGap * u;
+	};
+	line(panel.guns, kGuns, kCream);
+	line(panel.gadgets, kGadgets, kFaint);
 }
 #else
 bool loadout_panel_showing() { return false; }

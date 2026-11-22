@@ -124,8 +124,9 @@ presets, then Custom 1..5 (`7D09001A..1E`). The items, eight words each (primary
 gadgets, the primary's and the secondary's attachment, a 7D08xxxx): a custom's in the profile from
 +0x230 (eight lists of five words, also copied to +0x410 when chosen), a preset's in the loadouts'
 sheet 805D18E0 (+8 count, +0xC rows of 0x28: hash, name text, the eight words; FFFFFFFF no gadget,
-7D070001 no attachment). Names come from the list at 80585C80. port/mods/weapons/loadout.cpp lists
-them in a panel beside those two pages with the primary turning (pages 7D00004B and 7D0000BD).
+7D070001 no attachment). Names come from the list at 80585C80. port/mods/weapons/loadout.cpp shows
+them in a caption centred under the menu of those two pages (7D00004B and 7D0000BD): the primary
+turning, the guns with their attachments, then the gadgets.
 
 ### Poses
 
