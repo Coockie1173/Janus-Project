@@ -275,8 +275,21 @@ void BuildSettings()
 	AddToggle(kForFun, "weapon_randomizer", "Weapon Randomizer", "On: in the campaign every guard and you start with a random weapon, with one random attachment or none. From the next spawn on.", weapon_randomizer, set_weapon_randomizer);
 	std::vector<const char*> weapons;
 	for (int i = 0; i < forced_weapon_count(); ++i) weapons.push_back(forced_weapon_name(i));
-	AddChoice(kForFun, "forced_weapon", "Forced Weapon", "In the campaign you and every guard start with this weapon, without attachments. Only while the Weapon Randomizer is off. From the next spawn on.",
-		weapons, forced_weapon, [](int v) { set_forced_weapon(v); g_dirty = true; }).dropdown = true;
+	Setting& forced = AddChoice(kForFun, "forced_weapon", "Forced Weapon", "In the campaign you and every guard start with this weapon, without attachments. Only while the Weapon Randomizer is off. From the next spawn on.",
+		weapons, forced_weapon, [](int v) { set_forced_weapon(v); g_dirty = true; });
+	forced.dropdown = true;
+	forced.offered = forced_weapon_offered;
+	//a step skips a custom weapon of a pack that's off
+	forced.step = [count = forced.count](float v, int d)
+	{
+		int at = (int)std::lround(v);
+		for (int tries = 0; tries < count; ++tries)
+		{
+			at = (at + d + count) % count;
+			if (forced_weapon_offered(at)) break;
+		}
+		return (float)at;
+	};
 	AddToggle(kForFun, "no_attachment_limit", "No Attachment Limit (Experimental)", "On: the Weapon Randomizer's weapons may have several attachments at once, each one a chance of its own. Some may break the view.", no_attachment_limit, set_no_attachment_limit);
 
 	//in a game someone else hosts through Connect to WFC Modded the page shows the host's, and nothing on it changes
@@ -327,14 +340,31 @@ Row SettingRow(int i)
 	}
 	if (s.dropdown)
 	{
-		r.options = [i]
+		//the list has only the ones offered, its places aren't the values then
+		auto values = [i]
+		{
+			std::vector<int> out;
+			for (int v = 0; v < g_settings[i].count; ++v)
+				if (!g_settings[i].offered || g_settings[i].offered(v)) out.push_back(v);
+			return out;
+		};
+		r.options = [i, values]
 		{
 			std::vector<std::string> names;
-			for (int v = 0; v < g_settings[i].count; ++v) names.push_back(g_settings[i].show((float)v));
+			for (int v : values()) names.push_back(g_settings[i].show((float)v));
 			return names;
 		};
-		r.chosen = [i] { return (int)std::lround(g_settings[i].get()); };
-		r.choose = [i](int v) { g_settings[i].set((float)v); };
+		r.chosen = [i, values]
+		{
+			const std::vector<int> all = values();
+			const auto at = std::find(all.begin(), all.end(), (int)std::lround(g_settings[i].get()));
+			return at == all.end() ? 0 : (int)(at - all.begin());
+		};
+		r.choose = [i, values](int place)
+		{
+			const std::vector<int> all = values();
+			if (place >= 0 && place < (int)all.size()) g_settings[i].set((float)all[place]);
+		};
 	}
 	return r;
 }

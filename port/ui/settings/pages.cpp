@@ -424,6 +424,25 @@ void build_pages() {
 		if (bhop_locked()) return std::string(bunnyhop_now() ? (bhop_map_locked() ? "On (map)" : "On (host)") : (bhop_map_locked() ? "Off (map)" : "Off (host)"));
 		return std::string(bunnyhop() ? "On" : "Off");
 	}, {}, [] { go(kBhop); }});
+	//every pack's custom weapons are the randomizer's and the forced weapon's, a switch a pack
+	if (modpack_count() > 0)
+	{
+		const auto forced = std::find_if(fun.begin(), fun.end(), [](const Row& r) { return r.label == "Forced Weapon"; });
+		fun.insert(forced == fun.end() ? fun.end() : forced + 1, {"Modpack Weapons", "Which modpacks' custom weapons the Weapon Randomizer and Forced Weapon use, whichever pack is installed.", []
+		{
+			int on = 0;
+			for (int pack = 0; pack < modpack_count(); ++pack) on += randomizer_pack(pack);
+			return std::to_string(on) + " of " + std::to_string(modpack_count());
+		}, {}, [] { go(kFunPacks); }});
+		Page& packs = g_pages[kFunPacks];
+		for (int pack = 0; pack < modpack_count(); ++pack)
+		{
+			const std::string weapons = randomizer_pack_weapons(pack);
+			auto flip = [pack] { set_randomizer_pack(pack, !randomizer_pack(pack)); g_dirty = true; };
+			packs.rows.push_back({modpack_name(pack), weapons.empty() ? "No custom weapons in this pack." : "Its weapons: " + weapons + ".",
+				[pack] { return std::string(randomizer_pack(pack) ? "On" : "Off"); }, [flip](int) { flip(); }, flip});
+		}
+	}
 
     Page& screen = g_pages[kScreen];
     screen.title = "Screen Settings";
@@ -467,6 +486,7 @@ void build_pages() {
     g_pages[kForFun].title = "For Fun";
     g_pages[kBhop].title = "Bunnyhopping";
     g_pages[kTriggers].title = "Trigger Viewer";
+    g_pages[kFunPacks].title = "Modpack Weapons";
     Page& speedrun = g_pages[kSpeedrun];
     speedrun.title = "Speedrun Timer";
     speedrun.rows.push_back({"Export Splits", "Saves your personal best and best segments as a LiveSplit file (.lss), in game time.",

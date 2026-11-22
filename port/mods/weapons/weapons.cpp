@@ -800,17 +800,18 @@ const std::vector<uint8_t>& custom_weapons_sum()
 
 bool custom_weapon(uint32_t id) { return std::any_of(g_weapons.begin(), g_weapons.end(), [&](const Weapon& w) { return w.id == id; }); }
 
-//the installed pack's, the nth of them
-static const Weapon* InstalledWeapon(int n)
-{
-	for (const Weapon& w : g_weapons)
-		if (Installed(w) && n-- == 0) return &w;
-	return nullptr;
-}
+//every pack's, a network game only has the installed pack's (NetItems)
+static const Weapon* NthWeapon(int n) { return n >= 0 && n < (int)g_weapons.size() ? &g_weapons[n] : nullptr; }
 
-int custom_weapon_count() { return (int)std::count_if(g_weapons.begin(), g_weapons.end(), [](const Weapon& w) { return Installed(w); }); }
-uint32_t custom_weapon_id(int n) { const Weapon* w = InstalledWeapon(n); return w ? w->id : 0; }
-const char* custom_weapon_name(int n) { const Weapon* w = InstalledWeapon(n); return w ? w->name.c_str() : ""; }
+int custom_weapon_count() { return (int)g_weapons.size(); }
+uint32_t custom_weapon_id(int n) { const Weapon* w = NthWeapon(n); return w ? w->id : 0; }
+const char* custom_weapon_name(int n) { const Weapon* w = NthWeapon(n); return w ? w->name.c_str() : ""; }
+int custom_weapon_pack(int n) { const Weapon* w = NthWeapon(n); return w ? w->pack : -1; }
+bool custom_weapon_drawn(int n)
+{
+	const Weapon* w = NthWeapon(n);
+	return w && (!w->modelFile || modpack_serves(w->pack, w->modelFile));
+}
 
 //once a frame on the game's thread: the list's places and the loadout pages
 void custom_weapons_frame(PPCContext& c)

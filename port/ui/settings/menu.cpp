@@ -57,6 +57,15 @@ int BhopRow()
 	return 0;
 }
 
+//the For Fun row that opens the modpack weapons page
+int FunPacksRow()
+{
+	const auto& fun = g_pages[kForFun].rows;
+	for (size_t i = 0; i < fun.size(); ++i)
+		if (fun[i].label == "Modpack Weapons") return (int)i;
+	return 0;
+}
+
 //the Cheats row that opens the trigger page
 int TriggerRow()
 {
@@ -74,6 +83,7 @@ void back() {
     else if (g_page == kSkips) go(kGameplay, 0);
     else if (g_page >= kGameplay && g_page <= kStartup) go(kEnhancements, g_page - kGameplay);
     else if (g_page == kBhop) go(kForFun, BhopRow());
+    else if (g_page == kFunPacks) go(kForFun, FunPacksRow());
     else if (g_page == kTriggers) go(kCheats, TriggerRow());
     else go(kRoot, g_root_row);
 }

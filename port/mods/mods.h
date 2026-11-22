@@ -37,6 +37,7 @@ const std::string& modpack_folder(int pack);
 const std::vector<ModLevel>& modpack_levels(int pack);
 const std::vector<ModLevel>& modpack_files(int pack);
 void modpack_select(int pack); //its files in place of the installed pack's. in the menus, on the game's thread
+bool modpack_serves(int pack, uint32_t hash); //the game gets that pack's file of the hash now, whichever pack is installed
 
 //unzip.cpp
 bool unzip_pack(const std::string& zip, const std::string& folder); //a modpack's zip into its folder, when it changed
@@ -56,8 +57,10 @@ void custom_weapons_frame(PPCContext& c); //once a frame, on the game's thread
 std::string file_name(uint32_t hash); //the disc's file of that hash ("mt_dam.edb"), empty when there is none
 uint32_t custom_weapon_text(uint32_t hash); //the characters of a custom weapon's name or about, 0 for any other
 bool custom_weapon(uint32_t id); //the inventory id is one of the custom weapons'
-int custom_weapon_count(); //the installed pack's custom weapons, by their number
+int custom_weapon_count(); //every pack's custom weapons, by their number
 uint32_t custom_weapon_id(int n);
 const char* custom_weapon_name(int n);
+int custom_weapon_pack(int n);
+bool custom_weapon_drawn(int n); //its gun is drawn right outside a network game: its own file is the one the game gets
 const std::vector<uint8_t>& custom_weapons_sum(); //what the installed pack's files say, for the network game's version
 } //namespace ge

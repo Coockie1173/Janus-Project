@@ -100,6 +100,7 @@ void save_launch_settings() {
     char forced_text[16];
     std::snprintf(forced_text, sizeof forced_text, "%08X", forced_weapon_id());
     values.push_back({"LAUNCH_FORCEDWEAPON", forced_text});
+    values.push_back({"LAUNCH_RANDOMIZERPACKSOFF", randomizer_packs_off()});
     const NextStart& next = next_start();
     values.push_back({"LAUNCH_ONLINE", next.online ? "1" : "0"});
     values.push_back({"LAUNCH_FASTSTART", next.fast_start ? "1" : "0"});
