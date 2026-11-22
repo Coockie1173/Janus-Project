@@ -126,7 +126,10 @@ gadgets, the primary's and the secondary's attachment, a 7D08xxxx): a custom's i
 sheet 805D18E0 (+8 count, +0xC rows of 0x28: hash, name text, the eight words; FFFFFFFF no gadget,
 7D070001 no attachment). Names come from the list at 80585C80. port/mods/weapons/loadout.cpp shows
 them in a caption centred under the menu of those two pages (7D00004B and 7D0000BD): the primary
-turning, the guns with their attachments, then the gadgets.
+and the secondary turning, the guns with their attachments, then the gadgets. The game's own pictures there are
+`ge_loadout_scene` (8023B090): panel 0 of the menu's +0x914 loaded with a scene of 01090053 by the
+loadout's number (table 8057E108; the presets' guns and grenades, nothing for a custom one); the
+port hides the panel after it (its byte +0x1129).
 
 ### Poses
 

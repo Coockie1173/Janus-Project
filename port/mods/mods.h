@@ -73,6 +73,7 @@ int64_t weapon_gun_of_key(uint32_t key); //the gun a weapon's key is drawn with,
 bool weapon_picture(int64_t gun, float angle, int w, int h, std::vector<uint8_t>& rgba); //that gun turned by angle, w x h RGBA. any thread
 
 //weapons/loadout.cpp
+void install_loadout_panel(); //the game's own pictures of a loadout are left out
 void loadout_menu_update(const PPCContext& c, uint32_t menu); //the menu's update, on the game's thread: what the chosen loadout has
 bool loadout_panel_showing(); //on the renderer's thread
 void loadout_panel_draw(); //inside the overlay's frame

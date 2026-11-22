@@ -1,7 +1,13 @@
 //what the chosen loadout has, beside the menus that choose one: the "Game starting in..." page of a
 //network game and its pause menu, both with a Loadout row whose left and right go through the ten
-//loadouts. a caption centred under the menu says what it has, in the menus' font: the primary
-//turning (preview.cpp draws it), the guns with their attachments, then the gadgets
+//loadouts. a caption centred under the menu says what it has, in the menus' font: the primary and
+//the secondary turning (preview.cpp draws them), the guns with their attachments, then the gadgets
+//
+//the game's own pictures of a loadout are left out: ge_loadout_scene (8023B090, the menu's update
+//on pages 7D0000BD, 7D00004B and 7D000101) puts a scene of geometry 01090053 in panel 0 of the
+//menu's +0x914, the script by the loadout's number from the table at 8057E108 (the presets' guns
+//and grenades, nothing for a custom one). after it the panel is hidden (its byte +0x1129, a panel
+//0x14 bytes, what fn_8023F860 sets)
 //
 //the Loadout row is a choice row (kind 3) of setting 7D01003D: ge_choice_step (8022D000) puts the
 //loadout's number, 0 to 9, at the profile's +0x404 (profile 805DE6A0 + the pad * 0x590) and its
@@ -58,7 +64,7 @@ struct Panel
 	float x{}, y{}; //the middle of its top on the game's 1280 x 720 screen
 	float gunHigh{}; //how high the gun is drawn
 	std::string guns, gadgets; //its two lines
-	int64_t gun{ -1 }; //the primary's, turning over the lines
+	int64_t gun{ -1 }, second{ -1 }; //the primary's and the secondary's, turning over the lines
 	uint32_t frame{}; //the game's frame it was made in
 };
 const char* const kDot = "  \xB7  "; //between two items
@@ -116,14 +122,32 @@ void Make(const PPCContext& c, uint32_t hash, uint32_t pad, Panel& panel)
 	for (Item item : { kGadget1, kGadget2, kGadget3 })
 		if (const std::string gadget = name(item); !gadget.empty()) panel.gadgets += (panel.gadgets.empty() ? "" : kDot) + gadget;
 	panel.gun = weapon_gun_of_key(items[kPrimary]);
-	if (panel.gun >= 0)
-	{
-		std::vector<uint8_t> warm; //the gun read here, not on the renderer's thread
-		weapon_picture(panel.gun, 0, 4, 4, warm);
-	}
+	panel.second = weapon_gun_of_key(items[kSecondary]);
+	for (int64_t gun : { panel.gun, panel.second })
+		if (gun >= 0)
+		{
+			std::vector<uint8_t> warm; //the gun read here, not on the renderer's thread
+			weapon_picture(gun, 0, 4, 4, warm);
+		}
+}
+
+const uint32_t kMenuPanels = 0x914, kPanelShown = 0x1129;
+PPCFunc orig_scene = nullptr;
+
+void Scene(PPCContext& c)
+{
+	const uint32_t menu = c.r[3];
+	orig_scene(c);
+	if (guest_ptr(menu)) st8(menu + kMenuPanels + kPanelShown, 0);
 }
 
 } //namespace
+
+void install_loadout_panel()
+{
+	orig_scene = ppc_hook("ge_loadout_scene", Scene);
+	if (!orig_scene) rt_log("goldeneye: ge_loadout_scene is not hooked in this build, the game's loadout pictures show under the caption");
+}
 
 void loadout_menu_update(const PPCContext& c, uint32_t menu)
 {
@@ -146,7 +170,7 @@ void loadout_menu_update(const PPCContext& c, uint32_t menu)
 	//under the Loadout row (the players' list starts at 292), paused under the menu's box
 	g_panel.x = page == kGameStarting ? 636 : 652;
 	g_panel.y = page == kGameStarting ? 162 : 418;
-	g_panel.gunHigh = page == kGameStarting ? 58 : 76;
+	g_panel.gunHigh = page == kGameStarting ? 56 : 66;
 	g_panel.frame = now;
 }
 
@@ -154,6 +178,8 @@ void loadout_menu_update(const PPCContext& c, uint32_t menu)
 namespace
 {
 
+const float kSecondSize = 0.75f; //of the primary's height
+const float kOverlap = 0.3f; //of the secondary's frame, over the primary's
 const float kGuns = 22, kGadgets = 19, kLineGap = 2;
 const int kPictureW = 256, kPictureH = 64;
 const float kTurnSeconds = 6.0f;
@@ -170,7 +196,7 @@ struct Gl
 };
 Gl gl{};
 bool g_glTried = false;
-GLuint g_picture = 0;
+GLuint g_pictures[2]{}; //the primary's, the secondary's
 const auto g_start = std::chrono::steady_clock::now();
 
 bool LoadGl()
@@ -189,8 +215,8 @@ bool LoadGl()
 	return false;
 }
 
-//the gun turned as it is now into the panel's texture
-bool Picture(int64_t gun)
+//the gun turned as it is now into one of the panel's textures
+bool Picture(int64_t gun, GLuint& picture)
 {
 	std::vector<uint8_t> rgba;
 	const float seconds = std::chrono::duration<float>(std::chrono::steady_clock::now() - g_start).count();
@@ -198,8 +224,8 @@ bool Picture(int64_t gun)
 	GLint texture = 0, unpack = 0;
 	gl.GetIntegerv(GL_TEXTURE_BINDING_2D, &texture);
 	gl.GetIntegerv(GL_UNPACK_ALIGNMENT, &unpack);
-	if (!g_picture) gl.GenTextures(1, &g_picture);
-	gl.BindTexture(GL_TEXTURE_2D, g_picture);
+	if (!picture) gl.GenTextures(1, &picture);
+	gl.BindTexture(GL_TEXTURE_2D, picture);
 	gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -235,10 +261,17 @@ void loadout_panel_draw()
 	const float u = rect[3] / 720, mid = rect[0] + panel.x * u;
 	float y = rect[1] + panel.y * u;
 	ImDrawList* dl = ImGui::GetBackgroundDrawList();
-	if (panel.gun >= 0 && Picture(panel.gun))
+	//side by side, the secondary smaller (each is drawn as big as its frame), their feet on one line
+	const bool first = panel.gun >= 0 && Picture(panel.gun, g_pictures[0]);
+	const bool second = panel.second >= 0 && Picture(panel.second, g_pictures[1]);
+	if (first || second)
 	{
-		const float high = panel.gunHigh * u, wide = high * kPictureW / kPictureH;
-		dl->AddImage((ImTextureID)(intptr_t)g_picture, ImVec2(mid - wide / 2, y), ImVec2(mid + wide / 2, y + high));
+		const float high = panel.gunHigh * u, small = high * kSecondSize, aspect = (float)kPictureW / kPictureH;
+		const float wide = first ? high * aspect : 0, smallWide = second ? small * aspect : 0;
+		const float overlap = first && second ? smallWide * kOverlap : 0; //a frame's sides are empty
+		const float left = mid - (wide + smallWide - overlap) / 2, right = left + wide - overlap;
+		if (first) dl->AddImage((ImTextureID)(intptr_t)g_pictures[0], ImVec2(left, y), ImVec2(left + wide, y + high));
+		if (second) dl->AddImage((ImTextureID)(intptr_t)g_pictures[1], ImVec2(right, y + high - small), ImVec2(right + smallWide, y + high));
 		y += high;
 	}
 	auto line = [&](const std::string& text, float size, ImU32 colour)
