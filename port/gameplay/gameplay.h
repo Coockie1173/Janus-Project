@@ -25,6 +25,10 @@ const char* custom_about(int slider); //the line that says what it is
 std::string custom_values(); //the sliders and the switch as the settings file keeps them
 bool set_custom_values(const std::string& text, bool always); //and back, always: every mission played with them (GE_CUSTOM_ON)
 bool custom_always();
+const int kCustomShown = kCustomSliders + 1; //what a mission was played with: the sliders and the switch
+std::string custom_shown_name(int i); //"Enemy Health"
+std::string custom_shown_value(int i); //"250%", "On"
+void custom_page_drawing(bool on); //mods.cpp: the Mission Complete page draws itself between the two
 
 //fov.cpp
 void install_fov();

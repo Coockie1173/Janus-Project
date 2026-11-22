@@ -10,6 +10,7 @@
 #include "extract.h"
 #include "files.h"
 #include "rt.h"
+#include "update.h"
 #include "window.h"
 #include <SDL3/SDL_filesystem.h>
 #include <cctype>
@@ -42,6 +43,7 @@ namespace
 		"  --no-tutorials --no-colour-filter --no-level-timer --auto-qte --auto-start\n"
 		"  --extras-menu --unlock-all --stamina-meter\n"
 		"  --crash-dumps --no-crash-dumps --crash-mem --trace\n"
+		"  --no-update-check          don't ask GitHub for a newer build this time\n"
 		"anything else goes to the game itself (--window 1920x1080, --language fr...).\n"
 		"The settings are kept in settings.env, the key bindings in keys.txt, the log in run.log.\n"
 	};
@@ -56,6 +58,7 @@ namespace
 		{ "autosave", "1" }, { "leveltimer", "1" }, { "autoqte", "0" }, { "autostart", "0" }, { "extrasmenu", "0" },
 		{ "onlineunlocks", "1" }, { "unlockall", "0" }, { "staminameter", "0" }, { "vsync", "0" }, { "ping", "1" },
 		{ "occlusion", "1" }, { "soundheight", "1" }, { "crashdump", "1" }, { "crashmem", "0" }, { "gxthread", "1" },
+		{ "updatecheck", "1" }, { "skipupdate", "" },
 	};
 
 	//the environment variable the port reads for each
@@ -80,6 +83,7 @@ namespace
 		{ "--fast-start", { "faststart", "1" } }, { "--offline", { "online", "0" } }, { "--crash-dumps", { "crashdump", "1" } },
 		{ "--no-crash-dumps", { "crashdump", "0" } }, { "--no-occlusion", { "occlusion", "0" } },
 		{ "--no-sound-height", { "soundheight", "0" } }, { "--no-gx-thread", { "gxthread", "0" } },
+		{ "--no-update-check", { "updatecheck", "0" } },
 	};
 
 	//where the player's files are: "." in a package, "build" in a checkout
@@ -318,6 +322,17 @@ namespace
 			else
 			{
 				Rest.push_back(Arg);
+			}
+		}
+
+		//a package asks for a newer build (update.cpp), a checkout never does
+		CleanUpdate();
+		if (Settings["updatecheck"] != "0")
+		{
+			Release Newer;
+			if (CheckForUpdate(Settings["skipupdate"], Newer) && UpdateWindow(Newer))
+			{
+				Restart(argv);
 			}
 		}
 

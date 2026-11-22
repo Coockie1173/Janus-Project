@@ -11,7 +11,9 @@
 //what's counted is the level timer (805C963C) going up while there is a player: every attempt of
 //a level, the deaths and the cutscenes, never the menus or the loads. the pause menu counts too,
 //by the clock, as the level timer stands still under it. a checkpoint's reload sets the timer
-//back, that drop isn't counted either way
+//back, that drop isn't counted either way. between missions it's the clock too: from the Mission
+//Complete page (ge_mission_page) through the load until the next level has a player. the page's
+//time is the won mission's, the split comes after it, the load's is the next one's
 //
 //like LiveSplit: the personal best's time at the end of each split, the best segment of each,
 //the difference to the personal best as a split ends (green ahead, red behind, gold for a best
@@ -62,7 +64,7 @@ void Clear()
 
 void ResetRun()
 {
-	m_Running = m_Finished = m_NewPb = false;
+	m_Running = m_Finished = m_NewPb = m_Between = false;
 	m_Index = 0;
 	for (int i = 0; i < kSplits; ++i)
 	{
@@ -210,7 +212,12 @@ void speedrun_frame()
 	std::lock_guard<std::mutex> hold(g_lock);
 	EnsureLoaded();
 	bool campaign = (level & kLevelKind) == kCampaignLevel;
-	if (m_Running && campaign && level == m_LastLevel && guest_ptr(ld32(kPlayerPtr)))
+	bool player = guest_ptr(ld32(kPlayerPtr));
+	//the new level is in once it has a player and its own timer runs from the start. the old one
+	//can still be the current level for a while after the change
+	if (m_Between && level == m_ChangeTo && campaign && player && t > m_LastTime && t < kFreshTimer) m_Between = false;
+	if (m_Running && m_Between) m_Segment[m_Index] += std::chrono::duration<float>(now - m_LastClock).count();
+	else if (m_Running && campaign && level == m_LastLevel && player)
 	{
 		//paused the level timer stands still, the clock goes on
 		float step = ld8(kPaused) != 0 ? std::chrono::duration<float>(now - m_LastClock).count() : t >= m_LastTime ? t - m_LastTime : 0;
@@ -232,7 +239,18 @@ void speedrun_level_change(uint32_t from, uint32_t to, uint32_t entrance, bool n
 		ResetRun();
 		rt_log("goldeneye: speedrun: Save and Quit, the run is reset");
 	}
+	m_ChangeTo = to;
 	m_MenuSaved = false;
+}
+
+void speedrun_mission_end()
+{
+	uint32_t level = ld32(kCurrentLevel);
+	std::lock_guard<std::mutex> hold(g_lock);
+	if (!m_Running || m_Between || MissionOf(level) != m_Index) return;
+	m_Between = true;
+	m_ChangeTo = 0;
+	m_LastClock = Clock::now();
 }
 
 void speedrun_menu_save()

@@ -46,13 +46,17 @@ execute_process(COMMAND git describe --tags --match "v*" --always WORKING_DIRECT
                 OUTPUT_VARIABLE GE_VERSION OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
 execute_process(COMMAND git status --porcelain --untracked-files=no --ignore-submodules=all WORKING_DIRECTORY ${GE_ROOT}
                 OUTPUT_VARIABLE GE_CHANGES OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+# the commit too, for the updater (launcher/update.cpp): empty with changes, nothing to compare
+execute_process(COMMAND git rev-parse HEAD WORKING_DIRECTORY ${GE_ROOT}
+                OUTPUT_VARIABLE GE_COMMIT OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
 if(NOT GE_VERSION)
   set(GE_VERSION "unknown")
 elseif(GE_CHANGES)
   string(APPEND GE_VERSION "-dirty")
+  set(GE_COMMIT "")
 endif()
 file(CONFIGURE OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/ge_gen/ge_version.h
-     CONTENT "#define GE_VERSION \"${GE_VERSION}\"\n" @ONLY)
+     CONTENT "#define GE_VERSION \"${GE_VERSION}\"\n#define GE_COMMIT \"${GE_COMMIT}\"\n" @ONLY)
 if(WIN32)
   enable_language(RC)
   target_sources(wiiboot PRIVATE ${GE_PORT}/package/win/icon.rc)

@@ -131,6 +131,11 @@ You'll need a 64-bit Windows or Linux, a CPU with AVX2 (roughly 2015 or newer) a
 ## Something broke?
 Open an issue with your `run.log`, and on Linux the `report.txt` from the folder in `crashes/` (just that file, the rest is a memory dump of the game). Please mention the version too, it's at the bottom of the F1 menu and near the top of `run.log`. A crash on a build that's a week old might already be fixed!
 
+# Discord
+Whilst this project has no specific discord server for it, there are two alternative servers you can join instead.
+[Speedrun Discord](https://discord.gg/kExWmqm)
+[Multiplayer Discord](https://discord.gg/bpU3bsEqpP)
+
 # License
 Copyright (c) 2026 Mars
 
@@ -148,4 +153,4 @@ A couple of things in here aren't mine to license though:
 - [Dolphin](https://dolphin-emu.org) for the signature database and as the reference for how the console behaves.
 - [SDL](https://libsdl.org).
 - [Dear ImGui](https://github.com/ocornut/imgui) for the F1 menu (with the Roboto font that comes with it).
-- Special thanks to FitterSpace and AlpineEscape for testing.
+- Special thanks to FitterSpace, AlpineEscape and verif for testing.

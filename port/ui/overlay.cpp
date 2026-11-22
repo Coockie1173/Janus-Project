@@ -15,6 +15,7 @@
 #include "ge.h"
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cfloat>
 #include <cstdio>
@@ -167,7 +168,8 @@ void stamina_bar(const Stamina& s) {
     dl->AddRectFilled(ImVec2(at, y - 5 * u), ImVec2(at + wide, y + h + 5 * u), IM_COL32(255, 255, 255, 255));
 }
 
-//the speedometer (bunnyhop.cpp: bunnyhopping, or the cheat), under the crosshair: across the floor, a second
+//the speedometer (bunnyhop.cpp: bunnyhopping, or the cheat), under the crosshair: across the floor, a second.
+//on rules that aren't the defaults (bhop_custom_now) it flashes grey with the level timer (tweaks.cpp)
 void speedometer(float speed) {
     char text[16];
     std::snprintf(text, sizeof text, "%.1f", speed);
@@ -179,6 +181,8 @@ void speedometer(float speed) {
     ImVec2 at(std::floor((screen.x - box.x) / 2), std::floor(screen.y / 2 + 30 * u));
     float hot = std::clamp((speed - 4.2f) / 12.0f, 0.0f, 1.0f); //white at a run, orange as it builds
     ImU32 colour = IM_COL32(255, (int)(255 - 80 * hot), (int)(255 - 200 * hot), 255);
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(GameClock::now().time_since_epoch()).count();
+    if (ms % 1000 < 500 && bhop_custom_now()) colour = IM_COL32(192, 192, 192, 255); //the timer's 0x60 of the hud's 0x80
     ImDrawList* dl = ImGui::GetBackgroundDrawList();
     dl->AddText(font, size, ImVec2(at.x + 2 * u, at.y + 2 * u), IM_COL32(0, 0, 0, 180), text);
     dl->AddText(font, size, at, colour, text);

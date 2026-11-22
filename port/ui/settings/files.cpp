@@ -45,6 +45,7 @@ NextStart& next_start() {
         n.fullscreen = flag("LAUNCH_FULLSCREEN", false);
         n.crash_dumps = flag("LAUNCH_CRASHDUMP", true);
         n.gx_thread = flag("LAUNCH_GXTHREAD", true);
+        n.update_check = flag("LAUNCH_UPDATECHECK", true);
     }
     return n;
 }
@@ -99,12 +100,14 @@ void save_launch_settings() {
     char forced_text[16];
     std::snprintf(forced_text, sizeof forced_text, "%08X", forced_weapon_id());
     values.push_back({"LAUNCH_FORCEDWEAPON", forced_text});
+    values.push_back({"LAUNCH_RANDOMIZERPACKSOFF", randomizer_packs_off()});
     const NextStart& next = next_start();
     values.push_back({"LAUNCH_ONLINE", next.online ? "1" : "0"});
     values.push_back({"LAUNCH_FASTSTART", next.fast_start ? "1" : "0"});
     values.push_back({"LAUNCH_FULLSCREEN", next.fullscreen ? "1" : "0"});
     values.push_back({"LAUNCH_CRASHDUMP", next.crash_dumps ? "1" : "0"});
     values.push_back({"LAUNCH_GXTHREAD", next.gx_thread ? "1" : "0"});
+    values.push_back({"LAUNCH_UPDATECHECK", next.update_check ? "1" : "0"});
     if (g_fps_changed) values.push_back({"LAUNCH_FPS", std::to_string(fps_limit())}); //"auto" stays until it's changed
     auto lines = read_lines(GE_SETTINGS_FILE);
     if (lines.empty()) lines.push_back("# written by the launcher, read when the game is started");

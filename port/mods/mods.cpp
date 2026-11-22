@@ -450,6 +450,8 @@ PPCFunc orig_mission_page = nullptr;
 
 void MissionPage(PPCContext& c)
 {
+	speedrun_mission_end();
+	struct Drawing { Drawing() { custom_page_drawing(true); } ~Drawing() { custom_page_drawing(false); } } drawing; //007 Custom's settings can be up in it
 	const uint32_t levels = kCurrentLevel, last = ld32(kLastLevel);
 	const uint32_t row = RowOf(ld32(levels + kLevelRows), ld32(levels + kLevelRowCount), kLevelRowSize, kStandIn);
 	const auto& files = mod_files();
@@ -850,6 +852,18 @@ void modpack_select(int pack)
 {
 	if (!ValidPack(pack) || pack == g_active || g_slots.empty()) return;
 	Install(pack);
+}
+
+//the file of the hash the game gets now is the pack's: its own, or another pack's with the same bytes
+bool modpack_serves(int pack, uint32_t hash)
+{
+	const auto slot = std::find_if(g_slots.begin(), g_slots.end(), [&](const Slot& s) { return s.hash == hash; });
+	if (!ValidPack(pack) || slot == g_slots.end() || slot->mods[pack] < 0 || slot->shown < 0) return false;
+	if (slot->shown == pack) return true;
+	static std::map<std::pair<std::string, std::string>, bool> same;
+	const std::string a = ModOf(*slot, slot->shown).path, b = ModOf(*slot, pack).path;
+	const auto known = same.find({ a, b });
+	return known != same.end() ? known->second : same[{ a, b }] = SameBytes(a, b);
 }
 
 void install_mods()

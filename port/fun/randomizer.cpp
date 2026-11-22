@@ -37,7 +37,11 @@
 //
 //No Attachment Limit (experimental): any of them together
 //Forced Weapon: with the randomizer off, one of the weapons for the player and every guard, without
-//attachments. the names are the rows' +0x190 texts
+//attachments. the names are the rows' +0x190 texts, a custom one's with its pack
+//every modpack's custom weapons are in both, whichever pack is installed (the weapons table has them
+//all), unless its pack is switched off (For Fun > Modpack Weapons). the same name in two packs is
+//one weapon to the randomizer. a gun of its own is a file of its pack: one the game gets another
+//pack's file for (the same hash, other bytes) is left out
 //the Golden Gun has no model a guard holds (+0x178 FFFFFFFF). it gets the one Golden Gun mode lays
 //in the level, 0400293D of o_guns.edb, so guards can have it, forced or random. ge_gun_parts shows
 //the parts of a gun model its list names (805730D0: the body, the attachments by the flags) and
@@ -47,15 +51,18 @@
 //player's from +0x44..+0x50 (the Golden Gun's 1000), a guard's from +0x14C..+0x158 (near damage, near
 //and far range, far damage), a pistol's 13.125 for the Golden Gun. the guard's damages are made a kill
 //GE_WEAPON_RANDOMIZER=1 starts with it on, GE_NO_ATTACHMENT_LIMIT=1 that, GE_RANDOMIZER_SEED=n the same picks every run,
-//GE_RANDOMIZER_WEAPON=id[:flags] the forced weapon (the model flags in hex), GE_TRACE=1 logs every swap and a guard that didn't take its gun
+//GE_RANDOMIZER_PACKS_OFF=a/b the packs whose weapons are left out, GE_RANDOMIZER_WEAPON=id[:flags] the forced weapon (the model flags in hex), GE_TRACE=1 logs every swap and a guard that didn't take its gun
 #include "ge.h"
 #include <algorithm>
 #include <sstream>
 #include <atomic>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <map>
+#include <memory>
 #include <random>
+#include <string>
 #include <vector>
 
 namespace ge
@@ -122,6 +129,8 @@ std::map<uint32_t, Pick> g_swapped; //the level's weapon -> what the player got 
 uint32_t g_swappedLevel = 0, g_swappedPlayer = 0;
 std::atomic<uint32_t> g_forced{0}; //Forced Weapon's id, 0 for none
 uint32_t g_forcedFlags = 0; //GE_RANDOMIZER_WEAPON's flags
+std::unique_ptr<std::atomic<bool>[]> g_packOn; //by modpack, its weapons are in
+std::vector<std::string> g_forcedNames; //the custom ones', "Klobb (classicspack)"
 
 bool Active() { return (g_on || g_forced) && !multiplayer_game(); }
 
@@ -139,12 +148,37 @@ uint32_t RowOf(uint32_t id)
 
 bool IsWeapon(uint32_t id) { return std::find(std::begin(kGiveAll), std::end(kGiveAll), id) != std::end(kGiveAll) || custom_weapon(id); }
 
-//the give-all's weapons, then the custom ones of mods/weapons
+bool PackOn(int pack) { return pack < 0 || pack >= modpack_count() || !g_packOn || g_packOn[pack]; }
+
+//a custom weapon may be handed out: its pack is on and its gun is drawn
+bool CustomOffered(int n) { return PackOn(custom_weapon_pack(n)) && custom_weapon_drawn(n); }
+
+std::string Lowered(std::string s)
+{
+	for (char& ch : s) ch = (char)std::tolower((unsigned char)ch);
+	return s;
+}
+
+//the give-all's weapons, then the custom ones of the packs that are on, a name once
 std::vector<uint32_t> Weapons()
 {
 	std::vector<uint32_t> ids(std::begin(kGiveAll), std::end(kGiveAll));
-	for (int i = 0; i < custom_weapon_count(); ++i) ids.push_back(custom_weapon_id(i));
+	std::vector<std::string> names;
+	for (int i = 0; i < custom_weapon_count(); ++i)
+	{
+		const std::string name{ Lowered(custom_weapon_name(i)) };
+		if (!CustomOffered(i) || std::find(names.begin(), names.end(), name) != names.end()) continue;
+		names.push_back(name);
+		ids.push_back(custom_weapon_id(i));
+	}
 	return ids;
+}
+
+//the forced weapon's list: the give-all's, then every pack's custom ones
+uint32_t ForcedId(int weapon)
+{
+	if (weapon > kWeaponCount) return custom_weapon_id(weapon - kWeaponCount - 1);
+	return weapon > 0 ? kGiveAll[weapon - 1] : 0;
 }
 
 //the model flags of the attachments the loadout menu allows on the weapon
@@ -203,7 +237,7 @@ Pick RandomWeapon(const PPCContext& c, bool guard, const std::vector<uint32_t>& 
 {
 	if (!g_on)
 	{
-		const uint32_t forced{ g_forced }, row{ forced ? RowOf(forced) : 0 };
+		const uint32_t forced{ g_forced }, row{ forced && forced_weapon_offered(forced_weapon()) ? RowOf(forced) : 0 };
 		if (!row) return {0, 0, 0};
 		if (guard && !HasModel(row)) return {0, 0, 0};
 		return {forced, row, g_forcedFlags};
@@ -510,23 +544,46 @@ bool weapon_randomizer() { return g_on; }
 void set_weapon_randomizer(bool on) { g_on = on; }
 bool no_attachment_limit() { return g_unlimited; }
 void set_no_attachment_limit(bool on) { g_unlimited = on; }
-//the give-all's, then the custom ones
 int forced_weapon()
 {
-	const std::vector<uint32_t> ids{ Weapons() };
-	const auto found{ std::find(ids.begin(), ids.end(), g_forced.load()) };
-	return found == ids.end() ? 0 : (int)(found - ids.begin()) + 1;
+	for (int weapon = 1; weapon < forced_weapon_count(); ++weapon)
+		if (ForcedId(weapon) == g_forced) return weapon;
+	return 0;
 }
-void set_forced_weapon(int weapon)
-{
-	const std::vector<uint32_t> ids{ Weapons() };
-	g_forced = weapon > 0 && weapon <= (int)ids.size() ? ids[weapon - 1] : 0;
-}
+void set_forced_weapon(int weapon) { g_forced = weapon > 0 && weapon < forced_weapon_count() ? ForcedId(weapon) : 0; }
 int forced_weapon_count() { return kWeaponCount + custom_weapon_count() + 1; }
 const char* forced_weapon_name(int weapon)
 {
-	if (weapon > kWeaponCount) return custom_weapon_name(weapon - kWeaponCount - 1);
+	if (weapon > kWeaponCount)
+	{
+		const size_t n = size_t(weapon - kWeaponCount - 1);
+		return n < g_forcedNames.size() ? g_forcedNames[n].c_str() : "";
+	}
 	return weapon > 0 ? kNames[weapon - 1] : "Off";
+}
+bool forced_weapon_offered(int weapon) { return weapon <= kWeaponCount || CustomOffered(weapon - kWeaponCount - 1); }
+bool randomizer_pack(int pack) { return PackOn(pack); }
+void set_randomizer_pack(int pack, bool on)
+{
+	if (g_packOn && pack >= 0 && pack < modpack_count()) g_packOn[pack] = on;
+}
+std::string randomizer_packs_off()
+{
+	std::string off;
+	for (int pack = 0; pack < modpack_count(); ++pack)
+		if (!PackOn(pack)) off += (off.empty() ? "" : "/") + modpack_name(pack);
+	return off;
+}
+std::string randomizer_pack_weapons(int pack)
+{
+	std::string list;
+	for (int i = 0; i < custom_weapon_count(); ++i)
+	{
+		if (custom_weapon_pack(i) != pack) continue;
+		list += (list.empty() ? "" : ", ") + std::string(custom_weapon_name(i));
+		if (!custom_weapon_drawn(i)) list += " (its gun is another pack's file, left out)";
+	}
+	return list;
 }
 uint32_t forced_weapon_id() { return g_forced; }
 
@@ -549,6 +606,14 @@ void install_randomizer()
 	g_on = std::atoi(saved_setting("GE_WEAPON_RANDOMIZER", "LAUNCH_WEAPONRANDOMIZER").c_str()) != 0;
 	g_trace = std::getenv("GE_TRACE") != nullptr;
 	g_unlimited = std::atoi(saved_setting("GE_NO_ATTACHMENT_LIMIT", "LAUNCH_NOATTACHMENTLIMIT").c_str()) != 0;
+	g_packOn = std::make_unique<std::atomic<bool>[]>((size_t)std::max(modpack_count(), 1));
+	{
+		const std::string off{ "/" + Lowered(saved_setting("GE_RANDOMIZER_PACKS_OFF", "LAUNCH_RANDOMIZERPACKSOFF")) + "/" };
+		for (int pack = 0; pack < modpack_count(); ++pack)
+			g_packOn[pack] = off.find("/" + Lowered(modpack_name(pack)) + "/") == std::string::npos;
+	}
+	for (int i = 0; i < custom_weapon_count(); ++i)
+		g_forcedNames.push_back(std::string(custom_weapon_name(i)) + " (" + modpack_name(custom_weapon_pack(i)) + ")");
 	{
 		const std::string forced{ saved_setting("GE_RANDOMIZER_WEAPON", "LAUNCH_FORCEDWEAPON") };
 		char* rest = nullptr;

@@ -1,5 +1,5 @@
 diff --git a/recomp/__main__.py b/recomp/__main__.py
-index db1b158..202b22a 100644
+index db1b158..5f0cc97 100644
 --- a/recomp/__main__.py
 +++ b/recomp/__main__.py
 @@ -22,6 +22,7 @@ boundaries and the hook names. The generated code needs wiikit/runtime/ppc.h.
@@ -60,11 +60,11 @@ index db1b158..202b22a 100644
 +
 +
 +def generate(img, out, per_file=8000, comments=True, hook_files=(), modules=(), log=print,
-+             cr_live=True, cr_check=False, ps_live=True, ps_check=False):
++             cr_live=True, cr_check=False, ps_live=True, ps_check=False, gpr_live=True):
      t0 = time.time()
      prog = Program(img, log=log)
      entries = set(prog.entries)
-@@ -177,21 +223,51 @@ def generate(img, out, per_file=8000, comments=True, hook_files=(), modules=(),
+@@ -177,28 +223,68 @@ def generate(img, out, per_file=8000, comments=True, hook_files=(), modules=(),
          files.append(name)
          buf, count, idx = [], 0, idx + 1
  
@@ -102,6 +102,10 @@ index db1b158..202b22a 100644
 +    if ps_live:
 +        from . import pslive
 +        ps = pslive.analyse(prog, emitted, log)
++    gpr = None
++    if gpr_live:
++        from . import gprlive
++        gpr = gprlive.Gprs(prog, emitted, hooks, log)
 +    for e in prog.entries:
 +        unit, body = prog.body(e)
 +        fn = FnCtx(prog, e, entries, next((m for m in modules if m.contains(e)), None))
@@ -112,17 +116,32 @@ index db1b158..202b22a 100644
 +        live = cr.live_after(e) if cr else None
 +        ps_after = ps.live_after(e) if ps else None
 +        ps_saves = pslive.prologue_saves(prog, e) if ps else ()
-+        for (a, ins), code in zip(body, emitted.pop(e)):
++        regs = gprlive.Fn(gpr, e) if gpr else None
++        if regs and regs.head():
++            lines.append("    " + regs.head())
++        for k, ((a, ins), code) in enumerate(zip(body, emitted.pop(e))):
 +            if a in labels:
 +                lines.append(f"L_{a:08X}:")
 +            if cr:
 +                code = _cr_narrow(code, ins, a, live[a], cr_check)
 +            if ps:
 +                code = pslive.narrow(code, ps_after[a], a, ps_check, a in ps_saves)
++            if regs:
++                code = regs.lines(k, code)
              note = f"  // {a:08X} {_text(ins, a)}" if comments else ""
              lines.append("    " + code[0] + note)
              lines.extend("    " + x for x in code[1:])
-@@ -211,7 +287,7 @@ def generate(img, out, per_file=8000, comments=True, hook_files=(), modules=(),
+         last = body[-1][1] if body else None
+         if last is None or not E.terminates(last):
+-            lines.append("    " + fn.jump(unit.end, unit.end) if unit.end in entries else
+-                         f'    ppc_unimplemented(c, 0x{unit.end:08X}u, "fell off the end"); return;')
++            end = (fn.jump(unit.end, unit.end) if unit.end in entries else
++                   f'ppc_unimplemented(c, 0x{unit.end:08X}u, "fell off the end"); return;')
++            lines.append("    " + (regs.extra(end) if regs else end))
+         lines.append("}\n")
+         buf.append("\n".join(lines))
+         count += len(body)
+@@ -211,7 +297,7 @@ def generate(img, out, per_file=8000, comments=True, hook_files=(), modules=(),
          f.write("#pragma once\n#include \"ppc.h\"\n\n")
          f.write("extern uint32_t g_rso_base[];   // where each RSO module is loaded (rso.cpp)\n\n")
          for e in prog.entries:
@@ -131,7 +150,7 @@ index db1b158..202b22a 100644
      with Out(os.path.join(out, "table.cpp")) as f:
          f.write('#include "funcs.h"\n#include <cstddef>\n\n')
          f.write("extern const PPCFuncEntry g_ppc_funcs[] = {\n")
-@@ -223,9 +299,9 @@ def generate(img, out, per_file=8000, comments=True, hook_files=(), modules=(),
+@@ -223,9 +309,9 @@ def generate(img, out, per_file=8000, comments=True, hook_files=(), modules=(),
          f.write(HOOKS_HEAD)
          for a, name in sorted(hooks.items()):
              f.write(f"// {name}\n"
@@ -143,7 +162,7 @@ index db1b158..202b22a 100644
                      f"else orig_{a:08X}(c); }}\n\n")
          f.write("extern const PPCHook g_ppc_hooks[] = {\n")
          for a, name in sorted(hooks.items()):
-@@ -315,6 +391,14 @@ def main():
+@@ -315,6 +401,16 @@ def main():
      ap.add_argument("--symbols", metavar="TSV",
                      help="names for a stripped executable (addr, ..., name); its functions "
                           "are found by discovery (recomp/discover.py)")
@@ -151,6 +170,8 @@ index db1b158..202b22a 100644
 +                    help="every single-precision result fills ps1 (recomp/pslive.py follows which are read)")
 +    ap.add_argument("--ps-check", action="store_true",
 +                    help="a ps1 taken for dead holds a mark, and reading it stops the game")
++    ap.add_argument("--no-gpr-live", action="store_true",
++                    help="every GPR lives in the context (recomp/gprlive.py keeps them in locals)")
 +    ap.add_argument("--no-cr-live", action="store_true",
 +                    help="every compare stores all four CR bits (recomp/crlive.py follows which are read)")
 +    ap.add_argument("--cr-check", action="store_true",
@@ -158,23 +179,23 @@ index db1b158..202b22a 100644
      a = ap.parse_args()
      img = Image(a.image)
      modules, module_names = [], {}
-@@ -328,7 +412,9 @@ def main():
+@@ -328,7 +424,9 @@ def main():
              names.setdefault(v, n)
          symbolise(img, names)
      generate(img, a.out, a.per_file, not a.no_comments,
 -             [os.path.join(RUNTIME, "hooks.txt")] + a.hooks, modules)
 +             [os.path.join(RUNTIME, "hooks.txt")] + a.hooks, modules,
 +             cr_live=not a.no_cr_live, cr_check=a.cr_check,
-+             ps_live=not a.no_ps_live, ps_check=a.ps_check)
++             ps_live=not a.no_ps_live, ps_check=a.ps_check, gpr_live=not a.no_gpr_live)
  
  
  if __name__ == "__main__":
 diff --git a/recomp/crlive.py b/recomp/crlive.py
 new file mode 100644
-index 0000000..ddc7462
+index 0000000..920169d
 --- /dev/null
 +++ b/recomp/crlive.py
-@@ -0,0 +1,357 @@
+@@ -0,0 +1,361 @@
 +"""Which condition register bits an instruction's result is still read from.
 +
 +A compare writes four CR bits and the branch after it reads one; the next
@@ -287,19 +308,21 @@ index 0000000..ddc7462
 +    """live(entry, addr): the CR bits read after the instruction at addr, before they are written."""
 +
 +    def __init__(self, prog, code, log=print, use_def=use_def, saved=SAVED, abi_in=SAVED | 1 << 6,
-+                 abi_out=ALL, pure_use=False, name=None):
++                 abi_out=ALL, pure_use=False, name=None, fixed_use=None):
 +        """code: {entry: [lines of each instruction of its body]}. The defaults follow CR bits;
 +        another 32-bit register set (pslive.py) gives its own use_def(lines, ins, following),
 +        the bits a function of unknown callers must keep (saved) and those an indirect
 +        call's target may read (abi_in) and its caller read after it (abi_out). With pure_use
 +        a function's use leaves out what only its caller reads after it returns (a call passes
 +        that through already): bits the callee never touches stay out of every caller's
-+        "live before the call"."""
++        "live before the call". fixed_use {entry: bits}: functions whose code is not what runs
++        (hooked ones: native code) and the use they are taken to have."""
 +        self.prog = prog
 +        self.code = code
 +        self.use_def = use_def
 +        self.abi_out = abi_out
 +        self.pure_use = pure_use
++        self.fixed_use = fixed_use or {}
 +        self.conds = {}
 +        entries = prog.entries
 +        self.entry_set = set(entries)
@@ -453,6 +476,8 @@ index 0000000..ddc7462
 +                break
 +            changed = True
 +        use0 = self._pure(entry) if self.pure_use else (live[0] if n else None)
++        if entry in self.fixed_use:
++            use0 = self.fixed_use[entry]
 +        if n and use0 != self.use[entry]:
 +            self.use[entry] = use0
 +            changed = True
@@ -801,6 +826,259 @@ index e7189b8..2ffec1e 100644
      if op in ("psq_lx", "psq_lux", "psq_stx", "psq_stux"):
          fn_ = "psq_load" if op.startswith("psq_l") else "psq_store"
          upd = f" c.r[{f['A']}] = ea;" if op.endswith("ux") else ""
+diff --git a/recomp/gprlive.py b/recomp/gprlive.py
+new file mode 100644
+index 0000000..01cf777
+--- /dev/null
++++ b/recomp/gprlive.py
+@@ -0,0 +1,247 @@
++"""Guest GPRs as C++ locals, written to the context only where something else reads them.
++
++Every recompiled function works on c.r[n]. The context is `restrict`, so between calls the
++C++ compiler keeps them in host registers already; but a call takes the context, so before
++it every register the function changed is stored, and after it every one still needed is
++loaded again: the compiler can't know what the callee reads or writes. Nor what a caller
++reads after a return, so each register changed is stored there too.
++
++Here a function's registers that no call in it may overwrite while they are still needed
++(temporaries, arguments, results, values kept across calls that leave them alone) are locals
++(r0, r3...); the others keep the context as their home, as before (Fn). Locals go to the
++context only:
++- before a direct call, with what the callee reads before writing (crlive.Analysis's
++  `use`, pure: its own reads and its callees') and what it may write that is read after
++  the call (the callee may write it on some paths only: what it stores then has to be
++  the caller's value on the others); after it, those it may write are loaded back.
++  "May write" (mod) is every register written in the callee or anything it calls;
++- before a return, with what a caller reads after the call (`ret`) and this function wrote;
++- before an indirect call or jump, with what any indirect target reads (only ABI
++  registers: r2-r10, r13, r14-r31) and everything read after; the callee may write anything.
++  Of what an indirect callee leaves, a caller reads only r3/r4 and the callee-saved ones (a
++  volatile register after a call is undefined on the hardware too: varargs calls do pass
++  their junk on to OSReport). Without this, any such read after any indirect call would be
++  stored at every function's return;
++- before the runtime gives up (a trap, an unknown target), with everything: the crash
++  report shows them;
++- around an interrupt check (a loop's PPC_POLL when one is pending, PPC_IDLE, mtmsr), all
++  of them both ways: the thread may park in the handler, and a saved state loaded meanwhile
++  writes the registers it was interrupted with.
++
++Nothing about the ABI is assumed for direct calls: callee-saved registers a callee saves
++and restores are written by it, so they are synced around it as now. What is saved: dead
++temporaries are never stored, a register a callee leaves alone stays in a host register
++across the call. Measured (deterministic Dam run, the same 3163 frames): 2-4% less time.
++The recompiler's --no-gpr-live goes back to the context for everything.
++
++Native code. A hooked function's slot may run native code: it reads what the ABI passes and
++may write anything (a saved state is loaded from inside a hook: every register is taken
++back from the context after such a call, see runtime/state.cpp). The runtime's own callers
++of guest code (callbacks, a thread's entry) read r3/r4 and the callee-saved registers.
++r1 stays in the context (an interrupt reads it: PPC_COMMIT); ppc_lswx/ppc_stswx address
++registers by number, and a function with them keeps all of its in the context.
++"""
++import re
++
++from . import crlive
++from .crlive import CALL, ICALL, TAIL, ITAIL, SWITCH
++
++ALL = 0xFFFFFFFF
++
++
++def _bits(*regs):
++    m = 0
++    for r in regs:
++        m |= 1 << r
++    return m
++
++
++CALLEE_SAVED = _bits(*range(14, 32))
++ABI_IN = _bits(*range(1, 11), 13) | CALLEE_SAVED           # what an indirect target may read
++SAVED = _bits(1, 2, 3, 4, 13) | CALLEE_SAVED                # what the runtime reads after a callback
++STACK = _bits(1)
++
++_REF = re.compile(r"c\.r\[(\d+)\]")
++_OPAQUE = ("ppc_lswx(", "ppc_stswx(")
++
++
++_REF_OR_END = re.compile(r"c\.r\[(\d+)\]|;")
++
++
++def _use_def(lines, ins, following):
++    """(read before written, written). Statements run in order and an assignment's
++    right-hand side before its store (the emitted code writes no register conditionally)."""
++    use = d = 0
++    for t in lines:
++        if any(o in t for o in _OPAQUE):
++            return ALL, ALL
++        pending = 0                                       # stores of the statement under way
++        for m in _REF_OR_END.finditer(t):
++            if m.group(0) == ";":
++                d |= pending
++                pending = 0
++                continue
++            bit = 1 << int(m.group(1))
++            if t.startswith(" = ", m.end()):
++                pending |= bit
++            elif not d & bit:
++                use |= bit
++        d |= pending
++    return use, d
++
++
++class Gprs:
++    def __init__(self, prog, code, hooks, log=print):
++        self.prog = prog
++        self.hooks = set(hooks)
++        self.opaque = {e for e, rows in code.items() if any(o in x for row in rows for x in row for o in _OPAQUE)}
++        self.a = crlive.Analysis(prog, code, log, use_def=_use_def, saved=SAVED, abi_in=ABI_IN,
++                                 abi_out=SAVED, pure_use=True, name="GPR",
++                                 fixed_use={e: ABI_IN for e in self.hooks})
++        self.refs = {}
++        for e, rows in code.items():
++            m = 0
++            for row in rows:
++                for x in row:
++                    for r in _REF.finditer(x):
++                        m |= 1 << int(r.group(1))
++            self.refs[e] = m
++        self._mod()
++
++    def _mod(self):
++        a = self.a
++        own, deps = {}, {}
++        for e, (rows, end) in a.fns.items():
++            m, ds = 0, set()
++            for use, d, kind, arg in rows:
++                m |= d
++                if kind in (CALL, TAIL):
++                    ds.add(arg[0])
++                elif kind in (ICALL, ITAIL, SWITCH):
++                    m = ALL
++            if end is not None and end >= 0:
++                ds.add(end)
++            if e in self.hooks or e in self.opaque:
++                m = ALL
++            own[e], deps[e] = m, ds
++        self.own = {e: m for e, m in own.items()}
++        mod = dict(own)
++        changed = True
++        while changed:
++            changed = False
++            for e, ds in deps.items():
++                m = mod[e]
++                if m == ALL:
++                    continue
++                for t in ds:
++                    m |= mod[t]
++                if m != mod[e]:
++                    mod[e] = m
++                    changed = True
++        # a hooked function's slot is what callers reach
++        for e in self.hooks:
++            mod[e] = ALL
++        self.mod = mod
++
++    def local_set(self, e):
++        if e in self.opaque:
++            return 0
++        return self.refs[e] & ~STACK
++
++    def ret_self(self, e):
++        return self.a.ret[e] | self.a.ret_any
++
++
++_SYNC = re.compile(r"(?P<tail>f_(?P<tt>[0-9A-F]{8})\(c\); return;)|(?P<itail>ppc_call_indirect\(c, [^;]*\); return;)"
++                   r"|(?P<call>f_(?P<ct>[0-9A-F]{8})\(c\);)|(?P<icall>ppc_call_indirect\(c, [^;]*\);)"
++                   r"|(?P<ret>\breturn;)|(?P<die>\b(?:ppc_unimplemented|ppc_trap)\()"
++                   r"|(?P<poll>PPC_POLL\(c\);)|(?P<park>(?:PPC_IDLE\(c\)|ppc_mtmsr\(c, [^;]*\));)")
++_LOCAL = re.compile(r"c\.r\[(\d+)\]")
++
++
++def _store(mask):
++    return " ".join(f"c.r[{k}] = r{k};" for k in range(32) if mask >> k & 1)
++
++
++def _load(mask):
++    return " ".join(f"r{k} = c.r[{k}];" for k in range(32) if mask >> k & 1)
++
++
++class Fn:
++    """The rewriting of one function's lines."""
++
++    def __init__(self, g, entry):
++        self.g, self.e = g, entry
++        self.L = g.local_set(entry)
++        rows, _ = g.a.fns[entry]
++        self.live = g.a.out[entry]
++        # A register still needed after a call that may write it keeps the context as its home:
++        # as a local it would be synced around the call all the same, and in a big function the
++        # compiler spills it to the host stack too (both copies kept: measured slower, the code
++        # a quarter bigger). What is left are temporaries, arguments, results and registers the
++        # calls leave alone.
++        for k, (use, d, kind, arg) in enumerate(rows):
++            if kind == ICALL:
++                self.L &= ~self.live[k + 1]
++            elif kind == CALL:
++                self.L &= ~(self.live[k + 1] & g.mod[arg[0]])
++        self.defs = 0
++        for use, d, kind, arg in rows:
++            self.defs |= d
++        self.defs &= self.L
++        self.ret = g.ret_self(entry)
++
++    def head(self):
++        if not self.L:
++            return None
++        return "uint32_t " + ", ".join(f"r{k} = c.r[{k}]" for k in range(32) if self.L >> k & 1) + ";"
++
++    def _wrap(self, store, body, load=0):
++        s, l = _store(store & self.defs), _load(load & self.L)
++        if not s and not l:
++            return body
++        return "{ " + " ".join(x for x in (s, body, l) if x) + " }"
++
++    def lines(self, k, code):
++        """The k-th instruction's lines, its registers renamed and the context synced."""
++        if not self.L:
++            return code
++        g, L = self.g, self.L
++        after = self.live[k + 1]
++        out = []
++        for line in code:
++            line = _LOCAL.sub(lambda m: f"r{m.group(1)}" if L >> int(m.group(1)) & 1 else m.group(0), line)
++            out.append(_SYNC.sub(lambda m: self._sync(m, after), line))
++        return out
++
++    def extra(self, line):
++        """A line after the last instruction (the jump off the end into the next function)."""
++        if not self.L:
++            return line
++        return _SYNC.sub(lambda m: self._sync(m, 0), line)
++
++    def _sync(self, m, after):
++        g, a = self.g, self.g.a
++        text = m.group(0)
++        if m.group("tail"):                              # a jump into another function
++            return self._wrap(a.use[int(m.group("tt"), 16)] | self.ret, text)
++        if m.group("itail"):                             # an indirect jump
++            return self._wrap(a.use_any | self.ret, text)
++        if m.group("call"):
++            t = int(m.group("ct"), 16)
++            mod = g.mod[t]
++            return self._wrap(a.use[t] | (after & mod), text, after & mod)
++        if m.group("icall"):
++            return self._wrap(a.use_any | after, text, after)
++        if m.group("ret"):
++            return self._wrap(self.ret, text)
++        if m.group("die"):                               # the runtime gives up: the report shows them
++            return _store(self.defs) + " " + text if self.defs else text
++        # An interrupt may park this thread (the handler reschedules), and a saved state loaded
++        # meanwhile writes its registers (os_state: a thread inside an interrupt gets its outer
++        # context back too): everything goes to the context and comes back from it. For the
++        # loops' poll only when an interrupt is pending.
++        sync = self._wrap(ALL, "ppc_poll(c);" if m.group("poll") else text, ALL)
++        if m.group("poll"):
++            return f"if (PPC_UNLIKELY(g_ppc_pending.load(std::memory_order_relaxed))) {sync}"
++        return sync
 diff --git a/recomp/pslive.py b/recomp/pslive.py
 new file mode 100644
 index 0000000..6e6b7c3
@@ -1618,7 +1896,7 @@ index 6709dd6..8af3664 100644
 +// may have it open): [at, at + size) of it is the parts in order, zeros after them. They must fit
 +bool disc_rewrite(const char* name, uint64_t at, uint64_t size, const std::vector<DiscPart>& parts);
 diff --git a/runtime/gl.h b/runtime/gl.h
-index 3d2da4e..6fce0b7 100644
+index 3d2da4e..2319b53 100644
 --- a/runtime/gl.h
 +++ b/runtime/gl.h
 @@ -6,6 +6,7 @@
@@ -1668,6 +1946,14 @@ index 3d2da4e..6fce0b7 100644
      X(PFNGLTEXTURESUBIMAGE2DPROC, glTextureSubImage2D)                                              \
      X(PFNGLTEXTUREPARAMETERIPROC, glTextureParameteri)                                              \
      X(PFNGLBINDTEXTUREUNITPROC, glBindTextureUnit)                                                  \
+@@ -81,6 +96,7 @@
+     X(PFNGLNAMEDFRAMEBUFFERTEXTUREPROC, glNamedFramebufferTexture)                                  \
+     X(PFNGLBINDFRAMEBUFFERPROC, glBindFramebuffer)                                                  \
+     X(PFNGLBLITNAMEDFRAMEBUFFERPROC, glBlitNamedFramebuffer)                                        \
++    X(PFNGLBLITFRAMEBUFFERPROC, glBlitFramebuffer)                                                  \
+     X(PFNGLCHECKNAMEDFRAMEBUFFERSTATUSPROC, glCheckNamedFramebufferStatus)
+ 
+ #define WIIKIT_GL_DECLARE(T, n) extern T n;
 diff --git a/runtime/gx.cpp b/runtime/gx.cpp
 index a6b37f2..5317653 100644
 --- a/runtime/gx.cpp
@@ -5988,10 +6274,10 @@ index 8a4e097..8b1b1a8 100644
  uint64_t ppc_timebase() { return 0; }
 diff --git a/runtime/state.cpp b/runtime/state.cpp
 new file mode 100644
-index 0000000..e1d3d88
+index 0000000..5f20bc9
 --- /dev/null
 +++ b/runtime/state.cpp
-@@ -0,0 +1,225 @@
+@@ -0,0 +1,226 @@
 +// wiikit runtime — saved states: the whole machine between two of the game's frames.
 +//
 +// Recompiled code runs as host code: a guest thread is a host thread, and where it is in its
@@ -6001,7 +6287,8 @@ index 0000000..e1d3d88
 +// call chain (the saved LRs up its stack): a state is only put back while every thread is
 +// parked at the same chain as when it was taken, so its host stack is the one the state's
 +// registers and memory go with (recompiled code keeps nothing of the guest's in host frames
-+// across a call). A thread that came or went, or waits somewhere else, refuses the load.
++// across a call that can reach native code or an interrupt: recomp/gprlive.py syncs every
++// register around those). A thread that came or went, or waits somewhere else, refuses the load.
 +//
 +// What a state holds: MEM1 and MEM2 (pages of zeros left out), the threads, the clock (only
 +// in deterministic mode, where it is virtual and every device's time goes by it), every
@@ -6218,7 +6505,7 @@ index 0000000..e1d3d88
 +    return true;
 +}
 diff --git a/runtime/video.cpp b/runtime/video.cpp
-index 5726093..d5ee874 100644
+index 5726093..a078127 100644
 --- a/runtime/video.cpp
 +++ b/runtime/video.cpp
 @@ -46,7 +46,7 @@ constexpr int EFB_W = 640, EFB_H = 528;
@@ -6346,8 +6633,20 @@ index 5726093..d5ee874 100644
  bool dump_ps = false;                              // WIIKIT_SHADERDUMP: log the next uniforms
  
  int32_t s11(uint32_t v) { return (int32_t)((v & 0x7FF) << 21) >> 21; }
-@@ -225,12 +291,22 @@ void save_program(GLuint p, uint64_t hash) {
+@@ -223,14 +289,34 @@ void save_program(GLuint p, uint64_t hash) {
+     }
+ }
  
++// a colour blit to or from the window's framebuffer (0) through the bound framebuffers, not the
++// named call: drivers that mishandle 0 in glBlitNamedFramebuffer leave the window black (an
++// Intel HD 530 under Windows ran the game fine behind a black window)
++void blit_bound(GLuint src, GLuint dst, int sx0, int sy0, int sx1, int sy1, int dx0, int dy0, int dx1, int dy1, GLenum filter) {
++    glBindFramebuffer(GL_READ_FRAMEBUFFER, src);
++    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, dst);
++    glBlitFramebuffer(sx0, sy0, sx1, sy1, dx0, dy0, dx1, dy1, GL_COLOR_BUFFER_BIT, filter);
++    glBindFramebuffer(GL_FRAMEBUFFER, 0);
++}
++
  void ensure_tex(Tex& t, int w, int h, int levels) {
      if (t.name && t.w == w && t.h == h && t.levels == levels) return;
 -    if (t.name) glDeleteTextures(1, &t.name);
@@ -6370,7 +6669,7 @@ index 5726093..d5ee874 100644
  void APIENTRY gl_debug(GLenum, GLenum type, GLuint, GLenum severity, GLsizei, const GLchar* msg, const void*) {
      if (severity == GL_DEBUG_SEVERITY_NOTIFICATION) return;
      rt_log("gl: %s%s", type == GL_DEBUG_TYPE_ERROR ? "error: " : "", msg);
-@@ -295,11 +371,117 @@ void main() {
+@@ -295,11 +381,117 @@ void main() {
  )";
  
  // ---- register side effects ----------------------------------------------------------------------
@@ -6489,7 +6788,7 @@ index 5726093..d5ee874 100644
      glEnable(GL_SCISSOR_TEST);
      glScissor(x * S, y * S, w * S, h * S);
      glColorMask(cu, cu, cu, au || !has_alpha);
-@@ -318,6 +500,7 @@ long efb_dump_every = std::getenv("WIIKIT_EFBDUMP_EVERY") ? std::atol(std::geten
+@@ -318,6 +510,7 @@ long efb_dump_every = std::getenv("WIIKIT_EFBDUMP_EVERY") ? std::atol(std::geten
  bool efb_dumping() { return (long)cnt.frames == efb_dump_frame; }
  void efb_dump(const char* tag) {
      static int k = 0;
@@ -6497,7 +6796,7 @@ index 5726093..d5ee874 100644
      std::vector<uint8_t> px((size_t)EFB_W * S * EFB_H * S * 4);   // top row first, as the EFB is kept
      glGetTextureImage(efb_col, 0, GL_RGBA, GL_UNSIGNED_BYTE, (GLsizei)px.size(), px.data());
      char name[160];
-@@ -325,9 +508,15 @@ void efb_dump(const char* tag) {
+@@ -325,9 +518,15 @@ void efb_dump(const char* tag) {
      write_png(name, EFB_W * S, EFB_H * S, px.data());
  }
  
@@ -6513,7 +6812,7 @@ index 5726093..d5ee874 100644
      uint32_t dest = (bp[0x4B] & 0xFFFFFF) << 5;
      glDisable(GL_SCISSOR_TEST);
      if (efb_dumping()) {
-@@ -336,21 +525,28 @@ void efb_copy(uint32_t v) {
+@@ -336,21 +535,28 @@ void efb_copy(uint32_t v) {
          efb_dump(tag);
      }
      if (v >> 14 & 1) {                                           // to the XFB
@@ -6550,7 +6849,7 @@ index 5726093..d5ee874 100644
          glViewport(0, 0, tw * S, th * S);
          glDisable(GL_BLEND);
          glDisable(GL_COLOR_LOGIC_OP);
-@@ -365,11 +561,143 @@ void efb_copy(uint32_t v) {
+@@ -365,11 +571,143 @@ void efb_copy(uint32_t v) {
          glBindTextureUnit(1, efb_dep);
          glBindSampler(0, 0);
          glBindSampler(1, 0);
@@ -6696,7 +6995,7 @@ index 5726093..d5ee874 100644
  }
  
  void bp_set(uint32_t v) {
-@@ -381,6 +709,7 @@ void bp_set(uint32_t v) {
+@@ -381,6 +719,7 @@ void bp_set(uint32_t v) {
          else { r[2] = s11(val); r[1] = s11(val >> 12); }              // BG
      }
      if (reg == 0x52) efb_copy(val);
@@ -6704,7 +7003,7 @@ index 5726093..d5ee874 100644
  }
  
  // ---- draws --------------------------------------------------------------------------------------
-@@ -451,6 +780,24 @@ void set_ps_uniforms() {
+@@ -451,6 +790,24 @@ void set_ps_uniforms() {
          std::memcpy(u.indmtx[2 * m], r0, sizeof r0);
          std::memcpy(u.indmtx[2 * m + 1], r1, sizeof r1);
      }
@@ -6729,7 +7028,7 @@ index 5726093..d5ee874 100644
      if (dump_ps) {
          dump_ps = false;
          std::string t = "video: program " + std::to_string(cnt.programs - 1) + " uniforms:";
-@@ -462,9 +809,12 @@ void set_ps_uniforms() {
+@@ -462,9 +819,12 @@ void set_ps_uniforms() {
          rt_log("%s", t.c_str());
      }
      if (ps_valid && !std::memcmp(&u, &ps_last, sizeof u)) return;
@@ -6743,7 +7042,7 @@ index 5726093..d5ee874 100644
  }
  
  void bind_textures() {
-@@ -475,113 +825,576 @@ void bind_textures() {
+@@ -475,113 +835,576 @@ void bind_textures() {
      for (int m = 0; m < 8; ++m) {
          if (!(used >> m & 1)) continue;
          GLuint name = 0;
@@ -7324,26 +7623,26 @@ index 5726093..d5ee874 100644
 -        static const GLenum lo[16] = {GL_CLEAR, GL_AND, GL_AND_REVERSE, GL_COPY, GL_AND_INVERTED, GL_NOOP,
 -                                      GL_XOR, GL_OR, GL_NOR, GL_EQUIV, GL_INVERT, GL_OR_REVERSE,
 -                                      GL_COPY_INVERTED, GL_OR_INVERTED, GL_NAND, GL_SET};
+-        glDisable(GL_BLEND);
+-        glEnable(GL_COLOR_LOGIC_OP);
+-        glLogicOp(lo[cm >> 12 & 15]);
+-    } else {
 +        glDepthFunc(scene ? GL_GEQUAL : GL_LEQUAL);
 +        glProgramUniform1f(dbgo_prog, dbgo_fade_loc, dbgo_opacity.load());
 +        glDrawArrays(GL_TRIANGLES, 0, (GLsizei)dbgo_count);
          glDisable(GL_BLEND);
--        glEnable(GL_COLOR_LOGIC_OP);
--        glLogicOp(lo[cm >> 12 & 15]);
--    } else {
--        glDisable(GL_BLEND);
 -        glDisable(GL_COLOR_LOGIC_OP);
 +        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
++    }
++    if (scene) {
++        glDepthMask(GL_TRUE);
++        glClearDepth(1.0);
++        glClear(GL_DEPTH_BUFFER_BIT);
      }
 -    // GX's front faces are clockwise on screen: counter-clockwise for GL,
 -    // whose y runs the other way over the same rows
 -    if (tri && cull) { glEnable(GL_CULL_FACE); glCullFace(cull == 1 ? GL_BACK : GL_FRONT); }
 -    else glDisable(GL_CULL_FACE);
-+    if (scene) {
-+        glDepthMask(GL_TRUE);
-+        glClearDepth(1.0);
-+        glClear(GL_DEPTH_BUFFER_BIT);
-+    }
 +}
  
 -    if (xf_lo < xf_hi) {
@@ -7399,7 +7698,7 @@ index 5726093..d5ee874 100644
          uint32_t pm = v0.mtx[0] * 4u;
          float pos[3];
          for (int r = 0; r < 3; ++r)
-@@ -593,67 +1406,75 @@ void draw(uint8_t prim, uint8_t vflags, const uint8_t* pieces, uint32_t npieces)
+@@ -593,67 +1416,75 @@ void draw(uint8_t prim, uint8_t vflags, const uint8_t* pieces, uint32_t npieces)
                 c[2] = fx(0x1024) * pos[2] + fx(0x1025); c[3] = 1; }
          std::fprintf(lf, "%ld prim %02X n %u zm %X cm %X pix %X at %X ztex %X fog %X | vp %g %g %g %g %g %g | proj%u %g %g %g %g %g %g | "
                       "mtx %u obj %g %g %g eye %g %g %g ndc %g %g w %g | tev %u chans %u\n",
@@ -7513,7 +7812,7 @@ index 5726093..d5ee874 100644
  }
  
  // ---- the record -----------------------------------------------------------------------------------
-@@ -662,6 +1483,8 @@ template <class T> T rd(const uint8_t*& p) { T v; std::memcpy(&v, p, sizeof v);
+@@ -662,6 +1493,8 @@ template <class T> T rd(const uint8_t*& p) { T v; std::memcpy(&v, p, sizeof v);
  // The EFB at its native size: the pixel at each native position's top-left
  // sample of the scaled EFB (rows from the top, as the EFB copies read it).
  void efb_readback() {
@@ -7522,7 +7821,7 @@ index 5726093..d5ee874 100644
      int W = EFB_W * S, H = EFB_H * S;
      std::vector<uint8_t> px((size_t)W * H * 4);
      std::vector<float> dz((size_t)W * H);
-@@ -702,7 +1525,11 @@ void copy_readback(uint32_t addr) {
+@@ -702,7 +1535,11 @@ void copy_readback(uint32_t addr) {
      rb_cv.notify_all();
  }
  
@@ -7534,7 +7833,7 @@ index 5726093..d5ee874 100644
      const uint8_t* p = data.data();
      const uint8_t* end = p + data.size();
      while (p < end) {
-@@ -712,24 +1539,42 @@ void exec(const std::vector<uint8_t>& data) {
+@@ -712,24 +1549,42 @@ void exec(const std::vector<uint8_t>& data) {
              uint16_t a = rd<uint16_t>(p), n = rd<uint16_t>(p);
              std::memcpy(&xf[a], p, 4u * n);
              p += 4u * n;
@@ -7580,7 +7879,7 @@ index 5726093..d5ee874 100644
              Tex& t = texs[id];
              ensure_tex(t, w, h, levels);
              for (int l = 0; l < levels; ++l) {
-@@ -742,7 +1587,56 @@ void exec(const std::vector<uint8_t>& data) {
+@@ -742,7 +1597,56 @@ void exec(const std::vector<uint8_t>& data) {
          }
          case VC_TEXBIND: { uint8_t m = rd<uint8_t>(p); map_src[m] = rd<uint32_t>(p); break; }
          case VC_TEXEFB: { uint8_t m = rd<uint8_t>(p); map_src[m] = 1ull << 32 | rd<uint32_t>(p); break; }
@@ -7638,7 +7937,7 @@ index 5726093..d5ee874 100644
          case VC_DRAWDONE: gx_draw_done_reached(); break;
          default: rt_die("video: bad record byte %02X", p[-1]);
          }
-@@ -811,13 +1705,17 @@ namespace {
+@@ -811,13 +1715,17 @@ namespace {
  // Where the picture sits in a window of w x h (pixels or window units): the
  // TV's screen, 4:3 or 16:9 as SYSCONF says, as large as the window allows and
  // centred; of its 480 lines (NTSC) VI scans the XFB out over its active ones,
@@ -7658,7 +7957,7 @@ index 5726093..d5ee874 100644
      return {(w - sw) / 2, (h - ph) / 2, sw, ph};
  }
  
-@@ -839,10 +1737,13 @@ enum : uint32_t { CL_UP = 0x0001, CL_LEFT = 0x0002, CL_ZR = 0x0004, CL_X = 0x000
+@@ -839,10 +1747,13 @@ enum : uint32_t { CL_UP = 0x0001, CL_LEFT = 0x0002, CL_ZR = 0x0004, CL_X = 0x000
                    CL_Y = 0x0020, CL_B = 0x0040, CL_ZL = 0x0080, CL_R = 0x0200, CL_PLUS = 0x0400,
                    CL_HOME = 0x0800, CL_MINUS = 0x1000, CL_L = 0x2000, CL_DOWN = 0x4000, CL_RIGHT = 0x8000 };
  constexpr uint32_t kStick = 1u << 16;               // L up, down, left, right, then R's: kStick << 0..7
@@ -7672,7 +7971,7 @@ index 5726093..d5ee874 100644
  
  const char* DEFAULT_KEYS =
      "# wiiboot's keys: each Wii Remote button, then the keys and mouse buttons that press it.\n"
-@@ -869,6 +1770,8 @@ const char* DEFAULT_KEYS =
+@@ -869,6 +1780,8 @@ const char* DEFAULT_KEYS =
      "# takes the keys, the mouse and the first pad at once (Input = Pad or Keyboard: only one of them;\n"
      "# wiiboot --input says the same).\n"
      "# The pad: its triggers are ZL and ZR, its shoulders L and R, Start +, Back -, its guide button Home.\n"
@@ -7681,7 +7980,7 @@ index 5726093..d5ee874 100644
      "# Face Buttons = Position: the right one is A, the bottom one B, the top one X, the left one Y (the\n"
      "# Classic's own layout); Label: the button labelled A (Cross) is A, B (Circle) B, X (Square) X, Y (Triangle) Y.\n"
      "# Dead Zone: how far the pad's sticks move before they count, of their travel.\n"
-@@ -897,7 +1800,9 @@ const char* DEFAULT_KEYS =
+@@ -897,7 +1810,9 @@ const char* DEFAULT_KEYS =
      "Right Stick Up    =\n"
      "Right Stick Down  =\n"
      "Right Stick Left  =\n"
@@ -7692,7 +7991,7 @@ index 5726093..d5ee874 100644
  
  std::string trim(const std::string& t) {
      size_t a = t.find_first_not_of(" \t\r"), b = t.find_last_not_of(" \t\r");
-@@ -923,7 +1828,11 @@ bool parse_keys(const std::string& text, const std::string& path, bool remote, b
+@@ -923,7 +1838,11 @@ bool parse_keys(const std::string& text, const std::string& path, bool remote, b
                                       {"Left Stick Up", kStick << 0}, {"Left Stick Down", kStick << 1},
                                       {"Left Stick Left", kStick << 2}, {"Left Stick Right", kStick << 3},
                                       {"Right Stick Up", kStick << 4}, {"Right Stick Down", kStick << 5},
@@ -7705,7 +8004,7 @@ index 5726093..d5ee874 100644
      static const Btn mice[] = {{"Mouse Left", SDL_BUTTON_LMASK}, {"Mouse Right", SDL_BUTTON_RMASK},
                                 {"Mouse Middle", SDL_BUTTON_MMASK}, {"Mouse X1", SDL_BUTTON_X1MASK},
                                 {"Mouse X2", SDL_BUTTON_X2MASK}};
-@@ -980,7 +1889,7 @@ bool parse_keys(const std::string& text, const std::string& path, bool remote, b
+@@ -980,7 +1899,7 @@ bool parse_keys(const std::string& text, const std::string& path, bool remote, b
          }
          if (!b) {
              if (in_classic) rt_log("video: %s:%d: not a Classic Controller button (A B X Y L R ZL ZR Plus Minus Home Up Down Left Right, "
@@ -7714,7 +8013,7 @@ index 5726093..d5ee874 100644
              else rt_log("video: %s:%d: not a Remote button (A B Up Down Left Right Plus Minus 1 2 Shake Raise; the Nunchuk's "
                          "C Z Stick Up/Down/Left/Right Walk)", path.c_str(), line);
              continue;
-@@ -1006,7 +1915,9 @@ bool parse_keys(const std::string& text, const std::string& path, bool remote, b
+@@ -1006,7 +1925,9 @@ bool parse_keys(const std::string& text, const std::string& path, bool remote, b
      return has_classic;
  }
  
@@ -7724,7 +8023,7 @@ index 5726093..d5ee874 100644
      std::string text;
      if (FILE* f = std::fopen(path.c_str(), "rb")) {
          char buf[4096];
-@@ -1079,6 +1990,8 @@ ClassicState classic_from_pad(SDL_Gamepad* g) {
+@@ -1079,6 +2000,8 @@ ClassicState classic_from_pad(SDL_Gamepad* g) {
          {SDL_GAMEPAD_BUTTON_START, CL_PLUS}, {SDL_GAMEPAD_BUTTON_BACK, CL_MINUS}, {SDL_GAMEPAD_BUTTON_GUIDE, CL_HOME}};
      for (auto& f : fixed)
          if (SDL_GetGamepadButton(g, f.b)) s.buttons |= f.bit;
@@ -7733,7 +8032,7 @@ index 5726093..d5ee874 100644
      // the face buttons: by position, the Classic's own layout (A right, B
      // bottom, X top, Y left), or by the pad's labels
      static const struct { SDL_GamepadButton b; uint32_t pos; } face[] = {
-@@ -1112,6 +2025,7 @@ ClassicState classic_from_pad(SDL_Gamepad* g) {
+@@ -1112,6 +2035,7 @@ ClassicState classic_from_pad(SDL_Gamepad* g) {
  void merge(ClassicState& a, const ClassicState& b) {
      a.connected |= b.connected;
      a.buttons |= b.buttons;
@@ -7741,7 +8040,7 @@ index 5726093..d5ee874 100644
      if (std::hypot(b.lx, b.ly) > std::hypot(a.lx, a.ly)) { a.lx = b.lx; a.ly = b.ly; }
      if (std::hypot(b.rx, b.ry) > std::hypot(a.rx, a.ry)) { a.rx = b.rx; a.ry = b.ry; }
      a.lt = std::max(a.lt, b.lt);
-@@ -1186,7 +2100,7 @@ void update_pad() {
+@@ -1186,7 +2110,7 @@ void update_pad() {
      p.buttons &= ~(kRaisePlus | kRaiseMinus | kWalk | (kStick * 0xF));
      int ww = 0, wh = 0;
      SDL_GetWindowSize(win, &ww, &wh);                        // mouse coordinates are in window units
@@ -7750,7 +8049,7 @@ index 5726093..d5ee874 100644
          // -1..1 spans the picture as present() shows it, so that the game's
          // cursor lands under the mouse
          Rect r = picture_rect((float)ww, (float)wh);
-@@ -1196,8 +2110,8 @@ void update_pad() {
+@@ -1196,8 +2120,8 @@ void update_pad() {
      }
      // over the picture the game draws its own cursor, as on the Wii
      static bool hidden = false;
@@ -7761,7 +8060,7 @@ index 5726093..d5ee874 100644
          if (hidden) SDL_HideCursor(); else SDL_ShowCursor();
      }
      // WIIKIT_PAD="45:A 50.5:@0.2,-0.1 51:A": at each time (seconds from
-@@ -1248,6 +2162,7 @@ void update_pad() {
+@@ -1248,6 +2172,7 @@ void update_pad() {
          ClassicState& k = c[0];
          k.connected = true;
          k.buttons = cl & 0xFFFF;
@@ -7769,7 +8068,7 @@ index 5726093..d5ee874 100644
          auto dir = [&](int i) { return cl & (kStick << i) ? 1.0f : 0.0f; };
          k.lx = dir(3) - dir(2);
          k.ly = dir(0) - dir(1);
-@@ -1261,12 +2176,171 @@ void update_pad() {
+@@ -1261,12 +2186,171 @@ void update_pad() {
      for (int i = 0; i < 4; ++i)
          if (chan_pad[i] && !(i == 0 && mode == INPUT_MODE_KEYBOARD)) merge(c[i], classic_from_pad(chan_pad[i]));
      update_rumble();
@@ -7871,7 +8170,7 @@ index 5726093..d5ee874 100644
 +    glBindFramebuffer(GL_FRAMEBUFFER, 0);
 +    const float scale = std::min((float)w / fw, (float)h / fh);
 +    const int dw = (int)std::lround(fw * scale), dh = (int)std::lround(fh * scale), dx = (w - dw) / 2, dy = (h - dh) / 2;
-+    glBlitNamedFramebuffer(0, fbo, 0, 0, fw, fh, dx, dy + dh, dx + dw, dy, GL_COLOR_BUFFER_BIT, GL_LINEAR);   // turned over: top row first
++    blit_bound(0, fbo, 0, 0, fw, fh, dx, dy + dh, dx + dw, dy, GL_LINEAR);   // turned over: top row first
 +    glBindFramebuffer(GL_READ_FRAMEBUFFER, fbo);
 +    glPixelStorei(GL_PACK_ALIGNMENT, 1);
 +    glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
@@ -7941,7 +8240,7 @@ index 5726093..d5ee874 100644
      ++cnt.presents;
      int ww = 0, wh = 0;
      SDL_GetWindowSizeInPixels(win, &ww, &wh);
-@@ -1275,22 +2349,121 @@ void present() {
+@@ -1275,22 +2359,120 @@ void present() {
      glColorMask(1, 1, 1, 1);
      glClearColor(0, 0, 0, 1);
      glClear(GL_COLOR_BUFFER_BIT);
@@ -7955,14 +8254,15 @@ index 5726093..d5ee874 100644
          int dw = (int)std::lround(r.w), dh = (int)std::lround(r.h);
 -        glNamedFramebufferTexture(copy_fbo, GL_COLOR_ATTACHMENT0, t.name, 0);
 -        glBlitNamedFramebuffer(copy_fbo, 0, 0, 0, t.w, t.h, dx, dy + dh, dx + dw, dy,   // top row first
-+        glBlitNamedFramebuffer(t.fbo, 0, 0, 0, t.w, t.h, dx, dy + dh, dx + dw, dy,   // top row first
-                                GL_COLOR_BUFFER_BIT, GL_LINEAR);
-     }
+-                               GL_COLOR_BUFFER_BIT, GL_LINEAR);
+-    }
 -    if (opt.dump_dir && cnt.presents % (uint64_t)opt.dump_every == 0 && ww > 0 && wh > 0) {
 -        std::vector<uint8_t> px((size_t)ww * wh * 4), flip(px.size());   // the window, as shown
 -        glReadPixels(0, 0, ww, wh, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
 -        for (int y = 0; y < wh; ++y)
 -            std::memcpy(&flip[(size_t)y * ww * 4], &px[(size_t)(wh - 1 - y) * ww * 4], (size_t)ww * 4);
++        blit_bound(t.fbo, 0, 0, 0, t.w, t.h, dx, dy + dh, dx + dw, dy, GL_LINEAR);   // top row first
++    }
 +    // WIIKIT_THUMBS=file: every picture shown, small (WIIKIT_THUMBS_SIZE=WxH, 160x90 unless given), as raw
 +    // RGBA one after the other, top row first. "|command" pipes them to a program instead, as in
 +    //     WIIKIT_THUMBS_SIZE=640x360 WIIKIT_THUMBS="|ffmpeg -f rawvideo -pix_fmt rgba -s 640x360 -i - -q:v 3 dir/%06d.jpg"
@@ -8071,7 +8371,7 @@ index 5726093..d5ee874 100644
          char name[64];
          std::snprintf(name, sizeof name, "/frame_%06llu.png", (unsigned long long)cnt.presents);
          write_png(std::string(opt.dump_dir) + name, ww, wh, flip.data());
-@@ -1317,7 +2490,6 @@ void setup() {
+@@ -1317,7 +2499,6 @@ void setup() {
      glNamedFramebufferTexture(efb_fbo, GL_DEPTH_ATTACHMENT, efb_dep, 0);
      if (glCheckNamedFramebufferStatus(efb_fbo, GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
          rt_die("video: the EFB framebuffer is incomplete");
@@ -8079,7 +8379,7 @@ index 5726093..d5ee874 100644
      glBindFramebuffer(GL_FRAMEBUFFER, efb_fbo);
      glClearColor(0, 0, 0, 1);
      glClearDepth(1.0);
-@@ -1327,45 +2499,25 @@ void setup() {
+@@ -1327,45 +2508,25 @@ void setup() {
      const GLbitfield map = GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT;
      glNamedBufferStorage(vbo, VBO_CAP, nullptr, map);
      vbo_ptr = static_cast<uint8_t*>(glMapNamedBufferRange(vbo, 0, VBO_CAP, map));
@@ -8142,7 +8442,7 @@ index 5726093..d5ee874 100644
  
      copy_prog = link(FULLSCREEN_VS, COPY_FS);
      if (!copy_prog) rt_die("video: the EFB copy program does not build");
-@@ -1377,6 +2529,7 @@ void setup() {
+@@ -1377,6 +2538,7 @@ void setup() {
  
  // ---- the game's side ------------------------------------------------------------------------------
  bool video_enabled() { return opt.enabled; }
@@ -8150,7 +8450,7 @@ index 5726093..d5ee874 100644
  void video_configure(const VideoOptions& o) { opt = o; S = std::max(1, o.scale); }
  
  VideoPerf g_vperf;
-@@ -1394,7 +2547,7 @@ bool video_submit(std::vector<uint8_t>& rec, int frames, int wait_ms) {
+@@ -1394,7 +2556,7 @@ bool video_submit(std::vector<uint8_t>& rec, int frames, int wait_ms) {
      else ok = q_space.wait_for(lk, std::chrono::milliseconds(wait_ms), room);
      if (g_vperf_on) g_vperf.wait += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - t0).count();
      if (!ok) return false;
@@ -8159,7 +8459,7 @@ index 5726093..d5ee874 100644
      q_frames += frames;
      // a buffer the renderer is done with, capacity and pages kept: fresh
      // allocations of megabytes a frame cost page faults and copies as they grow
-@@ -1424,7 +2577,7 @@ bool video_efb_read(std::vector<uint32_t>& argb, std::vector<uint32_t>& z) {
+@@ -1424,7 +2586,7 @@ bool video_efb_read(std::vector<uint32_t>& argb, std::vector<uint32_t>& z) {
      // the console's CPU takes its interrupts while it waits: so does this wait
      while (!rb_ready) {
          rb_cv.wait_for(lk, std::chrono::milliseconds(1));
@@ -8168,7 +8468,7 @@ index 5726093..d5ee874 100644
              lk.unlock();
              ppc_poll(*t_ppc);
              lk.lock();
-@@ -1447,7 +2600,7 @@ bool video_copy_read(uint32_t addr, int w, int h, std::vector<uint8_t>& rgba) {
+@@ -1447,7 +2609,7 @@ bool video_copy_read(uint32_t addr, int w, int h, std::vector<uint8_t>& rgba) {
      if (wake) SDL_SignalSemaphore(wake);
      while (!rb_ready) {                              // taking interrupts meanwhile, as video_efb_read
          rb_cv.wait_for(lk, std::chrono::milliseconds(1));
@@ -8177,7 +8477,7 @@ index 5726093..d5ee874 100644
              lk.unlock();
              ppc_poll(*t_ppc);
              lk.lock();
-@@ -1462,6 +2615,46 @@ std::atomic<bool> want_relative{false};
+@@ -1462,6 +2624,46 @@ std::atomic<bool> want_relative{false};
  std::mutex motion_mx;
  float motion_x = 0, motion_y = 0;
  void video_set_relative_mouse(bool on) { want_relative = on; }
@@ -8224,7 +8524,7 @@ index 5726093..d5ee874 100644
  void video_take_mouse_motion(float& dx, float& dy) {
      std::lock_guard<std::mutex> lk(motion_mx);
      dx = motion_x; dy = motion_y;
-@@ -1473,12 +2666,36 @@ PadState video_pad() {
+@@ -1473,12 +2675,36 @@ PadState video_pad() {
      return pad;
  }
  ClassicState video_classic(int chan) {
@@ -8261,7 +8561,7 @@ index 5726093..d5ee874 100644
  void video_retrace() {
      retraces.fetch_add(1);
      if (wake) SDL_SignalSemaphore(wake);
-@@ -1499,13 +2716,21 @@ void video_run(const char* title) {
+@@ -1499,13 +2725,21 @@ void video_run(const char* title) {
      int w0 = opt.window_w ? opt.window_w : (opt.widescreen ? 1280 : 960), h0 = opt.window_h ? opt.window_h : 720;
      SDL_WindowFlags wflags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE;
      if (opt.fullscreen) wflags |= SDL_WINDOW_FULLSCREEN;
@@ -8283,7 +8583,7 @@ index 5726093..d5ee874 100644
      rt_log("video: %s, %s", (const char*)glGetString(GL_RENDERER), (const char*)glGetString(GL_VERSION));
      if (debug) {
          glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
-@@ -1529,11 +2754,15 @@ void video_run(const char* title) {
+@@ -1529,11 +2763,15 @@ void video_run(const char* title) {
      uint64_t frames_then = 0;
      uint32_t seen = retraces.load();
      std::string base_title = title;
@@ -8299,7 +8599,7 @@ index 5726093..d5ee874 100644
              if (e.type == SDL_EVENT_GAMEPAD_ADDED) pad_added(e.gdevice.which);
              if (e.type == SDL_EVENT_GAMEPAD_REMOVED) pad_removed(e.gdevice.which);
              // F11 or Alt+Enter: fullscreen and back
-@@ -1560,6 +2789,15 @@ void video_run(const char* title) {
+@@ -1560,7 +2798,23 @@ void video_run(const char* title) {
              }
          }
          auto now = Clock::now();
@@ -8313,9 +8613,17 @@ index 5726093..d5ee874 100644
 +            }
 +        }
          if (opt.quit_after > 0 && std::chrono::duration<double>(now - t0).count() > opt.quit_after) quit = true;
++        // WIIKIT_QUIT_GUEST=S: in deterministic mode, at S seconds of the guest's clock, and how long
++        // that took (unpaced: the same work for any build, a benchmark)
++        static const double quit_guest = std::getenv("WIIKIT_QUIT_GUEST") ? std::atof(std::getenv("WIIKIT_QUIT_GUEST")) : 0;
++        if (quit_guest > 0 && rt_deterministic() && rt_virtual_ns() >= (int64_t)(quit_guest * 1e9)) {
++            rt_log("video: %.1f s of guest time took %.3f s", quit_guest, std::chrono::duration<double>(now - t0).count());
++            quit = true;
++        }
          if (quit) {
              rt_log("video: %llu frames, %llu presents, %llu draws, %llu programs (%llu linked, %llu from the shader cache)",
-@@ -1574,6 +2812,18 @@ void video_run(const char* title) {
+                    (unsigned long long)cnt.frames, (unsigned long long)cnt.presents,
+@@ -1574,6 +2828,18 @@ void video_run(const char* title) {
          {
              bool rel = want_relative && (SDL_GetWindowFlags(win) & SDL_WINDOW_INPUT_FOCUS);
              if (rel != SDL_GetWindowRelativeMouseMode(win)) SDL_SetWindowRelativeMouseMode(win, rel);
@@ -8334,7 +8642,7 @@ index 5726093..d5ee874 100644
              float dx = 0, dy = 0;
              SDL_GetRelativeMouseState(&dx, &dy);
              if (rel) {
-@@ -1592,12 +2842,20 @@ void video_run(const char* title) {
+@@ -1592,12 +2858,20 @@ void video_run(const char* title) {
                  double vtx = ms(g_vperf.vtx), tex = ms(g_vperf.tex), wait = ms(g_vperf.wait), draw = ms(g_vperf.draw),
                         pres = ms(g_vperf.present);
                  rt_log("perf: %.1f fps; frame %.1f ms; game thread: vertices %.1f, textures %.1f, waiting for the renderer %.1f; "
@@ -8356,7 +8664,7 @@ index 5726093..d5ee874 100644
          for (int k = 0; k < 16; ++k) {
              Chunk c;
              {
-@@ -1608,7 +2866,10 @@ void video_run(const char* title) {
+@@ -1608,7 +2882,10 @@ void video_run(const char* title) {
              }
              if (c.readback) { if (c.copy) copy_readback(c.copy); else efb_readback(); busy = true; continue; }
              auto te = Clock::now();
@@ -8367,7 +8675,7 @@ index 5726093..d5ee874 100644
              if (g_vperf_on) g_vperf.draw += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - te).count();
              {
                  std::lock_guard<std::mutex> lk(qmx);
-@@ -1619,15 +2880,98 @@ void video_run(const char* title) {
+@@ -1619,15 +2896,98 @@ void video_run(const char* title) {
              q_space.notify_all();
              busy = true;
              if (retraces.load() != seen) break;
@@ -8655,7 +8963,7 @@ index ecfb499..24fcf02 100644
  // WIIKIT_PERF=1: where a frame's time goes, reported every second by the
  // renderer. Nanoseconds, summed since the last report.
 diff --git a/runtime/wiiboot.cpp b/runtime/wiiboot.cpp
-index 250d419..14e4e4e 100644
+index 250d419..5cb1261 100644
 --- a/runtime/wiiboot.cpp
 +++ b/runtime/wiiboot.cpp
 @@ -35,13 +35,20 @@
@@ -8688,11 +8996,12 @@ index 250d419..14e4e4e 100644
          else if (!std::strcmp(argv[i], "--quit-after") && i + 1 < argc) vo.quit_after = std::atof(argv[++i]);
          else if (!std::strcmp(argv[i], "--aspect") && i + 1 < argc) {
              std::string a = argv[++i];
-@@ -95,6 +103,7 @@ int main(int argc, char** argv) {
+@@ -95,6 +103,8 @@ int main(int argc, char** argv) {
          else { std::fprintf(stderr, "wiiboot: unknown option %s\n", argv[i]); return 2; }
      }
      std::setvbuf(stdout, nullptr, _IOLBF, 1 << 16);
 +    if (const char* d = std::getenv("WIIKIT_DETERMINISTIC")) if (std::atoi(d)) rt_set_deterministic(true);
++    if (const char* d = std::getenv("WIIKIT_UNPACED")) if (std::atoi(d)) rt_set_unpaced(true);   // (deterministic: as fast as the host can)
      if (!mem_init()) rt_die("cannot reserve the guest address space");
      if (vo.keys.empty()) vo.keys = root + "/../keys.txt";
      vo.shader_cache = root + "/../shadercache";

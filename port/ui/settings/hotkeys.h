@@ -24,6 +24,7 @@ struct Setting
 	std::function<float(float)> frac, at; //a range's slider: where a value is on the track (0..1) and the value there
 	int count{}; //a choice: how many it has
 	bool dropdown{}; //a choice that's a list to pick from, not stepped through
+	std::function<bool(int)> offered; //a choice: the ones that can be picked now, none for all of them
 };
 const std::vector<Setting>& Settings(); //catalog.cpp, the menu's own list
 

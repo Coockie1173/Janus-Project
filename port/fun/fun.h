@@ -16,6 +16,11 @@ void set_forced_weapon(int weapon);
 int forced_weapon_count(); //"Off" and the weapons
 const char* forced_weapon_name(int weapon);
 uint32_t forced_weapon_id(); //its id, 0 for none
+bool forced_weapon_offered(int weapon); //in the list now: not a custom one of a pack that's off
+bool randomizer_pack(int pack); //that modpack's custom weapons are among the randomizer's and the forced ones
+void set_randomizer_pack(int pack, bool on);
+std::string randomizer_packs_off(); //the packs that are off, for the settings file
+std::string randomizer_pack_weapons(int pack); //its weapons' names, for the menu
 
 //bunnyhop.cpp
 void install_bunnyhop();
