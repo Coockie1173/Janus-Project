@@ -14,9 +14,11 @@
 //gone by since its last character
 //GE_TRACETYPE=1 log how long each text took to type
 #include "ge.h"
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <unordered_map>
+#include <vector>
 
 namespace ge
 {
