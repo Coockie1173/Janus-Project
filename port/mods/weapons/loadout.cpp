@@ -138,7 +138,10 @@ void Scene(PPCContext& c)
 {
 	const uint32_t menu = c.r[3];
 	orig_scene(c);
-	if (guest_ptr(menu)) st8(menu + kMenuPanels + kPanelShown, 0);
+	if (!guest_ptr(menu)) return;
+	//called on every page, panel 0 is the mission picture elsewhere: only the pages it fills
+	const uint32_t page = ld32(menu + kMenuPage);
+	if (page == kGameStarting || page == kPausePage || page == 0x7D000101) st8(menu + kMenuPanels + kPanelShown, 0);
 }
 
 } //namespace
