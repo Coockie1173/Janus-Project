@@ -24,7 +24,7 @@
 0181014A 040030C6 62.8  ending      # Facility, until about a second before the quick time event (passed 64.2 s in), the rest plays
 0181014E 0400257F 100.2 ending      # Memorial, until a second before the quick time event (101.2 s in), the mouse comes back with it
 0181014E 04002B16 0     ending      # Memorial, after the quick time event: takes the mouse 2 s after it takes the player
-01810151 04002950 55.5  ending      # Station, until the mouse is back (55.6 s in)
+01810151 04002950 55.5  middle      # Station, in the middle, until the mouse is back (55.6 s in)
 01810151 040032EE 0     ending      # Station, the mouse lost after the quick time event to the end (04002952 between plays)
 0181014B 04002378 0     ending qte  # Cradle, the fight with Trevelyan with its quick time events, until the aim is back to shoot him
 0181014B 040035EC 0     ending      # Cradle, Trevelyan shot, until the change to 01810169 (the black stays up over it)
