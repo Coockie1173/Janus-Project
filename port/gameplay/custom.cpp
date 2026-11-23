@@ -189,25 +189,14 @@ void NpcHit(PPCContext& c)
 	const uint32_t flags = ld32(hit + 0x3C);
 	const float damage = ldf(hit + 0x44);
 	//a shot to the head (the flags' bit 0) is taken as it comes, with no factor for the place and
-	//none for the difficulty, and comes with the most of the weapon's damages by hit kind (the
-	//floats at the attacker's +0x1D0). without headshots that kill it is a shot at the body: the
-	//least of those damages, and bit 0 gone for the call so the difficulty's factor counts
+	//none for the difficulty. without headshots that kill it is handed on without bit 0, so it goes
+	//the body's way (the head's factor is 1, as the chest's) and Enemy Health counts for it. the
+	//bullet's own damage for the head is BulletContact's
 	const uint32_t kHead = 1;
 	const bool body = Active() && !g_headshots && (flags & kHead) != 0;
-	if (body)
-	{
-		float least = damage;
-		const uint32_t by = ld32(hit + 0x30);
-		for (uint32_t i = 0; guest_ptr(by) && i < 15; ++i)
-		{
-			const float one = ldf(by + 0x1D0 + i * 4);
-			if (one > 0 && one < least) least = one;
-		}
-		st32(hit + 0x3C, flags & ~kHead);
-		stf(hit + 0x44, least);
-	}
+	if (body) st32(hit + 0x3C, flags & ~kHead);
 	orig_npc_hit(c);
-	if (body) { st32(hit + 0x3C, flags); stf(hit + 0x44, damage); }
+	if (body) st32(hit + 0x3C, flags);
 	shots_npc_hit(npc, hit, before);
 	if (!g_tracehit) return;
 	const uint32_t by = ld32(hit + 0x30);
@@ -215,6 +204,27 @@ void NpcHit(PPCContext& c)
 	char number[24];
 	for (uint32_t i = 0; guest_ptr(by) && i < 15; ++i) { std::snprintf(number, sizeof number, " %g", ldf(by + 0x1D0 + i * 4)); table += number; }
 	rt_log("goldeneye: hit: guard %08X flags %08X damage %g by %08X (vtable %08X), health %g of %g, then %g; its damages%s", npc, flags, damage, by, guest_ptr(by) ? ld32(by) : 0, before, ldf(npc + 0x3AC), ldf(npc + 0x3A8), table.c_str());
+}
+
+//ge_bullet_contact (a bullet, the contact): a bullet that meets a guard (XItemHandler_EnemyNew) in
+//the head (the contact's +0x40 bit 0) within its range takes 5000 (806EE39C) for its damage in place
+//of the one by the range. without headshots that kill the head is off for the call, so the bullet
+//keeps the damage by the range
+PPCFunc orig_bullet_contact = nullptr;
+void BulletContact(PPCContext& c)
+{
+	const uint32_t bullet = c.r[3], contact = c.r[4];
+	shots_bullet_contact(bullet, contact);
+	const uint32_t kContactFlags = 0x40, kHead = 1;
+	//the contact's bit 0 is only the head on a guard (whose hit handler, vtable +0x50, is ge_npc_hit)
+	const uint32_t thing = guest_ptr(contact) ? ld32(contact + 0x38) : 0;
+	const bool guard = guest_ptr(thing) && guest_ptr(ld32(thing)) && ld32(ld32(thing) + 0x50) == 0x800517E0;
+	const uint32_t flags = guard ? ld32(contact + kContactFlags) : 0;
+	const bool body = Active() && !g_headshots && (flags & kHead) != 0;
+	if (body) st32(contact + kContactFlags, flags & ~kHead);
+	orig_bullet_contact(c);
+	if (body) st32(contact + kContactFlags, flags);
+	if (g_tracehit && (flags & kHead)) rt_log("goldeneye: hit: a bullet meets guard %08X in the head, its damage %g%s", thing, ldf(bullet + 0x1D0), body ? " (headshots that kill off)" : "");
 }
 
 //the mouse on the sliders. the menu draws a slider's bar (ge_slider_draw: the menu, x, y, width,
@@ -552,12 +562,13 @@ void install_custom()
 	orig_choice_text = ppc_hook("ge_choice_text", ChoiceText);
 	orig_choice_step = ppc_hook("ge_choice_step", ChoiceStep);
 	orig_npc_hit = ppc_hook("ge_npc_hit", NpcHit);
+	orig_bullet_contact = ppc_hook("ge_bullet_contact", BulletContact);
 	orig_slider_draw = ppc_hook("ge_slider_draw", SliderDraw);
 	orig_accuracy = ppc_hook("ge_guard_accuracy", GuardAccuracy);
 	orig_page_text = ppc_hook("ge_page_text", PageText);
 	orig_npc_fire = ppc_hook("ge_npc_fire_bullet", NpcFire);
 	g_tracehit = std::getenv("GE_TRACEHIT") != nullptr;
-	if (!orig_bullet || !orig_shot || !orig_fight_wait || !orig_protection || !orig_melee || !orig_fire_wait || !orig_setting_get || !orig_setting_step || !orig_accuracy || !orig_npc_fire)
+	if (!orig_bullet || !orig_shot || !orig_fight_wait || !orig_protection || !orig_melee || !orig_fire_wait || !orig_setting_get || !orig_setting_step || !orig_accuracy || !orig_npc_fire || !orig_bullet_contact)
 		rt_log("goldeneye: 007 Custom: a function of it isn't in this build, some of it won't work");
 }
 

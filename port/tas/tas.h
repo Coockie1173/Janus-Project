@@ -17,6 +17,7 @@ void tas_frame(uint32_t frame); //once a frame
 void tas_boundary(PPCContext& c); //between two frames on the game's thread (framerate.cpp)
 void tas_controller(uint32_t ctrl); //the local controller's update starts (players.cpp)
 void tas_shot(const GeTasShot& shot); //the local player's bullet (shots.cpp)
+void shots_bullet_contact(uint32_t bullet, uint32_t contact); //a bullet meets a thing (custom.cpp)
 void shots_npc_hit(uint32_t npc, uint32_t hit, float before); //a guard was hit, its health before (custom.cpp)
 bool tas_input(int chan, ClassicState& s); //the raw pad: true when the library's replaced it
 void tas_buttons(int chan, ClassicState& s); //the classic's filter, last

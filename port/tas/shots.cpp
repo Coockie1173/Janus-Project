@@ -6,7 +6,8 @@
 //a bullet is an XItemHandler_Bullet (vtable 80572AC4): +0x410 the shooter's id (the entity's
 //+0x170), +0x419 a player's. ge_bullet_impact 800B2610 (bullet, hit) lands it on the world at the
 //hit's +0x10, ge_bullet_contact 800B2C60 (bullet, contact) on the thing at the contact's +0x38
-//(its +4 the entity) at +0x20; the shooter itself is one of those as a bullet leaves. ge_npc_hit's hit (custom.cpp) has the bullet as its +0x30
+//(its +4 the entity) at +0x20; the shooter itself is one of those as a bullet leaves. ge_npc_hit's hit has the bullet as its +0x30; both hooks are
+//custom.cpp's, which hands them on here
 #include "tas/tas.h"
 #include "tas/taslib_api.h"
 #include "ge.h"
@@ -21,7 +22,7 @@ namespace
 const uint32_t kBulletVtable = 0x80572AC4, kBulletShooter = 0x410, kBulletPlayers = 0x419;
 const uint32_t kRowSpeed = 0x14, kEntityId = 0x170, kNpcHealth = 0x3A8;
 
-PPCFunc orig_fire = nullptr, orig_impact = nullptr, orig_contact = nullptr;
+PPCFunc orig_fire = nullptr, orig_impact = nullptr;
 bool g_trace = false;
 
 //the local player's entity's id, 0 when there's none
@@ -63,9 +64,10 @@ void Impact(PPCContext& c)
 	orig_impact(c);
 }
 
-void Contact(PPCContext& c)
+} //namespace
+
+void shots_bullet_contact(uint32_t bullet, uint32_t hit)
 {
-	const uint32_t bullet = c.r[3], hit = c.r[4];
 	if (Mine(bullet) && guest_ptr(hit))
 	{
 		const uint32_t thing = ld32(hit + 0x38);
@@ -76,10 +78,7 @@ void Contact(PPCContext& c)
 		if (!(ctrl && entity == ld32(ctrl + 4)))
 			Send({GE_SHOT_CONTACT, ldf(hit + 0x20), ldf(hit + 0x24), ldf(hit + 0x28), 0, 0, 0, entity, 0, 0, 0});
 	}
-	orig_contact(c);
 }
-
-} //namespace
 
 void shots_npc_hit(uint32_t npc, uint32_t hit, float before)
 {
@@ -93,8 +92,7 @@ void install_shots()
 	g_trace = std::getenv("GE_TRACE") != nullptr;
 	orig_fire = ppc_hook("ge_player_fire_bullet", Fire);
 	orig_impact = ppc_hook("ge_bullet_impact", Impact);
-	orig_contact = ppc_hook("ge_bullet_contact", Contact);
-	if (!orig_fire || !orig_impact || !orig_contact) rt_log("goldeneye: a bullet function isn't in this build, TASLib won't see shots");
+	if (!orig_fire || !orig_impact) rt_log("goldeneye: a bullet function isn't in this build, TASLib won't see shots");
 }
 
 } //namespace ge
