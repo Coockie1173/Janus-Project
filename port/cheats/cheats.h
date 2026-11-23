@@ -18,6 +18,11 @@ void noclip_look(uint32_t controller); //before ge_look_apply, the game's own st
 void noclip_apply(uint32_t controller); //after the local controller's update
 bool player_state(uint32_t& state, float& fallen, uint32_t& bodyFlags); //the local player as of its last update, false before there is one
 
+//online.cpp
+void install_online_lock();
+bool cheats_locked(); //connecting to Nintendo WFC turned every cheat off, they stay off
+void cheats_unlock_check(); //the local player of a campaign level was updated: they can be used again
+
 //cheats.cpp
 void install_cheats();
 bool god_mode(); //cheat, the campaign's player takes no hurt

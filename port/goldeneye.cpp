@@ -142,6 +142,7 @@ void install() {
     install_noclip();
     install_stamina();
     install_cheats();
+    install_online_lock();
     install_owned();
     install_randomizer();
     install_bunnyhop();

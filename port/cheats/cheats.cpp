@@ -154,6 +154,7 @@ void turbo_speed(uint32_t ctrl, uint32_t out, bool asSpeed)
 
 void cheats_apply(PPCContext& c, uint32_t ctrl)
 {
+	cheats_unlock_check();
 	if (!Campaign()) return;
 	if (g_sprint) Sprint(ctrl);
 	if (g_grenades) Grenades(c, ctrl);

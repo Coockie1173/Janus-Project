@@ -109,6 +109,8 @@ WIFI_FUN_80234a60      # the menu's update: a level picked in the settings menu'
 ge_lod_pick            # an entity's level of detail by distance: the distance divided by Detail Distance (port/engine/drawdist.cpp)
 ge_camera_shake        # the camera's shakes move the look-at point: scaled by Screen Shake (port/engine/shake.cpp)
 _APPLYING_PATCH_       # the server's live patch: its data writes made, known code patches done natively, the rest left out (port/net/net.cpp)
+DemonWareAuthenticate_LobbyConnect  # going online starts: every cheat is switched off and stays off until a campaign level (port/cheats/online.cpp)
+startDemonwareAuthenticate          # the same, the other way it starts (port/cheats/online.cpp)
 bd_command_set_time    # a player's command gets the frame's time in whole milliseconds: what's cut off goes into the next (port/net/net.cpp)
 bd_interp_set_time     # a replica's blend time is set: a little more than the host's updates are apart (port/net/net.cpp)
 ge_input_copy          # a command is copied into its controller: in a modded network game two of its floats are the mouse's turn (port/input/look.cpp)

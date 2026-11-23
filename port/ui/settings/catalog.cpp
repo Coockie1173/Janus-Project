@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 
 namespace ge::menu
 {
@@ -316,6 +317,17 @@ void BuildSettings()
 		}, v.lo, v.hi, v.by, v.decimals);
 	}
 	for (const auto& add : g_addedToggles) add();
+	//connected to Nintendo WFC a cheat only goes off (cheats/online.cpp)
+	for (Setting& s : g_settings)
+	{
+		const char* off = settings_cheat_off(s.id);
+		if (!off || !*off) continue;
+		s.set = [set = s.set, off = (float)std::atof(off)](float v)
+		{
+			if (cheats_locked() && v != off) settings_say("Cheats can't be used online");
+			else set(v);
+		};
+	}
 }
 
 Row SettingRow(int i)

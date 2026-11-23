@@ -16,6 +16,8 @@ std::string settings_key_name(const char* id); //the key chosen on an added key'
 void settings_row(int page, const char* label, const char* hint, std::function<std::string()> value, std::function<void(int)> adjust, std::function<void()> select);
 void settings_say(const std::string& text); //a line at the top for a moment
 void save_settings(); //the settings file is written
+const char* settings_cheat_off(const std::string& id); //a setting of the Cheats page (or its Triggers page): its off value, "" for none of its own, null for any other
+void settings_cheats_off(); //every one of them off, the launcher's file kept as it is
 std::string saved_setting(const char* env, const char* name); //a setting as the game starts: the environment's, or what the menu saved under name in the launcher's file. empty for neither
 uint32_t settings_buttons(); //classic buttons the menu presses itself (+ to pause as it opens)
 

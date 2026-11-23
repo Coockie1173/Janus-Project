@@ -21,6 +21,7 @@ namespace ge {
 //a CC switch starts on, so what follows it runs until the condition before it first turns true
 struct GeckoLine { uint32_t a, b; bool was = false, on = true; };
 std::vector<std::vector<GeckoLine>> g_gecko;
+std::vector<bool> g_gecko_cheat; //the Cheats tab's ones, left out online (online.cpp)
 size_t g_cheat_codes = 0; //how many of them are the Cheats tab's
 
 bool gecko_ok(uint32_t addr, uint32_t size) {
@@ -34,7 +35,10 @@ void gecko_store(uint32_t addr, uint32_t size, uint32_t v) {
 }
 
 void gecko_apply() {
-    for (auto& code : g_gecko) {
+    const bool locked = cheats_locked();
+    for (size_t at = 0; at < g_gecko.size(); ++at) {
+        if (locked && g_gecko_cheat[at]) continue;
+        auto& code = g_gecko[at];
         int skip = 0; //how many failed conditions we're inside of
         uint32_t pointer = 0; //48 loads it, 0: nothing there yet
         for (size_t i = 0; i < code.size(); ++i) {
@@ -101,10 +105,12 @@ void gecko_load(const char* path) {
     //the launcher writes the ticked cheats to build/cheats.txt, the other files are fixes and aids
     std::string name = path;
     if (size_t slash = name.find_last_of("/\\"); slash != std::string::npos) name.erase(0, slash + 1);
-    if (name == "cheats.txt") g_cheat_codes += g_gecko.size() - before;
+    const bool cheat = name == "cheats.txt";
+    if (cheat) g_cheat_codes += g_gecko.size() - before;
+    g_gecko_cheat.resize(g_gecko.size(), cheat);
 }
 
-bool gecko_cheats() { return g_cheat_codes > 0; }
+bool gecko_cheats() { return g_cheat_codes > 0 && !cheats_locked(); }
 
 void install_gecko() {
     const char* path = std::getenv("GE_GECKO");

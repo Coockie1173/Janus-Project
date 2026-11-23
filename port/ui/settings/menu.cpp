@@ -537,6 +537,18 @@ const char* settings_cheat_off(const std::string& id) {
     if (s->id == "turbo") return "1"; //the game's own speed
     return s->kind == Setting::kToggle ? "0" : "";
 }
+//every one of them at its off value (cheats/online.cpp): not written to the launcher's file
+void settings_cheats_off() {
+    if (g_settings.empty()) build_pages();
+    bool dirty = g_dirty;
+    for (Setting& s : g_settings) {
+        const char* off = settings_cheat_off(s.id);
+        if (!off || !*off || !s.set) continue;
+        const float v = (float)std::atof(off);
+        if (s.get && s.get() != v) s.set(v);
+    }
+    g_dirty = dirty;
+}
 //one of them set by TASLib: not written to the launcher's file
 bool settings_apply(const std::string& id, const std::string& text) {
     const float value = (float)std::atof(text.c_str());
@@ -562,6 +574,12 @@ bool settings_apply(const std::string& id, const std::string& text) {
 void settings_replay_headless() {
     if (g_settings.empty()) build_pages();
     ReplayHotkeys();
+}
+#else
+void settings_cheats_off() {
+    set_god_mode(false), set_infinite_ammo(false), set_infinite_sprint(false), set_turbo(1.0f), set_grenades(false);
+    set_invisible_enemies(false), set_noclip(false), set_stamina_meter(false), set_collision_view(false), set_trigger_view(false);
+    set_speedometer_cheat(false), set_mouse_everywhere(false);
 }
 #endif
 
