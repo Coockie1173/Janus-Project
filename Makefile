@@ -6,6 +6,7 @@
 #   make names      mix the symbol sources into build/names.tsv
 #   make deps       build SDL3 into build/deps if the system has no SDL3 dev files
 #   make win        the Windows build, cross-compiled and zipped: build/Janus-Project-win64.zip
+#   make win-old-cpu  the same for CPUs without AVX2 (x86-64-v2): build/Janus-Project-win64-old-cpu.zip
 #   make linux      the Linux build to hand out, zipped: build/Janus-Project-linux64.zip
 #   make HL_CROUCH=ON   with Half-Life's crouch while bunnyhopping
 #   make clean      remove generated code and objects (keeps build/deps)
@@ -102,8 +103,9 @@ build: wiikit-patch recomp deps
 
 # Windows, 64-bit: cross-compiled with llvm-mingw (fetched into build/deps), run from its own
 # folder (GE_PORTABLE), packaged by tools/package_win.sh without anything of the disc
-.PHONY: win
-WIN_OUT   := $(BUILD)/out-win
+.PHONY: win win-old-cpu
+WIN_OUT   ?= $(BUILD)/out-win
+WIN_NAME  ?= Janus-Project-win64
 win: wiikit-patch recomp deps
 	@sh tools/get_mingw.sh $(BUILD)/deps
 	@[ -f $(BUILD)/deps/sdl3-win/bin/SDL3.dll ] || sh tools/build_sdl3.sh $(BUILD)/deps win
@@ -114,7 +116,11 @@ win: wiikit-patch recomp deps
 	    -DOPENSSL_ROOT_DIR=$(abspath $(BUILD)/deps/openssl-win) -DOPENSSL_USE_STATIC_LIBS=ON \
 	    -DGE_HL_CROUCH=$(HL_CROUCH) -DWIIKIT_EXTRA=$(abspath port/goldeneye.cmake) > $(BUILD)/cmake-win.log 2>&1 || { tail -20 $(BUILD)/cmake-win.log; exit 1; }
 	ninja -C $(WIN_OUT) wiiboot
-	sh tools/package_win.sh $(FONTS)
+	WIN_OUT=$(WIN_OUT) WIN_NAME=$(WIN_NAME) sh tools/package_win.sh $(FONTS)
+
+# the Windows build for older CPUs (no AVX2: AMD before Excavator, Intel before Haswell)
+win-old-cpu:
+	$(MAKE) win ARCH=-march=x86-64-v2 WIN_OUT=$(BUILD)/out-win-old-cpu WIN_NAME=Janus-Project-win64-old-cpu
 
 # Linux, to hand out: the same portable layout as the Windows package (GE_PORTABLE), SDL3 beside
 # the game in lib/, the C++ runtime linked in, packaged by tools/package_linux.sh

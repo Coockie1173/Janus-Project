@@ -112,7 +112,7 @@ And if you change wiikit yourself, `make wiikit-save` writes your changes back i
 The boot ROM fonts and the DSP's resampling table (`font_western.bin`, `font_japanese.bin`, `dsp_coef.bin`) are taken from Dolphin's free replacements in `Sys/GC` if you have Dolphin installed (pass `FONTS=dir` otherwise). If Dolphin's `Sys/totaldb.dsy` is around (`DSY=file`) it'll name some more SDK functions by signature.
 
 ## Windows
-`make win` cross-compiles a 64-bit Windows build from Linux (llvm-mingw and SDL3 get fetched into `build/deps`) and packs it as `build/Janus-Project-win64.zip`. In there you'll find the executable and a `README.txt` (see `port/package/win/`). The disc's files are not in it! The player takes them out of their own image on the first start. Online works the same as on Linux (Winsock instead of BSD sockets).
+`make win` cross-compiles a 64-bit Windows build from Linux (llvm-mingw and SDL3 get fetched into `build/deps`) and packs it as `build/Janus-Project-win64.zip`. In there you'll find the executable and a `README.txt` (see `port/package/win/`). The disc's files are not in it! The player takes them out of their own image on the first start. Online works the same as on Linux (Winsock instead of BSD sockets). `make win-old-cpu` builds the same for CPUs without AVX2 (`-march=x86-64-v2`) as `build/Janus-Project-win64-old-cpu.zip`.
 
 ## Linux package
 `make linux` builds the same portable layout for Linux and packs it as `build/Janus-Project-linux64.zip`: the executable (C++ runtime linked in, SDL3 next to it in `lib/`), and a `README.txt` (see `port/package/linux/`). It needs glibc 2.38, OpenSSL 3 and OpenGL 4.5 wherever it runs. Online and crash dumps work there too.
@@ -126,7 +126,7 @@ Grab the zip for your OS from [Releases](https://github.com/Coockie1173/Janus-Pr
 
 The small (and redundant) settings window is gone, everything lives in the much superior F1 menu in game now.
 
-You'll need a 64-bit Windows or Linux, a CPU with AVX2 (roughly 2015 or newer) and a GPU with OpenGL 4.5. The `README.txt` in the zip has the controls and the rest.
+You'll need a 64-bit Windows or Linux, a CPU with AVX2 (roughly 2015 or newer, older Windows PCs take the `win64-old-cpu` zip) and a GPU with OpenGL 4.5. The `README.txt` in the zip has the controls and the rest.
 
 ## Something broke?
 Open an issue with your `run.log`, and on Linux the `report.txt` from the folder in `crashes/` (just that file, the rest is a memory dump of the game). Please mention the version too, it's at the bottom of the F1 menu and near the top of `run.log`. A crash on a build that's a week old might already be fixed!

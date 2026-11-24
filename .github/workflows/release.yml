@@ -44,9 +44,10 @@ jobs:
 
       - run: make linux
       - run: make win
+      - run: make win-old-cpu
       - run: make mods-zip
 
       - name: release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: sh tools/publish_release.sh build/Janus-Project-linux64.zip build/Janus-Project-win64.zip build/modpacks/*.zip
+        run: sh tools/publish_release.sh build/Janus-Project-linux64.zip build/Janus-Project-win64.zip build/Janus-Project-win64-old-cpu.zip build/modpacks/*.zip

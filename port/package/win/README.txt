@@ -9,6 +9,7 @@ What you need
 -------------
 - Windows 10 or 11, 64-bit.
 - A processor from about 2015 or later (AVX2: Intel Haswell, AMD Ryzen, or newer).
+  Older ones: take the Janus-Project-win64-old-cpu zip from the releases.
 - A graphics card with OpenGL 4.5 and up-to-date drivers (NVIDIA, AMD, or Intel
   from the last ten years).
 - Your own GoldenEye 007 disc for the Wii, US version (game ID SJBE52), as a
@@ -119,7 +120,7 @@ If something goes wrong
   a laptop, make Janus-Project.exe use the dedicated graphics card (Windows
   Settings -> Display -> Graphics).
 - "Illegal instruction", or it never opens a window on an old PC: the processor
-  has no AVX2. This build cannot run there.
+  has no AVX2. Take the Janus-Project-win64-old-cpu zip instead (a bit slower).
 - Windows SmartScreen says the program is unknown: More info -> Run anyway.
 - Online does not connect: allow Janus-Project.exe through the Windows firewall
   when it asks, and leave F1 > Enhancements > Online on.

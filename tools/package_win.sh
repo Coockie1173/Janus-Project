@@ -3,19 +3,21 @@
 # instructions and an empty modpacks/default, zipped. Nothing of the disc goes in: game/ is left for the
 # player to fill.
 #     sh tools/package_win.sh [FONTS_DIR]      -> build/Janus-Project-win64.zip
+# WIN_OUT and WIN_NAME pick another build and zip (make win-old-cpu, for CPUs without AVX2)
 set -e
 cd "$(dirname "$0")/.."
 FONTS=${1:-/usr/share/dolphin-emu/Sys/GC}
-NAME=Janus-Project-win64
+NAME=${WIN_NAME:-Janus-Project-win64}
+WOUT=${WIN_OUT:-build/out-win}
 S=build/win/$NAME
 rm -rf "$S" build/$NAME.zip
 mkdir -p "$S/config/gecko" "$S/fonts" "$S/game" "$S/licenses"
-cp build/out-win/wiiboot.exe "$S/Janus-Project.exe"
+cp $WOUT/wiiboot.exe "$S/Janus-Project.exe"
 build/deps/llvm-mingw/bin/x86_64-w64-mingw32-strip "$S/Janus-Project.exe"
 cp build/deps/sdl3-win/bin/SDL3.dll "$S/"
 # TASLib only as the built library, when the private submodule was there to build it
-if [ -f build/out-win/TASLib.dll ]; then
-    cp build/out-win/TASLib.dll "$S/"
+if [ -f $WOUT/TASLib.dll ]; then
+    cp $WOUT/TASLib.dll "$S/"
     build/deps/llvm-mingw/bin/x86_64-w64-mingw32-strip "$S/TASLib.dll"
 fi
 cp config/keys.txt "$S/keys.txt"
