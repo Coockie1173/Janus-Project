@@ -238,6 +238,11 @@ PPCFunc orig_command_fill = nullptr;
 void command_fill(PPCContext& c) {
     static uint32_t frame = ~0u;
     uint32_t input = c.r[3], cmd = c.r[4], now = ld32(kFrameCount);
+    //the look stick goes into the command smoothed (fn_801C9010: the input object's +0x48 and +0x4C
+    //blend towards the pad's every frame), unless its byte +0x10F says this read takes the pad's as
+    //it is. the mouse on the stick is a speed already, and smoothed it carried a scope's near-full
+    //deflection into the hip's sensitivity for a few frames: a flick on letting go of the scope
+    if (g_stick_took && mouse_on_stick() && guest_ptr(input)) st8(input + 0x10F, 1);
     orig_command_fill(c);
     net_command_look(cmd, now != frame);
     bunnyhop_command(cmd);
