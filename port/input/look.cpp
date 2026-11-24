@@ -310,13 +310,30 @@ const float kStickSens = 100.0f, kStickRate = 2.95f, kStickDead = 0.12f; //the r
 const uint32_t kSensAddr[4] = {0x805DE7A4, 0x805DE7A8, 0x805DE7CC, 0x805DE7D0};
 float g_pitch_rate_scale = 1.25f; //the pitch's rate compared to the yaw's at the same sensitivity
 bool g_stick_took = false;
-std::atomic<float> g_stick_sens[2]{kStickSens, kStickSens}; //what the game turns the stick with, across and up and down (look_settings)
+//what the game turns the stick with, across and up and down, with aim let go [0] and held [1] (look_settings)
+std::atomic<float> g_stick_sens[2][2]{{kStickSens, kStickSens}, {kStickSens, kStickSens}};
+std::atomic<bool> g_stick_aimed{false}; //the aim byte (+0xD00) as of the last look update
+bool g_final_zl = false; //aim (ZL) as the game got it on the last read, after every rule (classic_filter)
+const uint32_t kZL = 0x0080;
+
+//the sensitivity the deflection is made for. the host takes the one for the aim of the same command
+//and this console only learns which in the look update after it was sent: let go of a scope and
+//the deflection made for the scope's 0.09 turned at the hip's 74, a twist of the view. while the
+//aim may change on this read (aim pressed or let go, or the game hasn't taken the last change
+//yet) it's made for the faster of the two: at worst the host turns slower for a frame
+float stick_sens_for(int axis, bool zl_now) {
+    static bool zl_was = false;
+    bool aimed = g_stick_aimed, sure = zl_now == zl_was && g_final_zl == aimed;
+    if (axis == 1) zl_was = zl_now;
+    return sure ? g_stick_sens[aimed][axis].load() : std::max(g_stick_sens[0][axis].load(), g_stick_sens[1][axis].load());
+}
+
 void mouse_stick(ClassicState& s) {
     g_stick_took = g_mouse_sens > 0 && !lib_mouse_taken() && in_play() && !overlay_open() && stick_look_allowed() && mouse_on_stick();
     if (!g_stick_took) return;
     //the mouse's speed measured over at least 4 ms, every read in between gets the same
     static auto last = std::chrono::steady_clock::now();
-    static float ax = 0, ay = 0, defl_x = 0, defl_y = 0;
+    static float ax = 0, ay = 0, rate_x = 0, rate_y = 0;
     auto now = std::chrono::steady_clock::now();
     float dt = std::chrono::duration<float>(now - last).count();
     float dx = 0, dy = 0;
@@ -325,21 +342,25 @@ void mouse_stick(ClassicState& s) {
     ax += dx;
     ay += g_mouse_invert ? -dy : dy;
     if (dt >= 0.004f) {
-        defl_x = defl_y = 0;
+        rate_x = rate_y = 0;
         if (dt <= 0.25f) {
             float blend = 0, aim = local_aim_blend(blend) ? aim_sens_at(blend) : 1.0f;
             float k = kRadPerPixel * g_mouse_sens * aim / dt / kStickRate;
-            float across = g_stick_sens[0], up = g_stick_sens[1]; //0 is an axis the game has turned off
-            //the game takes the dead zone off each axis by itself, so each gets past it by itself
-            auto past_dead = [](float v) {
-                return std::fabs(v) > 1e-7f ? std::copysign(std::min(1.0f, kStickDead + (1 - kStickDead) * std::fabs(v)), v) : 0.0f;
-            };
-            defl_x = across > 0 ? past_dead(ax * k / across) : 0.0f;
-            defl_y = up > 0 ? past_dead(ay * k / (up * g_pitch_rate_scale)) : 0.0f;
+            rate_x = ax * k;
+            rate_y = ay * k;
         }
         ax = ay = 0;
         last = now;
     }
+    //the sensitivity goes by this read's aim, every read
+    bool zl = (s.buttons & kZL) != 0;
+    float across = stick_sens_for(0, zl), up = stick_sens_for(1, zl); //0 is an axis the game has turned off
+    //the game takes the dead zone off each axis by itself, so each gets past it by itself
+    auto past_dead = [](float v) {
+        return std::fabs(v) > 1e-7f ? std::copysign(std::min(1.0f, kStickDead + (1 - kStickDead) * std::fabs(v)), v) : 0.0f;
+    };
+    float defl_x = across > 0 ? past_dead(rate_x / across) : 0.0f;
+    float defl_y = up > 0 ? past_dead(rate_y / (up * g_pitch_rate_scale)) : 0.0f;
     s.rx = std::clamp(s.rx + defl_x, -1.0f, 1.0f);
     s.ry = std::clamp(s.ry - defl_y, -1.0f, 1.0f);
 }
@@ -382,6 +403,17 @@ void look_settings(PPCContext& c) {
     float theirs = hosted && ours ? host_drawn_fov() : 0;
     uint32_t drawn = theirs > 0 ? ld32(ctrl + kCtrlFovDrawn) : 0;
     if (theirs > 0) stf(ctrl + kCtrlFovDrawn, theirs);
+    //the answer with the aim the other way as well, for the read that changes it (stick_sens_for)
+    //the game's own answer only reads the controller
+    float other[2] = {kStickSens, kStickSens};
+    bool aimed = ld8(ctrl + 0xD00) != 0, local = hosted && ctrl == g_local_ctrl && g_stick_took && guest_ptr(out);
+    if (local) {
+        st8(ctrl + 0xD00, aimed ? 0 : 1);
+        orig_look_settings(c);
+        st8(ctrl + 0xD00, aimed ? 1 : 0);
+        c.r[3] = ctrl; c.r[4] = out;
+        for (int i = 0; i < 2; ++i) other[i] = g_sens_ours[!aimed] ? std::max(ldf(out + 0x18 + 4 * i), 0.0f) : kStickSens;
+    }
     orig_look_settings(c);
     if (theirs > 0) st32(ctrl + kCtrlFovDrawn, drawn);
     if (!g_stick_took || !guest_ptr(out)) return;
@@ -394,16 +426,22 @@ void look_settings(PPCContext& c) {
     }
     if (hosted) {
         //once the game has kStickSens in the set it reads here, before that the deflection stays kStickSens's
-        bool sent = g_sens_ours[ld8(ctrl + 0xD00) != 0];
-        if (ctrl == g_local_ctrl)
-            for (int i = 0; i < 2; ++i) g_stick_sens[i] = sent ? std::max(ldf(out + 0x18 + 4 * i), 0.0f) : kStickSens;
+        bool sent = g_sens_ours[aimed];
+        if (local) {
+            for (int i = 0; i < 2; ++i) {
+                g_stick_sens[aimed][i] = sent ? std::max(ldf(out + 0x18 + 4 * i), 0.0f) : kStickSens;
+                g_stick_sens[!aimed][i] = other[i];
+            }
+            g_stick_aimed = aimed;
+        }
         return;
     }
     for (int i = 0; i < 2; ++i) {
         uint32_t at = out + 0x18 + 4 * i;
         if (ldf(at) > 0) stf(at, kStickSens);
-        g_stick_sens[i] = kStickSens;
+        g_stick_sens[0][i] = g_stick_sens[1][i] = kStickSens;
     }
+    if (ctrl == g_local_ctrl) g_stick_aimed = aimed;
 }
 
 void install_look() {

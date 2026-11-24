@@ -48,6 +48,7 @@ extern uint32_t g_look_frame; //the frame the mouse was last applied in
 extern uint32_t g_look_ctrl; //the controller it's for, and what's still left to turn
 extern float g_look_yaw;
 extern bool g_stick_took; //the mouse is on the stick this frame
+extern bool g_final_zl; //aim as the game got it on the last read (classic_filter sets it)
 void mouse_aim(uint32_t ctrl);
 void mouse_look(uint32_t ctrl, uint32_t player);
 void mouse_stick(ClassicState& s);

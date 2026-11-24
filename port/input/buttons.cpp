@@ -257,6 +257,7 @@ void classic_filter(int chan, ClassicState& s) {
     tank_buttons(s);
     skip_buttons(s);
     tas_buttons(chan, s);
+    g_final_zl = (s.buttons & kClZL) != 0;
 }
 
 bool sprint_key() { return g_sprint_held; }
