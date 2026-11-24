@@ -50,6 +50,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <map>
@@ -227,22 +228,64 @@ void BulletContact(PPCContext& c)
 	if (g_tracehit && (flags & kHead)) rt_log("goldeneye: hit: a bullet meets guard %08X in the head, its damage %g%s", thing, ldf(bullet + 0x1D0), body ? " (headshots that kill off)" : "");
 }
 
-//the mouse on the sliders. the menu draws a slider's bar (ge_slider_draw: the menu, x, y, width,
-//height in a screen of 640 by 448) right after it asked for its value, so a bar drawn after
-//one of the four was asked for is that slider's. the cursor is free in a menu (input.cpp):
-//a press on a bar takes hold of the slider and it follows the cursor until the button is let
-//go. lighting the row under the cursor and select are the menus' own pointer's (pointer.cpp)
+//the mouse on the sliders, the game's own (the volumes, the sensitivities) and 007 Custom's. the menu
+//draws a slider's bar (ge_slider_draw: the menu, x, y, width, height in a screen of 640 by 448) right
+//after it asked for its value, so a bar is the slider ge_setting_get was asked for last. the cursor is
+//free in a menu (input.cpp): a press on a bar takes hold of the slider and it follows the cursor until
+//the button is let go. a slider of the game's is moved by its own steps (ge_setting_step), which
+//also put the value to use, as many as bring it closest to the cursor. lighting the row under the
+//cursor and select are the menus' own pointer's (pointer.cpp)
 const float kGrabAcross = 6.0f, kGrabDown = 6.0f; //how far outside a bar a press still takes hold of it
 const float kRowLeft = 125.0f, kRowRight = 500.0f; //a row of the list, across
 const uint32_t kUpFrames = 3; //the page is up when a bar was drawn this many frames ago at most
+const int kMostSteps = 64; //more than any slider of the game's has from end to end
 struct Bar { float x, y, wide, high; };
-Bar g_bars[kCustomSliders] = {};
-int g_asked = -1; //the slider ge_setting_get was asked for last
-int g_held = -1; //the slider the mouse has hold of
+struct Asked { uint32_t profile, hash, pad, arg; }; //a ge_setting_get as the menu made it, hash 0 for none
+Bar g_bars[kCustomSliders] = {}; //007 Custom's, for its page's rows
+Asked g_asked = {}; //the slider ge_setting_get was asked for last
+uint32_t g_held = 0; //the hash of the slider the mouse has hold of, 0 for none
 uint32_t g_stepped_frame = 0, g_clicked_frame = 0; //the frames the switch was changed through the menu, and by a click on its row
 uint32_t g_drawn_frame = 0, g_mouse_frame = 0;
 bool g_up = false, g_pressed = false, g_was_left = false;
 std::atomic<bool> g_on_bar{false}; //the button went down on a bar and is still down: not the menu's select
+
+int SliderOf(uint32_t setting)
+{
+	return setting >= kCustomSetting && setting < kCustomSetting + kCustomSliders ? int(setting - kCustomSetting) : -1;
+}
+
+//a slider of the game's: how full it is, 0 to 1
+double GameValue(const PPCContext& c, const Asked& a)
+{
+	PPCContext call = c;
+	call.r[3] = a.profile; call.r[4] = a.hash; call.r[5] = a.pad; call.r[6] = a.arg; call.r[7] = 0;
+	orig_setting_get(call);
+	return call.f[1];
+}
+
+//and a step of it, -1 or 1
+void GameStep(const PPCContext& c, const Asked& a, int way)
+{
+	PPCContext call = c;
+	call.r[3] = a.profile; call.r[4] = a.hash; call.r[5] = uint32_t(way); call.r[6] = a.pad;
+	orig_setting_step(call);
+}
+
+//a slider of the game's stepped to the value closest to a part of its bar, 0 to 1: its new value
+double GameMoveTo(const PPCContext& c, const Asked& a, double part)
+{
+	double now = GameValue(c, a);
+	for (int i = 0; i < kMostSteps && now != part; ++i)
+	{
+		const int way = part > now ? 1 : -1;
+		GameStep(c, a, way);
+		const double then = GameValue(c, a);
+		if (then == now) break; //at its end
+		if (std::abs(part - then) >= std::abs(part - now)) { GameStep(c, a, -way); break; } //past it
+		now = then;
+	}
+	return now;
+}
 
 //the page's row at a place of the screen, -1 for none
 int RowAt(float x, float y)
@@ -257,16 +300,20 @@ int RowAt(float x, float y)
 
 void SliderDraw(PPCContext& c)
 {
-	const int slider = g_asked;
-	g_asked = -1;
-	if (slider >= 0)
+	const Asked asked = g_asked;
+	g_asked = {};
+	if (asked.hash)
 	{
-		const uint32_t menu = c.r[3], frame = ld32(kFrameCount);
-		Bar& bar = g_bars[slider];
-		bar = { float((int32_t)c.r[4]), float((int32_t)c.r[5]), float((int32_t)c.r[6]), float((int32_t)c.r[7]) };
+		const uint32_t frame = ld32(kFrameCount);
+		const Bar bar = { float((int32_t)c.r[4]), float((int32_t)c.r[5]), float((int32_t)c.r[6]), float((int32_t)c.r[7]) };
+		const int slider = SliderOf(asked.hash);
+		if (slider >= 0) g_bars[slider] = bar;
 		g_drawn_frame = frame;
-		static bool said[kCustomSliders] = {};
-		if (g_trace && !said[slider] && (said[slider] = true)) rt_log("goldeneye: 007 Custom: slider %d's bar is at %g %g, %g by %g", slider, bar.x, bar.y, bar.wide, bar.high);
+		if (g_trace)
+		{
+			static std::map<uint32_t, bool> said;
+			if (!said[asked.hash] && (said[asked.hash] = true)) rt_log("goldeneye: slider %08X's bar is at %g %g, %g by %g", asked.hash, bar.x, bar.y, bar.wide, bar.high);
+		}
 		float x = 0, y = 0;
 		bool left = false;
 		const bool cursor = menu_cursor(x, y, left);
@@ -276,19 +323,23 @@ void SliderDraw(PPCContext& c)
 			g_mouse_frame = frame;
 			g_pressed = cursor && left && !g_was_left;
 			g_was_left = cursor && left;
-			if (!g_was_left) g_held = -1;
-			g_on_bar = g_held >= 0;
+			if (!g_was_left) g_held = 0;
+			g_on_bar = g_held != 0;
 		}
 		if (cursor && bar.wide > 0)
 		{
 			const bool over = x >= bar.x - kGrabAcross && x <= bar.x + bar.wide + kGrabAcross && y >= bar.y - kGrabDown && y <= bar.y + bar.high + kGrabDown;
-			if (g_pressed && over) { g_held = slider; g_on_bar = true; }
-			if (g_held == slider)
+			if (g_pressed && over) { g_held = asked.hash; g_on_bar = true; }
+			if (g_held == asked.hash)
 			{
-				const Slider& s = kSliders[slider];
 				const float part = std::clamp((x - bar.x) / bar.wide, 0.0f, 1.0f);
-				g_value[slider] = std::clamp(int(part * s.most / s.step + 0.5f) * s.step, 0, s.most);
-				c.f[1] = double(g_value[slider]) / s.most;
+				if (slider >= 0)
+				{
+					const Slider& s = kSliders[slider];
+					g_value[slider] = std::clamp(int(part * s.most / s.step + 0.5f) * s.step, 0, s.most);
+					c.f[1] = double(g_value[slider]) / s.most;
+				}
+				else c.f[1] = GameMoveTo(c, asked, part);
 			}
 			//a click on the switch's row is the switch
 			//(not when the press was on one of its arrows, which the menu's pointer has just taken as a step)
@@ -302,16 +353,11 @@ void SliderDraw(PPCContext& c)
 	orig_slider_draw(c);
 }
 
-int SliderOf(uint32_t setting)
-{
-	return setting >= kCustomSetting && setting < kCustomSetting + kCustomSliders ? int(setting - kCustomSetting) : -1;
-}
-
 //(profile, a setting's hash, the pad, -, as it is) -> f1 how full its bar is, 0 to 1
 void SettingGet(PPCContext& c)
 {
 	const int slider = SliderOf(c.r[4]);
-	g_asked = slider;
+	g_asked = { c.r[3], c.r[4], c.r[5], c.r[6] };
 	if (slider < 0) { orig_setting_get(c); return; }
 	c.f[1] = double(g_value[slider]) / kSliders[slider].most;
 }
@@ -460,7 +506,7 @@ void custom_frame(uint32_t frame)
 	if (up == g_up) return;
 	g_up = up;
 	if (up) return;
-	g_held = -1;
+	g_held = 0;
 	g_on_bar = false;
 	g_was_left = false;
 }
