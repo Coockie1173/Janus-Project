@@ -7,7 +7,7 @@
 #define GE_TASLIB_API_H
 #include <stdint.h>
 
-#define GE_TAS_API_VERSION 10
+#define GE_TAS_API_VERSION 11
 
 #ifdef _WIN32
 #define GE_TAS_EXPORT __declspec(dllexport)
@@ -200,6 +200,9 @@ typedef struct GeTasLib
 
 	//api 9
 	void (*DrawUi)(void); //the library's window's frame, its ImGui context current (renderer's thread), while it's up
+
+	//api 11
+	int (*Steering)(void); //1 while the library may have a hand in play: best times aren't kept (game's thread)
 } GeTasLib;
 
 //the one export, null when the library doesn't want to run

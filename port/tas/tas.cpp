@@ -488,6 +488,7 @@ void install_tas()
 }
 
 bool tas_loaded() { return g_pLib != nullptr; }
+bool lib_steering() { return g_pLib && g_pLib->size >= offsetof(GeTasLib, Steering) + sizeof(void*) && g_pLib->Steering && g_pLib->Steering(); }
 uint32_t lib_fixed_rate() { return g_pLib ? g_fixedRate.load() : 0; }
 bool lib_frames_as_drawn() { return g_pLib && g_asDrawn; }
 bool lib_mouse_taken() { return g_pLib && g_mouseTaken; }

@@ -13,6 +13,7 @@ namespace ge
 void install_tas();
 void install_shots(); //shots.cpp
 bool tas_loaded();
+bool lib_steering(); //the library says it may have a hand in play
 void tas_frame(uint32_t frame); //once a frame
 void tas_boundary(PPCContext& c); //between two frames on the game's thread (framerate.cpp)
 void tas_controller(uint32_t ctrl); //the local controller's update starts (players.cpp)

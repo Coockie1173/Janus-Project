@@ -8,7 +8,7 @@
 //Classic, it's only kept with the sliders at LTK's or DLTK's (kLtk, kDltk) the whole attempt
 //
 //a time only counts when no cheat was on at any point of the attempt (cheats_active, every frame),
-//TASLib wasn't loaded and bunnyhopping kept its default rules (bhop_custom_now).
+//TAS mode wasn't on (lib_steering) and bunnyhopping kept its default rules (bhop_custom_now).
 //an attempt starts with a level change to a mission's start (a pick in the menu, a restart, Save and
 //Continue's next mission) once the level timer has gone back to 0: the game changes level before the
 //page comes up, with the won level's time still on the timer. a checkpoint's reload isn't a new attempt
@@ -132,7 +132,7 @@ void best_times_frame()
 		m_Recorded = false;
 	}
 	if (cheats_active()) Spoil(Spoiled::Cheats);
-	if (tas_loaded()) Spoil(Spoiled::Tas);
+	if (lib_steering()) Spoil(Spoiled::Tas);
 	if (bhop_custom_now()) Spoil(Spoiled::BhopRules);
 	if (Custom() != m_Custom) Spoil(Spoiled::Custom);
 	if (bunnyhop_now()) m_Hopped = true;
@@ -187,7 +187,7 @@ std::string best_time_text()
 	switch (m_ShownSpoiled)
 	{
 	case Spoiled::Cheats: return "Cheats Used - Not Saved";
-	case Spoiled::Tas: return "TASLib Loaded - Not Saved";
+	case Spoiled::Tas: return "TAS Mode On - Not Saved";
 	case Spoiled::BhopRules: return "Custom Bhop Rules - Not Saved";
 	case Spoiled::Custom: return "Settings Changed - Not Saved";
 	default: break;
