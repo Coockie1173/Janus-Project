@@ -27,6 +27,10 @@ const float kAdsSensMin = 0.05f, kAdsSensMax = 2.0f;
 float ads_sens(); //the mouse's sensitivity aiming down the sight, times the normal one
 void set_ads_sens(float s);
 bool local_aim_blend(float& blend); //how far the local player is aimed, 0 to 1
+//a scope over Nintendo WFC: the command goes to the host without the aim (input/look.cpp)
+struct ScopeHidden { bool on; uint32_t pressed, held, stick[2]; };
+ScopeHidden scope_command_hide(uint32_t cmd); //before ge_command_write
+void scope_command_restore(uint32_t cmd, const ScopeHidden& h); //after it
 bool aim_lock(); //a press of aim stays aimed until the next
 void set_aim_lock(bool on);
 const char* local_look_name(); //what the mouse does in that state, "view", "aim", "locked" or "cheat"

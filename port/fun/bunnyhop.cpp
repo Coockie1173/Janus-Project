@@ -777,7 +777,9 @@ void MoveSpeed(PPCContext& c)
 void CommandWrite(PPCContext& c)
 {
 	const uint32_t cmd{ c.r[3] }, stream{ c.r[4] };
+	const ScopeHidden hidden{ scope_command_hide(cmd) };
 	orig_command_write(c);
+	scope_command_restore(cmd, hidden);
 	owned_command_write(c, cmd, stream);
 	if (modded_lobby()) net_write_number(c, stream, guest_ptr(cmd) && (ld32(cmd + kCmdExtra) & kCmdJump) ? 1 : 0, 1);
 }

@@ -244,6 +244,12 @@ void command_fill(PPCContext& c) {
     //deflection into the hip's sensitivity for a few frames: a flick on letting go of the scope
     if (g_stick_took && mouse_on_stick() && guest_ptr(input)) st8(input + 0x10F, 1);
     orig_command_fill(c);
+    static const bool trace_cmd = std::getenv("GE_TRACECMD") != nullptr;
+    static uint32_t seen_cmd[2] = {~0u, ~0u};
+    if (trace_cmd && guest_ptr(cmd) && (ld32(cmd + 0x34) != seen_cmd[0] || ld32(cmd + 0x38) != seen_cmd[1])) {
+        seen_cmd[0] = ld32(cmd + 0x34); seen_cmd[1] = ld32(cmd + 0x38);
+        rt_log("cmd: frame %u buttons %08X %08X, zl %d", now, seen_cmd[0], seen_cmd[1], (int)g_final_zl);
+    }
     net_command_look(cmd, now != frame);
     bunnyhop_command(cmd);
     owned_command_fill(input, cmd);
@@ -399,7 +405,19 @@ template <int I> void look_sens(PPCContext& c) {
 //time. there the answer stays the game's, worked out for the angle the host draws the aim
 //with (the game's view, the weapon's own angle: fov.cpp), and the stick's deflection is made
 //for it (mouse_stick): the two turn the same, as far as a stick goes through a scope
+//
+//a scope over Nintendo WFC: the host's own scope sensitivity is its table's 0.09 whatever this
+//console sent, and a full deflection of the stick turns 0.28 radians a second at that, far
+//slower than the mouse. so with a scope in the hand the aim goes to the host without the aim
+//bits (scope_command_hide): the host turns the player with the hip set (kStickSens), and here
+//this console's player and its host's copy are answered the hip set too while aimed, so the
+//three turn the same. the scope itself is this console's: the zoom, the sway and the shot,
+//which the shooter's console works out (fn_8012E1A0 fires and sends where from and which way,
+//message 0x21; the host only makes the bullet, fn_801DEDC0)
 const uint32_t kCtrlFovDrawn = 0x71C; //the angle the view is drawn with (fov.cpp)
+const uint32_t kScopeSens = 0x805E0468; //the scope table's two sensitivities, what out+0x18 and +0x1C get from it
+const uint32_t kCmdAim = 0x40; //aim in the command's pressed (+0x34) and held (+0x38) buttons, measured
+std::atomic<bool> g_scope_hidden{false}; //a scope is in the hand, the host isn't told about the aim
 PPCFunc orig_look_settings = nullptr;
 void look_settings(PPCContext& c) {
     uint32_t ctrl = c.r[3], out = c.r[4];
@@ -408,34 +426,51 @@ void look_settings(PPCContext& c) {
     float theirs = hosted && ours ? host_drawn_fov() : 0;
     uint32_t drawn = theirs > 0 ? ld32(ctrl + kCtrlFovDrawn) : 0;
     if (theirs > 0) stf(ctrl + kCtrlFovDrawn, theirs);
-    //the answer with the aim the other way as well, for the read that changes it (stick_sens_for)
-    //the game's own answer only reads the controller
+    //the answer with the aim the other way as well, for the read that changes it (stick_sens_for),
+    //and for a hidden scope the hip's while aimed. the game's own answer only reads the controller
     float other[2] = {kStickSens, kStickSens};
+    uint32_t hip[10] = {};
     bool aimed = ld8(ctrl + 0xD00) != 0, local = hosted && ctrl == g_local_ctrl && g_stick_took && guest_ptr(out);
-    if (local) {
+    bool copy = hosted && ours && ctrl != g_local_ctrl && guest_ptr(out) && g_scope_hidden && aimed;
+    bool scope = false, have_hip = false;
+    if (local || copy) {
         st8(ctrl + 0xD00, aimed ? 0 : 1);
         orig_look_settings(c);
         st8(ctrl + 0xD00, aimed ? 1 : 0);
         c.r[3] = ctrl; c.r[4] = out;
         for (int i = 0; i < 2; ++i) other[i] = g_sens_ours[!aimed] ? std::max(ldf(out + 0x18 + 4 * i), 0.0f) : kStickSens;
+        if (aimed) { for (int i = 0; i < 10; ++i) hip[i] = ld32(out + 4 * i); have_hip = true; }
+        else scope = ld32(out + 0x18) == ld32(kScopeSens) && ld32(out + 0x1C) == ld32(kScopeSens + 4);
     }
     orig_look_settings(c);
     if (theirs > 0) st32(ctrl + kCtrlFovDrawn, drawn);
+    if (local) {
+        if (aimed) scope = ld32(out + 0x18) == ld32(kScopeSens) && ld32(out + 0x1C) == ld32(kScopeSens + 4);
+        bool hide = scope && !modded_lobby();
+        if (hide != g_scope_hidden) rt_log("goldeneye: %s", hide ? "a scope in the hand, its aim stays off the host's command" : "the aim goes to the host again");
+        g_scope_hidden = hide;
+    }
+    if (g_scope_hidden && aimed && have_hip)
+        for (int i = 0; i < 10; ++i) st32(out + 4 * i, hip[i]);
     if (!g_stick_took || !guest_ptr(out)) return;
     static const bool trace = std::getenv("GE_TRACEAIM") != nullptr;
     static uint32_t seen[2] = {};
     if (trace && (ld32(out + 0x18) != seen[0] || ld32(out + 0x1C) != seen[1])) { //what the game would have turned with
         seen[0] = ld32(out + 0x18); seen[1] = ld32(out + 0x1C);
-        rt_log("aim: frame %u the game's look sensitivities %.3f across, %.3f up and down, aim held %d, drawn at %.1f degrees%s", ld32(kFrameCount),
-               ldf(out + 0x18), ldf(out + 0x1C), ld8(ctrl + 0xD00), ldf(ctrl + kCtrlFovDrawn), hosted ? ", kept: the host's" : "");
+        rt_log("aim: frame %u the game's look sensitivities %.3f across, %.3f up and down, aim held %d, drawn at %.1f degrees%s%s", ld32(kFrameCount),
+               ldf(out + 0x18), ldf(out + 0x1C), ld8(ctrl + 0xD00), ldf(ctrl + kCtrlFovDrawn), hosted ? ", kept: the host's" : "",
+               g_scope_hidden ? ", scope hidden" : "");
     }
     if (hosted) {
         //once the game has kStickSens in the set it reads here, before that the deflection stays kStickSens's
-        bool sent = g_sens_ours[aimed];
+        //a hidden scope's aim is the hip's on the host
+        bool hidden = g_scope_hidden;
+        bool sent = g_sens_ours[hidden ? 0 : aimed];
         if (local) {
             for (int i = 0; i < 2; ++i) {
-                g_stick_sens[aimed][i] = sent ? std::max(ldf(out + 0x18 + 4 * i), 0.0f) : kStickSens;
-                g_stick_sens[!aimed][i] = other[i];
+                float now = sent ? std::max(ldf(out + 0x18 + 4 * i), 0.0f) : kStickSens;
+                g_stick_sens[aimed][i] = now;
+                g_stick_sens[!aimed][i] = hidden ? now : other[i];
             }
             g_stick_aimed = aimed;
         }
@@ -447,6 +482,40 @@ void look_settings(PPCContext& c) {
         g_stick_sens[0][i] = g_stick_sens[1][i] = kStickSens;
     }
     if (ctrl == g_local_ctrl) g_stick_aimed = aimed;
+}
+
+//the command as the host gets it: no aim, and the move stick down to the aimed speed, which the
+//host otherwise only walks a player at with the aim (ge_move_speed: 2.6 against 4.2, crouched
+//1.9 against 2.2). the command itself stays as it was for this console's own two players
+const uint32_t kMoveStand = 0x806E947C, kMoveAimed = 0x806E9480, kMoveCrouch = 0x806E9484, kMoveCrouchAimed = 0x806E9488;
+const uint32_t kCtrlCrouched = 0xC54;
+ScopeHidden scope_command_hide(uint32_t cmd) {
+    ScopeHidden h{};
+    uint32_t ctrl = g_local_ctrl;
+    if (!g_scope_hidden || !joined_game() || modded_lobby() || !guest_ptr(cmd) || !guest_ptr(ctrl)) return h;
+    h.on = true;
+    h.pressed = ld32(cmd + 0x34);
+    h.held = ld32(cmd + 0x38);
+    h.stick[0] = ld32(cmd + 8);
+    h.stick[1] = ld32(cmd + 0xC);
+    st32(cmd + 0x34, h.pressed & ~kCmdAim);
+    st32(cmd + 0x38, h.held & ~kCmdAim);
+    if (h.held & kCmdAim) {
+        bool crouched = ld8(ctrl + kCtrlCrouched) != 0;
+        float slow = ldf(crouched ? kMoveCrouchAimed : kMoveAimed), fast = ldf(crouched ? kMoveCrouch : kMoveStand);
+        float k = fast > 0 && slow > 0 && slow < fast ? slow / fast : 1.0f;
+        stf(cmd + 8, ldf(cmd + 8) * k);
+        stf(cmd + 0xC, ldf(cmd + 0xC) * k);
+    }
+    return h;
+}
+
+void scope_command_restore(uint32_t cmd, const ScopeHidden& h) {
+    if (!h.on || !guest_ptr(cmd)) return;
+    st32(cmd + 0x34, h.pressed);
+    st32(cmd + 0x38, h.held);
+    st32(cmd + 8, h.stick[0]);
+    st32(cmd + 0xC, h.stick[1]);
 }
 
 void install_look() {
