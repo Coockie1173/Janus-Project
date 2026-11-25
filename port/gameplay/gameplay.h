@@ -30,6 +30,12 @@ std::string custom_shown_name(int i); //"Enemy Health"
 std::string custom_shown_value(int i); //"250%", "On"
 void custom_page_drawing(bool on); //mods.cpp: the Mission Complete page draws itself between the two
 
+//besttimes.cpp
+void best_times_frame(); //once a frame, on the game's thread
+void best_times_level_change(uint32_t entrance); //cutscenes.cpp, before the game's level change
+void best_times_page(uint32_t page); //mods.cpp: the Mission Complete page fills itself, before a mod level's stand-in
+std::string best_time_text(); //right of the page's mission time, empty for nothing
+
 //fov.cpp
 void install_fov();
 void fov_apply();

@@ -406,6 +406,7 @@ const uint32_t kRowStyle = 0x700002E, kRowFont = 0x109002A, kLeft = 0, kRight = 
 const uint32_t kPageUpFrames = 3; //the page is up when it drew this many frames ago at most
 const uint32_t kLeftButton = 0x0002, kRightButton = 0x8000; //the classic's d-pad
 const uint32_t kDifficultyTexts = 0x805861F8, kPageDifficulty = 0x1A; //a text's hash a difficulty, the page's difficulty (a short)
+const uint32_t kTimeTrial = 0x805E05AB; //DisplayLevelTimer
 const char16_t kLeftGlyph = 0x2738, kRightGlyph = 0x2739; //the d-pad in the font: prompts.cpp makes them the keys
 bool g_page_drawing = false; //inside ge_mission_page
 std::atomic<uint32_t> g_page_frame{0};
@@ -463,8 +464,18 @@ std::u16string LevelLine(const PPCContext& c)
 	return line.substr(0, line.size() - difficulty.size()) + u"007 Custom";
 }
 
+//the mission time's row (the first, Time Trial puts its best there) gets the best time on the right
+void PageTimeRow(PPCContext& c)
+{
+	const PPCContext call = c;
+	orig_page_text(c);
+	const std::string best = best_time_text();
+	if (!best.empty()) PageString(call, call.r[5], Wide(best), kRight);
+}
+
 void PageText(PPCContext& c)
 {
+	if (g_page_drawing && c.r[5] == kPageRow && c.r[10] == kLeft && !ld8(kTimeTrial) && !(Active() && g_page_settings)) { PageTimeRow(c); return; }
 	if (!g_page_drawing || !Active()) { orig_page_text(c); return; }
 	const PPCContext call = c; //as it came: the call returns with its registers changed
 	const uint32_t widget = c.r[5];
