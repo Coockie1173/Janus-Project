@@ -6,6 +6,7 @@
 //(ZR 0004, ZL 0080, R 0200, L 2000, a 0010, b 0040, x 0008, y 0020)
 //GE_KEYS="5:F1 6:Down 7:Return 9:Left_Shift" press keys, SDL's names with _ for a space
 //GE_MOUSEMOVE="66-67:300,0" fake mouse motion in pixels a second (x right, y down)
+//GE_DEV_FACE="90-150" turn the view to another player of the network game then (to see its body)
 //GE_WHEEL="30:-1 31:2" turn the mouse wheel that many notches at that time (+ is up)
 //GE_SCAN="41,43.5,44.5,46.5,49" snapshots guest memory at those times, then lists the floats
 //(build/scan.txt) that changed over every odd interval and stood still over every even one
@@ -554,6 +555,26 @@ bool debug_setting_due(std::string& id, float& value) {
     return true;
 }
 
+//GE_DEV_FACE: the yaw (the entity's +0xDC, radians, growing to the right) turned towards the other
+//player's entity place (+0xF8) a bit each frame
+double face[2] = {0, 0};
+void face_other(float& dx) {
+    using namespace ge;
+    const uint32_t ctrl = ge::local_controller(), other = ctrl ? ge::online_player_controller(ctrl) : 0;
+    if (!other) return;
+    const uint32_t me = ld32(ctrl + 4), it = ld32(other + 4);
+    if (!ge::guest_ptr(me) || !ge::guest_ptr(it)) return;
+    const float ax = ldf(it + 0xF8) - ldf(me + 0xF8), az = ldf(it + 0x100) - ldf(me + 0x100);
+    const float want = std::atan2(ax, az), yaw = ldf(me + 0xDC);
+    float err = std::remainder(want - yaw, 6.2831853f);
+    dx += std::clamp(err * 40.0f, -60.0f, 60.0f);
+    static uint32_t logged = 0;
+    if (ld32(kFrameCount) - logged > 120) {
+        logged = ld32(kFrameCount);
+        rt_log("debug: face: me %.2f %.2f yaw %.2f, other %08X at %.2f %.2f, %.2f away, off by %.2f", ldf(me + 0xF8), ldf(me + 0x100), yaw, other, ldf(it + 0xF8), ldf(it + 0x100), std::sqrt(ax * ax + az * az), err);
+    }
+}
+
 void debug_mouse(float& dx, float& dy) {
     if (rec_out || replaying) record_mouse(dx, dy);
     static double last = now_s();
@@ -561,6 +582,7 @@ void debug_mouse(float& dx, float& dy) {
     last = now;
     for (auto& h : moves)
         if (t >= h.a && t < h.b) { dx += h.x * (float)dt; dy += h.y * (float)dt; }
+    if (face[1] > face[0] && t >= face[0] && t < face[1]) face_other(dx);
 }
 
 int debug_wheel() {
@@ -655,6 +677,7 @@ void debug_install() {
             while (*q == ' ') ++q;
         }
     }
+    if (const char* e = std::getenv("GE_DEV_FACE")) std::sscanf(e, "%lf-%lf", &face[0], &face[1]);
     if (const char* e = std::getenv("GE_WHEEL")) {
         std::stringstream all(e);
         for (std::string part; all >> part;) {

@@ -84,6 +84,7 @@ std::vector<Pick> g_picks; //this console's for the match: the host's from g_pic
 std::unordered_map<uint32_t, uint32_t> g_ctrl_skin; //a joined console's: the skin the host gave each controller
 std::array<uint32_t, kPlayerSkins + 1> g_slot_skin{}; //and so each slot
 bool g_any_picked = false; //g_picked has something
+std::vector<uint32_t> g_made; //the controllers given skins this level
 bool g_trace = false;
 PPCFunc orig_info_write = nullptr, orig_info_read = nullptr, orig_match_write = nullptr, orig_match_read = nullptr, orig_skin_give = nullptr;
 PPCFunc check_game = nullptr, team_game = nullptr, member_of = nullptr;
@@ -264,6 +265,7 @@ uint32_t SlotOf(const PPCContext& c, uint8_t id)
 void SkinGive(PPCContext& c)
 {
 	const uint32_t ctrl = c.r[3], slot = guest_ptr(ctrl) ? ld32(ctrl + kCtrlSkinSlot) : 0;
+	if (std::find(g_made.begin(), g_made.end(), ctrl) == g_made.end()) g_made.push_back(ctrl);
 	uint32_t hash = 0;
 	if (slot >= 1 && slot <= kPlayerSkins && Applies(c))
 	{
@@ -422,6 +424,7 @@ void character_skins(PPCContext& c)
 {
 	g_slot_skin.fill(0);
 	g_ctrl_skin.clear();
+	g_made.clear();
 	if (!Applies(c)) return;
 	if (guest_ptr(ld32(kNetHost))) HostPicks();
 	//the heroes' two first (only Heroes has them, a team gamemode), then the players' from the last
@@ -498,6 +501,12 @@ void character_frame()
 }
 
 uint32_t online_character() { return g_mine; }
+uint32_t online_player_controller(uint32_t not_this)
+{
+	for (uint32_t ctrl : g_made)
+		if (ctrl != not_this && guest_ptr(ctrl) && guest_ptr(ld32(ctrl + 4))) return ctrl;
+	return 0;
+}
 void set_online_character(uint32_t hash)
 {
 	g_mine = IsCharacter(hash) ? hash : 0;

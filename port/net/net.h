@@ -39,5 +39,6 @@ void character_write(PPCContext& c, uint32_t ctrl, uint32_t stream); //behind a 
 void character_read(PPCContext& c, uint32_t ctrl, uint32_t stream);
 void character_menu_update(const PPCContext& c, uint32_t menu); //the menu's update: the Character page's turning model
 uint32_t online_character(); //the pick, 0 for the map's
+uint32_t online_player_controller(uint32_t not_this); //a network game's player that isn't that one (made this level), 0 for none
 void set_online_character(uint32_t hash);
 } //namespace ge
