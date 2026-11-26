@@ -426,6 +426,7 @@ void MenuUpdate(PPCContext& c)
 	}
 	orig_menu_update(c);
 	loadout_menu_update(c, menu);
+	character_menu_update(c, menu);
 }
 
 void MenuPending(PPCContext& c)

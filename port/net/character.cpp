@@ -21,6 +21,12 @@
 //skin slot at +0x50, what the player's maker passes on, only known by then. a team gamemode keeps the teams' characters. a
 //player who joins a match that's on has missed the host's message and sees the map's
 //
+//the Character page shows the pick turning, as the unused character viewer (page 7D000028) does: as
+//that page is made the menu gets an object of 0x6CC (fn_802A4A90, made by fn_8022A690) at +0x904,
+//handed to its scene (fn_803795F0), fn_8022A910 (object, 0 to 2) where the camera is. the viewer
+//loads with fn_8022A9D0 (two lists, T-posed); split screen's select with fn_8022AB00 (object, the
+//character's hash): its +0x528 list, an idle of cp_bondtp and a gun, which is what's used here. the menu takes all four of +0x904..+0x910 down when its page changes
+//
 //GE_ONLINE_CHARACTER=hash picks one (0 the map's), GE_TRACE=1 logs what's sent and given
 #include "ge.h"
 #include "ui/settings/menu.h"
@@ -47,6 +53,14 @@ const uint32_t kNetGame = 0x805D5460, kCheck = 0x801AD470, kTeamGame = 0x801E77F
 const uint32_t kMemberOf = 0x801C13F0, kMemberSlot = 0x50; //(805D5460, a player id) -> its record in the match, the skin slot at +0x50
 const uint32_t kCtrlSkinSlot = 0x1154, kCtrlSkin = 0x6E0;
 const uint32_t kRosterMost = 255;
+const uint32_t kCharacterCount = 0x8, kCharacterRows = 0xC, kCharacterSize = 0x44;
+const uint32_t kMenuPage = 0x214, kMenuModels = 0x904;
+const uint32_t kViewerAlloc = 0x802A4A90, kViewerMake = 0x8022A690, kSceneAdd = 0x803795F0, kViewerShow = 0x8022A9D0, kViewerCamera = 0x8022A910;
+const uint32_t kViewerSize = 0x6CC, kViewerLoaded = 0x6C8, kListRemove = 0x80302960;
+const uint32_t kViewerLists[][2] = { { 0x210, 0x35C }, { 0x39C, 0x4E8 } }; //a list and its first
+const uint32_t kViewerPlace = 0x308; //the first list's place: across, up, away, and the camera's distance (fn_8022A910)
+const float kModelPlace[4] = { 2.3f, -1.05f, 9.0f, 9.0f };
+const uint32_t kViewerLayout = 0;
 const uint32_t kHashMost = 0xFFFFFFFF, kIdMost = 0xFF, kMostPicks = 16;
 const uint32_t kCharacterMask = 0xFFFF0000, kCharacterKind = 0x4D000000, kFirstCharacter = 0x100;
 
@@ -60,6 +74,8 @@ bool g_any_picked = false; //g_picked has something
 bool g_trace = false;
 PPCFunc orig_info_write = nullptr, orig_info_read = nullptr, orig_match_write = nullptr, orig_match_read = nullptr, orig_skin_give = nullptr;
 PPCFunc check_game = nullptr, team_game = nullptr, member_of = nullptr;
+PPCFunc viewer_alloc = nullptr, viewer_make = nullptr, scene_add = nullptr, viewer_show = nullptr, viewer_camera = nullptr, list_remove = nullptr;
+uint32_t g_viewer = 0, g_shown = 0; //the Character page's model object and whom it shows (1: nobody yet)
 
 bool IsCharacter(uint32_t hash) { return (hash & kCharacterMask) == kCharacterKind && (hash & 0xFFFF) >= kFirstCharacter; }
 
@@ -257,8 +273,81 @@ void SkinGive(PPCContext& c)
 	if (g_trace) rt_log("goldeneye: online character: the player in skin slot %u (%08X) is %08X", slot, ctrl, hash);
 }
 
+//a guest function with a frame of its own under the stack
+uint32_t Call(const PPCContext& c, PPCFunc fn, uint32_t r3, uint32_t r4 = 0)
+{
+	PPCContext call = c;
+	const uint32_t stack = c.r[1], frame = stack - 0x40;
+	st32(frame, stack);
+	call.r[1] = frame;
+	call.r[3] = r3;
+	call.r[4] = r4;
+	fn(call);
+	return call.r[3];
+}
+
+//a list of the viewer's models emptied
+void Clear(const PPCContext& c, uint32_t viewer, const uint32_t list[2])
+{
+	for (int n = 0; n < 64 && guest_ptr(ld32(viewer + list[1])); ++n) Call(c, list_remove, viewer + list[0], ld32(viewer + list[1]));
+}
+
+//its row's place in the character sheet, -1 for none
+int SheetIndex(uint32_t hash)
+{
+	const uint32_t rows = ld32(kSheet + kCharacterRows);
+	int lo = 0, hi = (int)ld32(kSheet + kCharacterCount) - 1;
+	if (!guest_ptr(rows) || hi > 4096) return -1;
+	while (lo <= hi)
+	{
+		const int mid = (lo + hi) / 2, at = (int)ld32(rows + mid * kCharacterSize);
+		if ((uint32_t)at == hash) return mid;
+		if ((uint32_t)at < hash) lo = mid + 1;
+		else hi = mid - 1;
+	}
+	return -1;
+}
+
 } //namespace
 
+//the menu's update: on the Character page the pick is shown turning, nobody for the map's
+void character_menu_update(const PPCContext& c, uint32_t menu)
+{
+	if (!guest_ptr(menu) || !viewer_alloc || !viewer_make || !scene_add || !viewer_show || !viewer_camera || !list_remove) return;
+	if (ld32(menu + kMenuPage) != kCharacterPage)
+	{
+		g_viewer = 0;
+		return;
+	}
+	uint32_t viewer = ld32(menu + kMenuModels);
+	if (!viewer)
+	{
+		viewer = Call(c, viewer_alloc, kViewerSize);
+		if (!guest_ptr(viewer)) return;
+		viewer = Call(c, viewer_make, viewer);
+		if (!guest_ptr(viewer)) return;
+		st32(menu + kMenuModels, viewer);
+		Call(c, scene_add, menu, viewer);
+		Call(c, viewer_camera, viewer, kViewerLayout);
+		g_viewer = viewer;
+		g_shown = 1;
+	}
+	if (viewer != g_viewer) return; //the game's own, not ours
+	const uint32_t pick = g_mine;
+	if (pick == g_shown) return;
+	g_shown = pick;
+	const int index = pick ? SheetIndex(pick) : -1;
+	if (index >= 0)
+	{
+		//the second list is the viewer's other pose, left out: one model, right of the list
+		Call(c, viewer_show, viewer, (uint32_t)index);
+		Clear(c, viewer, kViewerLists[1]);
+		for (int i = 0; i < 4; ++i) stf(viewer + kViewerPlace + i * 4, kModelPlace[i]);
+		return;
+	}
+	for (const auto& list : kViewerLists) Clear(c, viewer, list);
+	st8(viewer + kViewerLoaded, 0);
+}
 //after ge_player_skin (fun/bunnyhop.cpp has its hook): the picks' skins take slots of 805D1690, the
 //player's own id's when it has one, so their files load with the level
 void character_skins(PPCContext& c)
@@ -354,6 +443,12 @@ void install_character()
 	check_game = ppc_lookup(kCheck);
 	team_game = ppc_lookup(kTeamGame);
 	member_of = ppc_lookup(kMemberOf);
+	viewer_alloc = ppc_lookup(kViewerAlloc);
+	viewer_make = ppc_lookup(kViewerMake);
+	scene_add = ppc_lookup(kSceneAdd);
+	viewer_show = ppc_lookup(kViewerShow);
+	viewer_camera = ppc_lookup(kViewerCamera);
+	list_remove = ppc_lookup(kListRemove);
 	//all four or none: a console that reads the picks and one that doesn't write them can't play together
 	orig_info_write = ppc_hook("ge_player_info_write", InfoWrite);
 	orig_info_read = ppc_hook("ge_player_info_read", InfoRead);

@@ -172,7 +172,7 @@ const uint32_t kTextSlider = 0x4300F0D0, kTextAboutSlider = 0x4300F0D8; //one a 
 const uint32_t kTextHeadshots = 0x4300F0E6, kTextAboutHeadshots = 0x4300F0E7;
 const uint32_t kKindSlider = 0x00050000, kKindChoice = 0x00030000, kKindClassic = 0x00160000; //a slider of a setting, a setting with values to pick from, 007 Classic
 const uint32_t kLabelRoom = 48; //characters a slider's label has room for
-const uint32_t kOnlineMenuPage = 0x7D000026, kCharacterPage = 0x7D000DFA;
+const uint32_t kOnlineMenuPage = 0x7D000026;
 const uint32_t kTextPromoCodes = 0x430012B6; //its item that Character takes the place of
 const uint32_t kTextCharacter = 0x4300F0C1, kTextAboutCharacterItem = 0x4300F0C2, kTextAboutCharacter = 0x4300F0C3;
 const uint32_t kListClass = 0x7D030000; //a page that's a plain list (Multiplayer's)

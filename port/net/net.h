@@ -28,6 +28,7 @@ void owned_command_read(PPCContext& c, uint32_t cmd, uint32_t stream);
 void owned_input(PPCContext& c, uint32_t ctrl, uint32_t cmd); //before ge_input_copy (input/look.cpp)
 //character.cpp
 const uint32_t kCharacterSetting = 0x7D01F010; //the Character row's setting (a choice), the game's own stop at 7D0100xx
+const uint32_t kCharacterPage = 0x7D000DFA; //the Character page, made in mods/modmenu.cpp
 const uint32_t kTextMapsCharacter = 0x4300F0C0; //"Map's Default", the pick that leaves the map's characters
 void install_character(); //online characters: a player's pick goes to the others in a modded game
 void character_frame(); //once a frame: the picks are forgotten outside a network game
@@ -36,6 +37,7 @@ bool character_choice_text(PPCContext& c); //ge_choice_text and ge_choice_step f
 bool character_choice_step(PPCContext& c);
 void character_write(PPCContext& c, uint32_t ctrl, uint32_t stream); //behind a player's state: the skin the host gave it
 void character_read(PPCContext& c, uint32_t ctrl, uint32_t stream);
+void character_menu_update(const PPCContext& c, uint32_t menu); //the menu's update: the Character page's turning model
 uint32_t online_character(); //the pick, 0 for the map's
 void set_online_character(uint32_t hash);
 } //namespace ge
