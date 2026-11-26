@@ -59,8 +59,18 @@ const uint32_t kViewerAlloc = 0x802A4A90, kViewerMake = 0x8022A690, kSceneAdd = 
 const uint32_t kViewerSize = 0x6CC, kViewerLoaded = 0x6C8, kListRemove = 0x80302960;
 const uint32_t kViewerLists[][2] = { { 0x210, 0x35C }, { 0x39C, 0x4E8 } }; //a list and its first
 const uint32_t kViewerPlace = 0x308; //the first list's place: across, up, away, and the camera's distance (fn_8022A910)
-const float kModelPlace[4] = { 2.3f, -1.05f, 9.0f, 9.0f };
+const float kModelPlace[4] = { 0.0f, -0.55f, 8.0f, 8.0f };
+//the idle, as split screen's select starts it (fn_8022AB00): the list's animation part, its anim mode now
+//at the list's +0x184; mode 09000001 when its anims have it, else one of eight idles of 0102001A
+const uint32_t kAnimPart = 0x803029C0, kAnimPartKind = 0x805505A8, kHasMode = 0x803062D0, kPlayMode = 0x80306330;
+const uint32_t kFileLoad = 0x802EC760, kPartFile = 0x802ECD10, kPartFiles = 0x1C;
+const uint32_t kListMode = 0x184, kModeStart = 0x090000C1, kIdle = 0x09000001, kModeBlend = 0x0900000B;
+const uint32_t kIdleFile = 0x0102001A, kIdles = 0x8057D8A8, kIdleCount = 8, kIdleRow = 8;
 const uint32_t kViewerLayout = 0;
+const uint32_t kMenuWidgets = 0x914; //the menu's widgets: +0x100 the layout's scene, a slot's box (+0x2AC on) made from its node every frame (fn_80240FC0)
+const uint32_t kSlots[] = { 0x1500011B, 0x1500011C };
+const float kSlotsDown = -0.275f; //their parent's z is the screen's up, 600 px of 448 a unit: 165 down, the second slot ends over the line above the description
+const uint32_t kWidgetsScene = 0x100, kSceneRoot = 0x14C, kNodeFind = 0x8031D7B0, kNodePlace = 0xF8, kNodeMade = 0x8E;
 const uint32_t kHashMost = 0xFFFFFFFF, kIdMost = 0xFF, kMostPicks = 16;
 const uint32_t kCharacterMask = 0xFFFF0000, kCharacterKind = 0x4D000000, kFirstCharacter = 0x100;
 
@@ -74,7 +84,10 @@ bool g_any_picked = false; //g_picked has something
 bool g_trace = false;
 PPCFunc orig_info_write = nullptr, orig_info_read = nullptr, orig_match_write = nullptr, orig_match_read = nullptr, orig_skin_give = nullptr;
 PPCFunc check_game = nullptr, team_game = nullptr, member_of = nullptr;
+PPCFunc node_find = nullptr, anim_part = nullptr, has_mode = nullptr, play_mode = nullptr, file_load = nullptr, part_file = nullptr;
 PPCFunc viewer_alloc = nullptr, viewer_make = nullptr, scene_add = nullptr, viewer_show = nullptr, viewer_camera = nullptr, list_remove = nullptr;
+uint32_t g_slot_node[2] = {}; //the slots' nodes, and their heights as the layout has them
+float g_slot_y[2] = {};
 uint32_t g_viewer = 0, g_shown = 0; //the Character page's model object and whom it shows (1: nobody yet)
 
 bool IsCharacter(uint32_t hash) { return (hash & kCharacterMask) == kCharacterKind && (hash & 0xFFFF) >= kFirstCharacter; }
@@ -274,7 +287,7 @@ void SkinGive(PPCContext& c)
 }
 
 //a guest function with a frame of its own under the stack
-uint32_t Call(const PPCContext& c, PPCFunc fn, uint32_t r3, uint32_t r4 = 0)
+uint32_t Call(const PPCContext& c, PPCFunc fn, uint32_t r3, uint32_t r4 = 0, uint32_t r5 = 0, uint32_t r6 = 0)
 {
 	PPCContext call = c;
 	const uint32_t stack = c.r[1], frame = stack - 0x40;
@@ -282,6 +295,8 @@ uint32_t Call(const PPCContext& c, PPCFunc fn, uint32_t r3, uint32_t r4 = 0)
 	call.r[1] = frame;
 	call.r[3] = r3;
 	call.r[4] = r4;
+	call.r[5] = r5;
+	call.r[6] = r6;
 	fn(call);
 	return call.r[3];
 }
@@ -290,6 +305,25 @@ uint32_t Call(const PPCContext& c, PPCFunc fn, uint32_t r3, uint32_t r4 = 0)
 void Clear(const PPCContext& c, uint32_t viewer, const uint32_t list[2])
 {
 	for (int n = 0; n < 64 && guest_ptr(ld32(viewer + list[1])); ++n) Call(c, list_remove, viewer + list[0], ld32(viewer + list[1]));
+}
+
+//a model list stands idle, as split screen's select has it
+void Idle(const PPCContext& c, uint32_t list)
+{
+	if (!anim_part || !has_mode || !play_mode || !file_load || !part_file) return;
+	st32(list + kListMode, kModeStart);
+	const uint32_t part = Call(c, anim_part, list, kAnimPartKind);
+	if (!guest_ptr(part)) return;
+	uint32_t mode = kIdle;
+	if (!(Call(c, has_mode, part, kIdle) & 0xFF))
+	{
+		const uint32_t file = Call(c, file_load, kIdleFile);
+		if (!guest_ptr(file)) return;
+		Call(c, part_file, part + kPartFiles, file);
+		mode = ld32(kIdles + (uint32_t)(std::rand() % kIdleCount) * kIdleRow);
+	}
+	if (Call(c, play_mode, part, ld32(list + kListMode), mode, kModeBlend)) st32(list + kListMode, mode);
+	else if (g_trace) rt_log("goldeneye: online character: the preview's idle %08X didn't play", mode);
 }
 
 //its row's place in the character sheet, -1 for none
@@ -331,8 +365,26 @@ void character_menu_update(const PPCContext& c, uint32_t menu)
 		Call(c, viewer_camera, viewer, kViewerLayout);
 		g_viewer = viewer;
 		g_shown = 1;
+		g_slot_node[0] = g_slot_node[1] = 0;
 	}
 	if (viewer != g_viewer) return; //the game's own, not ours
+	//the list goes down to the line over the description, the model stands above it: the slots are
+	//nodes of the layout's scene, their boxes made from them every frame (fn_80240FC0)
+	const uint32_t scene = ld32(menu + kMenuWidgets + kWidgetsScene);
+	const uint32_t root = guest_ptr(scene) ? ld32(scene + kSceneRoot) : 0;
+	for (size_t i = 0; guest_ptr(root) && node_find && i < std::size(kSlots); ++i)
+	{
+		const uint32_t node = Call(c, node_find, root, kSlots[i]);
+		if (!guest_ptr(node)) continue;
+		if (g_slot_node[i] != node)
+		{
+			g_slot_node[i] = node;
+			g_slot_y[i] = ldf(node + kNodePlace + 8);
+		}
+		stf(node + kNodePlace + 8, g_slot_y[i] + kSlotsDown);
+		st8(node + kNodeMade, 0);
+	}
+
 	const uint32_t pick = g_mine;
 	if (pick == g_shown) return;
 	g_shown = pick;
@@ -342,6 +394,7 @@ void character_menu_update(const PPCContext& c, uint32_t menu)
 		//the second list is the viewer's other pose, left out: one model, right of the list
 		Call(c, viewer_show, viewer, (uint32_t)index);
 		Clear(c, viewer, kViewerLists[1]);
+		Idle(c, viewer + kViewerLists[0][0]);
 		for (int i = 0; i < 4; ++i) stf(viewer + kViewerPlace + i * 4, kModelPlace[i]);
 		return;
 	}
@@ -443,6 +496,12 @@ void install_character()
 	check_game = ppc_lookup(kCheck);
 	team_game = ppc_lookup(kTeamGame);
 	member_of = ppc_lookup(kMemberOf);
+	node_find = ppc_lookup(kNodeFind);
+	anim_part = ppc_lookup(kAnimPart);
+	has_mode = ppc_lookup(kHasMode);
+	play_mode = ppc_lookup(kPlayMode);
+	file_load = ppc_lookup(kFileLoad);
+	part_file = ppc_lookup(kPartFile);
 	viewer_alloc = ppc_lookup(kViewerAlloc);
 	viewer_make = ppc_lookup(kViewerMake);
 	scene_add = ppc_lookup(kSceneAdd);
