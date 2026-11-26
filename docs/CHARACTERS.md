@@ -8,11 +8,18 @@ of the game's skeletons, picked on the online Character page. Addresses are the 
 ```
 eurochef-cli ge skin --base sk_jaws_jaws.edb --parts                  # the base's bones and meshes
 eurochef-cli ge skin --base sk_jaws_jaws.edb --export jaws.gltf       # the base to start from
-eurochef-cli ge skin mine.gltf --base sk_jaws_jaws.edb -o modpacks/NAME/characters/mine.edb --hash 0x010AF000
+eurochef-cli ge skin mine.gltf --base sk_jaws_jaws.edb -o modpacks/NAME/characters/mine.edb --hash 0x010AF000 \
+    --arms sk_arms_jaws.edb                                           # and mine_arms.edb, hash 0x010AF001
 ```
 
-Arms for first person are made the same way on an arms file (`--base sk_arms_jaws.edb`: its own
-skeleton of 48 bones, the fingers too, named by number only).
+`--arms` makes the first person arms from the same scene: the body's triangles from the collar to
+the wrists moved onto the arms file's skeleton (48 bones, the fingers too), with the arms file's
+own hands. An arms file's hands are made flat, the fingers straight out, for its finger bones to
+close them round the gun; a body's hang relaxed and would sit bent behind the gun.
+`--arms-own-hands` takes the scene's hands anyway (model them as the arms file's are), each
+position weighted to the fingers as the arms file's closest one. Arms can also be made by hand on
+an arms file (`--base sk_arms_jaws.edb --export`, then build on it), its bones named by number
+only.
 
 The base files are the game's `sk_<who>_<outfit>.edb` (sk_bond_arkangel, sk_jaws_jaws,
 sk_trev_trevel...). Every body has the same skeleton of 37 bones, so the base only decides the
@@ -28,9 +35,12 @@ In Blender (File > Import > glTF):
   becomes the new body. Delete it and put yours in, weighted to the bones (Ctrl+P > With Automatic
   Weights, or paint them). Two weights a vertex are used, the two heaviest. A mesh parented to a
   bone instead (a hat on `Bone_08_Head`) follows that bone.
-- `Hand_L`, `Hand_R`, `Head_1`... are the base's own, with the hands' grips (morphs). While their
-  objects are in the scene they're kept as they are (edits to them aren't read); deleted, they're
-  left out, then model hands into your body.
+- `Hand_L`, `Hand_R`, `Head_1`... are the base's own. While their objects are in the scene they're
+  kept as they are (edits to them aren't read). The hands have grips: five shapes their fingers
+  are blended between (open, round a gun...), the body skeleton having no finger bones. Delete a
+  hand and model your own on its bone (`Bone_12_L_Hand`, `Bone_21_R_Hand`): it gets the base hand's
+  grips, each position moved as the base hand's closest ones are, so keep it about where the
+  base's was. Deleted with nothing on the bone, the hand is left out.
 - Textures are taken from the materials' base colour; the base's own textures, unchanged, stay
   the base's.
 
@@ -63,10 +73,19 @@ other. A pack has at most 64.
   160 (fn_802A36F0 skins 160 at a time through ge_skin1/ge_skin2); the weights are two shorts a
   vertex, 0x2000 the whole, the heavier bone first (the normal follows only that one). The meshes
   are 0x601 entities with flags 3 (a strip's texture is a place in the mesh's own list).
+- **Morphs** (the grips, the eyelids): the animskin's +0x84 count and +0x88 rows (0x10: the mesh's
+  hash, a number, how many targets, the first of the weights the animations give, the kind: 0 adds
+  each target by its weight, 1 goes between two by a table). The mesh's +0xB4 has 4 when it has
+  extras, words from +0xB8 (low byte the kind, the rest how far from that word); kind 2 points at
+  the targets' pointers, each target what it adds to every position (three floats).
+  fn_802A36F0 blends them into a buffer of 0x4C30 bytes (805FB3E0), so a morphed mesh has at most
+  1219 positions (the build allows 1200).
 - **The build** (eurochef `ge/skin.rs`) writes the scene's mesh with its positions sorted by bone
   pair into a copy of the base file: the header's lists grown for new textures, everything up to the
   meshes moved as it is, the new body in place of the base's on every level of detail, the parts not
-  kept taken out of the animskins.
+  kept taken out of the animskins. Hands of the scene's own go into the hands' meshes on the closest
+  level (with their targets), the body without them; the far levels have no hands of their own and
+  get the whole body.
 - **The character sheet** (805D1598): +8 count, +0xC character rows (0x44: hash, set, name text,
   animations file, +0x18 body file, +0x1C its animskin...: what a preview or a guard is drawn from),
   +0xD0 count, +0xD4 skin rows (0x18: hash, arms file, body file, animskin, width, height: what a
@@ -89,8 +108,13 @@ other. A pack has at most 64.
   the joints) on the Character page, idling, with Jaws's hands; in a network game on Archives the
   other console draws the box body holding its gun; Jaws's arms rebuilt with a green texture as
   `arms =` are the first person arms in a match. sk_arms_jaws exported and built again: the same.
+- Grips: the base's hands renamed (so the build takes them as the scene's own) get targets equal to
+  the base's to 4e-8; on the Character page their fingers curl as Jaws's do, with the targets zeroed
+  they stay straight.
+- `--arms`: in a match the box robot's arms with the arms file's hands, and Jaws's body's sleeves and
+  forearms with them, the hands round the gun as the game's own.
 
 ## Not done
 
-- A lighter mesh for the far levels of detail (the
-  body is used on all three), the morphs (grips, eyelids) for a mesh of your own.
+- A lighter mesh for the far levels of detail (the body is used on all three).
+- Grips of your own (shape keys): a hand of your own gets the base's moved onto it.
