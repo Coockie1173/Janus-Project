@@ -181,3 +181,8 @@ ge_screen_quad         # a screen quad of the passes: the grain's colour scaled 
 ge_player_fire_bullet  # the player's bullet leaves the gun: told to TASLib (port/tas/shots.cpp)
 ge_bullet_impact       # a bullet's impact: told to TASLib (port/tas/shots.cpp)
 ge_bullet_contact      # a bullet meets a thing: told to TASLib, and 007 Custom's headshot switch (port/gameplay/custom.cpp)
+ge_player_info_write   # a joined console's player info to the host: its online character after it in a modded game (port/net/character.cpp)
+ge_player_info_read
+ge_match_info_write    # the host's match settings to each console: every player's online character after them in a modded game
+ge_match_info_read
+ge_player_skin_give    # a network game's player gets its skin: the online character its player picked

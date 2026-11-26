@@ -344,7 +344,7 @@ uint32_t HostPingOf(uint32_t ctrl)
 	return kPingNone;
 }
 
-//(r3 the controller, r4 the stream, r5 the state). bunnyhopping's after the ping (bunnyhop.cpp)
+//(r3 the controller, r4 the stream, r5 the state). bunnyhopping's after the ping (bunnyhop.cpp), then the skin (character.cpp)
 void PlayerWrite(PPCContext& c)
 {
 	const uint32_t ctrl = c.r[3], stream = c.r[4];
@@ -354,6 +354,7 @@ void PlayerWrite(PPCContext& c)
 	if (ms != kPingNone) KeepPing(ctrl, ms); //the host's own scoreboard reads them here too
 	net_write_number(c, stream, ms, kPingNone);
 	bunnyhop_write(c, stream, ms == kPingHost);
+	character_write(c, ctrl, stream);
 }
 
 //(r3 the controller, r4 the stream, r5 the state), true when it was read
@@ -364,6 +365,7 @@ void PlayerRead(PPCContext& c)
 	if (!modded_lobby()) return;
 	const uint32_t ms = net_read_number(c, stream, kPingNone, kPingNone);
 	bunnyhop_read(c, stream);
+	character_read(c, ctrl, stream);
 	if (ms < kPingNone) KeepPing(ctrl, ms);
 	static const bool trace = std::getenv("GE_TRACE") != nullptr;
 	static uint32_t said = 0;
@@ -476,6 +478,7 @@ void install_ping()
 void net_frame()
 {
 	UpdatePing();
+	character_frame();
 	static const bool trace = std::getenv("GE_NETTRACE") != nullptr;
 	if (trace && in_play()) TraceThrown();
 	static float said = 0;

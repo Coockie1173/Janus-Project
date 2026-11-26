@@ -68,6 +68,11 @@
 //the row's hash a setting's; port/gameplay/custom.cpp answers for these four) and "Start Mission", a
 //row of 007 Classic's kind. a slider's bar has no number, so its label is rewritten with it
 //
+//after Connect to WFC Modded the online menu (7D000026, rows 80580468: Find Game, Choose Loadout,
+//Agent Record, Party Invite, Region, Promotional Codes to 7D0000D6, Main Menu; a second set at
+//80580670 starts with one more) gets rows made here with Character in place of Promotional Codes,
+//to a page made here with one choice row, the player's online character (port/net/character.cpp)
+//
 //GE_MODS_PAGE=7D000045 Extras > Mods opens that page instead (to look at a page without going
 //through the menus that lead to it)
 #include "ge.h"
@@ -167,6 +172,11 @@ const uint32_t kTextSlider = 0x4300F0D0, kTextAboutSlider = 0x4300F0D8; //one a 
 const uint32_t kTextHeadshots = 0x4300F0E6, kTextAboutHeadshots = 0x4300F0E7;
 const uint32_t kKindSlider = 0x00050000, kKindChoice = 0x00030000, kKindClassic = 0x00160000; //a slider of a setting, a setting with values to pick from, 007 Classic
 const uint32_t kLabelRoom = 48; //characters a slider's label has room for
+const uint32_t kOnlineMenuPage = 0x7D000026, kCharacterPage = 0x7D000DFA;
+const uint32_t kTextPromoCodes = 0x430012B6; //its item that Character takes the place of
+const uint32_t kTextCharacter = 0x4300F0C1, kTextAboutCharacterItem = 0x4300F0C2, kTextAboutCharacter = 0x4300F0C3;
+const uint32_t kListClass = 0x7D030000; //a page that's a plain list (Multiplayer's)
+const uint32_t kKindSlot = 0x00A30000, kKindFoot = 0x00AA0000;
 const uint32_t kAlloc = 0x803428C0; //(bytes, flags) -> a block of the game's heap
 const uint32_t kMostPages = 4096;
 
@@ -209,6 +219,11 @@ uint32_t g_custom_rows = 0, g_custom_row_count = 0, g_custom_start = 0; //its pa
 uint32_t g_custom_labels[kCustomSliders] = {};
 uint32_t g_custom_class = 0;
 bool g_custom_failed = false;
+
+struct OnlineMenu { uint32_t game, rows, count; }; //the game's rows of the online menu, ours made from them
+std::vector<OnlineMenu> g_online_menus;
+uint32_t g_character_rows = 0, g_character_row_count = 0;
+bool g_character_failed = false;
 
 uint32_t Alloc(const PPCContext& c, uint32_t bytes)
 {
@@ -457,8 +472,9 @@ const uint32_t kModdedVersions = 0x40000000; //where the numbers made here are, 
 //that don't read each other's packets don't find each other: 1 the pitch's range (net.cpp),
 //2 a pool for every gamemode, 3 a command's yaw and lean are the mouse's turn (input/look.cpp),
 //4 a player's state has its ping behind it (net.cpp), 5 a command has the jump key behind it and a
-//player's state the host's bunnyhopping (bunnyhop.cpp)
-const uint8_t kPortProtocol = 5;
+//player's state the host's bunnyhopping (bunnyhop.cpp), 6 a player's info, the match's settings and a
+//player's state have the online characters behind them (net/character.cpp)
+const uint8_t kPortProtocol = 6;
 
 uint32_t FileSum(const std::string& path)
 {
@@ -681,6 +697,113 @@ void CustomFrame(const PPCContext& c, uint32_t& data, uint32_t& count)
 	st32(kPages + kPagesRoom, count);
 }
 
+bool Modded();
+
+//one more page in the array: a new block, the game's old one is left as it is
+bool AddPage(const PPCContext& c, uint32_t& data, uint32_t& count, uint32_t hash, uint32_t rows, uint32_t rowCount, uint32_t kind)
+{
+	const uint32_t fresh = Alloc(c, (count + 1) * kPageSize);
+	if (!fresh) return false;
+	for (uint32_t i = 0; i < count * kPageSize; i += 4) st32(fresh + i, ld32(data + i));
+	const uint32_t page = fresh + count * kPageSize;
+	st32(page, hash);
+	st32(page + kPageRows, rows);
+	st32(page + kPageRowCount, rowCount);
+	st32(page + kPageClass, kind);
+	data = fresh;
+	count += 1;
+	st32(kPages + kPagesData, data);
+	st32(kPages + kPagesCount, count);
+	st32(kPages + kPagesRoom, count);
+	return true;
+}
+
+//a copy of the online menu's rows with Character where Promotional Codes is, 0 when they have none
+uint32_t OnlineMenuRows(const PPCContext& c, uint32_t game, uint32_t count)
+{
+	uint32_t first = 0, foot = 0;
+	for (uint32_t i = 0; i < count; ++i)
+	{
+		const uint32_t kind = ld32(game + i * kRowSize + kRowKind) & 0xFFFF0000;
+		if (kind == kKindSlot) first = i + 1;
+		if (kind == kKindFoot) { foot = i; break; }
+	}
+	uint32_t item = count;
+	for (uint32_t i = first; i < foot; ++i)
+		if (ld32(game + i * kRowSize) == kTextPromoCodes) item = i;
+	if (!first || !foot || item == count || foot + 1 + (item - first) >= count) return 0;
+	const uint32_t rows = Alloc(c, count * kRowSize);
+	if (!rows) return 0;
+	CopyRows(rows, game, count);
+	Row(rows + item * kRowSize, kTextCharacter, kCharacterPage, 0, kKindPage);
+	Row(rows + (foot + 1 + item - first) * kRowSize, kTextAboutCharacterItem, 0, 0, kKindAbout);
+	return rows;
+}
+
+//the Character page, made once
+bool BuildCharacter(const PPCContext& c)
+{
+	g_texts[kTextMapsCharacter] = Text(c, "Map's Default");
+	g_texts[kTextCharacter] = Text(c, "Character");
+	g_texts[kTextAboutCharacterItem] = Text(c, "Pick who you play as in gamemodes without teams.");
+	g_texts[kTextAboutCharacter] = Text(c, "Who everyone sees you as in gamemodes without teams. Map's Default keeps the map's characters.");
+	if (!g_texts[kTextMapsCharacter] || !g_texts[kTextCharacter] || !g_texts[kTextAboutCharacterItem] || !g_texts[kTextAboutCharacter]) return false;
+	const uint32_t at = ListRows(c, 1, kTextCharacter, g_character_rows, g_character_row_count);
+	if (!at) return false;
+	Row(at, kTextCharacter, kCharacterSetting, 0, kKindChoice);
+	Row(at + 2 * kRowSize, kTextAboutCharacter, 0, 0, kKindAbout);
+	return true;
+}
+
+//once a frame: after Connect to WFC Modded the online menu has Character, the game's own otherwise
+void OnlineMenuFrame(const PPCContext& c, uint32_t& data, uint32_t& count)
+{
+	if (g_character_failed || !game_alloc) return;
+	const uint32_t page = FindPage(data, count, kOnlineMenuPage);
+	if (!page) return;
+	const uint32_t have = ld32(page + kPageRows);
+	auto mine = std::find_if(g_online_menus.begin(), g_online_menus.end(), [&](const OnlineMenu& m) { return m.rows == have; });
+	const bool modded = Modded();
+	if (!modded)
+	{
+		if (mine != g_online_menus.end())
+		{
+			st32(page + kPageRows, mine->game);
+			st32(page + kPageRowCount, mine->count);
+		}
+		return;
+	}
+	if (mine != g_online_menus.end()) return;
+	if (!g_character_rows && !BuildCharacter(c))
+	{
+		g_character_failed = true;
+		rt_log("goldeneye: the Character page couldn't be made");
+		return;
+	}
+	if (!FindPage(data, count, kCharacterPage))
+	{
+		if (!AddPage(c, data, count, kCharacterPage, g_character_rows, g_character_row_count, kListClass)) return;
+	}
+	const uint32_t rowCount = ld32(FindPage(data, count, kOnlineMenuPage) + kPageRowCount);
+	auto made = std::find_if(g_online_menus.begin(), g_online_menus.end(), [&](const OnlineMenu& m) { return m.game == have; });
+	if (made == g_online_menus.end())
+	{
+		const uint32_t rows = OnlineMenuRows(c, have, rowCount);
+		if (!rows)
+		{
+			g_character_failed = true;
+			rt_log("goldeneye: the online menu's rows at %08X have no Promotional Codes, no Character page", have);
+			return;
+		}
+		g_online_menus.push_back({ have, rows, rowCount });
+		made = g_online_menus.end() - 1;
+		if (g_trace) rt_log("goldeneye: the online menu (rows %08X) has Character", have);
+	}
+	const uint32_t entry = FindPage(data, count, kOnlineMenuPage);
+	st32(entry + kPageRows, made->rows);
+	st32(entry + kPageRowCount, made->count);
+}
+
 bool Modded()
 {
 	const PackMenu* menu = Installed();
@@ -869,6 +992,7 @@ void mods_menu_frame(PPCContext& c)
 	}
 	CustomFrame(c, data, count);
 	MultiplayerFrame(c, data, count);
+	OnlineMenuFrame(c, data, count);
 	for (int mode = 0; mode < kModeCount; ++mode) PoolFrame(c, data, count, mode);
 	for (int which = 0; which < 2; ++which) ChooseFrame(c, data, count, which);
 	const uint32_t extras = FindPage(data, count, kExtrasPage);

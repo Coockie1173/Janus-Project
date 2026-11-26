@@ -752,6 +752,7 @@ void PlayerSkin(PPCContext& c)
 	if (!tank)
 	{
 		orig_player_skin(c);
+		character_skins(c);
 		return;
 	}
 	const uint32_t skin{ ld32(row + kRowSkin) };

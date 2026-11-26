@@ -103,6 +103,7 @@ void install() {
     install_command_time();
     install_blend_time();
     install_ping();
+    install_character();
     install_mods();
     install_custom_weapons();
     install_weapon_previews();

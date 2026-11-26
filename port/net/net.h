@@ -26,4 +26,16 @@ void owned_command_fill(uint32_t input, uint32_t cmd); //after ge_command_fill (
 void owned_command_write(PPCContext& c, uint32_t cmd, uint32_t stream); //behind the game's part of a command (bunnyhop.cpp)
 void owned_command_read(PPCContext& c, uint32_t cmd, uint32_t stream);
 void owned_input(PPCContext& c, uint32_t ctrl, uint32_t cmd); //before ge_input_copy (input/look.cpp)
+//character.cpp
+const uint32_t kCharacterSetting = 0x7D01F010; //the Character row's setting (a choice), the game's own stop at 7D0100xx
+const uint32_t kTextMapsCharacter = 0x4300F0C0; //"Map's Default", the pick that leaves the map's characters
+void install_character(); //online characters: a player's pick goes to the others in a modded game
+void character_frame(); //once a frame: the picks are forgotten outside a network game
+void character_skins(PPCContext& c); //after ge_player_skin: the picks' skins load with the level
+bool character_choice_text(PPCContext& c); //ge_choice_text and ge_choice_step for the Character row, false for another setting
+bool character_choice_step(PPCContext& c);
+void character_write(PPCContext& c, uint32_t ctrl, uint32_t stream); //behind a player's state: the skin the host gave it
+void character_read(PPCContext& c, uint32_t ctrl, uint32_t stream);
+uint32_t online_character(); //the pick, 0 for the map's
+void set_online_character(uint32_t hash);
 } //namespace ge

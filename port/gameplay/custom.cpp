@@ -383,6 +383,7 @@ void SettingStep(PPCContext& c)
 //(profile, a setting's hash, the pad) -> the text of its value
 void ChoiceText(PPCContext& c)
 {
+	if (character_choice_text(c)) return;
 	if (c.r[4] != kCustomHeadshots) { orig_choice_text(c); return; }
 	c.r[3] = g_headshots ? kCustomTextOn : kCustomTextOff;
 }
@@ -390,6 +391,7 @@ void ChoiceText(PPCContext& c)
 //(profile, a setting's hash, -1 or 1, the pad)
 void ChoiceStep(PPCContext& c)
 {
+	if (character_choice_step(c)) return;
 	if (c.r[4] != kCustomHeadshots) { orig_choice_step(c); return; }
 	const uint32_t frame = ld32(kFrameCount);
 	if (frame - g_clicked_frame <= 1) return; //that press has changed it already

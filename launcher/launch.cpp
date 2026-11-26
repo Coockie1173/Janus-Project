@@ -58,7 +58,7 @@ namespace
 		{ "autosave", "1" }, { "leveltimer", "1" }, { "autoqte", "0" }, { "autostart", "0" }, { "extrasmenu", "0" },
 		{ "onlineunlocks", "1" }, { "unlockall", "0" }, { "staminameter", "0" }, { "vsync", "0" }, { "ping", "1" },
 		{ "occlusion", "1" }, { "soundheight", "1" }, { "crashdump", "1" }, { "crashmem", "0" }, { "gxthread", "1" },
-		{ "updatecheck", "1" }, { "skipupdate", "" },
+		{ "updatecheck", "1" }, { "skipupdate", "" }, { "onlinecharacter", "" },
 	};
 
 	//the environment variable the port reads for each
@@ -70,7 +70,7 @@ namespace
 		{ "GE_NO_TUTORIALS", "notutorials" }, { "GE_NO_COLOUR_FILTER", "nocolourfilter" }, { "GE_AUTOSAVE", "autosave" },
 		{ "GE_EXTRAS_MENU", "extrasmenu" }, { "GE_UNLOCK_ALL", "unlockall" }, { "GE_ONLINE_UNLOCKS", "onlineunlocks" },
 		{ "GE_STAMINA", "staminameter" }, { "GE_VSYNC", "vsync" }, { "GE_PING", "ping" },
-		{ "GE_OCCLUSION", "occlusion" }, { "GE_SOUND_HEIGHT", "soundheight" }, { "WIIKIT_GX_THREAD", "gxthread" },
+		{ "GE_OCCLUSION", "occlusion" }, { "GE_ONLINE_CHARACTER", "onlinecharacter" }, { "GE_SOUND_HEIGHT", "soundheight" }, { "WIIKIT_GX_THREAD", "gxthread" },
 	};
 
 	//the flags that just turn a setting on or off
