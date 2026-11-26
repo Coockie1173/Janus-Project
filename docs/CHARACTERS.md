@@ -11,6 +11,9 @@ eurochef-cli ge skin --base sk_jaws_jaws.edb --export jaws.gltf       # the base
 eurochef-cli ge skin mine.gltf --base sk_jaws_jaws.edb -o modpacks/NAME/characters/mine.edb --hash 0x010AF000
 ```
 
+Arms for first person are made the same way on an arms file (`--base sk_arms_jaws.edb`: its own
+skeleton of 48 bones, the fingers too, named by number only).
+
 The base files are the game's `sk_<who>_<outfit>.edb` (sk_bond_arkangel, sk_jaws_jaws,
 sk_trev_trevel...). Every body has the same skeleton of 37 bones, so the base only decides the
 proportions the animations were made for, the hands and head parts that can be kept, and the row
@@ -84,9 +87,10 @@ other. A pack has at most 64.
   places; the bones turned at random (as Blender does on import) build the same body.
 - In the game: the rebuilt Jaws and a body of boxes with a texture of its own (weighted, blended at
   the joints) on the Character page, idling, with Jaws's hands; in a network game on Archives the
-  other console draws the box body holding its gun.
+  other console draws the box body holding its gun; Jaws's arms rebuilt with a green texture as
+  `arms =` are the first person arms in a match. sk_arms_jaws exported and built again: the same.
 
 ## Not done
 
-- Arms of its own (the key is read, never tried), a lighter mesh for the far levels of detail (the
+- A lighter mesh for the far levels of detail (the
   body is used on all three), the morphs (grips, eyelids) for a mesh of your own.
