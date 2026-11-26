@@ -42,7 +42,8 @@ In Blender (File > Import > glTF):
   grips, each position moved as the base hand's closest ones are, so keep it about where the
   base's was. Deleted with nothing on the bone, the hand is left out.
 - Textures are taken from the materials' base colour; the base's own textures, unchanged, stay
-  the base's.
+  the base's. A material with Blend as its blend mode (sk_bond_skybrig's hair) is drawn blended,
+  after the rest: the body is then two meshes, as the game's own is.
 
 ## The character's file
 
@@ -72,7 +73,10 @@ other. A pack has at most 64.
   bone, the second bone or FF, FFFF) over the mesh's positions in order, never across a multiple of
   160 (fn_802A36F0 skins 160 at a time through ge_skin1/ge_skin2); the weights are two shorts a
   vertex, 0x2000 the whole, the heavier bone first (the normal follows only that one). The meshes
-  are 0x601 entities with flags 3 (a strip's texture is a place in the mesh's own list).
+  are 0x601 entities with flags 3 (a strip's texture is a place in the mesh's own list). A body
+  may be a split (0x603: +0x54 how many meshes, +0x58 no tree, +0x5C a pointer to each), then the
+  animskin's row has as many parts, a run table each (sk_bond_skybrig: the body and the hair, the
+  hair's mesh flagged 0x40000000, drawn blended after the rest).
 - **Morphs** (the grips, the eyelids): the animskin's +0x84 count and +0x88 rows (0x10: the mesh's
   hash, a number, how many targets, the first of the weights the animations give, the kind: 0 adds
   each target by its weight, 1 goes between two by a table). The mesh's +0xB4 has 4 when it has
@@ -108,6 +112,8 @@ other. A pack has at most 64.
   the joints) on the Character page, idling, with Jaws's hands; in a network game on Archives the
   other console draws the box body holding its gun; Jaws's arms rebuilt with a green texture as
   `arms =` are the first person arms in a match. sk_arms_jaws exported and built again: the same.
+- sk_bond_skybrig (a split body, hair blended) exported and built again: the same, the hair still
+  its own blended mesh; on the Character page with its hair's soft edges.
 - Grips: the base's hands renamed (so the build takes them as the scene's own) get targets equal to
   the base's to 4e-8; on the Character page their fingers curl as Jaws's do, with the targets zeroed
   they stay straight.
