@@ -70,6 +70,8 @@ const uint32_t kViewerLayout = 0;
 const uint32_t kMenuWidgets = 0x914; //the menu's widgets: +0x100 the layout's scene, a slot's box (+0x2AC on) made from its node every frame (fn_80240FC0)
 const uint32_t kSlots[] = { 0x1500011B, 0x1500011C };
 const float kSlotsDown = -0.275f; //their parent's z is the screen's up, 600 px of 448 a unit: 165 down, the second slot ends over the line above the description
+const uint32_t kNodeAngles = 0xD8;
+const float kModelAngles[3] = { 0.0f, 3.14159265f, 0.0f }; //0 shows its back
 const uint32_t kWidgetsScene = 0x100, kSceneRoot = 0x14C, kNodeFind = 0x8031D7B0, kNodePlace = 0xF8, kNodeMade = 0x8E;
 const uint32_t kHashMost = 0xFFFFFFFF, kIdMost = 0xFF, kMostPicks = 16;
 const uint32_t kCharacterMask = 0xFFFF0000, kCharacterKind = 0x4D000000, kFirstCharacter = 0x100;
@@ -384,6 +386,11 @@ void character_menu_update(const PPCContext& c, uint32_t menu)
 		stf(node + kNodePlace + 8, g_slot_y[i] + kSlotsDown);
 		st8(node + kNodeMade, 0);
 	}
+
+	//it stands still facing the camera: the list is a node, its angles at +0xD8 turned every frame
+	const uint32_t model = viewer + kViewerLists[0][0];
+	for (int i = 0; i < 3; ++i) stf(model + kNodeAngles + i * 4, kModelAngles[i]);
+	st8(model + kNodeMade, 0);
 
 	const uint32_t pick = g_mine;
 	if (pick == g_shown) return;
