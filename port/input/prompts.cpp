@@ -396,9 +396,10 @@ void StringSet(PPCContext& c)
 void TextMsg(PPCContext& c)
 {
 	uint32_t hash = c.r[3], out = c.r[4];
-	//the Mods menu's and the custom weapons' texts aren't the game's: characters, the hash, a word
+	//the Mods menu's, the custom weapons' and characters' texts aren't the game's: characters, the hash, a word
 	uint32_t own = mods_menu_text(hash);
 	if (!own) own = custom_weapon_text(hash);
+	if (!own) own = custom_character_text(hash);
 	if (own)
 	{
 		if (guest_ptr(out)) { st32(out, own); st32(out + 4, hash); st32(out + 8, 0); }

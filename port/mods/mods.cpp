@@ -29,6 +29,7 @@
 //a .png with a level's name is its picture in the menus (port/mods/pictures.cpp)
 //a .txt with a level's name says who the players of a network game are in it (LevelSet)
 //weapons/ has the custom weapons: their .txt files (port/mods/weapons/weapons.cpp) and the guns they are drawn with, mods too
+//characters/ the custom characters: their .txt files (port/mods/characters.cpp) and their bodies, mods too
 //
 //GE_MODPACKS=DIR the packs' folder (modpacks in the game's folder by default). a mods folder of an
 //older build, when there is no modpacks folder, is the pack "default"
@@ -611,7 +612,7 @@ float world_trace(const PPCContext& c, const float start[3], const float way[3])
 }
 
 //in the order of the game's Choose Game Mode. Classic Conflict has Conflict's maps, as in the game
-const char* const kWeaponsFolder = "weapons";
+const char* const kWeaponsFolder = "weapons", * const kCharactersFolder = "characters";
 const char* const kModeFolders[kModeCount] = { "conflict", "team_conflict", "golden_gun", "black_box", "goldeneye", "heroes", "license_to_kill", "team_license_to_kill" };
 
 const std::vector<ModLevel>& mod_levels() { return modpack_levels(g_active); }
@@ -841,6 +842,7 @@ void ReadPack(Pack& pack, const std::set<uint32_t>& disc)
 		const auto mode = std::find(std::begin(kModeFolders), std::end(kModeFolders), name);
 		if (mode != std::end(kModeFolders)) ReadFolder(folder, 1u << (mode - std::begin(kModeFolders)), pack.mods);
 		else if (name == kWeaponsFolder) ReadFolder(folder, 0, pack.mods); //the custom weapons' guns (weapons/weapons.cpp)
+		else if (name == kCharactersFolder) ReadFolder(folder, 0, pack.mods); //the custom characters' bodies (characters.cpp)
 		else rt_log("goldeneye: modpack %s: the folder %s isn't a gamemode's, left out", pack.name.c_str(), folder.filename().string().c_str());
 	}
 	std::sort(pack.mods.begin(), pack.mods.end(), [](const Mod& a, const Mod& b) { return a.name != b.name ? a.name < b.name : a.path < b.path; });

@@ -530,6 +530,9 @@ uint32_t PoolVersion(const PackMenu& menu)
 	//the custom weapons: a loadout has them by a key their order gives them
 	const std::vector<uint8_t>& weapons = custom_weapons_sum();
 	if (!weapons.empty()) Mix(sum, weapons.data(), weapons.size());
+	//and the characters: a pick goes by a hash their order gives them
+	const std::vector<uint8_t>& characters = custom_characters_sum();
+	if (!characters.empty()) Mix(sum, characters.data(), characters.size());
 	return kModdedVersions | (sum & (kModdedVersions - 1));
 }
 

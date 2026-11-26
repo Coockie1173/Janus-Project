@@ -106,6 +106,7 @@ void install() {
     install_character();
     install_mods();
     install_custom_weapons();
+    install_custom_characters();
     install_weapon_previews();
     install_loadout_panel();
     install_mods_menu();

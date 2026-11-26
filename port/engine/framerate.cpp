@@ -137,6 +137,7 @@ void frame_tick(PPCContext& c) {
         autosave_frame(c);
         mods_menu_frame(c);
         custom_weapons_frame(c);
+        custom_characters_frame(c);
         pictures_frame();
     }
     collision_tick();

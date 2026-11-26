@@ -186,3 +186,6 @@ ge_player_info_read
 ge_match_info_write    # the host's match settings to each console: every player's online character after them in a modded game
 ge_match_info_read
 ge_player_skin_give    # a network game's player gets its skin: the online character its player picked
+ge_character_sheet_load # the character sheet filled: the custom characters' rows get their base's (port/mods/characters.cpp)
+ge_character_insert    # a character row in: the custom characters' go in first
+ge_skin_insert         # a skin row in: the custom characters' go in first, once

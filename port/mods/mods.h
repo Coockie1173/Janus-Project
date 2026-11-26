@@ -67,6 +67,15 @@ int custom_weapon_pack(int n);
 bool custom_weapon_drawn(int n); //its gun is drawn right outside a network game: its own file is the one the game gets
 const std::vector<uint8_t>& custom_weapons_sum(); //what the installed pack's files say, for the network game's version
 
+//characters.cpp
+void install_custom_characters(); //after install_mods: the characters of every pack's characters/
+void custom_characters_frame(PPCContext& c); //once a frame, on the game's thread
+int custom_character_count(); //the installed pack's characters there are rows for, after the game's on the Character page
+uint32_t custom_character_hash(int n);
+uint32_t custom_character_row(uint32_t hash); //its row of the character sheet, 0 for one that isn't ours
+uint32_t custom_character_text(uint32_t hash); //the characters of a custom character's name, 0 for any other
+const std::vector<uint8_t>& custom_characters_sum(); //what the installed pack's character files say, for the network game's version
+
 //weapons/preview.cpp
 void install_weapon_previews(); //after install_custom_weapons: the loadout menu shows each gun turning in place of its picture
 int64_t weapon_gun_of_key(uint32_t key); //the gun a weapon's key is drawn with, -1 for none. on the game's thread

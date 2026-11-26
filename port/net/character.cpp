@@ -3,7 +3,8 @@
 //
 //the picks: split screen's character list (805D1680, a list of the character sheet's rows: +0 the
 //hash, +8 the name's text; 805D167C how many), the one its Character row (setting 7D01003A) steps
-//through. ours is a setting of its own with "Map's Default" before them, kept in settings.env
+//through. ours is a setting of its own with "Map's Default" before them and the installed pack's
+//custom characters after them (mods/characters.cpp), kept in settings.env
 //
 //the game: ge_player_skin (8000F8E0) puts the rows of the skins a network game loads at 805D1690
 //(ten: four of each team's set, the two heroes), fn_8000E000 loads their two files each right
@@ -94,13 +95,20 @@ uint32_t g_viewer = 0, g_shown = 0; //the Character page's model object and whom
 
 bool IsCharacter(uint32_t hash) { return (hash & kCharacterMask) == kCharacterKind && (hash & 0xFFFF) >= kFirstCharacter; }
 
-uint32_t RosterCount()
+uint32_t GameRosterCount()
 {
 	const uint32_t count = ld32(kRosterCount);
 	return guest_ptr(ld32(kRoster)) && count < 1024 ? count : 0;
 }
 
-uint32_t RosterRow(uint32_t i) { return ld32(ld32(kRoster) + i * 4); }
+//split screen's, then the installed pack's custom characters (mods/characters.cpp)
+uint32_t RosterCount() { return GameRosterCount() + (uint32_t)custom_character_count(); }
+
+uint32_t RosterRow(uint32_t i)
+{
+	const uint32_t game = GameRosterCount();
+	return i < game ? ld32(ld32(kRoster) + i * 4) : custom_character_row(custom_character_hash((int)(i - game)));
+}
 
 //its place in the roster, -1 for the map's
 int RosterIndex(uint32_t hash)
