@@ -28,6 +28,12 @@ the character is copied from.
 
 In Blender (File > Import > glTF):
 
+- A model rigged to a ValveBiped (Source) or Mixamo skeleton, A or T pose: import it next to the
+  export and press GoldenEye > Character > Move Onto Game Skeleton in the 3D View's sidebar
+  (eurochef's `blender_addon/ge_character_rig.py`, part of the Eurochef Utility add-on). It is
+  scaled, turned and posed onto the game's skeleton, its weights moved to the game's bones (fingers
+  to the hands), the base's body parts deleted. Untested on real models yet.
+
 - The export is the base at the game's size (Bond is 1.8 m), its armature `Skeleton` with bones
   named `Bone_08_Head`, `Bone_12_L_Hand`...: only the number counts. Leave the armature as it is:
   the game moves the bones from where the base has them, whatever Blender shows.
