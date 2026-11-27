@@ -172,7 +172,9 @@ damage = 2
 - a row in each loadout page of its base's kind (a pistol in the secondary's, the rest in the
   primary's, all in 7D0000E8). It has no place of its own in the loadout list (seven free ones for
   up to 64 weapons a pack): the three functions that search it are hooked, and the weapon they ask
-  for is written into a free place while they run (`ListLend`), so any number of each kind fit;
+  for is written into a free place while they run (`ListLend`), so any number of each kind fit.
+  Its kind is its base's, or the file's `kind = pistol | smg | heavy | rifle | sniper`; its rows go
+  after the page's last game gun of that kind (a pistol is a secondary, the rest primaries);
 - a place in the network item list after the game's 37 (26 custom weapons at most);
 - its files go into the version of a modded network game, so only consoles with the same
   weapons find each other.

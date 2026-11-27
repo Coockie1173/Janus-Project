@@ -18,6 +18,8 @@
 //                             at the gun's place: the player's, another player's, a guard's
 //                             (customsound.cpp)
 //  fire volume = 0.8          that sound times this
+//  kind = smg                 where it is in the loadout menu: pistol (a secondary), smg, heavy,
+//                             rifle or sniper. the base's kind when it isn't given
 #include "mods/weapons/weapon.h"
 #include <algorithm>
 #include <cctype>
@@ -25,6 +27,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 
 namespace ge::weapons
 {
@@ -76,6 +79,16 @@ bool ReadWeapon(const std::filesystem::path& path, Weapon& w, std::vector<uint8_
 		else if (key == "model scale") w.scale = std::strtof(value.c_str(), nullptr);
 		else if (key == "fire sound") w.fireSound = value;
 		else if (key == "fire volume") w.fireVolume = std::strtof(value.c_str(), nullptr);
+		else if (key == "kind")
+		{
+			//the loadout list's six places a kind, in its order
+			const char* const kinds[] = { "pistol", "smg", "heavy", "rifle", "sniper" };
+			const std::string kind = Lower(value);
+			w.fileKind = -1;
+			for (int k = 0; k < (int)std::size(kinds); ++k)
+				if (kind == kinds[k] || kind == std::string(kinds[k]) + "s") w.fileKind = k;
+			if (w.fileKind < 0) rt_log("goldeneye: weapons: %s: kind \"%s\" isn't pistol, smg, heavy, rifle or sniper", w.file.c_str(), value.c_str());
+		}
 		else if (key.rfind("byte+", 0) == 0 || key.rfind("word+", 0) == 0 || key.rfind("float+", 0) == 0)
 		{
 			Patch p{};

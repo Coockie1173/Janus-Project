@@ -141,6 +141,7 @@ bool FindBase(const PPCContext& c, Weapon& w)
 		const uint32_t key = ld32(kList + i * kListSize), row = key == kListFree ? 0 : RowOfKey(key);
 		if (row && ld32(row + kRowId) == id) { w.baseKey = key; w.kind = (int)(i / kListKind); }
 	}
+	if (w.fileKind >= 0) w.kind = w.fileKind;
 	for (uint32_t i = 0; !w.baseKey && i < count && i < 512; ++i)
 	{
 		const uint32_t row = rows + i * kRowSize;
@@ -606,6 +607,20 @@ void WeaponPage(const PPCContext& c, uint32_t page)
 	const uint32_t fresh = Alloc(c, (count + (uint32_t)adds.size() + relayout) * kMenuRow);
 	if (!fresh) return;
 	const uint32_t item = rows + (uint32_t)last * kMenuRow;
+	//each after the page's last gun of its kind (the game's guns are in the list's order), else after its last gun
+	std::vector<uint32_t> after;
+	for (const Weapon* pW : adds)
+	{
+		uint32_t at = (uint32_t)last;
+		for (uint32_t i = 0; pW->kind >= 0 && i < count; ++i)
+		{
+			const uint32_t row = rows + i * kMenuRow, key = ld32(row + kMenuRowHash);
+			if (ld32(row + kMenuRowKind) >> 16 != kKindWeapon) continue;
+			for (uint32_t k = 0; k < kListWeapons && k * 4 < g_gameList.size(); ++k)
+				if (g_gameList[k * 4] == key && (int)(k / kListKind) == pW->kind) at = i;
+		}
+		after.push_back(at);
+	}
 	uint32_t out = fresh;
 	for (uint32_t i = 0; i < count; ++i)
 	{
@@ -618,9 +633,10 @@ void WeaponPage(const PPCContext& c, uint32_t page)
 			st32(out + kMenuRowHash, ld32(rows + i * kMenuRow + kMenuRowHash) + 1); //the next slot's widget
 			out += kMenuRow;
 		}
-		if (i != (uint32_t)last) continue;
-		for (const Weapon* pW : adds)
+		for (size_t n = 0; n < adds.size(); ++n)
 		{
+			if (after[n] != i) continue;
+			const Weapon* pW = adds[n];
 			for (uint32_t at = 0; at < kMenuRow; at += 4) st32(out + at, ld32(item + at));
 			st32(out, pW->text);
 			st32(out + kMenuRowHash, pW->key);
@@ -633,7 +649,7 @@ void WeaponPage(const PPCContext& c, uint32_t page)
 	st32(page + kPageRowCount, total);
 	if (g_trace)
 	{
-		rt_log("goldeneye: weapons: page %08X (%u rows at %08X) gets %zu weapon(s) after row %d", hash, count, rows, adds.size(), last);
+		rt_log("goldeneye: weapons: page %08X (%u rows at %08X) gets %zu weapon(s)", hash, count, rows, adds.size());
 		for (uint32_t i = 0; i < total; ++i)
 		{
 			const uint32_t row = fresh + i * kMenuRow;

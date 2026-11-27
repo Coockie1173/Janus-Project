@@ -25,7 +25,8 @@ struct Weapon
 	std::vector<Patch> patches;
 	uint32_t key{}, id{}, text{}, aboutText{};
 	uint32_t baseId{}, baseKey{};
-	int kind{ -1 }; //which six of the loadout list its base is in (0 the pistols), -1 none
+	int kind{ -1 }; //which six of the loadout list it goes with (0 the pistols), -1 none
+	int fileKind{ -1 }; //the file's kind =, -1 its base's
 	bool listed{}; //in the loadout menu: its base found, of the installed pack
 	uint32_t picture{}; //its base's picture in the menu
 	uint32_t chars{}, aboutChars{}; //the texts in the game's memory
