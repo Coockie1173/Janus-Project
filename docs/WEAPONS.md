@@ -39,7 +39,7 @@ copy of each of its base's (keys from 4B000500) and the same pairs.
 | +0x00C | byte: automatic | 0 | 1 |
 | +0x00D | byte: clip | 16 | 30 |
 | +0x00E | byte: clips | 12 | 8 |
-| +0x010 | float, probably shots a second | 5 | 10 |
+| +0x010 | float, shots a second (measured: 5 and 6.3 fired 25 and 31.7 rounds in 5 s) | 5 | 10 |
 | +0x014 | float, probably the longest range | 200 | 200 |
 | +0x028..+0x030 | ammo kinds (4B1000xx) | | |
 | +0x044, +0x048, +0x04C, +0x050 | the player's damage near, near range, far range, damage far | 40 10 20 35 | 35 25 45 20 |

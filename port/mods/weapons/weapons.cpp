@@ -60,6 +60,7 @@ const uint32_t kRowPlayerShot = 0x44, kRowGuardShot = 0x14C, kShotSize = 0x10; /
 const uint32_t kDefs = 0x80578AB0, kDefSize = 0x2C, kDefLast = 0x02000001;
 const uint32_t kList = 0x80585C80, kListSize = 0x10, kListCount = 0x41, kListKind = 6, kListFree = 0xFFFFFFFF;
 const uint32_t kListWeapons = 32; //the weapons' places, the attachments and gadgets after them
+const int kKindPistols = 0; //the list's first six places, the secondary's
 const uint32_t kPages = 0x805E0590, kPagesCount = 0x8, kPagesData = 0xC;
 const uint32_t kPageSize = 0x10, kPageHash = 0, kPageRows = 0x4, kPageRowCount = 0x8;
 const uint32_t kMenuRow = 20, kMenuRowHash = 4, kMenuRowKind = 0xC, kKindWeapon = 0x0010, kKindSlot = 0x00A3;
@@ -482,39 +483,55 @@ void DefAdd(PPCContext& c)
 }
 
 //a free place among the guns of the base's kind of the loadout list, the base's picture: the
-//installed pack's weapons, in the game's list as it was
+//installed pack's weapons, in the game's list as it was. every weapon gets a place of its own kind
+//first, then the ones left over the free places of the others but the pistols' (a gun there is a
+//pistol to the game, a secondary). one at a time in file order, a rifle with the rifles full took
+//the pistols' one free place ahead of the PP7 after it, which went to the SMGs
 void ListWeapons(const PPCContext& c)
 {
 	if (g_gameList.empty())
 		for (uint32_t at = 0; at < kListWeapons * kListSize; at += 4) g_gameList.push_back(ld32(kList + at));
 	for (uint32_t i = 0; i < (uint32_t)g_gameList.size(); ++i) st32(kList + i * 4, g_gameList[i]);
+	std::vector<Weapon*> listed;
 	for (Weapon& w : g_weapons)
 	{
 		if (!Installed(w) || (!w.baseKey && !FindBase(c, w))) continue;
 		if (!w.chars) w.chars = Chars(c, w.name);
 		if (!w.aboutChars) w.aboutChars = Chars(c, w.about);
-		uint32_t picture = 0;
+		listed.push_back(&w);
+	}
+	auto freePlace = [](bool ofKind, int kind)
+	{
 		for (uint32_t i = 0; i < kListWeapons; ++i)
-			if (ld32(kList + i * kListSize) == w.baseKey) picture = ld32(kList + i * kListSize + 0xC);
-		int place = -1;
-		for (uint32_t i = 0; i < kListWeapons && place < 0; ++i)
 		{
-			const bool ofKind = w.kind < 0 || (int)(i / kListKind) == w.kind;
-			if (ofKind && ld32(kList + i * kListSize) == kListFree) place = (int)i;
+			const int placeKind = (int)(i / kListKind);
+			const bool fits = ofKind ? kind < 0 || placeKind == kind : placeKind != kKindPistols;
+			if (fits && ld32(kList + i * kListSize) == kListFree) return (int)i;
 		}
-		for (uint32_t i = 0; i < kListWeapons && place < 0; ++i)
-			if (ld32(kList + i * kListSize) == kListFree) place = (int)i;
-		if (place < 0)
+		return -1;
+	};
+	std::vector<Weapon*> left;
+	for (bool ofKind : {true, false})
+	{
+		for (Weapon* w : ofKind ? listed : left)
 		{
-			rt_log("goldeneye: weapons: the loadout menu has no room for %s", w.name.c_str());
-			continue;
+			const int place = w->kind == kKindPistols && !ofKind ? -1 : freePlace(ofKind, w->kind);
+			if (place < 0)
+			{
+				if (ofKind) left.push_back(w);
+				else rt_log("goldeneye: weapons: the loadout menu has no room for %s", w->name.c_str());
+				continue;
+			}
+			uint32_t picture = 0;
+			for (uint32_t i = 0; i < kListWeapons; ++i)
+				if (g_gameList[i * 4] == w->baseKey) picture = g_gameList[i * 4 + 3];
+			const uint32_t at = kList + (uint32_t)place * kListSize;
+			st32(at, w->key);
+			st32(at + 4, w->text);
+			st32(at + 8, w->aboutText);
+			st32(at + 0xC, picture);
+			if (g_trace) rt_log("goldeneye: weapons: %s in the loadout list's place %d", w->name.c_str(), place);
 		}
-		const uint32_t at = kList + (uint32_t)place * kListSize;
-		st32(at, w.key);
-		st32(at + 4, w.text);
-		st32(at + 8, w.aboutText);
-		st32(at + 0xC, picture);
-		if (g_trace) rt_log("goldeneye: weapons: %s in the loadout list's place %d", w.name.c_str(), place);
 	}
 }
 
