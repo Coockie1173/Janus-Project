@@ -25,7 +25,9 @@ struct Weapon
 	std::vector<Patch> patches;
 	uint32_t key{}, id{}, text{}, aboutText{};
 	uint32_t baseId{}, baseKey{};
-	int kind{ -1 }; //which six of the loadout list
+	int kind{ -1 }; //which six of the loadout list its base is in (0 the pistols), -1 none
+	bool listed{}; //in the loadout menu: its base found, of the installed pack
+	uint32_t picture{}; //its base's picture in the menu
 	uint32_t chars{}, aboutChars{}; //the texts in the game's memory
 	std::string model; //its gun's file in the weapons folder, empty: the base's
 	uint32_t modelFile{}; //that file's hash, as the mods have it
@@ -43,5 +45,17 @@ inline std::vector<std::vector<uint8_t>> g_sums; //what each pack's files say, f
 std::string Lower(std::string s);
 void ReadWeapons(); //every pack's weapons folder's files, a pack after the other and sorted, into g_weapons
 bool Installed(const Weapon& w); //of the installed pack
+
+//weapons.cpp: the loadout menu's list (80585C80) has room for seven more guns, so the custom ones
+//aren't kept in it. a game function that looks a key up there gets that one weapon in a free place
+//while it runs (ge_loadout_info, ge_loadout_pick, ge_loadout_slot_name)
+struct ListLend
+{
+	explicit ListLend(uint32_t key);
+	~ListLend();
+	ListLend(const ListLend&) = delete;
+	ListLend& operator=(const ListLend&) = delete;
+	uint32_t at{}; //the place lent, 0 none
+};
 
 } //namespace ge::weapons

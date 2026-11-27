@@ -167,6 +167,7 @@ ge_file_object         # a file with the section of one of its objects loaded: a
 ge_weapon_fire_sound   # a shot's sounds: a custom weapon's own .wav in place of its base's (port/mods/weapons/weapons.cpp)
 ge_character_sound     # a sound at a character: a guard's shot with a custom weapon plays its .wav (port/mods/weapons/weapons.cpp)
 ge_loadout_pick        # the loadout menu takes the lit weapon: a custom pistol stays a loadout's secondary
+ge_loadout_slot_name   # the name of a loadout slot's weapon: a custom weapon is lent a place in the list (port/mods/weapons/weapons.cpp)
 ge_loadout_info        # the loadout menu's lit row: its gun drawn turning in place of the picture (port/mods/weapons/preview.cpp)
 ge_texture_bind        # a texture goes to a GX map: a gun picture becomes the lit weapon's drawn gun (port/mods/weapons/preview.cpp)
 ge_loadout_scene       # the chosen loadout's pictures beside the network pause and game starting menus: hidden, the caption shows it (port/mods/weapons/loadout.cpp)

@@ -445,6 +445,7 @@ void Info(PPCContext& c)
 	if (g_lit >= 0 && !g_blocks[0])
 		for (uint32_t& block : g_blocks)
 			if (const uint32_t at = Alloc(c, kMostSide * kMostLines * 2 + 32)) block = (at + 31) & ~31u;
+	const weapons::ListLend lend(key);
 	orig_info(c);
 }
 

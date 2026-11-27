@@ -27,7 +27,8 @@
 //  page, a secondary's (the five pistols) and one with them all. a key is also looked for in
 //  the list at 80585C80 (16 bytes: key, name, about, a picture's number; 0x41 of them): six a
 //  kind of gun, pistols first, and a key that isn't there is taken out of the loadout again
-//  (fn_80256A80). the kinds have free places (FFFFFFFF), which is where these go
+//  (fn_80256A80). the kinds have seven free places (FFFFFFFF) in all, so a custom weapon is only
+//  lent one while a game function looks its key up (ListLend)
 //the network game gives a player the weapons of its loadout by their keys (fn_800C2740), so a
 //console has to have the same custom weapons as the others: their files go into the version of
 //a modded network game (modmenu.cpp)
@@ -482,61 +483,60 @@ void DefAdd(PPCContext& c)
 	if (g_trace) rt_log("goldeneye: weapons: %zu definition(s) made", g_weapons.size());
 }
 
-//a free place among the guns of the base's kind of the loadout list, the base's picture: the
-//installed pack's weapons, in the game's list as it was. every weapon gets a place of its own kind
-//first, then the ones left over the free places of the others but the pistols' (a gun there is a
-//pistol to the game, a secondary). one at a time in file order, a rifle with the rifles full took
-//the pistols' one free place ahead of the PP7 after it, which went to the SMGs
+//the installed pack's weapons in the loadout menu, by their bases: the kind (the six of the list the
+//base is in, the pistols a secondary) and the picture. none of them goes into the list itself: it
+//has seven free places, a pack up to 64 weapons, so each is lent a place while the game looks for it
 void ListWeapons(const PPCContext& c)
 {
 	if (g_gameList.empty())
 		for (uint32_t at = 0; at < kListWeapons * kListSize; at += 4) g_gameList.push_back(ld32(kList + at));
-	for (uint32_t i = 0; i < (uint32_t)g_gameList.size(); ++i) st32(kList + i * 4, g_gameList[i]);
-	std::vector<Weapon*> listed;
 	for (Weapon& w : g_weapons)
 	{
+		w.listed = false;
 		if (!Installed(w) || (!w.baseKey && !FindBase(c, w))) continue;
 		if (!w.chars) w.chars = Chars(c, w.name);
 		if (!w.aboutChars) w.aboutChars = Chars(c, w.about);
-		listed.push_back(&w);
-	}
-	auto freePlace = [](bool ofKind, int kind)
-	{
+		w.picture = 0;
 		for (uint32_t i = 0; i < kListWeapons; ++i)
-		{
-			const int placeKind = (int)(i / kListKind);
-			const bool fits = ofKind ? kind < 0 || placeKind == kind : placeKind != kKindPistols;
-			if (fits && ld32(kList + i * kListSize) == kListFree) return (int)i;
-		}
-		return -1;
-	};
-	std::vector<Weapon*> left;
-	for (bool ofKind : {true, false})
-	{
-		for (Weapon* w : ofKind ? listed : left)
-		{
-			const int place = w->kind == kKindPistols && !ofKind ? -1 : freePlace(ofKind, w->kind);
-			if (place < 0)
-			{
-				if (ofKind) left.push_back(w);
-				else rt_log("goldeneye: weapons: the loadout menu has no room for %s", w->name.c_str());
-				continue;
-			}
-			uint32_t picture = 0;
-			for (uint32_t i = 0; i < kListWeapons; ++i)
-				if (g_gameList[i * 4] == w->baseKey) picture = g_gameList[i * 4 + 3];
-			const uint32_t at = kList + (uint32_t)place * kListSize;
-			st32(at, w->key);
-			st32(at + 4, w->text);
-			st32(at + 8, w->aboutText);
-			st32(at + 0xC, picture);
-			if (g_trace) rt_log("goldeneye: weapons: %s in the loadout list's place %d", w->name.c_str(), place);
-		}
+			if (g_gameList[i * 4] == w.baseKey) w.picture = g_gameList[i * 4 + 3];
+		w.listed = true;
+		if (g_trace) rt_log("goldeneye: weapons: %s in the loadout menu as kind %d", w.name.c_str(), w.kind);
 	}
 }
 
+const Weapon* ListedWeapon(uint32_t key)
+{
+	for (const Weapon& w : g_weapons)
+		if (w.key == key && w.listed && w.chars) return &w;
+	return nullptr;
+}
+
+} //namespace
+
+ListLend::ListLend(uint32_t key)
+{
+	const Weapon* w = ListedWeapon(key);
+	if (!w) return;
+	for (uint32_t i = kListWeapons; i-- > 0 && !at;)
+		if (ld32(kList + i * kListSize) == kListFree) at = kList + i * kListSize;
+	if (!at) return;
+	st32(at, w->key);
+	st32(at + 4, w->text);
+	st32(at + 8, w->aboutText);
+	st32(at + 0xC, w->picture);
+}
+
+ListLend::~ListLend()
+{
+	if (at) st32(at, kListFree);
+}
+
+namespace
+{
+
 bool InList(uint32_t key)
 {
+	if (ListedWeapon(key)) return true;
 	for (uint32_t i = 0; i < kListWeapons; ++i)
 		if (ld32(kList + i * kListSize) == key) return true;
 	return false;
@@ -544,6 +544,7 @@ bool InList(uint32_t key)
 
 bool Pistol(uint32_t key)
 {
+	if (const Weapon* w = ListedWeapon(key)) return w->kind == kKindPistols;
 	for (uint32_t i = 0; i < kListKind; ++i)
 		if (ld32(kList + i * kListSize) == key) return true;
 	return false;
@@ -785,6 +786,7 @@ void NetItems(const PPCContext& c)
 //still goes when the Multi Task does
 const uint32_t kMenuLit = 0x2C8, kMenuLitIndex = 0x220, kMenuPad = 0x1A4, kMenuPage = 0x214, kItemLoadout = 8;
 const uint32_t kSecondaryPages[] = {0x7D0000C1, 0x7D0000E8}, kSecondarySlot = 0x15C, kTorka = 0x4B00002D;
+const uint32_t kPrimaryPage = 0x7D0000C0, kPrimarySlot = 0x148;
 PPCFunc orig_loadout_pick = nullptr;
 
 void LoadoutPick(PPCContext& c)
@@ -800,11 +802,32 @@ void LoadoutPick(PPCContext& c)
 	const uint32_t slot = kProfiles + ld8(menu + kMenuPad) * kProfileSize + ld32(item + kItemLoadout) * 4 + kSecondarySlot;
 	const bool secondaryPage = std::find(std::begin(kSecondaryPages), std::end(kSecondaryPages), page) != std::end(kSecondaryPages);
 	const uint32_t wanted = secondaryPage ? key : ld32(slot);
-	orig_loadout_pick(c);
+	{
+		const ListLend lend(key);
+		orig_loadout_pick(c);
+	}
 	const bool custom = std::any_of(g_weapons.begin(), g_weapons.end(), [&](const Weapon& w) { return w.key == wanted; });
 	if (!custom || ld32(slot) != kTorka || (!secondaryPage && !Pistol(wanted))) return;
 	st32(slot, wanted);
 	if (g_trace) rt_log("goldeneye: weapons: %08X kept as the secondary", wanted);
+}
+
+//the name of a loadout slot's weapon (fn_80256CF0: item, menu, page): the slot's key looked up in
+//the list. the slot is fn_80256D80's, the primary's or the secondary's on the weapon pages
+PPCFunc orig_slot_name = nullptr;
+
+void SlotName(PPCContext& c)
+{
+	const uint32_t item = c.r[3], menu = c.r[4], page = c.r[5];
+	uint32_t key = 0;
+	if (guest_ptr(item) && guest_ptr(menu))
+	{
+		const uint32_t loadout = kProfiles + ld8(menu + kMenuPad) * kProfileSize + ld32(item + kItemLoadout) * 4;
+		if (page == kPrimaryPage) key = ld32(loadout + kPrimarySlot);
+		else if (std::find(std::begin(kSecondaryPages), std::end(kSecondaryPages), page) != std::end(kSecondaryPages)) key = ld32(loadout + kSecondarySlot);
+	}
+	const ListLend lend(key);
+	orig_slot_name(c);
 }
 
 //a shot's sounds (fn_8012E3A0: controller, the shot's place): the weapon's own .wav in place of the
@@ -932,6 +955,7 @@ void install_custom_weapons()
 	orig_script_set = ppc_hook("ge_script_set", ScriptSet);
 	orig_file_object = ppc_hook("ge_file_object", FileObject);
 	orig_loadout_pick = ppc_hook("ge_loadout_pick", LoadoutPick);
+	orig_slot_name = ppc_hook("ge_loadout_slot_name", SlotName);
 	get_file = ppc_lookup(kGetFile);
 	fix_up = ppc_lookup(kFixUp);
 	for (Weapon& w : g_weapons)
@@ -945,7 +969,7 @@ void install_custom_weapons()
 		orig_character_sound = ppc_hook("ge_character_sound", CharacterSound);
 		if (!orig_fire_sound || !orig_character_sound) rt_log("goldeneye: ge_weapon_fire_sound or ge_character_sound is not hooked in this build, custom weapons fire with their base's sound");
 	}
-	if (!game_alloc || !row_insert || !map_insert || !orig_load || !orig_def_add || !orig_poses || !weapon_pose || !orig_loadout_give || !orig_script_set || !orig_file_object || !orig_loadout_pick || !get_file || !fix_up) rt_die("goldeneye: custom weapons are not hooked in this build");
+	if (!game_alloc || !row_insert || !map_insert || !orig_load || !orig_def_add || !orig_poses || !weapon_pose || !orig_loadout_give || !orig_script_set || !orig_file_object || !orig_loadout_pick || !orig_slot_name || !get_file || !fix_up) rt_die("goldeneye: custom weapons are not hooked in this build");
 }
 
 } //namespace ge

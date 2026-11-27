@@ -106,7 +106,10 @@ A loadout (profile 805DE788 + pad × 0x590, five of them) keeps keys: primary +0
 key as the row's hash (7D0000C0: 21 guns, 7D0000C1: the five pistols, 7D0000E8: all 26).
 `fn_80256A80` takes a pick out again unless the key is in the list at 80585C80 (key, name, about,
 picture number; six places a kind of gun: pistols, SMGs, heavy, rifles, snipers, with free places
-5, 11, 17, 23, 24, 30, 31), and a secondary that isn't one of the five pistols.
+5, 11, 17, 23, 24, 30, 31), and a secondary that isn't one of the five pistols (by their keys,
+2D 09 0F 2E 1E, not by the list). The game reads the list in three places only, each a search for
+one key over its 0x41 rows: `ge_loadout_info` (80256710), `ge_loadout_pick` (80256A80) and
+`ge_loadout_slot_name` (80256CF0, the name on a slot's row). Where a key sits means nothing to it.
 
 A network game gives each player the weapons of its loadout row by key (`fn_800C2740` from
 fn_800C2530 and fn_8013B4E0), so every console in the game needs the same custom weapons.
@@ -166,8 +169,10 @@ damage = 2
   up), name and about texts, and what the file changes;
 - a copy of the base's definition with its own id, so it has the base's animations, gun scripts
   and attachments; a pose made for it after the game's own;
-- a free place in the loadout list (its base's kind first; seven places in all) and a row in each
-  loadout page of its kind (a pistol in the secondary's, the rest in the primary's, all in 7D0000E8);
+- a row in each loadout page of its base's kind (a pistol in the secondary's, the rest in the
+  primary's, all in 7D0000E8). It has no place of its own in the loadout list (seven free ones for
+  up to 64 weapons a pack): the three functions that search it are hooked, and the weapon they ask
+  for is written into a free place while they run (`ListLend`), so any number of each kind fit;
 - a place in the network item list after the game's 37 (26 custom weapons at most);
 - its files go into the version of a modded network game, so only consoles with the same
   weapons find each other.
