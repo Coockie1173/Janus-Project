@@ -113,6 +113,8 @@ private:
 			}
 			if (!Size(now.w, now.h)) continue;
 			Draw(now);
+			SDL_BlitSurfaceScaled(m_pCanvas, nullptr, m_pSmall, nullptr, SDL_SCALEMODE_LINEAR); //a 2x2 block's average
+			Shot();
 			Finish();
 		}
 		Drop();
@@ -120,12 +122,15 @@ private:
 		m_pShower = nullptr;
 	}
 
-	//the surface it's drawn on at the picture's size, with its renderer and the font on it
+	//the surface it's drawn on at twice the picture's size (its triangles sample the font's nearest
+	//pixel: the 48 pixel glyphs drawn at 20 came out crunchy), its renderer with the font on it, and
+	//the picture's size it's scaled down to
 	bool Size(int w, int h)
 	{
-		if (m_pCanvas && m_pCanvas->w == w && m_pCanvas->h == h) return true;
+		if (m_pSmall && m_pSmall->w == w && m_pSmall->h == h) return true;
 		Drop();
-		m_pCanvas = SDL_CreateSurface(w, h, SDL_PIXELFORMAT_XRGB8888);
+		m_pSmall = SDL_CreateSurface(w, h, SDL_PIXELFORMAT_XRGB8888);
+		m_pCanvas = m_pSmall ? SDL_CreateSurface(w * kSuper, h * kSuper, SDL_PIXELFORMAT_XRGB8888) : nullptr;
 		m_pDraw = m_pCanvas ? SDL_CreateSoftwareRenderer(m_pCanvas) : nullptr;
 		m_pFont = m_pDraw ? SDL_CreateTexture(m_pDraw, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, m_FontW, m_FontH) : nullptr;
 		if (!m_pFont)
@@ -144,9 +149,11 @@ private:
 	{
 		if (m_pDraw) SDL_DestroyRenderer(m_pDraw); //its texture with it
 		SDL_DestroySurface(m_pCanvas);
+		SDL_DestroySurface(m_pSmall);
 		m_pDraw = nullptr;
 		m_pFont = nullptr;
 		m_pCanvas = nullptr;
+		m_pSmall = nullptr;
 	}
 
 	void Draw(const Picture& p)
@@ -154,7 +161,7 @@ private:
 		SDL_SetRenderClipRect(m_pDraw, nullptr);
 		SDL_SetRenderDrawColor(m_pDraw, 6, 14, 18, 255);
 		SDL_RenderClear(m_pDraw);
-		const float sx = (float)p.w / (p.dw > 0 ? p.dw : (float)p.w), sy = (float)p.h / (p.dh > 0 ? p.dh : (float)p.h); //points to pixels
+		const float sx = (float)(p.w * kSuper) / (p.dw > 0 ? p.dw : (float)p.w), sy = (float)(p.h * kSuper) / (p.dh > 0 ? p.dh : (float)p.h); //points to the canvas's pixels
 		m_Xy.resize(p.vtx.size() * 2);
 		m_Colour.resize(p.vtx.size());
 		for (size_t i = 0; i < p.vtx.size(); ++i)
@@ -175,11 +182,15 @@ private:
 				&v->uv.x, sizeof(ImDrawVert), (int)(p.vtx.size() - c.vtxAt), &p.idx[c.idxAt], (int)c.count, sizeof(ImDrawIdx));
 		}
 		SDL_FlushRenderer(m_pDraw);
+	}
+
+	void Shot()
+	{
 		//GE_SPEEDRUN_SHOT=F.bmp the timer's first picture, GE_POPWINDOW_SHOT=F.bmp the other windows' every 120th
 		static bool shot = false;
 		const bool timer = m_Name == "speedrun timer";
 		if (const char* path = std::getenv(timer ? "GE_SPEEDRUN_SHOT" : "GE_POPWINDOW_SHOT"); path && (timer ? !shot : ++m_Pictures % 120 == 0))
-			shot = SDL_SaveBMP(m_pCanvas, path);
+			shot = SDL_SaveBMP(m_pSmall, path);
 	}
 
 	//the picture to the window: kept for the game's thread to blit, or uploaded and presented here
@@ -188,12 +199,12 @@ private:
 		if (m_Native)
 		{
 			std::lock_guard<std::mutex> hold(m_Lock);
-			if (!m_pReady || m_pReady->w != m_pCanvas->w || m_pReady->h != m_pCanvas->h)
+			if (!m_pReady || m_pReady->w != m_pSmall->w || m_pReady->h != m_pSmall->h)
 			{
 				SDL_DestroySurface(m_pReady);
-				m_pReady = SDL_CreateSurface(m_pCanvas->w, m_pCanvas->h, m_pCanvas->format);
+				m_pReady = SDL_CreateSurface(m_pSmall->w, m_pSmall->h, m_pSmall->format);
 			}
-			if (m_pReady && SDL_BlitSurface(m_pCanvas, nullptr, m_pReady, nullptr)) m_Fresh = true;
+			if (m_pReady && SDL_BlitSurface(m_pSmall, nullptr, m_pReady, nullptr)) m_Fresh = true;
 			return;
 		}
 		if (!m_pShower)
@@ -207,13 +218,13 @@ private:
 			}
 			SDL_SetRenderVSync(m_pShower, 0); //its presents never wait for the screen
 		}
-		if (!m_pShown || m_pShown->w != m_pCanvas->w || m_pShown->h != m_pCanvas->h)
+		if (!m_pShown || m_pShown->w != m_pSmall->w || m_pShown->h != m_pSmall->h)
 		{
 			if (m_pShown) SDL_DestroyTexture(m_pShown);
-			m_pShown = SDL_CreateTexture(m_pShower, SDL_PIXELFORMAT_XRGB8888, SDL_TEXTUREACCESS_STREAMING, m_pCanvas->w, m_pCanvas->h);
+			m_pShown = SDL_CreateTexture(m_pShower, SDL_PIXELFORMAT_XRGB8888, SDL_TEXTUREACCESS_STREAMING, m_pSmall->w, m_pSmall->h);
 			if (!m_pShown) return;
 		}
-		SDL_UpdateTexture(m_pShown, nullptr, m_pCanvas->pixels, m_pCanvas->pitch);
+		SDL_UpdateTexture(m_pShown, nullptr, m_pSmall->pixels, m_pSmall->pitch);
 		SDL_RenderTexture(m_pShower, m_pShown, nullptr, nullptr);
 		SDL_RenderPresent(m_pShower);
 	}
@@ -230,7 +241,9 @@ private:
 	std::vector<unsigned char> m_Font;
 	int m_FontW{}, m_FontH{};
 	//the thread's
+	static constexpr int kSuper = 2;
 	SDL_Surface* m_pCanvas{ nullptr };
+	SDL_Surface* m_pSmall{ nullptr };
 	SDL_Renderer* m_pDraw{ nullptr };
 	SDL_Texture* m_pFont{ nullptr };
 	std::vector<float> m_Xy;
