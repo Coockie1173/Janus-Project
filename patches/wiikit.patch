@@ -6505,7 +6505,7 @@ index 0000000..5f20bc9
 +    return true;
 +}
 diff --git a/runtime/video.cpp b/runtime/video.cpp
-index 5726093..3f495e0 100644
+index 5726093..500118c 100644
 --- a/runtime/video.cpp
 +++ b/runtime/video.cpp
 @@ -46,7 +46,7 @@ constexpr int EFB_W = 640, EFB_H = 528;
@@ -8618,7 +8618,7 @@ index 5726093..3f495e0 100644
          float aspect = opt.widescreen ? 16.0f / 9 : 4.0f / 3;
          float sh = std::min((float)wh, (float)ww / aspect);
          S = std::clamp((int)std::ceil(sh / 480 - 0.01f), 1, 4);
-@@ -1529,11 +2778,15 @@ void video_run(const char* title) {
+@@ -1529,11 +2778,17 @@ void video_run(const char* title) {
      uint64_t frames_then = 0;
      uint32_t seen = retraces.load();
      std::string base_title = title;
@@ -8629,12 +8629,14 @@ index 5726093..3f495e0 100644
          bool quit = false;
          while (SDL_PollEvent(&e)) {
              if (e.type == SDL_EVENT_QUIT) quit = true;
++            // SDL only quits as the last window closes: the game's closed quits with others still open
++            if (e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED && e.window.windowID == SDL_GetWindowID(win)) quit = true;
 +            if (overlay_cb.event && overlay_cb.event(&e)) continue;
 +            if (e.type == SDL_EVENT_MOUSE_WHEEL) wheel_y.fetch_add(e.wheel.y > 0 ? 1 : e.wheel.y < 0 ? -1 : 0);
              if (e.type == SDL_EVENT_GAMEPAD_ADDED) pad_added(e.gdevice.which);
              if (e.type == SDL_EVENT_GAMEPAD_REMOVED) pad_removed(e.gdevice.which);
              // F11 or Alt+Enter: fullscreen and back
-@@ -1560,7 +2813,23 @@ void video_run(const char* title) {
+@@ -1560,7 +2815,23 @@ void video_run(const char* title) {
              }
          }
          auto now = Clock::now();
@@ -8658,7 +8660,7 @@ index 5726093..3f495e0 100644
          if (quit) {
              rt_log("video: %llu frames, %llu presents, %llu draws, %llu programs (%llu linked, %llu from the shader cache)",
                     (unsigned long long)cnt.frames, (unsigned long long)cnt.presents,
-@@ -1574,6 +2843,18 @@ void video_run(const char* title) {
+@@ -1574,6 +2845,18 @@ void video_run(const char* title) {
          {
              bool rel = want_relative && (SDL_GetWindowFlags(win) & SDL_WINDOW_INPUT_FOCUS);
              if (rel != SDL_GetWindowRelativeMouseMode(win)) SDL_SetWindowRelativeMouseMode(win, rel);
@@ -8677,7 +8679,7 @@ index 5726093..3f495e0 100644
              float dx = 0, dy = 0;
              SDL_GetRelativeMouseState(&dx, &dy);
              if (rel) {
-@@ -1592,12 +2873,20 @@ void video_run(const char* title) {
+@@ -1592,12 +2875,20 @@ void video_run(const char* title) {
                  double vtx = ms(g_vperf.vtx), tex = ms(g_vperf.tex), wait = ms(g_vperf.wait), draw = ms(g_vperf.draw),
                         pres = ms(g_vperf.present);
                  rt_log("perf: %.1f fps; frame %.1f ms; game thread: vertices %.1f, textures %.1f, waiting for the renderer %.1f; "
@@ -8699,7 +8701,7 @@ index 5726093..3f495e0 100644
          for (int k = 0; k < 16; ++k) {
              Chunk c;
              {
-@@ -1608,7 +2897,10 @@ void video_run(const char* title) {
+@@ -1608,7 +2899,10 @@ void video_run(const char* title) {
              }
              if (c.readback) { if (c.copy) copy_readback(c.copy); else efb_readback(); busy = true; continue; }
              auto te = Clock::now();
@@ -8710,7 +8712,7 @@ index 5726093..3f495e0 100644
              if (g_vperf_on) g_vperf.draw += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - te).count();
              {
                  std::lock_guard<std::mutex> lk(qmx);
-@@ -1619,15 +2911,98 @@ void video_run(const char* title) {
+@@ -1619,15 +2913,98 @@ void video_run(const char* title) {
              q_space.notify_all();
              busy = true;
              if (retraces.load() != seen) break;
