@@ -34,6 +34,10 @@ In Blender (File > Import > glTF):
   scaled, turned and posed onto the game's skeleton, its weights moved to the game's bones (fingers
   to the hands), the base's body parts deleted. An SMD/DMX goes in with Blender Source Tools' Bone
   Append Mode on Make New Armature, or its bones are added to the export's armature.
+  The arms' and legs' joints (shoulders, elbows, wrists, hips, knees, ankles) are put on the
+  game's, the limbs' bones made as long as the game's (0.9 to 1.0 for CS:S's): the game bends the
+  body at its own joints, and a wrist 7 cm off (CS:S on sk_bond_skybrig) swung the hand from
+  inside the forearm, away from the gun. The spine, neck, head and collars keep the model's shape.
   Each hand is laid onto the base's (Hand_L, Hand_R, read before they go): turned at the wrist
   and its fingers bent at their joints until it lies on the base hand as closely as it comes,
   the forearm taking the wrist's twist along its length. The game's hands hang relaxed, palm to
