@@ -256,7 +256,8 @@ void ReadFolder(const std::filesystem::path& dir, uint32_t modes, std::vector<Mo
 //name's text) and takes a set's characters in turn. in split screen everyone picks their own
 //a mod level can name them in mt_yard.txt (next to it, or in the mods folder for all of the
 //map's gamemodes): a line each of team0, team1, hero0, hero1 with a character's name as the game
-//shows it (a team: the set that character is in) or a hash. then it gets a copy of the row
+//shows it (a team: the set that character is in), a hash, or one of the pack's own characters
+//(characters/NAME.txt: its name, NAME, or its body file's hash; the whole team is that one). then it gets a copy of the row
 //with those in it
 //
 //the teams' names aren't the row's. the first team is MI6 (text 43001487) and the other goes by
@@ -308,6 +309,7 @@ std::string Trimmed(const std::string& text)
 //a character's hash by the name the game shows, or its set's: the first with that name
 uint32_t Character(const PPCContext& c, const std::string& name, bool set)
 {
+	if (const uint32_t custom = custom_character_find(name)) return custom;
 	if (name.size() == 8 && name.find_first_not_of("0123456789abcdefABCDEF") == std::string::npos) return (uint32_t)std::strtoul(name.c_str(), nullptr, 16);
 	const uint32_t count = ld32(kCharacters + kCharacterCount), rows = ld32(kCharacters + kCharacterRows);
 	if (!guest_ptr(rows) || count > 4096) return 0;

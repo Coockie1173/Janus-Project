@@ -312,6 +312,23 @@ int custom_character_count()
 
 uint32_t custom_character_hash(int n) { return kFirstHash + (uint32_t)n; }
 
+//the installed pack's character by its name, its .txt's name or its body file's hash (what a level's
+//mt_NAME.txt may say), 0 for none
+uint32_t custom_character_find(const std::string& what)
+{
+	const std::vector<Character>* pack = Installed();
+	if (!pack) return 0;
+	const std::string lower = Lower(Trim(what));
+	const bool hex = !lower.empty() && lower.size() <= 8 && lower.find_first_not_of("0123456789abcdef") == std::string::npos;
+	const uint32_t file = hex ? (uint32_t)std::strtoul(lower.c_str(), nullptr, 16) : 0;
+	for (const Character& ch : *pack)
+	{
+		const std::string stem = Lower(std::filesystem::path(ch.file).stem().string());
+		if (Lower(ch.name) == lower || stem == lower || (hex && ch.bodyFile == file)) return ch.hash;
+	}
+	return 0;
+}
+
 uint32_t custom_character_row(uint32_t hash) { return hash >= kFirstHash && hash < kFirstHash + g_rows ? CharacterRow(hash) : 0; }
 
 uint32_t custom_character_text(uint32_t hash)

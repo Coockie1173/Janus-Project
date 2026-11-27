@@ -72,6 +72,7 @@ void install_custom_characters(); //after install_mods: the characters of every 
 void custom_characters_frame(PPCContext& c); //once a frame, on the game's thread
 int custom_character_count(); //the installed pack's characters there are rows for, after the game's on the Character page
 uint32_t custom_character_hash(int n);
+uint32_t custom_character_find(const std::string& what); //the installed pack's character by name, .txt name or body file hash, 0 for none
 uint32_t custom_character_row(uint32_t hash); //its row of the character sheet, 0 for one that isn't ours
 uint32_t custom_character_text(uint32_t hash); //the characters of a custom character's name, 0 for any other
 const std::vector<uint8_t>& custom_characters_sum(); //what the installed pack's character files say, for the network game's version
