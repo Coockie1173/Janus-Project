@@ -47,6 +47,13 @@ In Blender (File > Import > glTF):
   name, the build's grips for that hand: the fingers bend at their own joints, so a hand made
   differently (CS:S hands, three fingers fused) closes whole. The console says how far apart they
   still are and how far it bent. CS:S models (`.mdl`) come in through SourceIO.
+  Exported with `--arms sk_arms_<who>.edb` (or the GUI's arms file ticked), the export also has the
+  arms file's hands, `Arms_Hand_L` and `Arms_Hand_R` (flat, the fingers straight, as the first
+  person arms' finger bones want them; the build skips them): the rig lays each hand onto those too
+  and keeps that as the shape key `Arms`, the forearm twisted to match. `--arms-own-hands` then
+  builds the arms with the hands (and forearms) as `Arms` has them, each hand position on the
+  arms file's bones of its closest few positions, the two heaviest, so a finger lying across two of
+  them bends between them.
 
 - The export is the base at the game's size (Bond is 1.8 m), its armature `Skeleton` with bones
   named `Bone_08_Head`, `Bone_12_L_Hand`...: only the number counts. Leave the armature as it is:
@@ -148,6 +155,9 @@ other. A pack has at most 64.
   file has them. Moved over from the base, CS:S SAS's fused fingers sheared into a flat paddle
   under target 3 (straight index, curled rest); bent by its own finger bones (rig, shape keys) it
   makes the trigger grip whole, and every other grip, SAS and Phoenix on sk_bond_skybrig.
+- First person: with every finger bone of sk_arms_skybrig turned 60° (the thumb 30°), CS:S SAS's
+  arms built from its relaxed hand (closest position's bones) tore at the fingertips; laid onto the
+  arms file's hand (`Arms`) its fingers curl whole as the arms file's own do.
 - The rig on a ValveBiped spacesuit (DMX, thick three-fingered gloves) and a Mixamo man (FBX), on
   Jaws: the hands lie on Jaws's (10 to 13% of its size apart, 1.3 to 1.4 times as big), and built,
   their grips (read back from the file) close as Jaws's do, the fist and round the gun whole, where
