@@ -32,7 +32,13 @@ In Blender (File > Import > glTF):
   export and press GoldenEye > Character > Move Onto Game Skeleton in the 3D View's sidebar
   (eurochef's `blender_addon/ge_character_rig.py`, part of the Eurochef Utility add-on). It is
   scaled, turned and posed onto the game's skeleton, its weights moved to the game's bones (fingers
-  to the hands), the base's body parts deleted. Untested on real models yet.
+  to the hands), the base's body parts deleted. An SMD/DMX goes in with Blender Source Tools' Bone
+  Append Mode on Make New Armature, or its bones are added to the export's armature.
+  Each hand is laid onto the base's (Hand_L, Hand_R, read before they go): turned at the wrist
+  and its fingers bent at their joints until it lies on the base hand as closely as it comes,
+  the forearm taking the wrist's twist along its length. The game's hands hang relaxed, palm to
+  the thigh, and their grips are made for that hand; a T pose hand, flat and palm down, would
+  close wrong. The console says how far apart they still are and how far it bent.
 
 - The export is the base at the game's size (Bond is 1.8 m), its armature `Skeleton` with bones
   named `Bone_08_Head`, `Bone_12_L_Hand`...: only the number counts. Leave the armature as it is:
@@ -45,8 +51,10 @@ In Blender (File > Import > glTF):
   kept as they are (edits to them aren't read). The hands have grips: five shapes their fingers
   are blended between (open, round a gun...), the body skeleton having no finger bones. Delete a
   hand and model your own on its bone (`Bone_12_L_Hand`, `Bone_21_R_Hand`): it gets the base hand's
-  grips, each position moved as the base hand's closest ones are, so keep it about where the
-  base's was. Deleted with nothing on the bone, the hand is left out.
+  grips, each position turned and moved as the base hand's closest ones are together (as a finger
+  bends), so model it about as the base's lies, fingers and all. A bigger or smaller hand, or one
+  a little away, is laid over the base's at its size to look its grips up, and closes as much.
+  Deleted with nothing on the bone, the hand is left out.
 - Textures are taken from the materials' base colour; the base's own textures, unchanged, stay
   the base's. A material with Blend as its blend mode (sk_bond_skybrig's hair) is drawn blended,
   after the rest: the body is then two meshes, as the game's own is.
@@ -121,10 +129,14 @@ other. A pack has at most 64.
 - sk_bond_skybrig (a split body, hair blended) exported and built again: the same, the hair still
   its own blended mesh; on the Character page with its hair's soft edges.
 - Grips: the base's hands renamed (so the build takes them as the scene's own) get targets equal to
-  the base's to 4e-8; on the Character page their fingers curl as Jaws's do, with the targets zeroed
+  the base's (none apart, with the grips taken from the closest positions' turn); on the Character page their fingers curl as Jaws's do, with the targets zeroed
   they stay straight.
 - `--arms`: in a match the box robot's arms with the arms file's hands, and Jaws's body's sleeves and
   forearms with them, the hands round the gun as the game's own.
+- The rig on a ValveBiped spacesuit (DMX, thick three-fingered gloves) and a Mixamo man (FBX), on
+  Jaws: the hands lie on Jaws's (10 to 13% of its size apart, 1.3 to 1.4 times as big), and built,
+  their grips (read back from the file) close as Jaws's do, the fist and round the gun whole, where
+  before the hand stuck out flat from the forearm and the fist tore.
 
 ## Not done
 
