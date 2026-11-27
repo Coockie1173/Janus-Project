@@ -1,9 +1,11 @@
-//a window of its own beside the game's: an SDL window with an ImGui context of its own, drawn by a
-//thread with a GL context of its own (the game's thread only builds the vertices and hands them over)
+//a window of its own beside the game's: an SDL window with an ImGui context of its own, drawn on the
+//CPU by a thread of its own (the game's thread only builds the vertices and hands them over)
 //
-//drawn with the game's GL context made current on it instead, the switch of drawable cost the game
-//143 frames a second down to 117 on X11; a software renderer before that (its surface a GL renderer's)
-//150 to 105, and visible its presents waited for the screen's refresh, so the game ran at 60
+//drawn by a GL context of its own on that thread before: with the Steam overlay or RivaTuner hooking
+//the GL presents, two contexts presenting from two threads broke the game's picture and the timer's.
+//With the game's GL context made current on it, the switch of drawable cost the game 143 frames a
+//second down to 117 on X11; a software renderer on the game's thread shown through a GL renderer 150
+//to 105, and visible its presents waited for the screen's refresh, so the game ran at 60
 //
 //the speedrun timer's (only drawn) and TASLib's editor (the mouse and the keys work it, through
 //Dear ImGui's SDL backend on its context)
@@ -38,6 +40,9 @@ public:
 	//frame, End renders it, hands it to its thread and puts the other context back
 	void Begin();
 	void End();
+	//the newest picture its thread drew put on the screen, where that's the game's thread's to do: a
+	//frame of the game's, drawn or not
+	void Present();
 
 	//an event of this window's: true, and with input it went to its ImGui
 	bool Event(const SDL_Event* e);

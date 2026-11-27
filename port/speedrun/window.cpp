@@ -169,6 +169,7 @@ void ClosePop()
 
 void DrawPop()
 {
+	g_pop.Present();
 	auto now = Clock::now();
 	if (now - g_popDrawn < std::chrono::milliseconds(16)) return; //60 a second is plenty for a clock
 	g_popDrawn = now;

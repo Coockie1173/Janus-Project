@@ -610,6 +610,7 @@ int tas_own_window()
 		g_uiUp = false;
 	}
 	if (!g_ui.Opened()) return 5;
+	g_ui.Present();
 	//a picture a refresh of its screen: the renderer's loop turns far more often than that, and with the
 	//game paused it presents ten times a second, which is why it isn't drawn from the overlay's frame
 	using Clock = std::chrono::steady_clock;

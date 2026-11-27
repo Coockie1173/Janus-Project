@@ -1,7 +1,6 @@
 #include "ui/popwindow.h"
 #ifdef GE_IMGUI
 #include "ge.h"
-#include "gl.h"
 #include "imgui_impl_sdl3.h"
 #include <algorithm>
 #include <climits>
@@ -29,37 +28,24 @@ struct Picture
 	std::vector<Cmd> cmds;
 };
 
-#define POP_GL_FUNCS(X) \
-	X(PFNGLCREATESHADERPROC, CreateShader) X(PFNGLSHADERSOURCEPROC, ShaderSource) X(PFNGLCOMPILESHADERPROC, CompileShader) \
-	X(PFNGLCREATEPROGRAMPROC, CreateProgram) X(PFNGLATTACHSHADERPROC, AttachShader) X(PFNGLLINKPROGRAMPROC, LinkProgram) \
-	X(PFNGLDELETESHADERPROC, DeleteShader) X(PFNGLDELETEPROGRAMPROC, DeleteProgram) X(PFNGLUSEPROGRAMPROC, UseProgram) \
-	X(PFNGLGETUNIFORMLOCATIONPROC, GetUniformLocation) X(PFNGLUNIFORMMATRIX4FVPROC, UniformMatrix4fv) X(PFNGLUNIFORM1IPROC, Uniform1i) \
-	X(PFNGLGENVERTEXARRAYSPROC, GenVertexArrays) X(PFNGLBINDVERTEXARRAYPROC, BindVertexArray) X(PFNGLDELETEVERTEXARRAYSPROC, DeleteVertexArrays) \
-	X(PFNGLGENBUFFERSPROC, GenBuffers) X(PFNGLBINDBUFFERPROC, BindBuffer) X(PFNGLBUFFERDATAPROC, BufferData) X(PFNGLDELETEBUFFERSPROC, DeleteBuffers) \
-	X(PFNGLENABLEVERTEXATTRIBARRAYPROC, EnableVertexAttribArray) X(PFNGLVERTEXATTRIBPOINTERPROC, VertexAttribPointer) \
-	X(PFNGLGENTEXTURESPROC, GenTextures) X(PFNGLBINDTEXTUREPROC, BindTexture) X(PFNGLTEXPARAMETERIPROC, TexParameteri) \
-	X(PFNGLTEXIMAGE2DPROC, TexImage2D) X(PFNGLDELETETEXTURESPROC, DeleteTextures) X(PFNGLACTIVETEXTUREPROC, ActiveTexture) \
-	X(PFNGLVIEWPORTPROC, Viewport) X(PFNGLCLEARCOLORPROC, ClearColor) X(PFNGLCLEARPROC, Clear) X(PFNGLENABLEPROC, Enable) \
-	X(PFNGLDISABLEPROC, Disable) X(PFNGLBLENDEQUATIONPROC, BlendEquation) X(PFNGLBLENDFUNCSEPARATEPROC, BlendFuncSeparate) \
-	X(PFNGLSCISSORPROC, Scissor) X(PFNGLDRAWELEMENTSBASEVERTEXPROC, DrawElementsBaseVertex) X(PFNGLREADPIXELSPROC, ReadPixels) \
-	X(PFNGLPIXELSTOREIPROC, PixelStorei)
-
+//drawn on the CPU by a thread of its own (SDL's software renderer on a surface), so no GL context
+//of a second window ever presents: the Steam overlay and RivaTuner hook the GL presents and break the
+//game's picture with two of them on two threads. Shown where the system has a framebuffer for a
+//window (Windows' GDI, X11) by a blit on the game's thread; elsewhere (Wayland, macOS) the thread
+//uploads it to an SDL renderer of the window's
 class PopRenderer
 {
 public:
-	//on the game's thread: the context is made for the window and the game's made current again
-	bool Start(SDL_Window* pWindow, const unsigned char* font, int fontW, int fontH, const char* name)
+	//on the game's thread, before the window's first picture
+	bool Start(SDL_Window* pWindow, bool native, const unsigned char* font, int fontW, int fontH, const char* name)
 	{
 		m_pWindow = pWindow;
+		m_Native = native;
 		m_Name = name;
 		m_Font.assign(font, font + (size_t)fontW * fontH * 4);
 		m_FontW = fontW;
 		m_FontH = fontH;
-		SDL_Window* game = SDL_GL_GetCurrentWindow();
-		SDL_GLContext gameContext = SDL_GL_GetCurrentContext();
-		m_Context = SDL_GL_CreateContext(pWindow);
-		if (game && gameContext) SDL_GL_MakeCurrent(game, gameContext);
-		if (!m_Context) return false;
+		if (m_Native) SDL_SetWindowSurfaceVSync(m_pWindow, SDL_WINDOW_SURFACE_VSYNC_DISABLED);
 		m_Thread = SDL_CreateThread([](void* me) { static_cast<PopRenderer*>(me)->Run(); return 0; }, m_Name.c_str(), this);
 		return m_Thread != nullptr;
 	}
@@ -72,9 +58,9 @@ public:
 		}
 		m_Wake.notify_one();
 		if (m_Thread) SDL_WaitThread(m_Thread, nullptr);
-		if (m_Context) SDL_GL_DestroyContext(m_Context);
 		m_Thread = nullptr;
-		m_Context = nullptr;
+		SDL_DestroySurface(m_pReady);
+		m_pReady = nullptr;
 	}
 
 	void Show(Picture&& picture)
@@ -87,22 +73,34 @@ public:
 		m_Wake.notify_one();
 	}
 
-private:
-	struct Gl
+	//on the game's thread: the thread's newest picture blitted to the window's framebuffer
+	void Present()
 	{
-#define POP_GL_DECLARE(T, n) T n{};
-		POP_GL_FUNCS(POP_GL_DECLARE)
-#undef POP_GL_DECLARE
-	} gl;
+		if (!m_Native) return;
+		{
+			std::lock_guard<std::mutex> hold(m_Lock);
+			if (!m_Fresh || !m_pReady) return;
+			m_Fresh = false;
+			SDL_Surface* screen = SDL_GetWindowSurface(m_pWindow);
+			if (!screen)
+			{
+				if (!m_Said) rt_log("goldeneye: window \"%s\" can't be shown: %s", m_Name.c_str(), SDL_GetError());
+				m_Said = true;
+				return;
+			}
+			if (screen->w != m_pReady->w || screen->h != m_pReady->h) SDL_FillSurfaceRect(screen, nullptr, SDL_MapSurfaceRGB(screen, 6, 14, 18));
+			SDL_BlitSurface(m_pReady, nullptr, screen, nullptr);
+		}
+		if (!SDL_UpdateWindowSurface(m_pWindow) && !m_Said)
+		{
+			rt_log("goldeneye: window \"%s\" can't be shown: %s", m_Name.c_str(), SDL_GetError());
+			m_Said = true;
+		}
+	}
 
+private:
 	void Run()
 	{
-		if (!SDL_GL_MakeCurrent(m_pWindow, m_Context)) return;
-		SDL_GL_SetSwapInterval(0); //its presents never wait for the screen
-#define POP_GL_LOAD(T, n) gl.n = (T)SDL_GL_GetProcAddress("gl" #n);
-		POP_GL_FUNCS(POP_GL_LOAD)
-#undef POP_GL_LOAD
-		Setup();
 		for (;;)
 		{
 			Picture now;
@@ -113,121 +111,144 @@ private:
 				now = std::move(m_Next);
 				m_Have = false;
 			}
+			if (!Size(now.w, now.h)) continue;
 			Draw(now);
+			Finish();
 		}
-		gl.DeleteTextures(1, &m_Texture);
-		gl.DeleteBuffers(1, &m_Vbo);
-		gl.DeleteBuffers(1, &m_Ibo);
-		gl.DeleteVertexArrays(1, &m_Vao);
-		gl.DeleteProgram(m_Program);
-		SDL_GL_MakeCurrent(m_pWindow, nullptr);
+		Drop();
+		if (m_pShower) SDL_DestroyRenderer(m_pShower);
+		m_pShower = nullptr;
 	}
 
-	void Setup()
+	//the surface it's drawn on at the picture's size, with its renderer and the font on it
+	bool Size(int w, int h)
 	{
-		const char* vs = "#version 330 core\n"
-			"layout(location = 0) in vec2 Position; layout(location = 1) in vec2 UV; layout(location = 2) in vec4 Color;\n"
-			"uniform mat4 Proj; out vec2 FragUV; out vec4 FragColor;\n"
-			"void main() { FragUV = UV; FragColor = Color; gl_Position = Proj * vec4(Position, 0, 1); }\n";
-		const char* fs = "#version 330 core\n"
-			"in vec2 FragUV; in vec4 FragColor; uniform sampler2D Texture; out vec4 OutColor;\n"
-			"void main() { OutColor = FragColor * texture(Texture, FragUV); }\n";
-		GLuint v = gl.CreateShader(GL_VERTEX_SHADER), f = gl.CreateShader(GL_FRAGMENT_SHADER);
-		gl.ShaderSource(v, 1, &vs, nullptr);
-		gl.ShaderSource(f, 1, &fs, nullptr);
-		gl.CompileShader(v);
-		gl.CompileShader(f);
-		m_Program = gl.CreateProgram();
-		gl.AttachShader(m_Program, v);
-		gl.AttachShader(m_Program, f);
-		gl.LinkProgram(m_Program);
-		gl.DeleteShader(v);
-		gl.DeleteShader(f);
-		m_Proj = gl.GetUniformLocation(m_Program, "Proj");
-		m_Sampler = gl.GetUniformLocation(m_Program, "Texture");
-		gl.GenVertexArrays(1, &m_Vao);
-		gl.BindVertexArray(m_Vao);
-		gl.GenBuffers(1, &m_Vbo);
-		gl.GenBuffers(1, &m_Ibo);
-		gl.BindBuffer(GL_ARRAY_BUFFER, m_Vbo);
-		gl.BindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_Ibo);
-		gl.EnableVertexAttribArray(0);
-		gl.EnableVertexAttribArray(1);
-		gl.EnableVertexAttribArray(2);
-		gl.VertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(ImDrawVert), (void*)offsetof(ImDrawVert, pos));
-		gl.VertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(ImDrawVert), (void*)offsetof(ImDrawVert, uv));
-		gl.VertexAttribPointer(2, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(ImDrawVert), (void*)offsetof(ImDrawVert, col));
-		gl.GenTextures(1, &m_Texture);
-		gl.BindTexture(GL_TEXTURE_2D, m_Texture);
-		gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-		gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-		gl.PixelStorei(GL_UNPACK_ALIGNMENT, 1);
-		gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, m_FontW, m_FontH, 0, GL_RGBA, GL_UNSIGNED_BYTE, m_Font.data());
+		if (m_pCanvas && m_pCanvas->w == w && m_pCanvas->h == h) return true;
+		Drop();
+		m_pCanvas = SDL_CreateSurface(w, h, SDL_PIXELFORMAT_XRGB8888);
+		m_pDraw = m_pCanvas ? SDL_CreateSoftwareRenderer(m_pCanvas) : nullptr;
+		m_pFont = m_pDraw ? SDL_CreateTexture(m_pDraw, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, m_FontW, m_FontH) : nullptr;
+		if (!m_pFont)
+		{
+			rt_log("goldeneye: window \"%s\" can't be drawn: %s", m_Name.c_str(), SDL_GetError());
+			Drop();
+			return false;
+		}
+		SDL_UpdateTexture(m_pFont, nullptr, m_Font.data(), m_FontW * 4);
+		SDL_SetTextureBlendMode(m_pFont, SDL_BLENDMODE_BLEND);
+		SDL_SetTextureScaleMode(m_pFont, SDL_SCALEMODE_LINEAR);
+		return true;
+	}
+
+	void Drop()
+	{
+		if (m_pDraw) SDL_DestroyRenderer(m_pDraw); //its texture with it
+		SDL_DestroySurface(m_pCanvas);
+		m_pDraw = nullptr;
+		m_pFont = nullptr;
+		m_pCanvas = nullptr;
 	}
 
 	void Draw(const Picture& p)
 	{
-		gl.Viewport(0, 0, p.w, p.h);
-		gl.ClearColor(6 / 255.0f, 14 / 255.0f, 18 / 255.0f, 1);
-		gl.Disable(GL_SCISSOR_TEST);
-		gl.Clear(GL_COLOR_BUFFER_BIT);
-		gl.Enable(GL_BLEND);
-		gl.BlendEquation(GL_FUNC_ADD);
-		gl.BlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-		gl.Disable(GL_CULL_FACE);
-		gl.Disable(GL_DEPTH_TEST);
-		gl.Enable(GL_SCISSOR_TEST);
-		float l = 0, r = p.dw > 0 ? p.dw : (float)p.w, t = 0, b = p.dh > 0 ? p.dh : (float)p.h;
-		const float sx = (float)p.w / r, sy = (float)p.h / b; //points to pixels
-		const float proj[16] = { 2 / (r - l), 0, 0, 0, 0, 2 / (t - b), 0, 0, 0, 0, -1, 0, (r + l) / (l - r), (t + b) / (b - t), 0, 1 };
-		gl.UseProgram(m_Program);
-		gl.UniformMatrix4fv(m_Proj, 1, GL_FALSE, proj);
-		gl.Uniform1i(m_Sampler, 0);
-		gl.ActiveTexture(GL_TEXTURE0);
-		gl.BindTexture(GL_TEXTURE_2D, m_Texture);
-		gl.BindVertexArray(m_Vao);
-		gl.BindBuffer(GL_ARRAY_BUFFER, m_Vbo);
-		gl.BufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(p.vtx.size() * sizeof(ImDrawVert)), p.vtx.data(), GL_STREAM_DRAW);
-		gl.BufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)(p.idx.size() * sizeof(ImDrawIdx)), p.idx.data(), GL_STREAM_DRAW);
+		SDL_SetRenderClipRect(m_pDraw, nullptr);
+		SDL_SetRenderDrawColor(m_pDraw, 6, 14, 18, 255);
+		SDL_RenderClear(m_pDraw);
+		const float sx = (float)p.w / (p.dw > 0 ? p.dw : (float)p.w), sy = (float)p.h / (p.dh > 0 ? p.dh : (float)p.h); //points to pixels
+		m_Xy.resize(p.vtx.size() * 2);
+		m_Colour.resize(p.vtx.size());
+		for (size_t i = 0; i < p.vtx.size(); ++i)
+		{
+			const ImDrawVert& v = p.vtx[i];
+			m_Xy[i * 2] = v.pos.x * sx;
+			m_Xy[i * 2 + 1] = v.pos.y * sy;
+			m_Colour[i] = { (float)(v.col >> IM_COL32_R_SHIFT & 0xFF) / 255, (float)(v.col >> IM_COL32_G_SHIFT & 0xFF) / 255,
+				(float)(v.col >> IM_COL32_B_SHIFT & 0xFF) / 255, (float)(v.col >> IM_COL32_A_SHIFT & 0xFF) / 255 };
+		}
 		for (const Picture::Cmd& c : p.cmds)
 		{
-			if (c.clip.z <= c.clip.x || c.clip.w <= c.clip.y) continue;
-			gl.Scissor((GLint)(c.clip.x * sx), (GLint)((float)p.h - c.clip.w * sy), (GLsizei)((c.clip.z - c.clip.x) * sx), (GLsizei)((c.clip.w - c.clip.y) * sy));
-			gl.DrawElementsBaseVertex(GL_TRIANGLES, (GLsizei)c.count, sizeof(ImDrawIdx) == 2 ? GL_UNSIGNED_SHORT : GL_UNSIGNED_INT,
-				(void*)(size_t)(c.idxAt * sizeof(ImDrawIdx)), (GLint)c.vtxAt);
+			if (c.clip.z <= c.clip.x || c.clip.w <= c.clip.y || c.vtxAt >= p.vtx.size()) continue;
+			SDL_Rect clip{ (int)(c.clip.x * sx), (int)(c.clip.y * sy), (int)((c.clip.z - c.clip.x) * sx), (int)((c.clip.w - c.clip.y) * sy) };
+			SDL_SetRenderClipRect(m_pDraw, &clip);
+			const ImDrawVert* v = &p.vtx[c.vtxAt];
+			SDL_RenderGeometryRaw(m_pDraw, m_pFont, &m_Xy[(size_t)c.vtxAt * 2], sizeof(float) * 2, &m_Colour[c.vtxAt], sizeof(SDL_FColor),
+				&v->uv.x, sizeof(ImDrawVert), (int)(p.vtx.size() - c.vtxAt), &p.idx[c.idxAt], (int)c.count, sizeof(ImDrawIdx));
 		}
+		SDL_FlushRenderer(m_pDraw);
 		//GE_SPEEDRUN_SHOT=F.bmp the timer's first picture, GE_POPWINDOW_SHOT=F.bmp the other windows' every 120th
 		static bool shot = false;
 		const bool timer = m_Name == "speedrun timer";
 		if (const char* path = std::getenv(timer ? "GE_SPEEDRUN_SHOT" : "GE_POPWINDOW_SHOT"); path && (timer ? !shot : ++m_Pictures % 120 == 0))
+			shot = SDL_SaveBMP(m_pCanvas, path);
+	}
+
+	//the picture to the window: kept for the game's thread to blit, or uploaded and presented here
+	void Finish()
+	{
+		if (m_Native)
 		{
-			std::vector<uint8_t> rgba((size_t)p.w * p.h * 4), flipped(rgba.size());
-			gl.PixelStorei(GL_PACK_ALIGNMENT, 1);
-			gl.ReadPixels(0, 0, p.w, p.h, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
-			for (int y = 0; y < p.h; ++y) std::memcpy(&flipped[(size_t)y * p.w * 4], &rgba[(size_t)(p.h - 1 - y) * p.w * 4], (size_t)p.w * 4);
-			if (SDL_Surface* s = SDL_CreateSurfaceFrom(p.w, p.h, SDL_PIXELFORMAT_ABGR8888, flipped.data(), p.w * 4))
+			std::lock_guard<std::mutex> hold(m_Lock);
+			if (!m_pReady || m_pReady->w != m_pCanvas->w || m_pReady->h != m_pCanvas->h)
 			{
-				shot = SDL_SaveBMP(s, path);
-				SDL_DestroySurface(s);
+				SDL_DestroySurface(m_pReady);
+				m_pReady = SDL_CreateSurface(m_pCanvas->w, m_pCanvas->h, m_pCanvas->format);
 			}
+			if (m_pReady && SDL_BlitSurface(m_pCanvas, nullptr, m_pReady, nullptr)) m_Fresh = true;
+			return;
 		}
-		SDL_GL_SwapWindow(m_pWindow);
+		if (!m_pShower)
+		{
+			m_pShower = SDL_CreateRenderer(m_pWindow, nullptr);
+			if (!m_pShower)
+			{
+				rt_log("goldeneye: window \"%s\" can't be shown: %s", m_Name.c_str(), SDL_GetError());
+				m_Native = true; //never shown, but not tried again a picture
+				return;
+			}
+			SDL_SetRenderVSync(m_pShower, 0); //its presents never wait for the screen
+		}
+		if (!m_pShown || m_pShown->w != m_pCanvas->w || m_pShown->h != m_pCanvas->h)
+		{
+			if (m_pShown) SDL_DestroyTexture(m_pShown);
+			m_pShown = SDL_CreateTexture(m_pShower, SDL_PIXELFORMAT_XRGB8888, SDL_TEXTUREACCESS_STREAMING, m_pCanvas->w, m_pCanvas->h);
+			if (!m_pShown) return;
+		}
+		SDL_UpdateTexture(m_pShown, nullptr, m_pCanvas->pixels, m_pCanvas->pitch);
+		SDL_RenderTexture(m_pShower, m_pShown, nullptr, nullptr);
+		SDL_RenderPresent(m_pShower);
 	}
 
 	SDL_Window* m_pWindow{ nullptr };
+	bool m_Native{ false };
 	std::string m_Name;
 	unsigned m_Pictures{ 0 };
-	SDL_GLContext m_Context{ nullptr };
 	SDL_Thread* m_Thread{ nullptr };
 	std::mutex m_Lock;
 	std::condition_variable m_Wake;
 	Picture m_Next;
-	bool m_Have{ false }, m_Quit{ false };
+	bool m_Have{ false }, m_Quit{ false }, m_Fresh{ false }, m_Said{ false };
 	std::vector<unsigned char> m_Font;
 	int m_FontW{}, m_FontH{};
-	GLuint m_Program{}, m_Vao{}, m_Vbo{}, m_Ibo{}, m_Texture{};
-	GLint m_Proj{}, m_Sampler{};
+	//the thread's
+	SDL_Surface* m_pCanvas{ nullptr };
+	SDL_Renderer* m_pDraw{ nullptr };
+	SDL_Texture* m_pFont{ nullptr };
+	std::vector<float> m_Xy;
+	std::vector<SDL_FColor> m_Colour;
+	SDL_Renderer* m_pShower{ nullptr }; //where there's no framebuffer for a window
+	SDL_Texture* m_pShown{ nullptr };
+	//the last picture drawn, under the lock
+	SDL_Surface* m_pReady{ nullptr };
 };
+
+//Windows' and X11's windows have a framebuffer of their own; elsewhere SDL would make one of a GL renderer's
+bool NativeFramebuffer()
+{
+	const char* driver = SDL_GetCurrentVideoDriver();
+	const bool native = driver && (!std::strcmp(driver, "windows") || !std::strcmp(driver, "x11"));
+	if (native) SDL_SetHint(SDL_HINT_FRAMEBUFFER_ACCELERATION, "0"); //on X11 SDL would go through GL too
+	return native;
+}
 
 PopWindow::PopWindow() = default;
 PopWindow::~PopWindow() { (void)m_pRenderer.release(); } //at exit: SDL may be gone, nothing is torn down under it
@@ -235,7 +256,8 @@ PopWindow::~PopWindow() { (void)m_pRenderer.release(); } //at exit: SDL may be g
 bool PopWindow::Open(const char* title, int x, int y, int w, int h, bool input, const std::function<void(ImFontAtlas*)>& fonts)
 {
 	if (m_pWindow) return true;
-	SDL_WindowFlags flags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | (std::getenv("WIIKIT_HIDDEN") ? SDL_WINDOW_HIDDEN : 0);
+	static const bool native = NativeFramebuffer();
+	SDL_WindowFlags flags = (native ? 0 : SDL_WINDOW_OPENGL) | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | (std::getenv("WIIKIT_HIDDEN") ? SDL_WINDOW_HIDDEN : 0);
 	m_pWindow = SDL_CreateWindow(title, std::max(w, 64), std::max(h, 32), flags);
 	if (!m_pWindow)
 	{
@@ -260,7 +282,7 @@ bool PopWindow::Open(const char* title, int x, int y, int w, int h, bool input, 
 	io.Fonts->SetTexID((ImTextureID)1); //the thread's only texture
 	if (input) ImGui_ImplSDL3_InitForOther(m_pWindow);
 	m_pRenderer = std::make_unique<PopRenderer>();
-	const bool started = m_pRenderer->Start(m_pWindow, pixels, fw, fh, title && !std::strcmp(title, "Speedrun Timer") ? "speedrun timer" : "pop window");
+	const bool started = m_pRenderer->Start(m_pWindow, native, pixels, fw, fh, title && !std::strcmp(title, "Speedrun Timer") ? "speedrun timer" : "pop window");
 	ImGui::SetCurrentContext(outer);
 	if (!started)
 	{
@@ -289,6 +311,11 @@ void PopWindow::Close()
 }
 
 bool PopWindow::Focused() const { return m_pWindow && (SDL_GetWindowFlags(m_pWindow) & SDL_WINDOW_INPUT_FOCUS); }
+
+void PopWindow::Present()
+{
+	if (m_pRenderer) m_pRenderer->Present();
+}
 
 void PopWindow::Begin()
 {
