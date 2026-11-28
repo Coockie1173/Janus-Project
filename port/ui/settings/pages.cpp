@@ -435,18 +435,22 @@ void build_pages() {
 		return std::string(bunnyhop() ? "On" : "Off");
 	}, {}, [] { go(kBhop); }});
 	//every pack's custom weapons are the randomizer's and the forced weapon's, a switch a pack
-	if (modpack_count() > 0)
+	int withFolders = 0; //Vanilla has no weapons
+	for (int pack = 0; pack < modpack_count(); ++pack) withFolders += !modpack_vanilla(pack);
+	if (withFolders > 0)
 	{
 		const auto forced = std::find_if(fun.begin(), fun.end(), [](const Row& r) { return r.label == "Forced Weapon"; });
 		fun.insert(forced == fun.end() ? fun.end() : forced + 1, {"Modpack Weapons", "Which modpacks' custom weapons the Weapon Randomizer and Forced Weapon use, whichever pack is installed.", []
 		{
-			int on = 0;
-			for (int pack = 0; pack < modpack_count(); ++pack) on += randomizer_pack(pack);
-			return std::to_string(on) + " of " + std::to_string(modpack_count());
+			int on = 0, all = 0;
+			for (int pack = 0; pack < modpack_count(); ++pack)
+				if (!modpack_vanilla(pack)) { on += randomizer_pack(pack); ++all; }
+			return std::to_string(on) + " of " + std::to_string(all);
 		}, {}, [] { go(kFunPacks); }});
 		Page& packs = g_pages[kFunPacks];
 		for (int pack = 0; pack < modpack_count(); ++pack)
 		{
+			if (modpack_vanilla(pack)) continue;
 			const std::string weapons = randomizer_pack_weapons(pack);
 			auto flip = [pack] { set_randomizer_pack(pack, !randomizer_pack(pack)); g_dirty = true; };
 			packs.rows.push_back({modpack_name(pack), weapons.empty() ? "No custom weapons in this pack." : "Its weapons: " + weapons + ".",

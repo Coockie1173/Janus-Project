@@ -37,7 +37,8 @@
 //Screen and Nintendo Wi-Fi Connection, which goes to page 7D000049). with a level in any of
 //those folders of any pack that page gets rows made here too: Split Screen, "Connect to
 //Nintendo WFC" to 7D000049 and "Connect to WFC Modded" to Choose Modpack, a page made here with
-//the packs that have maps, each to 7D000049. the line under the list that says what the lit item
+//the packs that have maps, each to 7D000049, and Vanilla (mods.cpp), which has no maps of its own:
+//every gamemode keeps the game's, the network game is still one of this build's. the line under the list that says what the lit item
 //is gets looked up as the item is lit, and each item has a text of its own for it: the one asked
 //for last says which maps the gamemodes have, and which pack is installed
 //
@@ -418,7 +419,7 @@ bool Build(const PPCContext& c)
 		for (int mode = 0; mode < kModeCount; ++mode)
 			if (!menu.pool[mode].empty()) says += std::string(says.empty() ? "" : ", ") + kMapKinds[mode].mode + " " + std::to_string(menu.pool[mode].size());
 		if (!g_texts[kTextPack + (uint32_t)pack]) g_texts[kTextPack + (uint32_t)pack] = Text(c, modpack_name(pack));
-		g_texts[kTextAboutOnlinePack + (uint32_t)pack] = Text(c, "Maps: " + says + ".");
+		g_texts[kTextAboutOnlinePack + (uint32_t)pack] = Text(c, modpack_vanilla(pack) ? "The game's own maps." : "Maps: " + says + ".");
 	}
 	if (!online.empty())
 	{
@@ -580,7 +581,7 @@ void MultiplayerFrame(const PPCContext& c, uint32_t data, uint32_t count)
 		g_texts[kTextWfc] = Text(c, "Connect to Nintendo WFC");
 		g_texts[kTextWfcModded] = Text(c, "Connect to WFC Modded");
 		g_texts[kTextAboutWfc] = Text(c, "Connect to Nintendo WFC.");
-		g_texts[kTextAboutModded] = Text(c, "Connect to Nintendo WFC with the gamemodes and maps of a modpack.");
+		g_texts[kTextAboutModded] = Text(c, "Connect to Nintendo WFC with the gamemodes and maps of a modpack, or the game's own.");
 		const uint32_t items = 3;
 		uint32_t rows = 0;
 		const uint32_t at = ListRows(c, items, kTextMultiplayer, rows, g_multiplayer_row_count);
@@ -848,7 +849,8 @@ void PoolFrame(const PPCContext& c, uint32_t data, uint32_t count, int mode)
 	st32(page + kPageRowCount, on ? menu->poolRowCount[mode] : kMapRowCount);
 }
 
-//a Choose Game Mode after Connect to WFC Modded: only the gamemodes the installed pack has maps for
+//a Choose Game Mode after Connect to WFC Modded: only the gamemodes the installed pack has maps for,
+//all of them with Vanilla
 void ChooseFrame(const PPCContext& c, uint32_t data, uint32_t count, int which)
 {
 	const uint32_t game = kChooseRows[which];
@@ -871,7 +873,7 @@ void ChooseFrame(const PPCContext& c, uint32_t data, uint32_t count, int which)
 			int mode = 0;
 			while (mode < kModeCount && kModes[mode].text != text) ++mode;
 			if (text == kTextClassic) mode = 0;
-			if (mode == kModeCount || !menu->pool[mode].empty()) items.push_back(i);
+			if (mode == kModeCount || !menu->pool[mode].empty() || modpack_vanilla(modpack_active())) items.push_back(i);
 		}
 		if (items.size() == kChooseItemCount) { made = game; menu->chooseRowCount[which] = kChooseRowCount; }
 		else
@@ -1070,6 +1072,7 @@ void install_mods_menu()
 	{
 		ListLevels(pack);
 		ReadPool(pack);
+		if (modpack_vanilla(pack)) g_menus[pack].anyPool = g_any_pool = true; //a way online with the game's maps
 		g_mods_wanted |= !g_menus[pack].listed.empty() || g_menus[pack].anyPool;
 	}
 	ListDisc();

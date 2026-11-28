@@ -31,6 +31,10 @@
 //weapons/ has the custom weapons: their .txt files (port/mods/weapons/weapons.cpp) and the guns they are drawn with, mods too
 //characters/ the custom characters: their .txt files (port/mods/characters.cpp) and their bodies, mods too
 //
+//one more pack is always there, last: "Vanilla", with no folder and no files. installed, the game has
+//the disc's files only, and after Connect to WFC Modded its maps are the game's own: a network game of
+//this build (its online characters, bunnyhopping, ping) on the disc's maps (modmenu.cpp)
+//
 //GE_MODPACKS=DIR the packs' folder (modpacks in the game's folder by default). a mods folder of an
 //older build, when there is no modpacks folder, is the pack "default"
 //GE_MODS=DIR that folder is the only pack
@@ -198,6 +202,7 @@ struct Pack
 std::vector<Pack> g_packs;
 int g_active = -1;
 const char* const kDefaultPack = "default";
+const char* const kVanillaPack = "Vanilla"; //the pack with no files, the disc's levels
 const char* const kUnzipped = ".unzipped"; //where the zips' packs are unpacked, in the packs' folder
 const std::vector<ModLevel> kNone;
 const std::string kNoFolder;
@@ -648,6 +653,7 @@ const std::string& modpack_name(int pack) { return ValidPack(pack) ? g_packs[pac
 const std::string& modpack_folder(int pack) { return ValidPack(pack) ? g_packs[pack].folder : kNoFolder; }
 const std::vector<ModLevel>& modpack_levels(int pack) { return ValidPack(pack) ? g_packs[pack].levels : kNone; }
 const std::vector<ModLevel>& modpack_files(int pack) { return ValidPack(pack) ? g_packs[pack].files : kNone; }
+bool modpack_vanilla(int pack) { return ValidPack(pack) && g_packs[pack].folder.empty(); }
 
 //next to the mod's file, in whichever folder that is. a level in a gamemode's folder that has
 //none there has the one in its pack's folder itself: one for the map, whichever gamemode
@@ -823,6 +829,13 @@ void FindPacks()
 		const bool aFirst = Lower(a.name) == kDefaultPack, bFirst = Lower(b.name) == kDefaultPack;
 		return aFirst != bFirst ? aFirst : Lower(a.name) < Lower(b.name);
 	});
+	const auto same = std::find_if(g_packs.begin(), g_packs.end(), [](const Pack& p) { return Lower(p.name) == Lower(kVanillaPack); });
+	if (same != g_packs.end())
+	{
+		rt_log("goldeneye: modpacks: %s is the name of the pack with the disc's files, the folder %s is left out", kVanillaPack, same->folder.c_str());
+		g_packs.erase(same);
+	}
+	g_packs.push_back({ kVanillaPack, {}, {}, {}, {} });
 }
 
 //a pack's .edb files: in its folder, its gamemode folders and weapons/. two with the same hash
@@ -832,6 +845,7 @@ void FindPacks()
 //its header. one that has the hash of a file of the disc is meant to take that file's place and keeps it
 void ReadPack(Pack& pack, const std::set<uint32_t>& disc)
 {
+	if (pack.folder.empty()) return; //Vanilla
 	std::error_code error;
 	ReadFolder(pack.folder, 0, pack.mods);
 	std::vector<std::filesystem::path> folders;
@@ -869,7 +883,7 @@ void ReadPack(Pack& pack, const std::set<uint32_t>& disc)
 
 void modpack_select(int pack)
 {
-	if (!ValidPack(pack) || pack == g_active || g_slots.empty()) return;
+	if (!ValidPack(pack) || pack == g_active || (g_slots.empty() && !modpack_vanilla(pack))) return;
 	Install(pack);
 }
 

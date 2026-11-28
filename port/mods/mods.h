@@ -29,13 +29,14 @@ const std::vector<ModLevel>& mod_files(); //every mod of the installed pack
 const std::vector<ModLevel>& disc_levels(); //every level the disc has (mt_ and mpt_ files), the ones no menu leads to as well. no path
 const std::string& mods_folder(); //the installed pack's folder, empty when there's none
 std::string mod_side_file(const ModLevel& mod, const char* extension); //mt_yard.png for mt_yard.edb, next to it or in its pack's folder
-//the modpacks: a folder or a zip each in modpacks/, "default" first. one is installed at a time
+//the modpacks: a folder or a zip each in modpacks/, "default" first, "Vanilla" last. one is installed at a time
 int modpack_count();
 int modpack_active(); //-1 when there are none
 const std::string& modpack_name(int pack);
 const std::string& modpack_folder(int pack);
 const std::vector<ModLevel>& modpack_levels(int pack);
 const std::vector<ModLevel>& modpack_files(int pack);
+bool modpack_vanilla(int pack); //the last pack, "Vanilla": no folder, no files, the game's own maps online
 void modpack_select(int pack); //its files in place of the installed pack's. in the menus, on the game's thread
 bool modpack_serves(int pack, uint32_t hash); //the game gets that pack's file of the hash now, whichever pack is installed
 

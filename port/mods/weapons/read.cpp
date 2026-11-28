@@ -115,6 +115,7 @@ void ReadWeapons()
 	g_sums.assign((size_t)modpack_count(), {});
 	for (int pack = 0; pack < modpack_count(); ++pack)
 	{
+		if (modpack_vanilla(pack)) continue;
 		const std::filesystem::path folder = std::filesystem::path(modpack_folder(pack)) / "weapons";
 		std::error_code error;
 		if (!std::filesystem::is_directory(folder, error)) continue;
