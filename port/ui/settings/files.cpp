@@ -76,7 +76,7 @@ void save_launch_settings() {
         {"LAUNCH_NOBLOOM", no_bloom() ? "1" : "0"}, {"LAUNCH_DOF", dof_text}, {"LAUNCH_INVERTFLASH", invert_flash() ? "1" : "0"}, {"LAUNCH_GRAIN", grain_text},
         {"LAUNCH_LEVELTIMER", level_timer() ? "1" : "0"}, {"LAUNCH_AUTOQTE", auto_qte() ? "1" : "0"}, {"LAUNCH_AUTOSTART", auto_start() ? "1" : "0"}, {"LAUNCH_AUTOSAVE", autosave() ? "1" : "0"}, {"LAUNCH_EXTRASMENU", extras_menu() ? "1" : "0"}, {"LAUNCH_UNLOCKALL", unlock_all() ? "1" : "0"}, {"LAUNCH_ONLINEUNLOCKS", online_unlocks() ? "1" : "0"}, {"LAUNCH_STAMINAMETER", stamina_meter() ? "1" : "0"},
         {"LAUNCH_VSYNC", vsync() ? "1" : "0"}, {"LAUNCH_PING", show_ping() ? "1" : "0"}, {"LAUNCH_OCCLUSION", occlusion() ? "1" : "0"}, {"LAUNCH_SOUNDHEIGHT", sound_height() ? "1" : "0"},
-        {"LAUNCH_HUD", hud() ? "1" : "0"}, {"LAUNCH_SHAKE", shake_text}, {"LAUNCH_DRAWDIST", drawdist_text}, {"LAUNCH_TANKBUTTONS", tank_text},
+        {"LAUNCH_HUD", hud() ? "1" : "0"}, {"LAUNCH_DOTCROSSHAIR", dot_crosshair() ? "1" : "0"}, {"LAUNCH_SHAKE", shake_text}, {"LAUNCH_DRAWDIST", drawdist_text}, {"LAUNCH_TANKBUTTONS", tank_text},
         {"LAUNCH_ANISO", std::to_string(anisotropy())}, {"LAUNCH_MSAA", std::to_string(anti_aliasing())},
         {"LAUNCH_CUSTOM", custom_values()},
         {"LAUNCH_GOD", god_mode() ? "1" : "0"}, {"LAUNCH_INFINITEAMMO", infinite_ammo() ? "1" : "0"}, {"LAUNCH_INFINITESPRINT", infinite_sprint() ? "1" : "0"},

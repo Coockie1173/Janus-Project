@@ -79,6 +79,13 @@ void install_movies();
 bool skip_movies(); //a movie that plays once is over before it starts
 void set_skip_movies(bool on);
 
+//crosshair.cpp
+void install_crosshair();
+void crosshair_apply(); //once a frame
+void crosshair_file(uint32_t hash, uint32_t file); //a file (the game's object for it) was given its memory
+bool dot_crosshair(); //the crosshair is its dot, without the arrows round it
+void set_dot_crosshair(bool on);
+
 //tweaks.cpp
 void install_tweaks();
 void tweaks_apply();

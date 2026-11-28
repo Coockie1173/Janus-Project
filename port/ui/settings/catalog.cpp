@@ -223,6 +223,7 @@ void BuildSettings()
 	AddChoice(kVisuals, "depth_of_field", "Depth of Field", "How levels that blur what's far away (Jungle) draw it. Console is the game's own, blocky round anything near. High Quality blurs at full resolution.",
 		{"Off", "Console", "High Quality"}, depth_of_field, [](int v) { set_depth_of_field(v); g_dirty = true; });
 	AddToggle(kVisuals, "invert_flash", "Inverted Flashes", "On: a flash grenade freezes the picture of the moment it went off, with white edges, instead of whiting out the screen. It fades back as fast as the white would.", invert_flash, set_invert_flash);
+	AddToggle(kVisuals, "dot_crosshair", "Dot Only Crosshair", "On: the crosshair is just its dot, without the four arrows round it.", dot_crosshair, set_dot_crosshair);
 	Setting& grain = AddRange(kVisuals, "film_grain", "Film Grain", "How much grain lies over the picture. 100% is the game's own.",
 		film_grain, [](float v) { set_film_grain(v); g_dirty = true; }, 0, 1, 0.05f, 2);
 	grain.show = [](float v) { return v > 0 ? std::to_string((int)std::lround(v * 100)) + "%" : std::string("Off"); };

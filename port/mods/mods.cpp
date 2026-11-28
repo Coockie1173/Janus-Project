@@ -182,7 +182,11 @@ void OnLoad(PPCContext& c)
 	const uint32_t size = pending && guest_ptr(info) ? ld32(info + kInfoSize) : 0;
 	const uint32_t name = guest_ptr(file) ? ld32(file + kFileName) : 0;
 	orig_onload(c);
-	if (guest_ptr(file)) pictures_file(ld32(file + kFileHash), file);
+	if (guest_ptr(file))
+	{
+		pictures_file(ld32(file + kFileHash), file);
+		crosshair_file(ld32(file + kFileHash), file);
+	}
 	static const bool trace = std::getenv("GE_TRACEFILES") != nullptr;
 	if (trace) rt_log("goldeneye: file %s: %u bytes, loaded %u, memory %08X, returns %u", guest_ptr(name) ? (const char*)PPC_MEM(name) : "?", guest_ptr(info) ? ld32(info + kInfoSize) : 0, guest_ptr(file) ? ld32(file + kFileLoaded) : 0, guest_ptr(info) ? ld32(info + kInfoMemory) : 0, c.r[3]);
 	if (pending && size && c.r[3] == 0)

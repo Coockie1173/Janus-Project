@@ -29,6 +29,7 @@
 //GE_ONLINE_UNLOCKS=0 the loadouts' items and the game modes open at their levels
 //GE_NO_COLOUR_FILTER=1 a level's colour filter over the picture isn't drawn
 //GE_NO_BLOOM=1 no bloom, GE_DOF=0 no depth of field (1 the game's, 2 high quality), GE_INVERT_FLASH=1 a flash grenade freezes the picture instead of whiting it out, GE_GRAIN=0.5 half the film grain (port/gameplay/screen.cpp)
+//GE_DOT_CROSSHAIR=1 the crosshair without its arrows, the dot alone (port/gameplay/crosshair.cpp)
 //GE_AUTOSAVE=0 a checkpoint doesn't save the game
 //GE_EXTRAS_MENU=1 the menu's unused extras page
 //GE_UNLOCK_ALL=1 every mission and difficulty unlocked
@@ -76,6 +77,7 @@ void each_frame(uint32_t frame) {
     crash_test();
     gecko_apply();
     tweaks_apply();
+    crosshair_apply();
     fov_apply();
     cutscenes_frame();
     speedrun_frame();
@@ -124,6 +126,7 @@ void install() {
     install_cutscenes();
     install_qte();
     install_tweaks();
+    install_crosshair();
     install_movies();
     install_files();
     install_heap();

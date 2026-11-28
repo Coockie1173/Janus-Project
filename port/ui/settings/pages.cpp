@@ -371,7 +371,7 @@ void build_pages() {
     //Enhancements is a page of pages
     const struct { int page; const char* title; const char* about; } kEnhancementPages[] = {
         {kGameplay, "Gameplay", "Skipping cutscenes and movies, quick time events, checkpoints, tutorials, the level timer."},
-        {kVisuals, "Visuals", "The colour filter, the bloom, flash grenades and the film grain."},
+        {kVisuals, "Visuals", "The colour filter, the bloom, flash grenades, the crosshair and the film grain."},
         {kAudio, "Audio", "How sounds behind walls and on other floors are heard in multiplayer."},
         {kUnlocks, "Unlocks", "Missions, difficulties, online items and the unused extras menu."},
         {kStartup, "Startup", "What happens when the game starts: going online, the screens before the menu, crash reports."},
