@@ -148,6 +148,11 @@ const Mode kModes[kModeCount] = {
 	{0x7D000055, 0x43000E82}, //License to Kill
 	{0x7D000059, 0x43000E87}}; //Team License to Kill
 const uint32_t kMapRowCount = 16; //each of those pages as the game has it: the six before the maps and ten maps
+//a map's name in the lobby (the vote, the advertised map) comes from a table of hash and text the
+//game makes from those eight pages' level rows once (fn_801F86E0, the object 805D9628: +0x1C made,
+//+0x2C the table, freed as it is made again). a hash not in it is UNKNOWN MAP, so with the rows of
+//another pack (or the game's again) it has to be made again
+const uint32_t kMapNames = 0x805D9628, kMapNamesBuilt = 0x1C;
 //Choose Game Mode, the game's. there are two, alike row for row: one whose items go to the gamemode's
 //page of maps (7D000042), and the one a search for games comes through, all to 7D000048
 const uint32_t kChooseRows[] = { 0x8057FBE0, 0x8057FE60 }, kChooseRowCount = 32;
@@ -847,6 +852,7 @@ void PoolFrame(const PPCContext& c, uint32_t data, uint32_t count, int mode)
 	if (have == rows || !ours) return;
 	st32(page + kPageRows, rows);
 	st32(page + kPageRowCount, on ? menu->poolRowCount[mode] : kMapRowCount);
+	st8(kMapNames + kMapNamesBuilt, 0); //made again from the pages as it is next asked
 }
 
 //a Choose Game Mode after Connect to WFC Modded: only the gamemodes the installed pack has maps for,
